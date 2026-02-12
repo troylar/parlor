@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import uuid
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse, Response
 
@@ -10,6 +13,14 @@ from ..services import storage
 from ..services.export import export_conversation_markdown
 
 router = APIRouter(tags=["conversations"])
+
+
+def _validate_uuid(value: str) -> str:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+    return value
 
 
 @router.get("/conversations")
@@ -26,6 +37,7 @@ async def create_conversation(request: Request):
 
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str, request: Request):
+    _validate_uuid(conversation_id)
     db = request.app.state.db
     conv = storage.get_conversation(db, conversation_id)
     if not conv:
@@ -36,6 +48,7 @@ async def get_conversation(conversation_id: str, request: Request):
 
 @router.patch("/conversations/{conversation_id}")
 async def update_conversation(conversation_id: str, body: ConversationUpdate, request: Request):
+    _validate_uuid(conversation_id)
     db = request.app.state.db
     conv = storage.update_conversation_title(db, conversation_id, body.title)
     if not conv:
@@ -45,6 +58,7 @@ async def update_conversation(conversation_id: str, body: ConversationUpdate, re
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
 async def delete_conversation(conversation_id: str, request: Request):
+    _validate_uuid(conversation_id)
     db = request.app.state.db
     data_dir = request.app.state.config.app.data_dir
     deleted = storage.delete_conversation(db, conversation_id, data_dir)
@@ -55,13 +69,14 @@ async def delete_conversation(conversation_id: str, request: Request):
 
 @router.get("/conversations/{conversation_id}/export")
 async def export_conversation(conversation_id: str, request: Request):
+    _validate_uuid(conversation_id)
     db = request.app.state.db
     conv = storage.get_conversation(db, conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = storage.list_messages(db, conversation_id)
     markdown = export_conversation_markdown(conv, messages)
-    filename = conv["title"].replace('"', "").replace("'", "")[:50]
+    filename = re.sub(r"[^\w\s\-]", "", conv["title"])[:50].strip() or "conversation"
     return PlainTextResponse(
         content=markdown,
         media_type="text/markdown",

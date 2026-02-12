@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import uuid as uuid_mod
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -12,9 +14,19 @@ from sse_starlette.sse import EventSourceResponse
 from ..services import storage
 from ..services.ai_service import AIService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["chat"])
 
 _cancel_events: dict[str, asyncio.Event] = {}
+
+
+def _validate_uuid(value: str) -> str:
+    try:
+        uuid_mod.UUID(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+    return value
 
 
 def _get_ai_service(request: Request) -> AIService:
@@ -24,6 +36,7 @@ def _get_ai_service(request: Request) -> AIService:
 
 @router.post("/conversations/{conversation_id}/chat")
 async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
+    _validate_uuid(conversation_id)
     db = request.app.state.db
     conv = storage.get_conversation(db, conversation_id)
     if not conv:
@@ -199,8 +212,9 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
 
             yield {"event": "done", "data": json.dumps({})}
 
-        except Exception as e:
-            yield {"event": "error", "data": json.dumps({"message": str(e)})}
+        except Exception:
+            logger.exception("Chat stream error")
+            yield {"event": "error", "data": json.dumps({"message": "An internal error occurred"})}
         finally:
             _cancel_events.pop(conversation_id, None)
 
@@ -209,6 +223,7 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
 
 @router.post("/conversations/{conversation_id}/stop")
 async def stop_generation(conversation_id: str, request: Request):
+    _validate_uuid(conversation_id)
     db = request.app.state.db
     conv = storage.get_conversation(db, conversation_id)
     if not conv:
@@ -222,12 +237,15 @@ async def stop_generation(conversation_id: str, request: Request):
 
 @router.get("/attachments/{attachment_id}")
 async def get_attachment(attachment_id: str, request: Request):
+    _validate_uuid(attachment_id)
     db = request.app.state.db
     att = storage.get_attachment(db, attachment_id)
     if not att:
         raise HTTPException(status_code=404, detail="Attachment not found")
     data_dir = request.app.state.config.app.data_dir
-    file_path = data_dir / att["storage_path"]
+    file_path = (data_dir / att["storage_path"]).resolve()
+    if not file_path.is_relative_to(data_dir.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Attachment file missing")
     from fastapi.responses import FileResponse

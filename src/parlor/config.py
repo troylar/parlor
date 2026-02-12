@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -101,5 +102,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         )
 
     app_settings.data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        app_settings.data_dir.chmod(stat.S_IRWXU)  # 0700
+        if path.exists():
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    except OSError:
+        pass  # May fail on Windows or non-owned files
 
     return AppConfig(ai=ai, app=app_settings, mcp_servers=mcp_servers)

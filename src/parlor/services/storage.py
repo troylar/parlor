@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import sqlite3
 import uuid
@@ -40,8 +42,15 @@ def get_conversation(db: sqlite3.Connection, conversation_id: str) -> dict[str, 
     return dict(row)
 
 
+def _sanitize_fts_query(query: str) -> str:
+    """Escape FTS5 special characters by wrapping in double quotes."""
+    safe = query.replace('"', '""')
+    return f'"{safe}"'
+
+
 def list_conversations(db: sqlite3.Connection, search: str | None = None) -> list[dict[str, Any]]:
     if search:
+        safe_search = _sanitize_fts_query(search)
         rows = db.execute(
             """
             SELECT c.id, c.title, c.created_at, c.updated_at,
@@ -51,7 +60,7 @@ def list_conversations(db: sqlite3.Connection, search: str | None = None) -> lis
             WHERE conversations_fts MATCH ?
             ORDER BY c.updated_at DESC
             """,
-            (search,),
+            (safe_search,),
         ).fetchall()
     else:
         rows = db.execute(
@@ -163,6 +172,13 @@ ALLOWED_MIME_TYPES = {
 MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
+def _sanitize_filename(filename: str) -> str:
+    """Strip path components and dangerous characters from filename."""
+    safe = os.path.basename(filename).replace("\x00", "")
+    safe = re.sub(r"[^\w.\-]", "_", safe)
+    return safe or "unnamed"
+
+
 def save_attachment(
     db: sqlite3.Connection,
     message_id: str,
@@ -175,23 +191,29 @@ def save_attachment(
     if len(data) > MAX_ATTACHMENT_SIZE:
         raise ValueError(f"File exceeds maximum size of {MAX_ATTACHMENT_SIZE // (1024 * 1024)} MB")
 
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise ValueError(f"Unsupported file type: {mime_type}")
+
+    safe_filename = _sanitize_filename(filename)
     aid = _uuid()
     attachments_dir = data_dir / "attachments" / conversation_id
     attachments_dir.mkdir(parents=True, exist_ok=True)
-    storage_path = f"attachments/{conversation_id}/{aid}_{filename}"
-    full_path = data_dir / storage_path
+    storage_path = f"attachments/{conversation_id}/{aid}_{safe_filename}"
+    full_path = (data_dir / storage_path).resolve()
+    if not full_path.is_relative_to(data_dir.resolve()):
+        raise ValueError("Invalid filename")
     full_path.write_bytes(data)
 
     db.execute(
         "INSERT INTO attachments (id, message_id, filename, mime_type, size_bytes, storage_path)"
         " VALUES (?, ?, ?, ?, ?, ?)",
-        (aid, message_id, filename, mime_type, len(data), storage_path),
+        (aid, message_id, safe_filename, mime_type, len(data), storage_path),
     )
     db.commit()
     return {
         "id": aid,
         "message_id": message_id,
-        "filename": filename,
+        "filename": safe_filename,
         "mime_type": mime_type,
         "size_bytes": len(data),
         "storage_path": storage_path,

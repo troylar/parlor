@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 _SCHEMA = """
@@ -100,7 +101,42 @@ END;
 """
 
 
-def init_db(db_path: Path) -> sqlite3.Connection:
+_db_lock = threading.Lock()
+
+
+class ThreadSafeConnection:
+    """Wrapper around sqlite3.Connection that serializes all access with a lock."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._lock = _db_lock
+
+    def execute(self, sql: str, parameters: tuple = ()) -> sqlite3.Cursor:
+        with self._lock:
+            return self._conn.execute(sql, parameters)
+
+    def executescript(self, sql: str) -> sqlite3.Cursor:
+        with self._lock:
+            return self._conn.executescript(sql)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._conn.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    @property
+    def row_factory(self):
+        return self._conn.row_factory
+
+    @row_factory.setter
+    def row_factory(self, value):
+        self._conn.row_factory = value
+
+
+def init_db(db_path: Path) -> ThreadSafeConnection:
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -115,8 +151,8 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         pass
 
     conn.commit()
-    return conn
+    return ThreadSafeConnection(conn)
 
 
-def get_db(db_path: Path) -> sqlite3.Connection:
+def get_db(db_path: Path) -> ThreadSafeConnection:
     return init_db(db_path)

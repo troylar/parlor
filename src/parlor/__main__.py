@@ -69,14 +69,18 @@ def main() -> None:
     except Exception:
         print("AI connection: Could not validate (will try on first request)", file=sys.stderr)
 
-    url = f"http://{config.app.host}:{config.app.port}"
-    print(f"\nStarting AI Chat Web UI at {url}")
-
-    webbrowser.open(url)
-
     from .app import create_app
 
     app = create_app(config)
+
+    url = f"http://{config.app.host}:{config.app.port}"
+    print(f"\nStarting Parlor at {url}")
+
+    if config.app.host in ("0.0.0.0", "::"):
+        print("  WARNING: Binding to all interfaces. The app is accessible from the network.", file=sys.stderr)
+
+    webbrowser.open(url)
+
     uvicorn.run(app, host=config.app.host, port=config.app.port, log_level="info")
 
 

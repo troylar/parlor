@@ -126,7 +126,9 @@ const Sidebar = (() => {
 
     async function exportConv(id) {
         try {
-            const response = await fetch(`/api/conversations/${id}/export`);
+            const exportHeaders = {};
+            if (window.__PARLOR_TOKEN) exportHeaders['Authorization'] = `Bearer ${window.__PARLOR_TOKEN}`;
+            const response = await fetch(`/api/conversations/${id}/export`, { headers: exportHeaders });
             if (!response.ok) throw new Error('Export failed');
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);

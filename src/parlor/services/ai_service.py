@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
 
 from ..config import AIConfig
+
+logger = logging.getLogger(__name__)
 
 
 class AIService:
@@ -92,8 +95,9 @@ class AIService:
                     yield {"event": "done", "data": {}}
                     return
 
-        except Exception as e:
-            yield {"event": "error", "data": {"message": str(e)}}
+        except Exception:
+            logger.exception("AI stream error")
+            yield {"event": "error", "data": {"message": "An internal error occurred"}}
 
     async def generate_title(self, user_message: str) -> str:
         try:

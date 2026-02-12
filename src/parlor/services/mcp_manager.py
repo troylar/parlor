@@ -2,13 +2,52 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import shutil
 from contextlib import AsyncExitStack
 from typing import Any
+from urllib.parse import urlparse
 
 from ..config import McpServerConfig
 
 logger = logging.getLogger(__name__)
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_sse_url(url: str) -> None:
+    """Block SSE URLs pointing to internal/metadata endpoints."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+    hostname = parsed.hostname or ""
+    if hostname in ("localhost", "metadata.google.internal"):
+        raise ValueError(f"Blocked internal hostname: {hostname}")
+    try:
+        addr = ipaddress.ip_address(hostname)
+        for network in _BLOCKED_NETWORKS:
+            if addr in network:
+                raise ValueError(f"Blocked internal IP: {hostname}")
+    except ValueError as e:
+        if "Blocked" in str(e):
+            raise
+
+
+def _validate_command(command: str) -> None:
+    """Validate MCP command exists on PATH."""
+    resolved = shutil.which(command)
+    if resolved is None:
+        raise ValueError(f"MCP command not found on PATH: {command}")
 
 
 class McpManager:
@@ -34,6 +73,7 @@ class McpManager:
         for config in self._configs:
             try:
                 if config.transport == "stdio" and config.command:
+                    _validate_command(config.command)
                     server_params = StdioServerParameters(
                         command=config.command,
                         args=config.args,
@@ -67,6 +107,7 @@ class McpManager:
                     try:
                         from mcp.client.sse import sse_client
 
+                        _validate_sse_url(config.url)
                         sse_transport = await self._exit_stack.enter_async_context(sse_client(config.url))
                         read_stream, write_stream = sse_transport
                         session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))

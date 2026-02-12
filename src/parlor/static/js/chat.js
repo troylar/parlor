@@ -55,6 +55,8 @@ const Chat = (() => {
 
         let body;
         let headers = {};
+        const token = window.__PARLOR_TOKEN;
+        if (token) headers['Authorization'] = `Bearer ${token}`;
         if (files.length > 0) {
             const formData = new FormData();
             formData.append('message', text);

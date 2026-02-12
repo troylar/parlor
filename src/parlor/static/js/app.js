@@ -6,8 +6,16 @@ const App = (() => {
         isStreaming: false,
     };
 
+    function _authHeaders(options = {}) {
+        const token = window.__PARLOR_TOKEN;
+        if (!token) return options;
+        const headers = options.headers || {};
+        headers['Authorization'] = `Bearer ${token}`;
+        return { ...options, headers };
+    }
+
     async function api(url, options = {}) {
-        const response = await fetch(url, options);
+        const response = await fetch(url, _authHeaders(options));
         if (!response.ok) {
             const err = await response.json().catch(() => ({ detail: response.statusText }));
             throw new Error(err.detail || `HTTP ${response.status}`);
