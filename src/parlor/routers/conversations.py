@@ -61,7 +61,7 @@ async def export_conversation(conversation_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = storage.list_messages(db, conversation_id)
     markdown = export_conversation_markdown(conv, messages)
-    filename = conv["title"].replace('"', '').replace("'", "")[:50]
+    filename = conv["title"].replace('"', "").replace("'", "")[:50]
     return PlainTextResponse(
         content=markdown,
         media_type="text/markdown",

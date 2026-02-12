@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from contextlib import AsyncExitStack
 from typing import Any
@@ -39,13 +38,9 @@ class McpManager:
                         command=config.command,
                         args=config.args,
                     )
-                    stdio_transport = await self._exit_stack.enter_async_context(
-                        stdio_client(server_params)
-                    )
+                    stdio_transport = await self._exit_stack.enter_async_context(stdio_client(server_params))
                     read_stream, write_stream = stdio_transport
-                    session = await self._exit_stack.enter_async_context(
-                        ClientSession(read_stream, write_stream)
-                    )
+                    session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
                     await session.initialize()
                     self._sessions[config.name] = session
 
@@ -72,13 +67,9 @@ class McpManager:
                     try:
                         from mcp.client.sse import sse_client
 
-                        sse_transport = await self._exit_stack.enter_async_context(
-                            sse_client(config.url)
-                        )
+                        sse_transport = await self._exit_stack.enter_async_context(sse_client(config.url))
                         read_stream, write_stream = sse_transport
-                        session = await self._exit_stack.enter_async_context(
-                            ClientSession(read_stream, write_stream)
-                        )
+                        session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
                         await session.initialize()
                         self._sessions[config.name] = session
 

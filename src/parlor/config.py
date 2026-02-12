@@ -70,8 +70,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         )
     if not api_key:
         raise ValueError(
-            "AI api_key is required. Set 'ai.api_key' in config.yaml "
-            f"({path}) or AI_CHAT_API_KEY environment variable."
+            f"AI api_key is required. Set 'ai.api_key' in config.yaml ({path}) or AI_CHAT_API_KEY environment variable."
         )
 
     ai = AIConfig(

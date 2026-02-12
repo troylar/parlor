@@ -102,7 +102,10 @@ class AIService:
                 messages=[
                     {
                         "role": "system",
-                        "content": "Generate a short title (3-6 words) for a conversation that starts with the following message. Return only the title, no quotes or punctuation.",
+                        "content": (
+                            "Generate a short title (3-6 words) for a conversation that starts"
+                            " with the following message. Return only the title, no quotes or punctuation."
+                        ),
                     },
                     {"role": "user", "content": user_message},
                 ],

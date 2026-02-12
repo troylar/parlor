@@ -49,17 +49,23 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
             if hasattr(f, "read"):
                 file_data = await f.read()
                 att = storage.save_attachment(
-                    db, user_msg["id"], conversation_id,
-                    f.filename or "unnamed", f.content_type or "application/octet-stream",
-                    file_data, data_dir,
+                    db,
+                    user_msg["id"],
+                    conversation_id,
+                    f.filename or "unnamed",
+                    f.content_type or "application/octet-stream",
+                    file_data,
+                    data_dir,
                 )
                 if f.content_type and f.content_type.startswith("text"):
                     try:
-                        attachment_contents.append({
-                            "type": "text",
-                            "filename": f.filename,
-                            "content": file_data.decode("utf-8", errors="replace"),
-                        })
+                        attachment_contents.append(
+                            {
+                                "type": "text",
+                                "filename": f.filename,
+                                "content": file_data.decode("utf-8", errors="replace"),
+                            }
+                        )
                     except Exception:
                         pass
 
@@ -102,12 +108,14 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
                         tool_calls_pending.append(event["data"])
                         yield {
                             "event": "tool_call_start",
-                            "data": json.dumps({
-                                "id": event["data"]["id"],
-                                "tool_name": event["data"]["function_name"],
-                                "server_name": "",
-                                "input": event["data"]["arguments"],
-                            }),
+                            "data": json.dumps(
+                                {
+                                    "id": event["data"]["id"],
+                                    "tool_name": event["data"]["function_name"],
+                                    "server_name": "",
+                                    "input": event["data"]["arguments"],
+                                }
+                            ),
                         }
                     elif etype == "error":
                         yield {"event": "error", "data": json.dumps(event["data"])}
@@ -120,18 +128,34 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
 
                 # Save assistant message with tool calls
                 assistant_msg = storage.create_message(db, conversation_id, "assistant", assistant_content)
-                ai_messages.append({"role": "assistant", "content": assistant_content, "tool_calls": [
-                    {"id": tc["id"], "type": "function", "function": {"name": tc["function_name"], "arguments": json.dumps(tc["arguments"])}}
-                    for tc in tool_calls_pending
-                ]})
+                ai_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": assistant_content,
+                        "tool_calls": [
+                            {
+                                "id": tc["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": tc["function_name"],
+                                    "arguments": json.dumps(tc["arguments"]),
+                                },
+                            }
+                            for tc in tool_calls_pending
+                        ],
+                    }
+                )
 
                 # Execute tool calls via MCP
                 for tc in tool_calls_pending:
                     if mcp_manager:
-                        tc_record = storage.create_tool_call(
-                            db, assistant_msg["id"],
-                            tc["function_name"], "",
-                            tc["arguments"], tc["id"],
+                        storage.create_tool_call(
+                            db,
+                            assistant_msg["id"],
+                            tc["function_name"],
+                            "",
+                            tc["arguments"],
+                            tc["id"],
                         )
                         try:
                             result = await mcp_manager.call_tool(tc["function_name"], tc["arguments"])
@@ -140,22 +164,26 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
                                 "event": "tool_call_end",
                                 "data": json.dumps({"id": tc["id"], "output": result, "status": "success"}),
                             }
-                            ai_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc["id"],
-                                "content": json.dumps(result),
-                            })
+                            ai_messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc["id"],
+                                    "content": json.dumps(result),
+                                }
+                            )
                         except Exception as e:
                             storage.update_tool_call(db, tc["id"], {"error": str(e)}, "error")
                             yield {
                                 "event": "tool_call_end",
                                 "data": json.dumps({"id": tc["id"], "output": {"error": str(e)}, "status": "error"}),
                             }
-                            ai_messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc["id"],
-                                "content": json.dumps({"error": str(e)}),
-                            })
+                            ai_messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc["id"],
+                                    "content": json.dumps({"error": str(e)}),
+                                }
+                            )
 
                 assistant_content = ""
 
@@ -203,4 +231,5 @@ async def get_attachment(attachment_id: str, request: Request):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Attachment file missing")
     from fastapi.responses import FileResponse
+
     return FileResponse(str(file_path), media_type=att["mime_type"], filename=att["filename"])

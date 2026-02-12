@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-
-import logging
 
 from .config import AppConfig, load_config
 from .db import init_db

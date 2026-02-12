@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..models import AppConfigResponse, ConnectionValidation, McpServerStatus, McpTool
 from ..services.ai_service import AIService
@@ -27,12 +27,14 @@ async def get_config(request: Request) -> AppConfigResponse:
     mcp_manager = request.app.state.mcp_manager
     if mcp_manager:
         for name, status in mcp_manager.get_server_statuses().items():
-            mcp_statuses.append(McpServerStatus(
-                name=status["name"],
-                transport=status["transport"],
-                status=status["status"],
-                tool_count=status["tool_count"],
-            ))
+            mcp_statuses.append(
+                McpServerStatus(
+                    name=status["name"],
+                    transport=status["transport"],
+                    status=status["status"],
+                    tool_count=status["tool_count"],
+                )
+            )
 
     return AppConfigResponse(
         ai={

@@ -139,12 +139,24 @@ def list_messages(db: sqlite3.Connection, conversation_id: str) -> list[dict[str
 # --- Attachments ---
 
 ALLOWED_MIME_TYPES = {
-    "text/plain", "text/markdown", "text/html", "text/css", "text/csv",
-    "text/xml", "application/json", "application/pdf",
-    "application/x-yaml", "application/yaml",
-    "image/png", "image/jpeg", "image/gif", "image/webp",
-    "application/javascript", "text/javascript",
-    "application/x-python-code", "text/x-python",
+    "text/plain",
+    "text/markdown",
+    "text/html",
+    "text/css",
+    "text/csv",
+    "text/xml",
+    "application/json",
+    "application/pdf",
+    "application/x-yaml",
+    "application/yaml",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/javascript",
+    "text/javascript",
+    "application/x-python-code",
+    "text/x-python",
     "application/octet-stream",
 }
 
@@ -171,7 +183,8 @@ def save_attachment(
     full_path.write_bytes(data)
 
     db.execute(
-        "INSERT INTO attachments (id, message_id, filename, mime_type, size_bytes, storage_path) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO attachments (id, message_id, filename, mime_type, size_bytes, storage_path)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
         (aid, message_id, filename, mime_type, len(data), storage_path),
     )
     db.commit()
@@ -211,7 +224,8 @@ def create_tool_call(
     tcid = tool_call_id or _uuid()
     now = _now()
     db.execute(
-        "INSERT INTO tool_calls (id, message_id, tool_name, server_name, input_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tool_calls (id, message_id, tool_name, server_name, input_json, status, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
         (tcid, message_id, tool_name, server_name, json.dumps(input_data), "pending", now),
     )
     db.commit()
