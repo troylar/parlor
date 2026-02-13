@@ -20,6 +20,26 @@
             <div class="sidebar-search">
                 <input type="text" id="search-input" placeholder="Search conversations..." autocomplete="off">
             </div>
+            <div class="sidebar-projects">
+                <div class="project-selector-row">
+                    <select id="project-select">
+                        <option value="">All Conversations</option>
+                    </select>
+                    <button class="btn-project-add" id="btn-project-add" title="New project">+</button>
+                    <button class="btn-project-edit" id="btn-project-edit" title="Edit project" style="display:none">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                    </button>
+                    <button class="btn-project-delete" id="btn-project-delete" title="Delete project" style="display:none">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
             <div class="conversation-list" id="conversation-list">
                 <!-- Conversation items populated by JS -->
             </div>
@@ -60,8 +80,48 @@
             </div>
         </div>
 
+        <!-- Project Modal -->
+        <div class="modal-overlay" id="project-modal" style="display:none">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3 id="project-modal-title">New Project</h3>
+                    <button class="modal-close" id="project-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <label for="project-name">Name</label>
+                        <input type="text" id="project-name" placeholder="Project name" autocomplete="off">
+                    </div>
+                    <div class="setting-group">
+                        <label for="project-instructions">Instructions</label>
+                        <textarea id="project-instructions" rows="6" placeholder="Custom system prompt for this project..."></textarea>
+                        <span class="setting-hint">These instructions are prepended to the global system prompt for all conversations in this project.</span>
+                    </div>
+                    <div class="setting-group">
+                        <label for="project-model">Model (optional)</label>
+                        <input type="text" id="project-model" placeholder="Leave blank to use global default" autocomplete="off">
+                        <span class="setting-hint">Override the default model for conversations in this project.</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-modal-cancel" id="project-cancel">Cancel</button>
+                    <button class="btn-modal-save" id="project-save">Save</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Main Chat Area -->
         <main class="chat-main">
+            <!-- Model selector topbar -->
+            <div class="chat-topbar" id="chat-topbar">
+                <div class="model-selector">
+                    <label for="model-select-chat">Model:</label>
+                    <select id="model-select-chat">
+                        <option value="">Default</option>
+                    </select>
+                </div>
+            </div>
+
             <!-- Setup banner (hidden by default) -->
             <div class="setup-banner" id="setup-banner" style="display:none">
                 <p>AI service not configured. Please set up your <code>~/.ai-chat/config.yaml</code>.</p>

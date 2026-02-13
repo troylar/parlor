@@ -8,11 +8,23 @@ from contextlib import contextmanager
 from pathlib import Path
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '',
+    model TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    model TEXT DEFAULT NULL,
+    project_id TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -172,8 +184,22 @@ def init_db(db_path: Path) -> ThreadSafeConnection:
     except sqlite3.OperationalError:
         pass
 
+    _run_migrations(conn)
+
     conn.commit()
     return ThreadSafeConnection(conn)
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply schema migrations for existing databases."""
+    cursor = conn.execute("PRAGMA table_info(conversations)")
+    cols = {row[1] for row in cursor.fetchall()}
+
+    if "model" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN model TEXT DEFAULT NULL")
+
+    if "project_id" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT DEFAULT NULL")
 
 
 def get_db(db_path: Path) -> ThreadSafeConnection:

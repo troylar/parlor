@@ -26,18 +26,90 @@ def _uuid() -> str:
     return str(uuid.uuid4())
 
 
+# --- Projects ---
+
+
+def create_project(
+    db: sqlite3.Connection,
+    name: str,
+    instructions: str = "",
+    model: str | None = None,
+) -> dict[str, Any]:
+    pid = _uuid()
+    now = _now()
+    db.execute(
+        "INSERT INTO projects (id, name, instructions, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (pid, name, instructions, model or None, now, now),
+    )
+    db.commit()
+    return {"id": pid, "name": name, "instructions": instructions, "model": model, "created_at": now, "updated_at": now}
+
+
+def get_project(db: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
+    row = db.execute_fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
+    if not row:
+        return None
+    return dict(row)
+
+
+def list_projects(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = db.execute_fetchall("SELECT * FROM projects ORDER BY updated_at DESC")
+    return [dict(r) for r in rows]
+
+
+def update_project(
+    db: sqlite3.Connection,
+    project_id: str,
+    name: str | None = None,
+    instructions: str | None = None,
+    model: str | None = ...,
+) -> dict[str, Any] | None:
+    proj = get_project(db, project_id)
+    if not proj:
+        return None
+    now = _now()
+    updates = ["updated_at = ?"]
+    params: list[Any] = [now]
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name)
+    if instructions is not None:
+        updates.append("instructions = ?")
+        params.append(instructions)
+    if model is not ...:
+        updates.append("model = ?")
+        params.append(model or None)
+    params.append(project_id)
+    db.execute(f"UPDATE projects SET {', '.join(updates)} WHERE id = ?", tuple(params))
+    db.commit()
+    return get_project(db, project_id)
+
+
+def delete_project(db: sqlite3.Connection, project_id: str) -> bool:
+    proj = get_project(db, project_id)
+    if not proj:
+        return False
+    db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    db.commit()
+    return True
+
+
 # --- Conversations ---
 
 
-def create_conversation(db: sqlite3.Connection, title: str = "New Conversation") -> dict[str, Any]:
+def create_conversation(
+    db: sqlite3.Connection,
+    title: str = "New Conversation",
+    project_id: str | None = None,
+) -> dict[str, Any]:
     cid = _uuid()
     now = _now()
     db.execute(
-        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (cid, title, now, now),
+        "INSERT INTO conversations (id, title, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (cid, title, project_id, now, now),
     )
     db.commit()
-    return {"id": cid, "title": title, "created_at": now, "updated_at": now}
+    return {"id": cid, "title": title, "model": None, "project_id": project_id, "created_at": now, "updated_at": now}
 
 
 def get_conversation(db: sqlite3.Connection, conversation_id: str) -> dict[str, Any] | None:
@@ -59,22 +131,49 @@ DEFAULT_PAGE_LIMIT = 100
 def list_conversations(
     db: sqlite3.Connection,
     search: str | None = None,
+    project_id: str | None = None,
     limit: int = DEFAULT_PAGE_LIMIT,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     if search:
         safe_search = _sanitize_fts_query(search)
+        if project_id:
+            rows = db.execute_fetchall(
+                """
+                SELECT c.id, c.title, c.created_at, c.updated_at,
+                       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
+                FROM conversations c
+                JOIN conversations_fts fts ON fts.conversation_id = c.id
+                WHERE conversations_fts MATCH ? AND c.project_id = ?
+                ORDER BY c.updated_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (safe_search, project_id, limit, offset),
+            )
+        else:
+            rows = db.execute_fetchall(
+                """
+                SELECT c.id, c.title, c.created_at, c.updated_at,
+                       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
+                FROM conversations c
+                JOIN conversations_fts fts ON fts.conversation_id = c.id
+                WHERE conversations_fts MATCH ?
+                ORDER BY c.updated_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (safe_search, limit, offset),
+            )
+    elif project_id:
         rows = db.execute_fetchall(
             """
             SELECT c.id, c.title, c.created_at, c.updated_at,
                    (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
             FROM conversations c
-            JOIN conversations_fts fts ON fts.conversation_id = c.id
-            WHERE conversations_fts MATCH ?
+            WHERE c.project_id = ?
             ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?
             """,
-            (safe_search, limit, offset),
+            (project_id, limit, offset),
         )
     else:
         rows = db.execute_fetchall(
@@ -95,6 +194,16 @@ def update_conversation_title(db: sqlite3.Connection, conversation_id: str, titl
     db.execute(
         "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
         (title, now, conversation_id),
+    )
+    db.commit()
+    return get_conversation(db, conversation_id)
+
+
+def update_conversation_model(db: sqlite3.Connection, conversation_id: str, model: str | None) -> dict[str, Any] | None:
+    now = _now()
+    db.execute(
+        "UPDATE conversations SET model = ?, updated_at = ? WHERE id = ?",
+        (model or None, now, conversation_id),
     )
     db.commit()
     return get_conversation(db, conversation_id)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import uuid as uuid_mod
@@ -35,8 +36,12 @@ def _validate_uuid(value: str) -> str:
     return value
 
 
-def _get_ai_service(request: Request) -> AIService:
+def _get_ai_service(request: Request, model_override: str | None = None) -> AIService:
     config = request.app.state.config
+    if model_override:
+        ai_config = copy.copy(config.ai)
+        ai_config.model = model_override
+        return AIService(ai_config)
     return AIService(config.ai)
 
 
@@ -92,7 +97,19 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
     cancel_event = asyncio.Event()
     _cancel_events[conversation_id].add(cancel_event)
 
-    ai_service = _get_ai_service(request)
+    # Resolve model override: conversation model > project model > global default
+    model_override = conv.get("model") or None
+    project_instructions: str | None = None
+    project_id = conv.get("project_id")
+    if project_id:
+        project = storage.get_project(db, project_id)
+        if project:
+            if not model_override and project.get("model"):
+                model_override = project["model"]
+            if project.get("instructions"):
+                project_instructions = project["instructions"]
+
+    ai_service = _get_ai_service(request, model_override=model_override)
 
     # Build message history
     history = storage.list_messages(db, conversation_id)
@@ -119,7 +136,12 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
             while True:
                 tool_calls_pending: list[dict[str, Any]] = []
 
-                async for event in ai_service.stream_chat(ai_messages, tools=tools, cancel_event=cancel_event):
+                async for event in ai_service.stream_chat(
+                    ai_messages,
+                    tools=tools,
+                    cancel_event=cancel_event,
+                    extra_system_prompt=project_instructions,
+                ):
                     etype = event["event"]
                     if etype == "token":
                         assistant_content += event["data"]["content"]

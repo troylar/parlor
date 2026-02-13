@@ -14,9 +14,16 @@ const Sidebar = (() => {
         });
     }
 
+    function _projectParam() {
+        const pid = App.state.currentProjectId;
+        return pid ? `project_id=${encodeURIComponent(pid)}` : '';
+    }
+
     async function refresh() {
         try {
-            conversations = await App.api('/api/conversations');
+            const pp = _projectParam();
+            const url = pp ? `/api/conversations?${pp}` : '/api/conversations';
+            conversations = await App.api(url);
             render();
         } catch {
             conversations = [];
@@ -27,7 +34,12 @@ const Sidebar = (() => {
     async function search(query) {
         try {
             const q = query.trim();
-            const url = q ? `/api/conversations?search=${encodeURIComponent(q)}` : '/api/conversations';
+            const pp = _projectParam();
+            const params = [];
+            if (q) params.push(`search=${encodeURIComponent(q)}`);
+            if (pp) params.push(pp);
+            const qs = params.length ? `?${params.join('&')}` : '';
+            const url = `/api/conversations${qs}`;
             conversations = await App.api(url);
             render();
         } catch {

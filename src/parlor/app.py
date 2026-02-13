@@ -206,7 +206,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Parlor",
-        version="0.3.0",
+        version="0.4.0",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -240,11 +240,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     csrf_token = secrets.token_urlsafe(32)
     app.state.csrf_token = csrf_token
 
-    from .routers import chat, config_api, conversations
+    from .routers import chat, config_api, conversations, projects
 
     app.include_router(conversations.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(config_api.router, prefix="/api")
+    app.include_router(projects.router, prefix="/api")
 
     @app.post("/api/logout")
     async def logout():

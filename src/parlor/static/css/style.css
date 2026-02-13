@@ -845,6 +845,85 @@ html, body {
     background: var(--accent-hover);
 }
 
+/* Chat topbar - model selector */
+.chat-topbar {
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+.model-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.model-selector select {
+    padding: 4px 8px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    min-width: 160px;
+}
+.model-selector select:focus {
+    border-color: var(--accent);
+}
+
+/* Sidebar projects */
+.sidebar-projects {
+    padding: 0 12px 8px;
+}
+.project-selector-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.project-selector-row select {
+    flex: 1;
+    padding: 6px 8px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+}
+.project-selector-row select:focus {
+    border-color: var(--accent);
+}
+.btn-project-add,
+.btn-project-edit,
+.btn-project-delete {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.btn-project-add:hover,
+.btn-project-edit:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+}
+.btn-project-delete:hover {
+    color: var(--error);
+    border-color: var(--error);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .sidebar {

@@ -25,15 +25,25 @@ def _validate_uuid(value: str) -> str:
 
 
 @router.get("/conversations")
-async def list_conversations(request: Request, search: str | None = None):
+async def list_conversations(request: Request, search: str | None = None, project_id: str | None = None):
+    if project_id:
+        _validate_uuid(project_id)
     db = request.app.state.db
-    return storage.list_conversations(db, search=search)
+    return storage.list_conversations(db, search=search, project_id=project_id)
 
 
 @router.post("/conversations", status_code=201)
 async def create_conversation(request: Request):
     db = request.app.state.db
-    return storage.create_conversation(db)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    project_id = body.get("project_id") if isinstance(body, dict) else None
+    if project_id:
+        _validate_uuid(project_id)
+    return storage.create_conversation(db, project_id=project_id)
 
 
 @router.get("/conversations/{conversation_id}")
@@ -51,9 +61,13 @@ async def get_conversation(conversation_id: str, request: Request):
 async def update_conversation(conversation_id: str, body: ConversationUpdate, request: Request):
     _validate_uuid(conversation_id)
     db = request.app.state.db
-    conv = storage.update_conversation_title(db, conversation_id, body.title)
+    conv = storage.get_conversation(db, conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if body.title is not None:
+        conv = storage.update_conversation_title(db, conversation_id, body.title)
+    if body.model is not None:
+        conv = storage.update_conversation_model(db, conversation_id, body.model)
     return conv
 
 

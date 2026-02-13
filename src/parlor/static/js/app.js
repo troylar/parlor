@@ -3,7 +3,9 @@
 const App = (() => {
     const state = {
         currentConversationId: null,
+        currentProjectId: null,
         isStreaming: false,
+        availableModels: [],
     };
 
     function _getCsrfToken() {
@@ -49,13 +51,15 @@ const App = (() => {
         // Settings modal
         initSettings();
 
-        // Check config status
+        // Project modal
+        initProjectModal();
+
+        // Check config status and cache available models
         try {
             const config = await api('/api/config');
             if (!config.ai || !config.ai.base_url) {
                 document.getElementById('setup-banner').style.display = '';
             }
-            // Show MCP status in sidebar footer
             if (config.mcp_servers && config.mcp_servers.length > 0) {
                 const connected = config.mcp_servers.filter(s => s.status === 'connected');
                 const totalTools = connected.reduce((sum, s) => sum + s.tool_count, 0);
@@ -63,8 +67,37 @@ const App = (() => {
                     `${totalTools} tools / ${connected.length} servers`;
             }
         } catch {
-            // Config endpoint may not exist yet, that's ok
+            // Config endpoint may not exist yet
         }
+
+        // Fetch available models for model selector
+        try {
+            const validation = await api('/api/config/validate', { method: 'POST' });
+            if (validation.models && validation.models.length > 0) {
+                state.availableModels = validation.models.sort();
+            }
+        } catch {
+            // Models not available
+        }
+
+        populateModelSelector();
+
+        // Model selector change handler
+        document.getElementById('model-select-chat').addEventListener('change', async (e) => {
+            if (!state.currentConversationId) return;
+            try {
+                await api(`/api/conversations/${state.currentConversationId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: e.target.value }),
+                });
+            } catch {
+                // ignore
+            }
+        });
+
+        // Load projects
+        await loadProjects();
 
         // Load conversations
         await Sidebar.refresh();
@@ -76,10 +109,28 @@ const App = (() => {
         }
     }
 
+    function populateModelSelector() {
+        const select = document.getElementById('model-select-chat');
+        // Keep the default option, remove any others
+        while (select.options.length > 1) select.remove(1);
+        state.availableModels.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            select.appendChild(opt);
+        });
+    }
+
     async function newConversation() {
-        const conv = await api('/api/conversations', { method: 'POST' });
+        const opts = { method: 'POST' };
+        if (state.currentProjectId) {
+            opts.headers = { 'Content-Type': 'application/json' };
+            opts.body = JSON.stringify({ project_id: state.currentProjectId });
+        }
+        const conv = await api('/api/conversations', opts);
         state.currentConversationId = conv.id;
         Chat.loadMessages([]);
+        document.getElementById('model-select-chat').value = '';
         await Sidebar.refresh();
         Sidebar.setActive(conv.id);
         document.getElementById('message-input').focus();
@@ -90,6 +141,8 @@ const App = (() => {
         const detail = await api(`/api/conversations/${id}`);
         Chat.loadMessages(detail.messages || []);
         Sidebar.setActive(id);
+        // Set model selector to conversation's model
+        document.getElementById('model-select-chat').value = detail.model || '';
     }
 
     function formatTimestamp(iso) {
@@ -125,7 +178,6 @@ const App = (() => {
         const suggestionsEl = document.getElementById('model-suggestions');
         const promptTextarea = document.getElementById('setting-system-prompt');
 
-        // Load current config
         try {
             const config = await api('/api/config');
             promptTextarea.value = config.ai.system_prompt || '';
@@ -134,7 +186,6 @@ const App = (() => {
             modal.style.display = 'flex';
             suggestionsEl.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Loading available models...</span>';
 
-            // Fetch available models from API
             const validation = await api('/api/config/validate', { method: 'POST' });
             suggestionsEl.innerHTML = '';
 
@@ -152,7 +203,6 @@ const App = (() => {
                 });
             }
 
-            // Update active chip when user types
             modelInput.addEventListener('input', () => {
                 suggestionsEl.querySelectorAll('.model-chip').forEach(c => {
                     c.classList.toggle('active', c.textContent === modelInput.value);
@@ -180,7 +230,163 @@ const App = (() => {
         }
     }
 
+    // --- Projects ---
+
+    async function loadProjects() {
+        const select = document.getElementById('project-select');
+        const editBtn = document.getElementById('btn-project-edit');
+        const deleteBtn = document.getElementById('btn-project-delete');
+
+        try {
+            const projects = await api('/api/projects');
+            // Keep first option ("All Conversations"), remove the rest
+            while (select.options.length > 1) select.remove(1);
+            projects.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name;
+                select.appendChild(opt);
+            });
+            // Restore selection
+            if (state.currentProjectId) {
+                select.value = state.currentProjectId;
+            }
+        } catch {
+            // ignore
+        }
+
+        // Show/hide edit + delete buttons based on selection
+        const updateButtons = () => {
+            const hasProject = !!select.value;
+            editBtn.style.display = hasProject ? '' : 'none';
+            deleteBtn.style.display = hasProject ? '' : 'none';
+        };
+        updateButtons();
+
+        select.addEventListener('change', async () => {
+            state.currentProjectId = select.value || null;
+            updateButtons();
+            await Sidebar.refresh();
+            // If changing project, clear current conversation
+            state.currentConversationId = null;
+            Chat.loadMessages([]);
+        });
+
+        document.getElementById('btn-project-add').addEventListener('click', () => openProjectModal());
+        editBtn.addEventListener('click', () => {
+            if (state.currentProjectId) openProjectModal(state.currentProjectId);
+        });
+        deleteBtn.addEventListener('click', async () => {
+            if (!state.currentProjectId) return;
+            if (!confirm('Delete this project? Conversations will be kept but unlinked.')) return;
+            try {
+                await api(`/api/projects/${state.currentProjectId}`, { method: 'DELETE' });
+                state.currentProjectId = null;
+                await loadProjects();
+                await Sidebar.refresh();
+            } catch {
+                // ignore
+            }
+        });
+    }
+
+    function initProjectModal() {
+        const modal = document.getElementById('project-modal');
+        const closeBtn = document.getElementById('project-close');
+        const cancelBtn = document.getElementById('project-cancel');
+        const saveBtn = document.getElementById('project-save');
+
+        closeBtn.addEventListener('click', () => modal.style.display = 'none');
+        cancelBtn.addEventListener('click', () => modal.style.display = 'none');
+        saveBtn.addEventListener('click', saveProject);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.style.display = 'none';
+        });
+    }
+
+    let _editingProjectId = null;
+
+    async function openProjectModal(projectId) {
+        const modal = document.getElementById('project-modal');
+        const titleEl = document.getElementById('project-modal-title');
+        const nameInput = document.getElementById('project-name');
+        const instructionsInput = document.getElementById('project-instructions');
+        const modelInput = document.getElementById('project-model');
+
+        _editingProjectId = projectId || null;
+
+        if (projectId) {
+            titleEl.textContent = 'Edit Project';
+            try {
+                const proj = await api(`/api/projects/${projectId}`);
+                nameInput.value = proj.name || '';
+                instructionsInput.value = proj.instructions || '';
+                modelInput.value = proj.model || '';
+            } catch {
+                nameInput.value = '';
+                instructionsInput.value = '';
+                modelInput.value = '';
+            }
+        } else {
+            titleEl.textContent = 'New Project';
+            nameInput.value = '';
+            instructionsInput.value = '';
+            modelInput.value = '';
+        }
+
+        modal.style.display = 'flex';
+        nameInput.focus();
+    }
+
+    async function saveProject() {
+        const name = document.getElementById('project-name').value.trim();
+        const instructions = document.getElementById('project-instructions').value;
+        const model = document.getElementById('project-model').value.trim();
+
+        if (!name) {
+            alert('Project name is required.');
+            return;
+        }
+
+        try {
+            const payload = { name, instructions, model: model || null };
+            if (_editingProjectId) {
+                await api(`/api/projects/${_editingProjectId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+            } else {
+                const created = await api('/api/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                state.currentProjectId = created.id;
+            }
+            document.getElementById('project-modal').style.display = 'none';
+            // Reload project dropdown (remove old listeners by re-populating)
+            const select = document.getElementById('project-select');
+            const projects = await api('/api/projects');
+            while (select.options.length > 1) select.remove(1);
+            projects.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name;
+                select.appendChild(opt);
+            });
+            if (state.currentProjectId) {
+                select.value = state.currentProjectId;
+            }
+            document.getElementById('btn-project-edit').style.display = state.currentProjectId ? '' : 'none';
+            document.getElementById('btn-project-delete').style.display = state.currentProjectId ? '' : 'none';
+            await Sidebar.refresh();
+        } catch (e) {
+            alert('Failed to save project: ' + e.message);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', init);
 
-    return { state, api, _getCsrfToken, newConversation, loadConversation, formatTimestamp };
+    return { state, api, _getCsrfToken, newConversation, loadConversation, loadProjects, formatTimestamp };
 })();

@@ -75,7 +75,8 @@ class AppConfigResponse(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    model: str | None = Field(default=None, max_length=200)
 
 
 class ConnectionValidation(BaseModel):
