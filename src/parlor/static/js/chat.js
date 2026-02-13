@@ -63,7 +63,7 @@ const Chat = (() => {
         showThinking();
 
         let body;
-        let headers = {};
+        let headers = { 'X-CSRF-Token': App._getCsrfToken() };
         if (files.length > 0) {
             const formData = new FormData();
             formData.append('message', text);

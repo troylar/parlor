@@ -49,6 +49,26 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: troylar/parlor
 
+  security-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run pip-audit
+        run: pip-audit
+
   build:
     name: Build package
     runs-on: ubuntu-latest

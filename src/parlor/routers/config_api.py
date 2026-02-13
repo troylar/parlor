@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import yaml
@@ -10,6 +11,8 @@ from pydantic import BaseModel
 
 from ..models import AppConfigResponse, ConnectionValidation, McpServerStatus, McpTool
 from ..services.ai_service import AIService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["config"])
 
@@ -87,7 +90,7 @@ def _persist_config(config) -> None:
         with open(config_path, "w") as f:
             yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
     except Exception:
-        pass
+        logger.exception("Failed to persist config to %s", config_path)
 
 
 @router.post("/config/validate")

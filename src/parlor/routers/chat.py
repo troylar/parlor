@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from ..models import ChatRequest
 from ..services import storage
 from ..services.ai_service import AIService
 
@@ -55,8 +56,8 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
         if len(files) > MAX_FILES_PER_REQUEST:
             raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_REQUEST} files per request")
     else:
-        body = await request.json()
-        message_text = body.get("message", "")
+        body = ChatRequest(**(await request.json()))
+        message_text = body.message
         files = []
 
     user_msg = storage.create_message(db, conversation_id, "user", message_text)

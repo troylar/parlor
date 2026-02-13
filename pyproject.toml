@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "parlor"
-version = "0.2.2"
+version = "0.3.0"
 description = "Parlor - a private parlor for AI conversation"
 readme = "README.md"
 license = {text = "MIT"}
@@ -16,6 +16,7 @@ dependencies = [
     "openai>=1.12.0",
     "mcp>=1.0.0",
     "pyyaml>=6.0",
+    "filetype>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ dev = [
     "httpx>=0.25.0",
     "ruff>=0.4.0",
     "mypy>=1.8.0",
+    "pip-audit>=2.7.0",
 ]
 
 [project.scripts]

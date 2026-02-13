@@ -6,8 +6,17 @@ const App = (() => {
         isStreaming: false,
     };
 
+    function _getCsrfToken() {
+        const match = document.cookie.split('; ').find(c => c.startsWith('parlor_csrf='));
+        return match ? match.split('=')[1] : '';
+    }
+
     async function api(url, options = {}) {
         options.credentials = 'same-origin';
+        if (!options.headers) options.headers = {};
+        if (['POST', 'PATCH', 'PUT', 'DELETE'].includes((options.method || '').toUpperCase())) {
+            options.headers['X-CSRF-Token'] = _getCsrfToken();
+        }
         const response = await fetch(url, options);
         if (!response.ok) {
             const err = await response.json().catch(() => ({ detail: response.statusText }));
@@ -173,5 +182,5 @@ const App = (() => {
 
     document.addEventListener('DOMContentLoaded', init);
 
-    return { state, api, newConversation, loadConversation, formatTimestamp };
+    return { state, api, _getCsrfToken, newConversation, loadConversation, formatTimestamp };
 })();

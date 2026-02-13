@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -11,6 +12,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import filetype
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -203,6 +208,22 @@ def save_attachment(
 
     if mime_type not in ALLOWED_MIME_TYPES:
         raise ValueError(f"Unsupported file type: {mime_type}")
+
+    # Magic-byte verification for binary formats
+    guess = filetype.guess(data)
+    if guess is not None:
+        if guess.mime != mime_type:
+            logger.warning("MIME mismatch: claimed %s, detected %s for %s", mime_type, guess.mime, filename)
+            raise ValueError("File content does not match declared type")
+    elif not mime_type.startswith("text/") and mime_type not in (
+        "application/json",
+        "application/javascript",
+        "application/x-yaml",
+        "application/yaml",
+        "application/x-python-code",
+    ):
+        logger.warning("Cannot verify binary MIME type %s for %s", mime_type, filename)
+        raise ValueError("Cannot verify file content type")
 
     safe_filename = _sanitize_filename(filename)
     aid = _uuid()

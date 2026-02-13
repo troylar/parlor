@@ -82,3 +82,7 @@ class ConnectionValidation(BaseModel):
     valid: bool
     message: str
     models: list[str] = Field(default_factory=list)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(default="", max_length=100000)
