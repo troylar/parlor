@@ -628,6 +628,7 @@ async def _run_repl(
         multiline=True,
         prompt_continuation=_continuation,
         completer=completer,
+        reserve_space_for_menu=4,
     )
 
     current_model = config.ai.model
@@ -859,6 +860,7 @@ async def _run_repl(
                         response_tokens=response_token_count,
                         elapsed=total_elapsed,
                     )
+                    renderer.render_newline()
                     renderer.render_newline()
 
             # Generate title on first exchange
