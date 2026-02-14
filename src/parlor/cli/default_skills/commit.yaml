@@ -1,0 +1,16 @@
+name: commit
+description: Create a git commit with a conventional message
+prompt: |
+  Look at the current git diff (staged and unstaged changes).
+  Create a git commit with a conventional commit message.
+  Format: type(scope): description
+
+  Types: feat, fix, docs, refactor, test, chore, style, perf
+  Scope: the module or area affected
+
+  Steps:
+  1. Run `git diff --cached` to see staged changes
+  2. If nothing staged, run `git diff` to see unstaged changes
+  3. Stage relevant files with `git add`
+  4. Write a clear, concise commit message
+  5. Run `git commit -m "message"`

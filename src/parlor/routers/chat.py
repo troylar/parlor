@@ -160,117 +160,82 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
     is_first_message = not regenerate and len(history) <= 1
     first_user_text = message_text
 
+    async def _mcp_tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if not mcp_manager:
+            raise ValueError(f"No tool executor available for '{tool_name}'")
+        return await mcp_manager.call_tool(tool_name, arguments)
+
+    from ..services.agent_loop import run_agent_loop
+
     async def event_generator():
-        nonlocal ai_messages, tools
-        assistant_content = ""
+        nonlocal ai_messages
+        current_assistant_msg = None
+        _pending_tool_inputs: dict[str, Any] = {}
         try:
-            while True:
-                tool_calls_pending: list[dict[str, Any]] = []
+            async for agent_event in run_agent_loop(
+                ai_service=ai_service,
+                messages=ai_messages,
+                tool_executor=_mcp_tool_executor,
+                tools_openai=tools,
+                cancel_event=cancel_event,
+                extra_system_prompt=project_instructions,
+            ):
+                kind = agent_event.kind
+                data = agent_event.data
 
-                async for event in ai_service.stream_chat(
-                    ai_messages,
-                    tools=tools,
-                    cancel_event=cancel_event,
-                    extra_system_prompt=project_instructions,
-                ):
-                    etype = event["event"]
-                    if etype == "token":
-                        assistant_content += event["data"]["content"]
-                        yield {"event": etype, "data": json.dumps(event["data"])}
-                    elif etype == "tool_call":
-                        tool_calls_pending.append(event["data"])
-                        yield {
-                            "event": "tool_call_start",
-                            "data": json.dumps(
-                                {
-                                    "id": event["data"]["id"],
-                                    "tool_name": event["data"]["function_name"],
-                                    "server_name": "",
-                                    "input": event["data"]["arguments"],
-                                }
-                            ),
-                        }
-                    elif etype == "error":
-                        yield {"event": "error", "data": json.dumps(event["data"])}
-                        return
-                    elif etype == "done":
-                        break
+                if kind == "token":
+                    yield {"event": "token", "data": json.dumps(data)}
 
-                if not tool_calls_pending:
-                    break
-
-                # Save assistant message with tool calls
-                assistant_msg = storage.create_message(db, conversation_id, "assistant", assistant_content)
-                ai_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": assistant_content,
-                        "tool_calls": [
+                elif kind == "tool_call_start":
+                    # Track input args for DB persistence
+                    _pending_tool_inputs[data["id"]] = data["arguments"]
+                    yield {
+                        "event": "tool_call_start",
+                        "data": json.dumps(
                             {
-                                "id": tc["id"],
-                                "type": "function",
-                                "function": {
-                                    "name": tc["function_name"],
-                                    "arguments": json.dumps(tc["arguments"]),
-                                },
+                                "id": data["id"],
+                                "tool_name": data["tool_name"],
+                                "server_name": "",
+                                "input": data["arguments"],
                             }
-                            for tc in tool_calls_pending
-                        ],
+                        ),
                     }
-                )
 
-                # Execute tool calls via MCP
-                for tc in tool_calls_pending:
-                    if mcp_manager:
+                elif kind == "assistant_message":
+                    current_assistant_msg = storage.create_message(
+                        db, conversation_id, "assistant", data["content"]
+                    )
+
+                elif kind == "tool_call_end":
+                    if current_assistant_msg and mcp_manager:
+                        tool_input = _pending_tool_inputs.pop(data["id"], {})
                         storage.create_tool_call(
                             db,
-                            assistant_msg["id"],
-                            tc["function_name"],
-                            "",
-                            tc["arguments"],
-                            tc["id"],
+                            current_assistant_msg["id"],
+                            data["tool_name"],
+                            mcp_manager.get_tool_server_name(data["tool_name"]),
+                            tool_input,
+                            data["id"],
                         )
-                        try:
-                            result = await mcp_manager.call_tool(tc["function_name"], tc["arguments"])
-                            storage.update_tool_call(db, tc["id"], result, "success")
-                            yield {
-                                "event": "tool_call_end",
-                                "data": json.dumps({"id": tc["id"], "output": result, "status": "success"}),
-                            }
-                            ai_messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tc["id"],
-                                    "content": json.dumps(result),
-                                }
-                            )
-                        except Exception as e:
-                            storage.update_tool_call(db, tc["id"], {"error": str(e)}, "error")
-                            yield {
-                                "event": "tool_call_end",
-                                "data": json.dumps({"id": tc["id"], "output": {"error": str(e)}, "status": "error"}),
-                            }
-                            ai_messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tc["id"],
-                                    "content": json.dumps({"error": str(e)}),
-                                }
-                            )
+                        storage.update_tool_call(
+                            db, data["id"], data["output"], data["status"]
+                        )
+                    yield {
+                        "event": "tool_call_end",
+                        "data": json.dumps(
+                            {"id": data["id"], "output": data["output"], "status": data["status"]}
+                        ),
+                    }
 
-                assistant_content = ""
+                elif kind == "error":
+                    yield {"event": "error", "data": json.dumps(data)}
 
-            # Save final assistant message
-            if assistant_content:
-                storage.create_message(db, conversation_id, "assistant", assistant_content)
-
-            # Auto-generate title for first message
-            if is_first_message and conv["title"] == "New Conversation":
-                title = await ai_service.generate_title(first_user_text)
-                storage.update_conversation_title(db, conversation_id, title)
-                yield {"event": "title", "data": json.dumps({"title": title})}
-
-            yield {"event": "done", "data": json.dumps({})}
+                elif kind == "done":
+                    if is_first_message and conv["title"] == "New Conversation":
+                        title = await ai_service.generate_title(first_user_text)
+                        storage.update_conversation_title(db, conversation_id, title)
+                        yield {"event": "title", "data": json.dumps({"title": title})}
+                    yield {"event": "done", "data": json.dumps({})}
 
         except Exception:
             logger.exception("Chat stream error")

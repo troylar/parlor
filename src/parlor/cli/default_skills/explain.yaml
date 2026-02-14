@@ -1,0 +1,14 @@
+name: explain
+description: Explain how a file or code section works
+prompt: |
+  Explain the code that was referenced or described.
+
+  Provide:
+  1. A high-level overview of what the code does
+  2. Key components and their responsibilities
+  3. How data flows through the code
+  4. Any notable design patterns used
+  5. Potential areas of complexity or concern
+
+  Keep the explanation clear and concise. Use the file reading tools
+  to examine the code if a file path was provided.

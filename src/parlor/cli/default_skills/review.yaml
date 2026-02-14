@@ -1,0 +1,18 @@
+name: review
+description: Review code changes for issues and improvements
+prompt: |
+  Review the current code changes for potential issues.
+
+  Steps:
+  1. Run `git diff` to see all changes
+  2. Analyze the changes for:
+     - Bugs or logic errors
+     - Security vulnerabilities
+     - Performance concerns
+     - Code style inconsistencies
+     - Missing error handling
+     - Missing tests
+  3. Provide a structured review with:
+     - Summary of changes
+     - Issues found (severity: high/medium/low)
+     - Suggestions for improvement

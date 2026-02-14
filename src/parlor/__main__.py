@@ -1,4 +1,4 @@
-"""CLI entry point for ai-chat command."""
+"""CLI entry point for Parlor."""
 
 from __future__ import annotations
 
@@ -98,17 +98,8 @@ async def _test_connection(config) -> None:
     print("\nAll checks passed.")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="parlor", description="Parlor - a private parlor for AI conversation")
-    parser.add_argument("--test", action="store_true", help="Test connection settings and exit")
-    args = parser.parse_args()
-
-    config_path, config = _load_config_or_exit()
-
-    if args.test:
-        asyncio.run(_test_connection(config))
-        return
-
+def _run_web(config, config_path: Path) -> None:
+    """Launch the web UI server."""
     print(f"Config loaded from {config_path}")
     print(f"  AI endpoint: {config.ai.base_url}")
     print(f"  Model: {config.ai.model}")
@@ -134,6 +125,80 @@ def main() -> None:
     webbrowser.open(url)
 
     uvicorn.run(app, host=config.app.host, port=config.app.port, log_level="info")
+
+
+def _run_chat(
+    config,
+    prompt: str | None = None,
+    no_tools: bool = False,
+    continue_last: bool = False,
+    resume_id: str | None = None,
+    project_path: str | None = None,
+) -> None:
+    """Launch the CLI chat mode."""
+    import os
+
+    if project_path:
+        resolved = os.path.abspath(project_path)
+        if not os.path.isdir(resolved):
+            print(f"Error: {project_path} is not a directory", file=sys.stderr)
+            sys.exit(1)
+        os.chdir(resolved)
+
+    from .cli.repl import run_cli
+
+    asyncio.run(run_cli(
+        config,
+        prompt=prompt,
+        no_tools=no_tools,
+        continue_last=continue_last,
+        conversation_id=resume_id,
+    ))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="parlor", description="Parlor - a private parlor for AI conversation")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # `parlor chat` subcommand
+    chat_parser = subparsers.add_parser("chat", help="Interactive CLI chat mode")
+    chat_parser.add_argument("prompt", nargs="?", default=None, help="One-shot prompt (omit for REPL)")
+    chat_parser.add_argument("--no-tools", action="store_true", help="Disable built-in tools")
+    chat_parser.add_argument(
+        "-c", "--continue", dest="continue_last",
+        action="store_true", help="Continue the last conversation",
+    )
+    chat_parser.add_argument(
+        "-r", "--resume", dest="resume_id",
+        default=None, help="Resume a conversation by ID",
+    )
+    chat_parser.add_argument(
+        "-p", "--path", dest="project_path",
+        default=None, help="Project root directory (default: cwd)",
+    )
+
+    # Global flags
+    parser.add_argument("--test", action="store_true", help="Test connection settings and exit")
+
+    args = parser.parse_args()
+
+    config_path, config = _load_config_or_exit()
+
+    if args.test:
+        asyncio.run(_test_connection(config))
+        return
+
+    if args.command == "chat":
+        _run_chat(
+            config,
+            prompt=args.prompt,
+            no_tools=args.no_tools,
+            continue_last=args.continue_last,
+            resume_id=args.resume_id,
+            project_path=args.project_path,
+        )
+    else:
+        _run_web(config, config_path)
 
 
 if __name__ == "__main__":

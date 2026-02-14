@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "parlor"
-version = "0.5.3"
+version = "0.6.5"
 description = "Parlor - a private parlor for AI conversation"
 readme = "README.md"
 license = "MIT"
@@ -25,6 +25,9 @@ dependencies = [
     "mcp>=1.0.0",
     "pyyaml>=6.0",
     "filetype>=1.2.0",
+    "rich>=13.0.0",
+    "prompt-toolkit>=3.0.0",
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]
@@ -45,7 +48,7 @@ parlor = "parlor.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-parlor = ["static/**/*"]
+parlor = ["static/**/*", "cli/default_skills/*.yaml"]
 
 [tool.ruff]
 target-version = "py310"

@@ -43,11 +43,18 @@ class AppSettings:
 
 
 @dataclass
+class CliConfig:
+    builtin_tools: bool = True
+    max_tool_iterations: int = 50
+
+
+@dataclass
 class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
     shared_databases: list[SharedDatabaseConfig] = field(default_factory=list)
+    cli: CliConfig = field(default_factory=CliConfig)
 
 
 def _get_config_path(data_dir: Path | None = None) -> Path:
@@ -130,4 +137,13 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     except OSError:
         pass  # May fail on Windows or non-owned files
 
-    return AppConfig(ai=ai, app=app_settings, mcp_servers=mcp_servers, shared_databases=shared_databases)
+    cli_raw = raw.get("cli", {})
+    cli_config = CliConfig(
+        builtin_tools=cli_raw.get("builtin_tools", True),
+        max_tool_iterations=int(cli_raw.get("max_tool_iterations", 50)),
+    )
+
+    return AppConfig(
+        ai=ai, app=app_settings, mcp_servers=mcp_servers,
+        shared_databases=shared_databases, cli=cli_config,
+    )
