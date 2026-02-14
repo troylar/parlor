@@ -222,7 +222,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Parlor",
-        version="0.5.2",
+        version="0.5.3",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
