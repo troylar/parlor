@@ -153,6 +153,9 @@ const App = (() => {
         // Project modal
         initProjectModal();
 
+        // MCP modal
+        _initMcpModal();
+
         // Check config status and cache available models
         try {
             const config = await api('/api/config');
@@ -769,11 +772,138 @@ const App = (() => {
         }
     }
 
+    // --- MCP Modal ---
+
+    function _initMcpModal() {
+        const modal = document.getElementById('mcp-modal');
+        const closeBtn = document.getElementById('mcp-modal-close');
+        const statusEl = document.getElementById('mcp-status');
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+        }
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.style.display = 'none';
+            });
+        }
+        if (statusEl) {
+            statusEl.style.cursor = 'pointer';
+            statusEl.addEventListener('click', openMcpModal);
+        }
+    }
+
+    async function openMcpModal() {
+        const modal = document.getElementById('mcp-modal');
+        const listEl = document.getElementById('mcp-server-list');
+        listEl.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">Loading...</div>';
+        modal.style.display = 'flex';
+
+        try {
+            const config = await api('/api/config');
+            const servers = config.mcp_servers || [];
+            if (servers.length === 0) {
+                listEl.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">No MCP servers configured.</div>';
+                return;
+            }
+            _renderMcpServers(servers);
+        } catch (e) {
+            listEl.innerHTML = `<div style="color:var(--error);text-align:center;padding:20px">Failed to load: ${DOMPurify.sanitize(e.message)}</div>`;
+        }
+    }
+
+    function _renderMcpServers(servers) {
+        const listEl = document.getElementById('mcp-server-list');
+        listEl.innerHTML = '';
+
+        servers.forEach(srv => {
+            const row = document.createElement('div');
+            row.className = 'mcp-server-row';
+
+            const info = document.createElement('div');
+            info.className = 'mcp-server-info';
+
+            const name = document.createElement('span');
+            name.className = 'mcp-server-name';
+            name.textContent = srv.name;
+
+            const badge = document.createElement('span');
+            badge.className = 'mcp-status-badge mcp-status-' + srv.status;
+            badge.textContent = srv.status;
+
+            const detail = document.createElement('span');
+            detail.className = 'mcp-server-detail';
+            let detailText = srv.transport;
+            if (srv.status === 'connected') {
+                detailText += ` \u2022 ${srv.tool_count} tool${srv.tool_count !== 1 ? 's' : ''}`;
+            }
+            if (srv.error_message) {
+                detailText += ` \u2022 ${srv.error_message}`;
+            }
+            detail.textContent = detailText;
+
+            info.appendChild(name);
+            info.appendChild(badge);
+            info.appendChild(detail);
+
+            const actions = document.createElement('div');
+            actions.className = 'mcp-server-actions';
+
+            if (srv.status === 'connected') {
+                const reconnectBtn = document.createElement('button');
+                reconnectBtn.className = 'btn-mcp-action';
+                reconnectBtn.textContent = 'Reconnect';
+                reconnectBtn.addEventListener('click', () => _mcpAction(srv.name, 'reconnect'));
+                actions.appendChild(reconnectBtn);
+
+                const disconnectBtn = document.createElement('button');
+                disconnectBtn.className = 'btn-mcp-action btn-mcp-danger';
+                disconnectBtn.textContent = 'Disconnect';
+                disconnectBtn.addEventListener('click', () => _mcpAction(srv.name, 'disconnect'));
+                actions.appendChild(disconnectBtn);
+            } else {
+                const connectBtn = document.createElement('button');
+                connectBtn.className = 'btn-mcp-action btn-mcp-connect';
+                connectBtn.textContent = 'Connect';
+                connectBtn.addEventListener('click', () => _mcpAction(srv.name, 'connect'));
+                actions.appendChild(connectBtn);
+            }
+
+            row.appendChild(info);
+            row.appendChild(actions);
+            listEl.appendChild(row);
+        });
+    }
+
+    async function _mcpAction(name, action) {
+        try {
+            await api(`/api/mcp/servers/${encodeURIComponent(name)}/${action}`, { method: 'POST' });
+            await openMcpModal();
+            await _refreshMcpStatus();
+        } catch (e) {
+            alert(`MCP ${action} failed: ${e.message}`);
+        }
+    }
+
+    async function _refreshMcpStatus() {
+        try {
+            const config = await api('/api/config');
+            const statusEl = document.getElementById('mcp-status');
+            if (config.mcp_servers && config.mcp_servers.length > 0) {
+                const connected = config.mcp_servers.filter(s => s.status === 'connected');
+                const totalTools = connected.reduce((sum, s) => sum + s.tool_count, 0);
+                statusEl.textContent = `${totalTools} tools / ${connected.length} servers`;
+            } else {
+                statusEl.textContent = '';
+            }
+        } catch { /* ignore */ }
+    }
+
     document.addEventListener('DOMContentLoaded', init);
 
     return {
         state, api, _getCsrfToken, _selectModel, newConversation, loadConversation,
         loadProjects, loadDatabases, addDatabase, refreshModels, formatTimestamp,
-        getTheme, setTheme, THEMES,
+        getTheme, setTheme, THEMES, openMcpModal,
     };
 })();

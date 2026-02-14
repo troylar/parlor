@@ -39,7 +39,9 @@ class TestLoadConfig:
         assert config.ai.base_url == "https://api.example.com"
         assert config.ai.api_key == "sk-test-key"
         assert config.ai.model == "gpt-3.5-turbo"
-        assert config.ai.system_prompt == "Be concise."
+        assert config.ai.user_system_prompt == "Be concise."
+        assert "Be concise." in config.ai.system_prompt
+        assert "<user_instructions>" in config.ai.system_prompt
         assert config.app.host == "0.0.0.0"
         assert config.app.port == 9090
 
@@ -175,3 +177,46 @@ class TestLoadConfig:
         config = load_config(cfg_file)
         assert config.ai.base_url == "https://env.example.com"
         assert config.ai.api_key == "sk-env-key"
+
+    def test_user_system_prompt_appends_to_default(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                    "system_prompt": "Always respond in French.",
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.ai.user_system_prompt == "Always respond in French."
+        assert "Parlor" in config.ai.system_prompt
+        assert "<agentic_behavior>" in config.ai.system_prompt
+        assert "<user_instructions>" in config.ai.system_prompt
+        assert "Always respond in French." in config.ai.system_prompt
+
+    def test_no_user_system_prompt_uses_default(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.ai.user_system_prompt == ""
+        assert "Parlor" in config.ai.system_prompt
+        assert "<user_instructions>" not in config.ai.system_prompt
+
+    def test_user_system_prompt_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_BASE_URL", "https://env.example.com")
+        monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
+        monkeypatch.setenv("AI_CHAT_SYSTEM_PROMPT", "Be very brief.")
+        cfg_file = _write_config(tmp_path, {})
+        config = load_config(cfg_file)
+        assert config.ai.user_system_prompt == "Be very brief."
+        assert "Be very brief." in config.ai.system_prompt
+        assert "Parlor" in config.ai.system_prompt

@@ -114,6 +114,12 @@ async def _watch_for_escape(cancel_event: asyncio.Event) -> None:
 
 
 _MAX_PASTE_DISPLAY_LINES = 6
+_PASTE_THRESHOLD = 0.05  # 50ms; paste arrives faster than human typing
+
+
+def _is_paste(last_text_change: float, threshold: float = _PASTE_THRESHOLD) -> bool:
+    """Return True if Enter arrived fast enough after last buffer change to be paste."""
+    return (time.monotonic() - last_text_change) < threshold
 
 
 def _collapse_long_input(user_input: str) -> None:
@@ -304,7 +310,6 @@ def _build_system_prompt(config: AppConfig, working_dir: str, instructions: str 
     ]
     if instructions:
         parts.append(f"\n{instructions}")
-    parts.append(f"\n{config.ai.system_prompt}")
     return "\n".join(parts)
 
 
@@ -424,6 +429,8 @@ async def run_cli(
             working_dir=working_dir,
             resume_conversation_id=resume_conversation_id,
             skill_registry=skill_registry,
+            mcp_manager=mcp_manager,
+            tool_registry=tool_registry,
         )
 
     # Cleanup
@@ -531,6 +538,8 @@ async def _run_repl(
     working_dir: str,
     resume_conversation_id: str | None = None,
     skill_registry: SkillRegistry | None = None,
+    mcp_manager: Any = None,
+    tool_registry: Any = None,
 ) -> None:
     """Run the interactive REPL."""
     from prompt_toolkit import PromptSession
@@ -598,6 +607,7 @@ async def _run_repl(
         "compact",
         "tools",
         "skills",
+        "mcp",
         "model",
         "help",
         "quit",
@@ -606,15 +616,39 @@ async def _run_repl(
     skill_names = [s.name for s in skill_registry.list_skills()] if skill_registry else []
     completer = ParlorCompleter(commands, skill_names, working_dir)
 
+    def _rebuild_tools() -> None:
+        """Rebuild the tool list after MCP changes."""
+        nonlocal tools_openai, all_tool_names
+        new_tools: list[dict[str, Any]] = []
+        if tool_registry:
+            new_tools.extend(tool_registry.get_openai_tools())
+        if mcp_manager:
+            mcp_tools = mcp_manager.get_openai_tools()
+            if mcp_tools:
+                new_tools.extend(mcp_tools)
+        tools_openai = new_tools if new_tools else None
+        new_names: list[str] = list(tool_registry.list_tools()) if tool_registry else []
+        if mcp_manager:
+            new_names.extend(t["name"] for t in mcp_manager.get_all_tools())
+        all_tool_names = new_names
+
     history_path = config.app.data_dir / "cli_history"
 
     # Key bindings
     kb = KeyBindings()
 
+    # Paste detection: track buffer changes to distinguish paste from typing.
+    # Pasted characters arrive in < 5ms bursts; human typing is > 50ms apart.
+    _last_text_change: list[float] = [0.0]
+
     # Enter submits; Alt+Enter / Escape+Enter inserts newline
     @kb.add("enter")
     def _submit(event: Any) -> None:
-        event.current_buffer.validate_and_handle()
+        if _is_paste(_last_text_change[0]):
+            # Rapid input (paste) — insert newline, don't submit
+            event.current_buffer.insert_text("\n")
+        else:
+            event.current_buffer.validate_and_handle()
 
     @kb.add("escape", "enter")
     def _newline(event: Any) -> None:
@@ -644,6 +678,12 @@ async def _run_repl(
         completer=completer,
         reserve_space_for_menu=4,
     )
+
+    # Hook buffer changes for paste detection timing
+    def _on_buffer_change(_buf: Any) -> None:
+        _last_text_change[0] = time.monotonic()
+
+    session.default_buffer.on_text_changed += _on_buffer_change
 
     current_model = config.ai.model
 
@@ -741,6 +781,40 @@ async def _run_repl(
                             "[grey62]No skills loaded. Add .yaml files to"
                             " ~/.parlor/skills/ or .parlor/skills/[/grey62]\n"
                         )
+                continue
+            elif cmd == "/mcp":
+                parts = user_input.split()
+                if len(parts) == 1:
+                    if mcp_manager:
+                        renderer.render_mcp_status(mcp_manager.get_server_statuses())
+                    else:
+                        renderer.console.print("[grey62]No MCP servers configured.[/grey62]\n")
+                elif len(parts) >= 3:
+                    action = parts[1].lower()
+                    server_name = parts[2]
+                    if not mcp_manager:
+                        renderer.render_error("No MCP servers configured")
+                        continue
+                    try:
+                        if action == "connect":
+                            await mcp_manager.connect_server(server_name)
+                            renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
+                        elif action == "disconnect":
+                            await mcp_manager.disconnect_server(server_name)
+                            renderer.console.print(f"[grey62]Disconnected: {server_name}[/grey62]\n")
+                        elif action == "reconnect":
+                            await mcp_manager.reconnect_server(server_name)
+                            renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
+                        else:
+                            renderer.render_error(f"Unknown action: {action}. Use connect, disconnect, or reconnect.")
+                            continue
+                        _rebuild_tools()
+                    except ValueError as e:
+                        renderer.render_error(str(e))
+                else:
+                    renderer.console.print(
+                        "[grey62]Usage: /mcp [connect|disconnect|reconnect <server_name>][/grey62]\n"
+                    )
                 continue
             elif cmd == "/model":
                 parts = user_input.split(maxsplit=1)

@@ -67,6 +67,7 @@ class McpServerStatus(BaseModel):
     transport: str
     status: str  # connected, disconnected, error
     tool_count: int
+    error_message: str | None = None
 
 
 class AppConfigResponse(BaseModel):

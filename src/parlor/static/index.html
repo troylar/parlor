@@ -226,6 +226,21 @@
             </div>
         </div>
 
+        <!-- MCP Server Modal -->
+        <div class="modal-overlay" id="mcp-modal" style="display:none">
+            <div class="modal" style="width:600px">
+                <div class="modal-header">
+                    <h3>MCP Servers</h3>
+                    <button class="modal-close" id="mcp-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="mcp-server-list">
+                        <!-- Server rows populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Main Chat Area -->
         <main class="chat-main">
             <!-- Model selector topbar -->
@@ -246,7 +261,7 @@
 
             <!-- Setup banner (hidden by default) -->
             <div class="setup-banner" id="setup-banner" style="display:none">
-                <p>AI service not configured. Please set up your <code>~/.ai-chat/config.yaml</code>.</p>
+                <p>AI service not configured. Please set up your <code>~/.parlor/config.yaml</code>.</p>
             </div>
 
             <!-- Messages container -->

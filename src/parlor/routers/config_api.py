@@ -39,6 +39,7 @@ async def get_config(request: Request) -> AppConfigResponse:
                     transport=status["transport"],
                     status=status["status"],
                     tool_count=status["tool_count"],
+                    error_message=status.get("error_message"),
                 )
             )
 
@@ -47,7 +48,7 @@ async def get_config(request: Request) -> AppConfigResponse:
             "base_url": config.ai.base_url,
             "api_key_set": bool(config.ai.api_key),
             "model": config.ai.model,
-            "system_prompt": config.ai.system_prompt,
+            "system_prompt": config.ai.user_system_prompt,
         },
         mcp_servers=mcp_statuses,
     )
@@ -55,14 +56,22 @@ async def get_config(request: Request) -> AppConfigResponse:
 
 @router.patch("/config")
 async def update_config(body: ConfigUpdate, request: Request):
+    from ..config import _DEFAULT_SYSTEM_PROMPT
+
     config = request.app.state.config
     changed = False
 
     if body.model is not None and body.model != config.ai.model:
         config.ai.model = body.model
         changed = True
-    if body.system_prompt is not None and body.system_prompt != config.ai.system_prompt:
-        config.ai.system_prompt = body.system_prompt
+    if body.system_prompt is not None and body.system_prompt != config.ai.user_system_prompt:
+        config.ai.user_system_prompt = body.system_prompt
+        if body.system_prompt:
+            config.ai.system_prompt = (
+                _DEFAULT_SYSTEM_PROMPT + "\n\n<user_instructions>\n" + body.system_prompt + "\n</user_instructions>"
+            )
+        else:
+            config.ai.system_prompt = _DEFAULT_SYSTEM_PROMPT
         changed = True
 
     if changed:
@@ -70,7 +79,7 @@ async def update_config(body: ConfigUpdate, request: Request):
 
     return {
         "model": config.ai.model,
-        "system_prompt": config.ai.system_prompt,
+        "system_prompt": config.ai.user_system_prompt,
     }
 
 
@@ -88,7 +97,10 @@ def _persist_config(config) -> None:
         if "ai" not in raw:
             raw["ai"] = {}
         raw["ai"]["model"] = config.ai.model
-        raw["ai"]["system_prompt"] = config.ai.system_prompt
+        if config.ai.user_system_prompt:
+            raw["ai"]["system_prompt"] = config.ai.user_system_prompt
+        else:
+            raw["ai"].pop("system_prompt", None)
 
         with open(config_path, "w") as f:
             yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
@@ -145,6 +157,48 @@ async def list_mcp_tools(request: Request) -> list[McpTool]:
             )
 
     return result
+
+
+# --- MCP Server Management ---
+
+
+@router.post("/mcp/servers/{name}/connect")
+async def connect_mcp_server(name: str, request: Request):
+    mcp_manager = request.app.state.mcp_manager
+    if not mcp_manager:
+        raise HTTPException(status_code=400, detail="No MCP servers configured")
+    try:
+        await mcp_manager.connect_server(name)
+        statuses = mcp_manager.get_server_statuses()
+        return statuses.get(name, {"name": name, "status": "unknown"})
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/mcp/servers/{name}/disconnect")
+async def disconnect_mcp_server(name: str, request: Request):
+    mcp_manager = request.app.state.mcp_manager
+    if not mcp_manager:
+        raise HTTPException(status_code=400, detail="No MCP servers configured")
+    try:
+        await mcp_manager.disconnect_server(name)
+        statuses = mcp_manager.get_server_statuses()
+        return statuses.get(name, {"name": name, "status": "disconnected"})
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/mcp/servers/{name}/reconnect")
+async def reconnect_mcp_server(name: str, request: Request):
+    mcp_manager = request.app.state.mcp_manager
+    if not mcp_manager:
+        raise HTTPException(status_code=400, detail="No MCP servers configured")
+    try:
+        await mcp_manager.reconnect_server(name)
+        statuses = mcp_manager.get_server_statuses()
+        return statuses.get(name, {"name": name, "status": "unknown"})
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # --- Databases ---
