@@ -91,7 +91,8 @@ class TestLoadConfig:
             },
         )
         config = load_config(cfg_file)
-        assert config.ai.system_prompt == "You are a helpful assistant."
+        assert "Parlor" in config.ai.system_prompt
+        assert "<agentic_behavior>" in config.ai.system_prompt
 
     def test_default_app_settings(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
