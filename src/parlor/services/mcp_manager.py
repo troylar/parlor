@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import re
 import shutil
 import socket
@@ -97,6 +98,7 @@ class McpManager:
                     server_params = StdioServerParameters(
                         command=config.command,
                         args=config.args,
+                        env={**os.environ, **config.env} if config.env else None,
                     )
                     stdio_transport = await self._exit_stack.enter_async_context(stdio_client(server_params))
                     read_stream, write_stream = stdio_transport

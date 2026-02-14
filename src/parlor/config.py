@@ -27,6 +27,7 @@ class McpServerConfig:
     command: str | None = None
     args: list[str] = field(default_factory=list)
     url: str | None = None
+    env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -110,6 +111,10 @@ def load_config(config_path: Path | None = None) -> AppConfig:
 
     mcp_servers: list[McpServerConfig] = []
     for srv in raw.get("mcp_servers", []):
+        env_raw = srv.get("env", {})
+        env: dict[str, str] = {}
+        for k, v in env_raw.items():
+            env[k] = os.path.expandvars(str(v))
         mcp_servers.append(
             McpServerConfig(
                 name=srv["name"],
@@ -117,6 +122,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
                 command=srv.get("command"),
                 args=srv.get("args", []),
                 url=srv.get("url"),
+                env=env,
             )
         )
 

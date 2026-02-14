@@ -190,11 +190,16 @@ mcp_servers:
     transport: "stdio"
     command: "npx"
     args: ["-y", "@my-org/mcp-tools"]
+    env:
+      API_KEY: "${MY_API_KEY}"
+      DEBUG: "true"
 
   - name: "remote-tools"
     transport: "sse"
     url: "https://mcp-server.example.com/sse"
 ```
+
+Environment variables in `env` values support `${VAR}` expansion --- so you can reference secrets from your shell environment without hardcoding them in the config file.
 
 ### Streaming
 
@@ -667,6 +672,8 @@ mcp_servers:
     transport: "stdio"
     command: "npx"
     args: ["-y", "@my-org/mcp-tools"]
+    env:
+      API_KEY: "${MY_API_KEY}"
 
   - name: "remote-tools"
     transport: "sse"
