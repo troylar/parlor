@@ -121,11 +121,12 @@ class AIService:
                     },
                     {"role": "user", "content": user_message},
                 ],
-                max_tokens=20,
+                max_completion_tokens=20,
             )
             title = response.choices[0].message.content or "New Conversation"
             return title.strip().strip('"').strip("'")
         except Exception:
+            logger.exception("Failed to generate title")
             return "New Conversation"
 
     async def validate_connection(self) -> tuple[bool, str, list[str]]:

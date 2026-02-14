@@ -4,7 +4,7 @@ const Chat = (() => {
     let eventSource = null;
     let currentAssistantEl = null;
     let currentAssistantContent = '';
-    let _streamRawMode = localStorage.getItem('parlor_stream_raw_mode') !== 'false';
+    let _streamRawMode = localStorage.getItem('parlor_stream_raw_mode') === 'true';
 
     // Configure marked for safe link rendering (marked v15 passes token object)
     const renderer = new marked.Renderer();
@@ -191,6 +191,7 @@ const Chat = (() => {
         } else {
             contentEl.innerHTML = renderMarkdown(currentAssistantContent);
             renderMath(contentEl);
+            highlightCode(contentEl);
         }
         scrollToBottom();
     }
@@ -318,17 +319,31 @@ const Chat = (() => {
         actions.className = 'message-actions';
 
         if (role === 'assistant') {
-            const copyBtn = document.createElement('button');
-            copyBtn.className = 'btn-action-icon';
-            copyBtn.title = 'Copy';
-            copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
-            copyBtn.addEventListener('click', () => {
-                navigator.clipboard.writeText(content).then(() => {
-                    copyBtn.title = 'Copied!';
-                    setTimeout(() => { copyBtn.title = 'Copy'; }, 2000);
+            const copyTextBtn = document.createElement('button');
+            copyTextBtn.className = 'btn-action-icon';
+            copyTextBtn.title = 'Copy as text';
+            copyTextBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+            copyTextBtn.addEventListener('click', () => {
+                const contentEl = msgEl.querySelector('.message-content');
+                const text = contentEl ? contentEl.innerText : content;
+                navigator.clipboard.writeText(text).then(() => {
+                    copyTextBtn.title = 'Copied!';
+                    setTimeout(() => { copyTextBtn.title = 'Copy as text'; }, 2000);
                 });
             });
-            actions.appendChild(copyBtn);
+            actions.appendChild(copyTextBtn);
+
+            const copyMdBtn = document.createElement('button');
+            copyMdBtn.className = 'btn-action-icon';
+            copyMdBtn.title = 'Copy as markdown';
+            copyMdBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 16.5L2 7.5C2 6.67 2.67 6 3.5 6L20.5 6C21.33 6 22 6.67 22 7.5L22 16.5C22 17.33 21.33 18 20.5 18L3.5 18C2.67 18 2 17.33 2 16.5Z"/><path d="M5.5 15L5.5 9L8 9L10 11.5L12 9L14.5 9L14.5 15"/><path d="M5.5 15L8 15L8 12"/><path d="M10 15L10 11.5"/><path d="M12 15L14.5 15"/><path d="M17.5 12L20 9.5M17.5 12L15 9.5M17.5 12L17.5 15"/></svg>';
+            copyMdBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(content).then(() => {
+                    copyMdBtn.title = 'Copied!';
+                    setTimeout(() => { copyMdBtn.title = 'Copy as markdown'; }, 2000);
+                });
+            });
+            actions.appendChild(copyMdBtn);
         }
 
         if (role === 'user' && msgData) {
