@@ -85,7 +85,7 @@ Your browser opens to `http://127.0.0.1:8080`. That's it. You're done. :tada:
 
 | | |
 |---|---|
-| **Create, rename, search, delete** | Full conversation lifecycle with double-click rename |
+| :speech_balloon: **Create, rename, search, delete** | Full conversation lifecycle with double-click rename |
 | :mag: **Full-text search** | FTS5-powered instant search across all messages and titles |
 | :trident: **Fork at any message** | Branch a conversation into a new thread from any point |
 | :pencil2: **Edit & regenerate** | Edit any user message, all subsequent messages are deleted, AI regenerates from there |
