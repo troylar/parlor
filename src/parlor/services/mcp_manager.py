@@ -73,118 +73,168 @@ def _validate_command(command: str) -> None:
 
 class McpManager:
     def __init__(self, server_configs: list[McpServerConfig]) -> None:
-        self._configs = server_configs
-        self._exit_stack = AsyncExitStack()
+        self._configs: dict[str, McpServerConfig] = {cfg.name: cfg for cfg in server_configs}
+        self._exit_stacks: dict[str, AsyncExitStack] = {}
         self._sessions: dict[str, Any] = {}
-        self._tools: list[dict[str, Any]] = []
+        self._server_tools: dict[str, list[dict[str, Any]]] = {}
         self._tool_to_server: dict[str, str] = {}
         self._server_status: dict[str, dict[str, Any]] = {}
+        self._disabled: set[str] = set()
 
     async def startup(self) -> None:
         if not self._configs:
             return
 
         try:
-            from mcp import ClientSession, StdioServerParameters
-            from mcp.client.stdio import stdio_client
+            from mcp import ClientSession, StdioServerParameters  # noqa: F401
+            from mcp.client.stdio import stdio_client  # noqa: F401
         except ImportError:
             logger.warning("MCP SDK not installed, skipping MCP server connections")
             return
 
-        for config in self._configs:
-            try:
-                if config.transport == "stdio" and config.command:
-                    _validate_command(config.command)
-                    server_params = StdioServerParameters(
-                        command=config.command,
-                        args=config.args,
-                        env={**os.environ, **config.env} if config.env else None,
-                    )
-                    stdio_transport = await self._exit_stack.enter_async_context(stdio_client(server_params))
-                    read_stream, write_stream = stdio_transport
-                    session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-                    await session.initialize()
-                    self._sessions[config.name] = session
+        for name, config in self._configs.items():
+            await self._connect_one(config)
 
-                    tools_result = await session.list_tools()
-                    tool_count = 0
-                    for tool in tools_result.tools:
-                        if tool.name in self._tool_to_server:
-                            logger.warning(
-                                "Tool name collision: '%s' from server '%s' shadows existing tool from '%s'",
-                                tool.name,
-                                config.name,
-                                self._tool_to_server[tool.name],
-                            )
-                        tool_entry = {
-                            "name": tool.name,
-                            "server_name": config.name,
-                            "description": tool.description or "",
-                            "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
-                        }
-                        self._tools.append(tool_entry)
-                        self._tool_to_server[tool.name] = config.name
-                        tool_count += 1
+    async def _connect_one(self, config: McpServerConfig) -> None:
+        try:
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+        except ImportError:
+            self._server_status[config.name] = {
+                "status": "error",
+                "tool_count": 0,
+                "error_message": "MCP SDK not installed",
+            }
+            return
 
+        try:
+            stack = AsyncExitStack()
+
+            if config.transport == "stdio" and config.command:
+                _validate_command(config.command)
+                server_params = StdioServerParameters(
+                    command=config.command,
+                    args=config.args,
+                    env={**os.environ, **config.env} if config.env else None,
+                )
+                stdio_transport = await stack.enter_async_context(stdio_client(server_params))
+                read_stream, write_stream = stdio_transport
+                session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+                await session.initialize()
+
+            elif config.transport == "sse" and config.url:
+                try:
+                    from mcp.client.sse import sse_client
+                except ImportError:
                     self._server_status[config.name] = {
-                        "status": "connected",
-                        "tool_count": tool_count,
+                        "status": "error",
+                        "tool_count": 0,
+                        "error_message": "SSE client not available",
                     }
-                    logger.info(f"MCP server '{config.name}' connected with {tool_count} tools")
+                    logger.warning(f"SSE client not available for MCP server '{config.name}'")
+                    return
 
-                elif config.transport == "sse" and config.url:
-                    try:
-                        from mcp.client.sse import sse_client
+                _validate_sse_url(config.url)
+                sse_transport = await stack.enter_async_context(sse_client(config.url))
+                read_stream, write_stream = sse_transport
+                session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+                await session.initialize()
 
-                        _validate_sse_url(config.url)
-                        sse_transport = await self._exit_stack.enter_async_context(sse_client(config.url))
-                        read_stream, write_stream = sse_transport
-                        session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-                        await session.initialize()
-                        self._sessions[config.name] = session
-
-                        tools_result = await session.list_tools()
-                        tool_count = 0
-                        for tool in tools_result.tools:
-                            if tool.name in self._tool_to_server:
-                                logger.warning(
-                                    "Tool name collision: '%s' from server '%s' shadows existing tool from '%s'",
-                                    tool.name,
-                                    config.name,
-                                    self._tool_to_server[tool.name],
-                                )
-                            tool_entry = {
-                                "name": tool.name,
-                                "server_name": config.name,
-                                "description": tool.description or "",
-                                "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
-                            }
-                            self._tools.append(tool_entry)
-                            self._tool_to_server[tool.name] = config.name
-                            tool_count += 1
-
-                        self._server_status[config.name] = {
-                            "status": "connected",
-                            "tool_count": tool_count,
-                        }
-                        logger.info(f"MCP SSE server '{config.name}' connected with {tool_count} tools")
-
-                    except ImportError:
-                        logger.warning(f"SSE client not available for MCP server '{config.name}'")
-                        self._server_status[config.name] = {
-                            "status": "error",
-                            "tool_count": 0,
-                        }
-
-            except Exception as e:
-                logger.warning(f"Failed to connect to MCP server '{config.name}': {e}")
+            else:
                 self._server_status[config.name] = {
                     "status": "error",
                     "tool_count": 0,
+                    "error_message": f"Invalid transport config for '{config.name}'",
                 }
+                return
+
+            self._exit_stacks[config.name] = stack
+            self._sessions[config.name] = session
+
+            tools_result = await session.list_tools()
+            server_tools: list[dict[str, Any]] = []
+            for tool in tools_result.tools:
+                tool_entry = {
+                    "name": tool.name,
+                    "server_name": config.name,
+                    "description": tool.description or "",
+                    "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                }
+                server_tools.append(tool_entry)
+
+            self._server_tools[config.name] = server_tools
+            self._rebuild_tool_map()
+
+            self._server_status[config.name] = {
+                "status": "connected",
+                "tool_count": len(server_tools),
+            }
+            logger.info(f"MCP server '{config.name}' connected with {len(server_tools)} tools")
+
+        except Exception as e:
+            logger.warning(f"Failed to connect to MCP server '{config.name}': {e}")
+            self._server_status[config.name] = {
+                "status": "error",
+                "tool_count": 0,
+                "error_message": str(e),
+            }
+
+    def _rebuild_tool_map(self) -> None:
+        """Rebuild _tool_to_server from _server_tools, warning on collisions."""
+        self._tool_to_server.clear()
+        for server_name, tools in self._server_tools.items():
+            for tool in tools:
+                if tool["name"] in self._tool_to_server:
+                    logger.warning(
+                        "Tool name collision: '%s' from server '%s' shadows existing tool from '%s'",
+                        tool["name"],
+                        server_name,
+                        self._tool_to_server[tool["name"]],
+                    )
+                self._tool_to_server[tool["name"]] = server_name
+
+    async def connect_server(self, name: str) -> None:
+        """Connect (or reconnect) a single server by name."""
+        if name not in self._configs:
+            raise ValueError(f"Unknown MCP server: {name}")
+
+        # Disconnect first if already connected
+        if name in self._sessions:
+            await self.disconnect_server(name)
+
+        self._disabled.discard(name)
+        await self._connect_one(self._configs[name])
+
+    async def disconnect_server(self, name: str) -> None:
+        """Disconnect a single server by name."""
+        if name not in self._configs:
+            raise ValueError(f"Unknown MCP server: {name}")
+
+        self._disabled.add(name)
+        self._sessions.pop(name, None)
+        self._server_tools.pop(name, None)
+        self._rebuild_tool_map()
+
+        stack = self._exit_stacks.pop(name, None)
+        if stack:
+            try:
+                await stack.aclose()
+            except Exception:
+                logger.warning(f"Error closing exit stack for '{name}'", exc_info=True)
+
+        self._server_status[name] = {
+            "status": "disconnected",
+            "tool_count": 0,
+        }
+        logger.info(f"MCP server '{name}' disconnected")
+
+    async def reconnect_server(self, name: str) -> None:
+        """Disconnect then reconnect a server."""
+        await self.connect_server(name)
 
     def get_openai_tools(self) -> list[dict[str, Any]] | None:
-        if not self._tools:
+        all_tools = self.get_all_tools()
+        if not all_tools:
             return None
         return [
             {
@@ -195,7 +245,7 @@ class McpManager:
                     "parameters": tool["input_schema"],
                 },
             }
-            for tool in self._tools
+            for tool in all_tools
         ]
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
@@ -225,21 +275,30 @@ class McpManager:
         return self._tool_to_server.get(tool_name, "unknown")
 
     def get_all_tools(self) -> list[dict[str, Any]]:
-        return self._tools
+        """Flatten _server_tools into a single list."""
+        tools: list[dict[str, Any]] = []
+        for server_tools in self._server_tools.values():
+            tools.extend(server_tools)
+        return tools
 
     def get_server_statuses(self) -> dict[str, dict[str, Any]]:
         result = {}
-        for config in self._configs:
-            status = self._server_status.get(config.name, {"status": "disconnected", "tool_count": 0})
-            result[config.name] = {
-                "name": config.name,
+        for name, config in self._configs.items():
+            status = self._server_status.get(name, {"status": "disconnected", "tool_count": 0})
+            result[name] = {
+                "name": name,
                 "transport": config.transport,
                 **status,
             }
         return result
 
     async def shutdown(self) -> None:
-        await self._exit_stack.aclose()
+        for name, stack in list(self._exit_stacks.items()):
+            try:
+                await stack.aclose()
+            except Exception:
+                logger.warning(f"Error closing exit stack for '{name}'", exc_info=True)
+        self._exit_stacks.clear()
         self._sessions.clear()
-        self._tools.clear()
+        self._server_tools.clear()
         self._tool_to_server.clear()

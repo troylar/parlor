@@ -144,6 +144,7 @@ def render_help() -> None:
     console.print("  /compact    - Summarize and compact message history")
     console.print("  /tools      - List available tools")
     console.print("  /skills     - List available skills")
+    console.print("  /mcp        - Show MCP server status / manage servers")
     console.print("  /model NAME - Switch to a different model")
     console.print("  /quit       - Exit")
     console.print("  Escape      - Cancel current response")
@@ -164,6 +165,44 @@ def render_tools(tool_names: list[str]) -> None:
 
 def render_compact_done(original: int, compacted: int) -> None:
     console.print(f"\n[grey62]Compacted {original} messages -> {compacted} messages[/grey62]")
+
+
+def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
+    """Render MCP server status as a Rich table."""
+    from rich.table import Table
+
+    if not statuses:
+        console.print("\n[grey62]No MCP servers configured.[/grey62]\n")
+        return
+
+    table = Table(title="MCP Servers", show_header=True, header_style="bold")
+    table.add_column("Server", style="cyan")
+    table.add_column("Transport")
+    table.add_column("Status")
+    table.add_column("Tools", justify="right")
+
+    for name, info in statuses.items():
+        status = info.get("status", "unknown")
+        if status == "connected":
+            status_text = "[green]connected[/green]"
+        elif status == "error":
+            err = info.get("error_message", "")
+            status_text = "[red]error[/red]"
+            if err:
+                status_text += f" [grey62]({err})[/grey62]"
+        else:
+            status_text = f"[grey62]{status}[/grey62]"
+
+        table.add_row(
+            name,
+            info.get("transport", "?"),
+            status_text,
+            str(info.get("tool_count", 0)),
+        )
+
+    console.print()
+    console.print(table)
+    console.print("  [grey62]Usage: /mcp connect|disconnect|reconnect <server_name>[/grey62]\n")
 
 
 def render_context_footer(

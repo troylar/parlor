@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/pypi/v/parlor?style=for-the-badge&color=3b82f6&labelColor=0f1117" alt="PyPI Version">
   <img src="https://img.shields.io/badge/python-3.10%2B-10b981?style=for-the-badge&labelColor=0f1117" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-166%20passed-7c3aed?style=for-the-badge&labelColor=0f1117" alt="Tests">
+  <a href="https://codecov.io/gh/troylar/parlor"><img src="https://img.shields.io/codecov/c/github/troylar/parlor?style=for-the-badge&color=7c3aed&labelColor=0f1117&label=coverage" alt="Coverage"></a>
   <img src="https://img.shields.io/github/license/troylar/parlor?style=for-the-badge&color=e8913a&labelColor=0f1117" alt="License">
 </p>
 
@@ -36,9 +36,7 @@
 
 ## Why Parlor?
 
-Your company's AI chat UI sucks. You know it. We know it. Parlor replaces it with something you'll actually want to use.
-
-It connects to **any** OpenAI-compatible endpoint --- your company's internal API, OpenAI, Azure, Ollama, LM Studio, or anything else that speaks the OpenAI protocol. Built to [OWASP ASVS L1](SECURITY.md) standards because your conversations deserve real security, not security theater.
+Parlor connects to **any** OpenAI-compatible endpoint --- your company's internal API, OpenAI, Azure, Ollama, LM Studio, or anything else that speaks the OpenAI protocol. Built to [OWASP ASVS L1](SECURITY.md) standards because your conversations deserve real security, not security theater.
 
 > **One command. No cloud. No telemetry. No compromise.**
 
@@ -56,7 +54,7 @@ pip install parlor
 pip install parlor
 ```
 
-**2. Configure** --- create `~/.ai-chat/config.yaml`:
+**2. Configure** --- create `~/.parlor/config.yaml`:
 
 ```yaml
 ai:
@@ -528,7 +526,7 @@ Tab completion works for three categories:
 
 ### Command History
 
-Input history is persisted to `~/.ai-chat/cli_history` using prompt_toolkit's `FileHistory`. Previous commands are available with the up/down arrow keys across sessions.
+Input history is persisted to `~/.parlor/cli_history` using prompt_toolkit's `FileHistory`. Previous commands are available with the up/down arrow keys across sessions.
 
 ### One-Shot Mode
 
@@ -610,7 +608,7 @@ Create a `PARLOR.md` in your project root to inject context into every conversat
 
 ### Shared Database
 
-CLI and web UI share the same SQLite database (`~/.ai-chat/chat.db`). Conversations created in the terminal show up in the web sidebar, and vice versa. Every user message, assistant response, and tool call is persisted with the same schema used by the web UI.
+CLI and web UI share the same SQLite database (`~/.parlor/chat.db`). Conversations created in the terminal show up in the web sidebar, and vice versa. Every user message, assistant response, and tool call is persisted with the same schema used by the web UI.
 
 Titles are auto-generated after the first exchange. Tool calls are stored with their inputs and outputs, so the web UI can render expandable tool call panels for conversations that originated in the CLI.
 
@@ -633,7 +631,7 @@ The CLI works on **macOS**, **Linux**, and **Windows**:
 
 ### CLI Configuration
 
-Add a `cli:` section to `~/.ai-chat/config.yaml`:
+Add a `cli:` section to `~/.parlor/config.yaml`:
 
 ```yaml
 cli:
@@ -652,7 +650,7 @@ MCP servers configured in the same `config.yaml` are available in both CLI and w
 
 ### Config File
 
-`~/.ai-chat/config.yaml`
+`~/.parlor/config.yaml`
 
 ```yaml
 ai:
@@ -665,7 +663,7 @@ ai:
 app:
   host: "127.0.0.1"     # bind address
   port: 8080             # server port
-  data_dir: "~/.ai-chat" # where DB + attachments live
+  data_dir: "~/.parlor" # where DB + attachments live
 
 # Optional: CLI settings
 cli:
@@ -774,7 +772,7 @@ Full details in [SECURITY.md](SECURITY.md).
 Everything stays on your machine. Nothing phones home.
 
 ```
-~/.ai-chat/
+~/.parlor/
   config.yaml          # Configuration          (permissions: 0600)
   chat.db              # SQLite + WAL journal   (permissions: 0600)
   cli_history           # REPL command history

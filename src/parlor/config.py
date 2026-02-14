@@ -74,6 +74,7 @@ class AIConfig:
     api_key: str
     model: str = "gpt-4"
     system_prompt: str = _DEFAULT_SYSTEM_PROMPT
+    user_system_prompt: str = ""
     verify_ssl: bool = True
 
 
@@ -97,7 +98,7 @@ class SharedDatabaseConfig:
 class AppSettings:
     host: str = "127.0.0.1"
     port: int = 8080
-    data_dir: Path = field(default_factory=lambda: Path.home() / ".ai-chat")
+    data_dir: Path = field(default_factory=lambda: Path.home() / ".parlor")
 
 
 @dataclass
@@ -118,7 +119,7 @@ class AppConfig:
 def _get_config_path(data_dir: Path | None = None) -> Path:
     if data_dir:
         return data_dir / "config.yaml"
-    return Path.home() / ".ai-chat" / "config.yaml"
+    return Path.home() / ".parlor" / "config.yaml"
 
 
 def load_config(config_path: Path | None = None) -> AppConfig:
@@ -133,7 +134,14 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     base_url = ai_raw.get("base_url") or os.environ.get("AI_CHAT_BASE_URL", "")
     api_key = ai_raw.get("api_key") or os.environ.get("AI_CHAT_API_KEY", "")
     model = ai_raw.get("model") or os.environ.get("AI_CHAT_MODEL", "gpt-4")
-    system_prompt = ai_raw.get("system_prompt") or os.environ.get("AI_CHAT_SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
+    user_system_prompt = ai_raw.get("system_prompt") or os.environ.get("AI_CHAT_SYSTEM_PROMPT", "")
+    if user_system_prompt:
+        system_prompt = (
+            _DEFAULT_SYSTEM_PROMPT + "\n\n<user_instructions>\n" + user_system_prompt + "\n</user_instructions>"
+        )
+    else:
+        system_prompt = _DEFAULT_SYSTEM_PROMPT
+        user_system_prompt = ""
 
     if not base_url:
         raise ValueError(
@@ -153,11 +161,12 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         api_key=api_key,
         model=model,
         system_prompt=system_prompt,
+        user_system_prompt=user_system_prompt,
         verify_ssl=verify_ssl,
     )
 
     app_raw = raw.get("app", {})
-    data_dir = Path(os.path.expanduser(app_raw.get("data_dir", "~/.ai-chat")))
+    data_dir = Path(os.path.expanduser(app_raw.get("data_dir", "~/.parlor")))
     app_settings = AppSettings(
         host=app_raw.get("host", "127.0.0.1"),
         port=int(app_raw.get("port", 8080)),
