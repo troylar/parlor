@@ -19,11 +19,11 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &bull;
-  <a href="#features">Features</a> &bull;
-  <a href="#themes">Themes</a> &bull;
-  <a href="#security">Security</a> &bull;
-  <a href="#api-reference">API</a>
+  <a href="#-quick-start">Quick Start</a> &bull;
+  <a href="#-features">Features</a> &bull;
+  <a href="#-themes">Themes</a> &bull;
+  <a href="#-security">Security</a> &bull;
+  <a href="#-api-reference">API</a>
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@ pip install parlor
 
 ---
 
-## Quick Start
+## :rocket: Quick Start
 
 **1. Install**
 
@@ -75,107 +75,107 @@ parlor --test
 parlor
 ```
 
-Your browser opens to `http://127.0.0.1:8080`. That's it. You're done.
+Your browser opens to `http://127.0.0.1:8080`. That's it. You're done. :tada:
 
 ---
 
-## Features
+## :sparkles: Features
 
-### Conversations
+### :speech_balloon: Conversations
 
 | | |
 |---|---|
 | **Create, rename, search, delete** | Full conversation lifecycle with double-click rename |
-| **Full-text search** | FTS5-powered instant search across all messages and titles |
-| **Fork at any message** | Branch a conversation into a new thread from any point |
-| **Edit & regenerate** | Edit any user message, all subsequent messages are deleted, AI regenerates from there |
-| **Export to Markdown** | One-click download of any conversation as `.md` |
-| **Auto-titles** | AI generates a title from your first message |
-| **Per-conversation model** | Switch models mid-conversation from the top bar dropdown |
-| **Copy between databases** | Duplicate an entire conversation (with messages + tool calls) to another database |
+| :mag: **Full-text search** | FTS5-powered instant search across all messages and titles |
+| :trident: **Fork at any message** | Branch a conversation into a new thread from any point |
+| :pencil2: **Edit & regenerate** | Edit any user message, all subsequent messages are deleted, AI regenerates from there |
+| :arrow_down: **Export to Markdown** | One-click download of any conversation as `.md` |
+| :bulb: **Auto-titles** | AI generates a title from your first message |
+| :repeat: **Per-conversation model** | Switch models mid-conversation from the top bar dropdown |
+| :floppy_disk: **Copy between databases** | Duplicate an entire conversation (with messages + tool calls) to another database |
 
-### Projects
+### :file_folder: Projects
 
-Group conversations under projects with **custom system prompts** and **per-project model selection**. Your coding project uses Claude with a developer prompt. Your writing project uses GPT-4 with an editorial voice. Each project is its own world.
+Group conversations under projects with **custom system prompts** and **per-project model selection**. Your coding project uses Claude with a developer prompt. Your writing project uses GPT-4 with an editorial voice. Each project is its own world. :earth_americas:
 
-- Project-scoped system prompt overrides the global default
-- Per-project model override (or "use global default")
-- Project-scoped folders --- each project gets its own folder hierarchy
-- Deleting a project preserves its conversations (they become unlinked, not deleted)
-- "All Conversations" view to see everything across projects
+- :memo: Project-scoped system prompt overrides the global default
+- :robot: Per-project model override (or "use global default")
+- :open_file_folder: Project-scoped folders --- each project gets its own folder hierarchy
+- :shield: Deleting a project preserves its conversations (they become unlinked, not deleted)
+- :eyes: "All Conversations" view to see everything across projects
 
-### Organization
+### :card_index_dividers: Organization
 
 <table>
 <tr>
 <td width="50%">
 
-**Folders**
-- Nested folder hierarchy with unlimited depth
-- Add subfolders from the folder context menu
-- Collapse/expand state persists to the database
-- Depth-based indentation in the sidebar
-- Rename and delete (conversations are preserved, not deleted)
-- Project-scoped: each project gets its own folder tree
+**:file_folder: Folders**
+- :deciduous_tree: Nested folder hierarchy with unlimited depth
+- :heavy_plus_sign: Add subfolders from the folder context menu
+- :floppy_disk: Collapse/expand state persists to the database
+- :left_right_arrow: Depth-based indentation in the sidebar
+- :wastebasket: Rename and delete (conversations are preserved, not deleted)
+- :lock: Project-scoped: each project gets its own folder tree
 
 </td>
 <td width="50%">
 
-**Tags**
-- Color-coded labels on conversations (hex color picker)
-- Create tags inline from any conversation's tag dropdown
-- Filter the sidebar by tag
-- Visual badges with color indicators
-- Delete a tag and it's cleanly removed from all conversations
+**:label: Tags**
+- :art: Color-coded labels on conversations (hex color picker)
+- :heavy_plus_sign: Create tags inline from any conversation's tag dropdown
+- :mag_right: Filter the sidebar by tag
+- :round_pushpin: Visual badges with color indicators
+- :broom: Delete a tag and it's cleanly removed from all conversations
 
 </td>
 </tr>
 </table>
 
-### Shared Databases
+### :link: Shared Databases
 
 Connect **multiple SQLite databases** for team or topic-based separation. Each database is fully independent --- its own conversations, attachments, and history.
 
-- **Visual file browser** with directory navigation for selecting `.db`/`.sqlite`/`.sqlite3` files
-- **Copy conversations** between databases (full message + tool call history)
-- **Switch databases** from the sidebar --- active database is visually indicated
-- Database names: letters, numbers, hyphens, underscores only
-- "personal" database always exists and can't be removed
-- Paths restricted to your home directory for security
+- :open_file_folder: **Visual file browser** with directory navigation for selecting `.db`/`.sqlite`/`.sqlite3` files
+- :arrows_counterclockwise: **Copy conversations** between databases (full message + tool call history)
+- :electric_plug: **Switch databases** from the sidebar --- active database is visually indicated
+- :abc: Database names: letters, numbers, hyphens, underscores only
+- :house: "personal" database always exists and can't be removed
+- :locked: Paths restricted to your home directory for security
 
-### Rich Rendering
+### :art: Rich Rendering
 
 | Format | Support |
 |---|---|
-| **Markdown** | Full GFM --- tables, lists, blockquotes, strikethrough, task lists |
-| **Code blocks** | Syntax highlighting via highlight.js with language label + one-click copy button |
-| **LaTeX math** | Inline `$x^2$` / `\(x^2\)` and display `$$\int$$` / `\[\int\]` via KaTeX |
-| **Images** | Inline previews for attached images |
-| **HTML subset** | `<kbd>`, `<sup>`, `<sub>`, `<dl>`/`<dt>`/`<dd>` via DOMPurify allowlist |
+| :page_facing_up: **Markdown** | Full GFM --- tables, lists, blockquotes, strikethrough, task lists |
+| :computer: **Code blocks** | Syntax highlighting via highlight.js with language label + one-click copy button |
+| :1234: **LaTeX math** | Inline `$x^2$` / `\(x^2\)` and display `$$\int$$` / `\[\int\]` via KaTeX |
+| :framed_picture: **Images** | Inline previews for attached images |
+| :globe_with_meridians: **HTML subset** | `<kbd>`, `<sup>`, `<sub>`, `<dl>`/`<dt>`/`<dd>` via DOMPurify allowlist |
 
-### File Attachments
+### :paperclip: File Attachments
 
-Drag-and-drop or click to attach. **35+ file types** supported. Up to **10 files per message**, **10 MB each**. Every file is verified with magic-byte detection --- a renamed `.exe` won't sneak through as a `.png`.
+Drag-and-drop or click to attach. **35+ file types** supported. Up to **10 files per message**, **10 MB each**. Every file is verified with magic-byte detection --- a renamed `.exe` won't sneak through as a `.png`. :no_entry_sign:
 
 | Category | Extensions |
 |---|---|
-| **Code** | `.py` `.js` `.ts` `.java` `.c` `.cpp` `.h` `.hpp` `.rs` `.go` `.rb` `.php` `.sh` `.bat` `.ps1` `.sql` `.css` |
-| **Data** | `.json` `.yaml` `.yml` `.csv` `.xml` `.toml` `.ini` `.cfg` `.log` |
-| **Documents** | `.txt` `.md` `.pdf` |
-| **Images** | `.png` `.jpg` `.jpeg` `.gif` `.webp` |
+| :keyboard: **Code** | `.py` `.js` `.ts` `.java` `.c` `.cpp` `.h` `.hpp` `.rs` `.go` `.rb` `.php` `.sh` `.bat` `.ps1` `.sql` `.css` |
+| :bar_chart: **Data** | `.json` `.yaml` `.yml` `.csv` `.xml` `.toml` `.ini` `.cfg` `.log` |
+| :page_with_curl: **Documents** | `.txt` `.md` `.pdf` |
+| :camera: **Images** | `.png` `.jpg` `.jpeg` `.gif` `.webp` |
 
-- Image attachments show inline thumbnails with file size
-- Non-image files force-download (never rendered in-browser)
-- Filenames are sanitized: path components stripped, special characters replaced
+- :frame_photo: Image attachments show inline thumbnails with file size
+- :arrow_down: Non-image files force-download (never rendered in-browser)
+- :broom: Filenames are sanitized: path components stripped, special characters replaced
 
-### MCP Tool Integration
+### :hammer_and_wrench: MCP Tool Integration
 
-Connect **stdio** or **SSE-based** MCP servers. Your AI gains access to external tools --- databases, APIs, file systems, anything with an MCP adapter.
+Connect **stdio** or **SSE-based** MCP servers. Your AI gains access to external tools --- databases, APIs, file systems, anything with an MCP adapter. :zap:
 
-- Tool calls render as **expandable detail panels** --- see input during execution, output + status when complete
-- Spinner animation while tools execute
-- Connected server count and total tool count shown in sidebar footer
-- SSRF protection with DNS resolution and shell metacharacter rejection on tool args
+- :gear: Tool calls render as **expandable detail panels** --- see input during execution, output + status when complete
+- :hourglass_flowing_sand: Spinner animation while tools execute
+- :signal_strength: Connected server count and total tool count shown in sidebar footer
+- :shield: SSRF protection with DNS resolution and shell metacharacter rejection on tool args
 
 ```yaml
 mcp_servers:
@@ -189,56 +189,56 @@ mcp_servers:
     url: "https://mcp-server.example.com/sse"
 ```
 
-### Streaming
+### :ocean: Streaming
 
 Real-time **token-by-token streaming** via Server-Sent Events.
 
-- Markdown and math render live as tokens arrive
-- **Raw mode toggle** (eye icon in top bar) --- view unprocessed text during streaming, persists across sessions
-- Stop generation mid-response with `Escape` or the stop button
-- Animated thinking indicator with pulsing dots while AI processes
-- Error messages show inline with a **Retry** button
+- :fast_forward: Markdown and math render live as tokens arrive
+- :eye: **Raw mode toggle** (eye icon in top bar) --- view unprocessed text during streaming, persists across sessions
+- :stop_sign: Stop generation mid-response with `Escape` or the stop button
+- :thought_balloon: Animated thinking indicator with pulsing dots while AI processes
+- :rotating_light: Error messages show inline with a **Retry** button
 
-### Command Palette
+### :zap: Command Palette
 
 **`Cmd+K`** / **`Ctrl+K`** opens a Raycast-style command palette with fuzzy matching.
 
 | Command type | What it does |
 |---|---|
-| **New Chat** | Create a fresh conversation |
-| **Theme: Midnight / Dawn / Aurora / Ember** | Switch themes instantly |
-| **Model names** | Switch the current model (all available models listed) |
-| **Project names** | Jump to a project |
-| **Recent conversations** | Quick-jump to your 10 most recent chats |
+| :new: **New Chat** | Create a fresh conversation |
+| :art: **Theme: Midnight / Dawn / Aurora / Ember** | Switch themes instantly |
+| :robot: **Model names** | Switch the current model (all available models listed) |
+| :file_folder: **Project names** | Jump to a project |
+| :clock1: **Recent conversations** | Quick-jump to your 10 most recent chats |
 
 Arrow keys to navigate, `Enter` to select, `Escape` to dismiss.
 
-### Keyboard Shortcuts
+### :keyboard: Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Cmd/Ctrl + K` | Open command palette |
-| `Ctrl + Shift + N` | New conversation |
-| `Escape` | Stop generation / close palette / close modal |
-| `Enter` | Send message |
-| `Shift + Enter` | Newline in message input |
+| `Cmd/Ctrl + K` | :zap: Open command palette |
+| `Ctrl + Shift + N` | :new: New conversation |
+| `Escape` | :stop_sign: Stop generation / close palette / close modal |
+| `Enter` | :arrow_right: Send message |
+| `Shift + Enter` | :leftwards_arrow_with_hook: Newline in message input |
 
-### Settings UI
+### :gear: Settings UI
 
 Click the gear icon in the sidebar to open the settings modal:
 
-- **Model selector** --- dropdown populated live from your API
-- **System prompt editor** --- change at runtime, persists to `config.yaml`
-- **Theme picker** --- visual cards showing each theme's color palette
-- Changes take effect immediately, no restart needed
+- :robot: **Model selector** --- dropdown populated live from your API
+- :memo: **System prompt editor** --- change at runtime, persists to `config.yaml`
+- :art: **Theme picker** --- visual cards showing each theme's color palette
+- :white_check_mark: Changes take effect immediately, no restart needed
 
 ---
 
-## Themes
+## :palette: Themes
 
-Four built-in themes, each with a distinct visual identity. Switch instantly via settings or command palette (`Cmd+K`).
+Four built-in themes, each with a distinct visual identity. Switch instantly via settings or command palette (`Cmd+K`). :sparkles:
 
-### Midnight `Default`
+### :crescent_moon: Midnight `Default`
 
 Premium tech dark --- think Linear, Raycast, Vercel. Deep navy-charcoal with electric blue accents. Glassmorphic sidebar.
 
@@ -246,7 +246,7 @@ Premium tech dark --- think Linear, Raycast, Vercel. Deep navy-charcoal with ele
   <img src="docs/screenshots/theme-midnight.png" alt="Midnight Theme" width="800">
 </p>
 
-### Dawn `Light`
+### :sunrise: Dawn `Light`
 
 Warm editorial light --- think Notion in sunlight. Cream backgrounds, soft indigo-violet accents, subtle paper texture.
 
@@ -254,7 +254,7 @@ Warm editorial light --- think Notion in sunlight. Cream backgrounds, soft indig
   <img src="docs/screenshots/theme-dawn.png" alt="Dawn Theme" width="800">
 </p>
 
-### Aurora `Showstopper`
+### :milky_way: Aurora `Showstopper`
 
 Living gradient dark with animated CSS aurora (purple/teal/emerald). Gradient borders, animated input focus rings.
 
@@ -262,7 +262,7 @@ Living gradient dark with animated CSS aurora (purple/teal/emerald). Gradient bo
   <img src="docs/screenshots/theme-aurora.png" alt="Aurora Theme" width="800">
 </p>
 
-### Ember `Cozy`
+### :fire: Ember `Cozy`
 
 Warm luxury dark --- amber by firelight. Brown-charcoal backgrounds, rich amber glow on focus states.
 
@@ -271,30 +271,30 @@ Warm luxury dark --- amber by firelight. Brown-charcoal backgrounds, rich amber 
 </p>
 
 **Visual details:**
-- Glassmorphism with `backdrop-filter: blur(20px)` on sidebar
-- Multi-layered shadows for depth: `0 1px 2px` + `0 4px 12px`
-- Micro-animations: sidebar items shift on hover, buttons glow, modals spring in
-- Gradient text effect on welcome heading
-- Smooth 0.5s cross-fade transition between themes
-- Code block copy button fades in on hover
-- Theme persists in localStorage across sessions --- no flash on reload
+- :crystal_ball: Glassmorphism with `backdrop-filter: blur(20px)` on sidebar
+- :new_moon_with_face: Multi-layered shadows for depth: `0 1px 2px` + `0 4px 12px`
+- :dizzy: Micro-animations: sidebar items shift on hover, buttons glow, modals spring in
+- :rainbow: Gradient text effect on welcome heading
+- :performing_arts: Smooth 0.5s cross-fade transition between themes
+- :clipboard: Code block copy button fades in on hover
+- :floppy_disk: Theme persists in localStorage across sessions --- no flash on reload
 
 ---
 
-## Responsive Design
+## :iphone: Responsive Design
 
 | Breakpoint | Target | Behavior |
 |---|---|---|
-| **1400px+** | Large desktop | Wider messages (900px), expanded sidebar (300px) |
-| **769-1399px** | Desktop | Default layout |
-| **768-1024px** | Tablet | Compact sidebar (240px), full-width messages |
-| **0-767px** | Mobile | Slide-over sidebar with hamburger menu + dark overlay |
+| **1400px+** | :desktop_computer: Large desktop | Wider messages (900px), expanded sidebar (300px) |
+| **769-1399px** | :computer: Desktop | Default layout |
+| **768-1024px** | :tablet: Tablet | Compact sidebar (240px), full-width messages |
+| **0-767px** | :iphone: Mobile | Slide-over sidebar with hamburger menu + dark overlay |
 
 Mobile sidebar slides in with `transform` animation. Tap the overlay or hamburger to dismiss.
 
 ---
 
-## Configuration
+## :wrench: Configuration
 
 ### Config File
 
@@ -330,21 +330,21 @@ mcp_servers:
     url: "https://mcp-server.example.com/sse"
 ```
 
-### Environment Variables
+### :earth_americas: Environment Variables
 
 Every config option has an env var override:
 
 | Variable | Default | Description |
 |---|---|---|
-| `AI_CHAT_BASE_URL` | --- | AI API endpoint **(required)** |
-| `AI_CHAT_API_KEY` | --- | API key **(required)** |
-| `AI_CHAT_MODEL` | `gpt-4` | Model name |
-| `AI_CHAT_SYSTEM_PROMPT` | `You are a helpful assistant.` | System prompt |
-| `AI_CHAT_VERIFY_SSL` | `true` | SSL certificate verification |
+| `AI_CHAT_BASE_URL` | --- | :electric_plug: AI API endpoint **(required)** |
+| `AI_CHAT_API_KEY` | --- | :key: API key **(required)** |
+| `AI_CHAT_MODEL` | `gpt-4` | :robot: Model name |
+| `AI_CHAT_SYSTEM_PROMPT` | `You are a helpful assistant.` | :memo: System prompt |
+| `AI_CHAT_VERIFY_SSL` | `true` | :lock: SSL certificate verification |
 
 ---
 
-## CLI
+## :terminal: CLI
 
 ```
 parlor              Launch server and open browser
@@ -353,7 +353,7 @@ parlor --help       Show help
 ```
 
 <details>
-<summary><strong>Example <code>--test</code> output</strong></summary>
+<summary><strong>:test_tube: Example <code>--test</code> output</strong></summary>
 
 ```
 Config:
@@ -378,33 +378,33 @@ All checks passed.
 
 ---
 
-## Security
+## :shield: Security
 
-Parlor is hardened for use on corporate networks and shared machines. Not a checkbox exercise --- real, layered defense.
+Parlor is hardened for use on corporate networks and shared machines. Not a checkbox exercise --- real, layered defense. :lock:
 
 | Layer | What it does |
 |---|---|
-| **Authentication** | Random session token, HttpOnly cookies, HMAC-SHA256 timing-safe comparison |
-| **CSRF** | Per-session tokens validated on all state-changing requests |
-| **CSP** | `script-src 'self'`, `frame-ancestors 'none'`, no inline scripts |
-| **Security Headers** | X-Frame-Options DENY, X-Content-Type-Options nosniff, strict Referrer-Policy, Permissions-Policy |
-| **Database** | Column-allowlisted SQL builder, parameterized queries everywhere, `0600` file permissions, path validation |
-| **Input Sanitization** | DOMPurify on all rendered HTML, UUID validation on all IDs, filename sanitization |
-| **Rate Limiting** | 120 req/min per IP with LRU eviction |
-| **Body Size** | 15 MB max request |
-| **CORS** | Locked to configured origin, explicit method/header allowlist |
-| **File Safety** | MIME type allowlist + magic-byte verification, path traversal prevention, forced download for non-images |
-| **MCP Safety** | SSRF protection with DNS resolution, shell metacharacter rejection in tool args |
-| **SRI** | SHA-384 hashes on all vendor scripts |
-| **API Surface** | OpenAPI/Swagger docs disabled |
+| :key: **Authentication** | Random session token, HttpOnly cookies, HMAC-SHA256 timing-safe comparison |
+| :shield: **CSRF** | Per-session tokens validated on all state-changing requests |
+| :no_entry: **CSP** | `script-src 'self'`, `frame-ancestors 'none'`, no inline scripts |
+| :page_with_curl: **Security Headers** | X-Frame-Options DENY, X-Content-Type-Options nosniff, strict Referrer-Policy, Permissions-Policy |
+| :floppy_disk: **Database** | Column-allowlisted SQL builder, parameterized queries everywhere, `0600` file permissions, path validation |
+| :broom: **Input Sanitization** | DOMPurify on all rendered HTML, UUID validation on all IDs, filename sanitization |
+| :traffic_light: **Rate Limiting** | 120 req/min per IP with LRU eviction |
+| :weight_lifting: **Body Size** | 15 MB max request |
+| :globe_with_meridians: **CORS** | Locked to configured origin, explicit method/header allowlist |
+| :paperclip: **File Safety** | MIME type allowlist + magic-byte verification, path traversal prevention, forced download for non-images |
+| :hammer_and_wrench: **MCP Safety** | SSRF protection with DNS resolution, shell metacharacter rejection in tool args |
+| :hash: **SRI** | SHA-384 hashes on all vendor scripts |
+| :see_no_evil: **API Surface** | OpenAPI/Swagger docs disabled |
 
 Full details in [SECURITY.md](SECURITY.md).
 
 ---
 
-## Data Storage
+## :file_cabinet: Data Storage
 
-Everything stays on your machine. Nothing phones home.
+Everything stays on your machine. Nothing phones home. :lock:
 
 ```
 ~/.ai-chat/
@@ -417,12 +417,12 @@ The data directory is created with `0700` permissions (owner-only). Database fil
 
 ---
 
-## API Reference
+## :books: API Reference
 
-Parlor exposes a full REST API. All endpoints require authentication via session cookie + CSRF token.
+Parlor exposes a full REST API. All endpoints require authentication via session cookie + CSRF token. :key:
 
 <details>
-<summary><strong>Conversations</strong></summary>
+<summary><strong>:speech_balloon: Conversations</strong></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -440,7 +440,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 </details>
 
 <details>
-<summary><strong>Messages & Attachments</strong></summary>
+<summary><strong>:envelope: Messages & Attachments</strong></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -451,7 +451,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 </details>
 
 <details>
-<summary><strong>Projects</strong></summary>
+<summary><strong>:file_folder: Projects</strong></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -463,7 +463,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 </details>
 
 <details>
-<summary><strong>Folders</strong></summary>
+<summary><strong>:card_index_dividers: Folders</strong></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -475,7 +475,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 </details>
 
 <details>
-<summary><strong>Tags</strong></summary>
+<summary><strong>:label: Tags</strong></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -489,7 +489,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 </details>
 
 <details>
-<summary><strong>Databases</strong></summary>
+<summary><strong>:link: Databases</strong></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -501,7 +501,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 </details>
 
 <details>
-<summary><strong>Config & Models</strong></summary>
+<summary><strong>:gear: Config & Models</strong></summary>
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -515,7 +515,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 
 ---
 
-## Development
+## :hammer_and_pick: Development
 
 ```bash
 git clone https://github.com/troylar/parlor.git
@@ -527,22 +527,22 @@ ruff check src/ tests/    # Lint
 ruff format src/ tests/   # Format
 ```
 
-### Tech Stack
+### :toolbox: Tech Stack
 
 | | |
 |---|---|
-| **Backend** | Python 3.10+, FastAPI, Uvicorn |
-| **Frontend** | Vanilla JS (no build step), marked.js, highlight.js, KaTeX, DOMPurify |
-| **Database** | SQLite with FTS5 full-text search, WAL journaling |
-| **AI** | OpenAI Python SDK (async streaming) |
-| **MCP** | Model Context Protocol SDK (stdio + SSE transports) |
-| **Streaming** | Server-Sent Events (SSE) |
-| **Typography** | Inter + JetBrains Mono (self-hosted WOFF2, zero external requests) |
-| **Security** | OWASP ASVS L1 compliance, SRI, CSP, CSRF, rate limiting |
+| :snake: **Backend** | Python 3.10+, FastAPI, Uvicorn |
+| :globe_with_meridians: **Frontend** | Vanilla JS (no build step), marked.js, highlight.js, KaTeX, DOMPurify |
+| :floppy_disk: **Database** | SQLite with FTS5 full-text search, WAL journaling |
+| :brain: **AI** | OpenAI Python SDK (async streaming) |
+| :hammer_and_wrench: **MCP** | Model Context Protocol SDK (stdio + SSE transports) |
+| :ocean: **Streaming** | Server-Sent Events (SSE) |
+| :pencil: **Typography** | Inter + JetBrains Mono (self-hosted WOFF2, zero external requests) |
+| :shield: **Security** | OWASP ASVS L1 compliance, SRI, CSP, CSRF, rate limiting |
 
 ---
 
 <p align="center">
   <strong>MIT License</strong><br>
-  Built for people who care about their conversations.
+  Built with :heart: for people who care about their conversations.
 </p>
