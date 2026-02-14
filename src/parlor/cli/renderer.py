@@ -130,14 +130,8 @@ def render_welcome(
     console.print(f"\n[bold]Parlor CLI[/bold] - {escape(working_dir)}")
     inst = "loaded" if instructions_loaded else "none"
     branch_info = f" | Branch: {git_branch}" if git_branch else ""
-    console.print(
-        f"  Model: {escape(model)} | Tools: {tool_count}"
-        f" | Instructions: {inst}{branch_info}"
-    )
-    console.print(
-        "  Type [bold]/help[/bold] for commands, "
-        "[bold]Ctrl+D[/bold] to exit\n"
-    )
+    console.print(f"  Model: {escape(model)} | Tools: {tool_count} | Instructions: {inst}{branch_info}")
+    console.print("  Type [bold]/help[/bold] for commands, [bold]Ctrl+D[/bold] to exit\n")
 
 
 def render_help() -> None:
@@ -169,9 +163,7 @@ def render_tools(tool_names: list[str]) -> None:
 
 
 def render_compact_done(original: int, compacted: int) -> None:
-    console.print(
-        f"\n[grey62]Compacted {original} messages -> {compacted} messages[/grey62]"
-    )
+    console.print(f"\n[grey62]Compacted {original} messages -> {compacted} messages[/grey62]")
 
 
 def render_context_footer(
@@ -203,5 +195,3 @@ def render_context_footer(
         f"tokens ({pct_full:.0f}%){resp_info}{elapsed_info}"
         f" | {tokens_remaining:,} until auto-compact[/{color}]"
     )
-
-

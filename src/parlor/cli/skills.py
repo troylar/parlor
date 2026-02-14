@@ -48,12 +48,14 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> list[Skill]:
             prompt = data.get("prompt", "")
             if not prompt:
                 continue
-            skills.append(Skill(
-                name=name,
-                description=description,
-                prompt=prompt,
-                source=source,
-            ))
+            skills.append(
+                Skill(
+                    name=name,
+                    description=description,
+                    prompt=prompt,
+                    source=source,
+                )
+            )
         except Exception as e:
             logger.warning("Failed to load skill %s: %s", path, e)
     return skills

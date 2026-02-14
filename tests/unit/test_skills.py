@@ -39,9 +39,7 @@ class TestLoadSkills:
         with tempfile.TemporaryDirectory() as tmpdir:
             skills_dir = Path(tmpdir) / ".parlor" / "skills"
             skills_dir.mkdir(parents=True)
-            (skills_dir / "empty.yaml").write_text(
-                "name: empty\ndescription: No prompt\n"
-            )
+            (skills_dir / "empty.yaml").write_text("name: empty\ndescription: No prompt\n")
             skills = load_skills(tmpdir)
             assert len(skills) == 0
 
@@ -53,9 +51,7 @@ class TestSkillRegistry:
         (skills_dir / "commit.yaml").write_text(
             "name: commit\ndescription: Commit changes\nprompt: Make a git commit\n"
         )
-        (skills_dir / "review.yaml").write_text(
-            "name: review\ndescription: Review code\nprompt: Review the code\n"
-        )
+        (skills_dir / "review.yaml").write_text("name: review\ndescription: Review code\nprompt: Review the code\n")
         reg = SkillRegistry()
         reg.load(tmpdir)
         return reg

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 import time
 from collections import OrderedDict
@@ -21,6 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import AppConfig, load_config
 from .db import DatabaseManager, init_db
 from .services.mcp_manager import McpManager
+from .tools import ToolRegistry, register_default_tools
 
 logger = logging.getLogger(__name__)
 security_logger = logging.getLogger("parlor.security")
@@ -58,6 +60,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"MCP startup error: {e}")
     app.state.mcp_manager = mcp_manager
+
+    tool_registry = ToolRegistry()
+    working_dir = os.getcwd()
+    register_default_tools(tool_registry, working_dir=working_dir)
+    app.state.tool_registry = tool_registry
+    logger.info(f"Built-in tools: {len(tool_registry.list_tools())} registered (cwd: {working_dir})")
 
     yield
 

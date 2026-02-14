@@ -8,7 +8,7 @@ import logging
 from typing import Any, AsyncGenerator
 
 import httpx
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError, RateLimitError
 
 from ..config import AIConfig
 
@@ -103,6 +103,30 @@ class AIService:
                     yield {"event": "done", "data": {}}
                     return
 
+        except BadRequestError as e:
+            body = getattr(e, "body", {}) or {}
+            err_code = body.get("error", {}).get("code", "") if isinstance(body, dict) else ""
+            if err_code == "context_length_exceeded" or "context_length" in str(e).lower():
+                logger.warning("Context length exceeded: %s", e)
+                yield {
+                    "event": "error",
+                    "data": {
+                        "message": "Conversation too long for model context window.",
+                        "code": "context_length_exceeded",
+                    },
+                }
+            else:
+                logger.exception("AI bad request error")
+                yield {"event": "error", "data": {"message": f"AI request error: {e.message}"}}
+        except RateLimitError as e:
+            logger.warning("Rate limited by AI provider: %s", e)
+            yield {
+                "event": "error",
+                "data": {
+                    "message": "AI provider rate limit reached. Please wait a moment and try again.",
+                    "code": "rate_limit",
+                },
+            }
         except Exception:
             logger.exception("AI stream error")
             yield {"event": "error", "data": {"message": "An internal error occurred"}}
