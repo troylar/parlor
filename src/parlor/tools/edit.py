@@ -38,9 +38,7 @@ def set_working_dir(d: str) -> None:
     _working_dir = d
 
 
-async def handle(
-    path: str, old_text: str, new_text: str, replace_all: bool = False, **_: Any
-) -> dict[str, Any]:
+async def handle(path: str, old_text: str, new_text: str, replace_all: bool = False, **_: Any) -> dict[str, Any]:
     resolved, error = validate_path(path, _working_dir)
     if error:
         return {"error": error}
@@ -57,8 +55,7 @@ async def handle(
         return {"error": "old_text not found in file"}
     if count > 1 and not replace_all:
         return {
-            "error": f"old_text matches {count} times. "
-            "Use replace_all=true or provide more context to make it unique."
+            "error": f"old_text matches {count} times. Use replace_all=true or provide more context to make it unique."
         }
 
     if replace_all:

@@ -15,8 +15,7 @@ _working_dir: str = os.getcwd()
 DEFINITION: dict[str, Any] = {
     "name": "glob_files",
     "description": (
-        "Find files matching a glob pattern. "
-        "Returns matching file paths sorted by modification time (newest first)."
+        "Find files matching a glob pattern. Returns matching file paths sorted by modification time (newest first)."
     ),
     "parameters": {
         "type": "object",

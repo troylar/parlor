@@ -209,6 +209,23 @@
             </div>
         </div>
 
+        <!-- Rewind Modal -->
+        <div class="modal-overlay" id="rewind-modal" style="display:none">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>Rewind Conversation</h3>
+                    <button class="modal-close" id="rewind-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p>Go back to this point in the conversation?</p>
+                </div>
+                <div class="modal-footer">
+                    <button id="rewind-undo-files" class="btn-modal-save">Rewind &amp; undo file changes</button>
+                    <button id="rewind-keep-files" class="btn-modal-cancel">Rewind conversation only</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Main Chat Area -->
         <main class="chat-main">
             <!-- Model selector topbar -->

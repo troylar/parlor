@@ -147,13 +147,15 @@ def _run_chat(
 
     from .cli.repl import run_cli
 
-    asyncio.run(run_cli(
-        config,
-        prompt=prompt,
-        no_tools=no_tools,
-        continue_last=continue_last,
-        conversation_id=resume_id,
-    ))
+    asyncio.run(
+        run_cli(
+            config,
+            prompt=prompt,
+            no_tools=no_tools,
+            continue_last=continue_last,
+            conversation_id=resume_id,
+        )
+    )
 
 
 def main() -> None:
@@ -165,16 +167,25 @@ def main() -> None:
     chat_parser.add_argument("prompt", nargs="?", default=None, help="One-shot prompt (omit for REPL)")
     chat_parser.add_argument("--no-tools", action="store_true", help="Disable built-in tools")
     chat_parser.add_argument(
-        "-c", "--continue", dest="continue_last",
-        action="store_true", help="Continue the last conversation",
+        "-c",
+        "--continue",
+        dest="continue_last",
+        action="store_true",
+        help="Continue the last conversation",
     )
     chat_parser.add_argument(
-        "-r", "--resume", dest="resume_id",
-        default=None, help="Resume a conversation by ID",
+        "-r",
+        "--resume",
+        dest="resume_id",
+        default=None,
+        help="Resume a conversation by ID",
     )
     chat_parser.add_argument(
-        "-p", "--path", dest="project_path",
-        default=None, help="Project root directory (default: cwd)",
+        "-p",
+        "--path",
+        dest="project_path",
+        default=None,
+        help="Project root directory (default: cwd)",
     )
 
     # Global flags

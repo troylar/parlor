@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 
 from parlor.cli.instructions import (
-    find_global_instructions,
     find_project_instructions,
     load_instructions,
 )

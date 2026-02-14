@@ -12,10 +12,20 @@ ConfirmCallback = Callable[[str], Coroutine[Any, Any, bool]]
 
 # Destructive command patterns that need confirmation
 _DESTRUCTIVE_PATTERNS = (
-    "rm ", "rm\t", "rmdir", "git push --force", "git push -f",
-    "git reset --hard", "git clean", "git checkout .",
-    "drop table", "drop database", "truncate ",
-    "> /dev/", "chmod 777", "kill -9",
+    "rm ",
+    "rm\t",
+    "rmdir",
+    "git push --force",
+    "git push -f",
+    "git reset --hard",
+    "git clean",
+    "git checkout .",
+    "drop table",
+    "drop database",
+    "truncate ",
+    "> /dev/",
+    "chmod 777",
+    "kill -9",
 )
 
 
@@ -62,9 +72,7 @@ class ToolRegistry:
             cmd_lower = command.lower().strip()
             for pattern in _DESTRUCTIVE_PATTERNS:
                 if pattern in cmd_lower:
-                    confirmed = await self._confirm_callback(
-                        f"Destructive command: {command}"
-                    )
+                    confirmed = await self._confirm_callback(f"Destructive command: {command}")
                     if not confirmed:
                         return {"error": "Command cancelled by user", "exit_code": -1}
                     break

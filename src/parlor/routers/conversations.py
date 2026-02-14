@@ -9,9 +9,20 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response
 
-from ..models import ConversationUpdate, FolderCreate, FolderUpdate, ForkRequest, MessageEdit, TagCreate, TagUpdate
+from ..models import (
+    ConversationUpdate,
+    FolderCreate,
+    FolderUpdate,
+    ForkRequest,
+    MessageEdit,
+    RewindRequest,
+    RewindResponse,
+    TagCreate,
+    TagUpdate,
+)
 from ..services import storage
 from ..services.export import export_conversation_markdown
+from ..services.rewind import rewind_conversation as rewind_service
 
 router = APIRouter(tags=["conversations"])
 
@@ -133,6 +144,35 @@ async def delete_messages_after(conversation_id: str, request: Request, after_po
     data_dir = request.app.state.config.app.data_dir
     storage.delete_messages_after_position(db, conversation_id, after_position, data_dir)
     return Response(status_code=204)
+
+
+@router.post("/conversations/{conversation_id}/rewind")
+async def rewind_conversation(conversation_id: str, body: RewindRequest, request: Request) -> RewindResponse:
+    _validate_uuid(conversation_id)
+    db = _get_db(request)
+    conv = storage.get_conversation(db, conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    msgs = storage.list_messages(db, conversation_id)
+    positions = [m["position"] for m in msgs]
+    if body.to_position not in positions:
+        raise HTTPException(status_code=400, detail="Invalid position")
+
+    data_dir = request.app.state.config.app.data_dir
+    result = await rewind_service(
+        db=db,
+        conversation_id=conversation_id,
+        to_position=body.to_position,
+        undo_files=body.undo_files,
+        data_dir=data_dir,
+    )
+
+    return RewindResponse(
+        deleted_messages=result.deleted_messages,
+        reverted_files=result.reverted_files,
+        skipped_files=result.skipped_files,
+    )
 
 
 # --- Folders ---

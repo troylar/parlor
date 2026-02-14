@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/pypi/v/parlor?style=for-the-badge&color=3b82f6&labelColor=0f1117" alt="PyPI Version">
   <img src="https://img.shields.io/badge/python-3.10%2B-10b981?style=for-the-badge&labelColor=0f1117" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-155%20passed-7c3aed?style=for-the-badge&labelColor=0f1117" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-166%20passed-7c3aed?style=for-the-badge&labelColor=0f1117" alt="Tests">
   <img src="https://img.shields.io/github/license/troylar/parlor?style=for-the-badge&color=e8913a&labelColor=0f1117" alt="License">
 </p>
 
@@ -95,6 +95,7 @@ Your browser opens to `http://127.0.0.1:8080`. That's it.
 | **Create, rename, search, delete** | Full conversation lifecycle with double-click rename |
 | **Full-text search** | FTS5-powered instant search across all messages and titles |
 | **Fork at any message** | Branch a conversation into a new thread from any point |
+| **Rewind conversation** | Roll back to any message --- optionally revert file changes made by AI tools via `git checkout` |
 | **Edit & regenerate** | Edit any user message, all subsequent messages are deleted, AI regenerates from there |
 | **Export to Markdown** | One-click download of any conversation as `.md` |
 | **Auto-titles** | AI generates a title from your first message |
@@ -490,6 +491,7 @@ The new model applies to all subsequent turns in the current session. The conver
 | `/last` | Resume the most recent conversation |
 | `/list` | Show 20 most recent conversations with message counts |
 | `/resume N` | Resume by list number or full conversation ID |
+| `/rewind` | Rewind to a previous message, optionally undoing file changes via git |
 | `/compact` | Summarize and compact message history to free context |
 | `/model NAME` | Switch to a different model mid-session (omit NAME to see current) |
 | `/tools` | List all available tools (built-in + MCP), sorted alphabetically |
@@ -801,6 +803,7 @@ Parlor exposes a full REST API. All endpoints require authentication via session
 | `POST` | `/api/conversations/:id/chat` | Stream chat (SSE) |
 | `POST` | `/api/conversations/:id/stop` | Cancel active generation |
 | `POST` | `/api/conversations/:id/fork` | Fork at a message position |
+| `POST` | `/api/conversations/:id/rewind` | Rewind to a position, optionally revert file changes |
 | `POST` | `/api/conversations/:id/copy` | Copy to another database (`?target_db=`) |
 
 </details>
@@ -888,7 +891,7 @@ git clone https://github.com/troylar/parlor.git
 cd parlor
 pip install -e ".[dev]"
 
-pytest tests/ -v          # Run 155 tests
+pytest tests/ -v          # Run 166 tests
 ruff check src/ tests/    # Lint
 ruff format src/ tests/   # Format
 ```

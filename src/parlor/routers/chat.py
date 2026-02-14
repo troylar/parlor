@@ -153,17 +153,26 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
             content = parts
         ai_messages.append({"role": msg["role"], "content": content})
 
-    # Get MCP tools if available
+    # Build unified tool list: builtins + MCP
+    tool_registry = request.app.state.tool_registry
     mcp_manager = request.app.state.mcp_manager
-    tools = mcp_manager.get_openai_tools() if mcp_manager else None
+
+    tools_openai: list[dict[str, Any]] = list(tool_registry.get_openai_tools())
+    if mcp_manager:
+        mcp_tools = mcp_manager.get_openai_tools()
+        if mcp_tools:
+            tools_openai.extend(mcp_tools)
+    tools = tools_openai if tools_openai else None
 
     is_first_message = not regenerate and len(history) <= 1
     first_user_text = message_text
 
-    async def _mcp_tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        if not mcp_manager:
-            raise ValueError(f"No tool executor available for '{tool_name}'")
-        return await mcp_manager.call_tool(tool_name, arguments)
+    async def _tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if tool_registry.has_tool(tool_name):
+            return await tool_registry.call_tool(tool_name, arguments)
+        if mcp_manager:
+            return await mcp_manager.call_tool(tool_name, arguments)
+        raise ValueError(f"Unknown tool: {tool_name}")
 
     from ..services.agent_loop import run_agent_loop
 
@@ -175,7 +184,7 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
             async for agent_event in run_agent_loop(
                 ai_service=ai_service,
                 messages=ai_messages,
-                tool_executor=_mcp_tool_executor,
+                tool_executor=_tool_executor,
                 tools_openai=tools,
                 cancel_event=cancel_event,
                 extra_system_prompt=project_instructions,
@@ -202,29 +211,29 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
                     }
 
                 elif kind == "assistant_message":
-                    current_assistant_msg = storage.create_message(
-                        db, conversation_id, "assistant", data["content"]
-                    )
+                    current_assistant_msg = storage.create_message(db, conversation_id, "assistant", data["content"])
 
                 elif kind == "tool_call_end":
-                    if current_assistant_msg and mcp_manager:
+                    if current_assistant_msg:
                         tool_input = _pending_tool_inputs.pop(data["id"], {})
+                        if tool_registry.has_tool(data["tool_name"]):
+                            server_name = "builtin"
+                        elif mcp_manager:
+                            server_name = mcp_manager.get_tool_server_name(data["tool_name"])
+                        else:
+                            server_name = "unknown"
                         storage.create_tool_call(
                             db,
                             current_assistant_msg["id"],
                             data["tool_name"],
-                            mcp_manager.get_tool_server_name(data["tool_name"]),
+                            server_name,
                             tool_input,
                             data["id"],
                         )
-                        storage.update_tool_call(
-                            db, data["id"], data["output"], data["status"]
-                        )
+                        storage.update_tool_call(db, data["id"], data["output"], data["status"])
                     yield {
                         "event": "tool_call_end",
-                        "data": json.dumps(
-                            {"id": data["id"], "output": data["output"], "status": data["status"]}
-                        ),
+                        "data": json.dumps({"id": data["id"], "output": data["output"], "status": data["status"]}),
                     }
 
                 elif kind == "error":

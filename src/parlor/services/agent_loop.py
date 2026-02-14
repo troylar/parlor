@@ -19,6 +19,103 @@ class AgentEvent:
     data: dict[str, Any]
 
 
+_TOOL_OUTPUT_TRUNCATE_CHARS = 2000
+
+
+def _truncate_large_tool_outputs(messages: list[dict[str, Any]]) -> bool:
+    """Truncate oversized tool result messages and append a retry hint. Returns True if any were truncated."""
+    truncated_any = False
+    tool_call_names: dict[str, str] = {}
+
+    # Build map of tool_call_id -> tool name from assistant messages
+    for msg in messages:
+        for tc in msg.get("tool_calls", []):
+            tc_id = tc.get("id", "")
+            func = tc.get("function", {})
+            if tc_id and func.get("name"):
+                tool_call_names[tc_id] = func["name"]
+
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content", "")
+        if len(content) <= _TOOL_OUTPUT_TRUNCATE_CHARS:
+            continue
+
+        tc_id = msg.get("tool_call_id", "")
+        tool_name = tool_call_names.get(tc_id, "unknown tool")
+        original_len = len(content)
+        msg["content"] = (
+            content[:_TOOL_OUTPUT_TRUNCATE_CHARS]
+            + f"\n\n... [TRUNCATED — original output was {original_len:,} chars from '{tool_name}'. "
+            f"The output exceeded the context window. "
+            f"You MUST retry this tool call with more constrained parameters "
+            f"(e.g. fewer results, a narrower query, or a smaller limit) "
+            f"to get output that fits within the context window.]"
+        )
+        truncated_any = True
+        logger.info(
+            "Truncated tool output for %s (call %s): %d -> %d chars",
+            tool_name,
+            tc_id,
+            original_len,
+            len(msg["content"]),
+        )
+
+    return truncated_any
+
+
+async def _compact_messages(
+    ai_service: AIService,
+    messages: list[dict[str, Any]],
+) -> bool:
+    """Summarize conversation history to reduce context size. Returns True on success."""
+    if len(messages) < 4:
+        return False
+
+    history_text = []
+    for msg in messages:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        if isinstance(content, str) and content:
+            truncated = content[:500] + "..." if len(content) > 500 else content
+            history_text.append(f"{role}: {truncated}")
+        for tc in msg.get("tool_calls", []):
+            func = tc.get("function", {})
+            history_text.append(f"  tool_call: {func.get('name', '?')}")
+
+    summary_prompt = (
+        "Summarize the following conversation concisely, preserving:\n"
+        "- Key decisions and conclusions\n"
+        "- File paths that were read, written, or edited\n"
+        "- Important code changes and their purpose\n"
+        "- Current state of the task\n"
+        "- Any errors encountered and how they were resolved\n\n" + "\n".join(history_text)
+    )
+
+    try:
+        response = await ai_service.client.chat.completions.create(
+            model=ai_service.config.model,
+            messages=[{"role": "user", "content": summary_prompt}],
+            max_completion_tokens=1000,
+        )
+        summary = response.choices[0].message.content or "Conversation summary unavailable."
+    except Exception:
+        logger.exception("Failed to generate compaction summary")
+        return False
+
+    original_count = len(messages)
+    messages.clear()
+    messages.append(
+        {
+            "role": "system",
+            "content": (f"Previous conversation summary (auto-compacted from {original_count} messages):\n\n{summary}"),
+        }
+    )
+    logger.info("Compacted %d messages into summary for context recovery", original_count)
+    return True
+
+
 async def run_agent_loop(
     ai_service: AIService,
     messages: list[dict[str, Any]],
@@ -33,10 +130,14 @@ async def run_agent_loop(
     tool_executor must be an async callable: (tool_name, arguments) -> dict
     """
     iteration = 0
+    context_recovery_attempts = 0
+    max_context_recoveries = 2  # truncate once, compact once
+
     while iteration < max_iterations:
         iteration += 1
         tool_calls_pending: list[dict[str, Any]] = []
         assistant_content = ""
+        got_context_error = False
 
         async for event in ai_service.stream_chat(
             messages,
@@ -59,10 +160,53 @@ async def run_agent_loop(
                     },
                 )
             elif etype == "error":
+                if (
+                    event["data"].get("code") == "context_length_exceeded"
+                    and context_recovery_attempts < max_context_recoveries
+                ):
+                    got_context_error = True
+                    break
                 yield AgentEvent(kind="error", data=event["data"])
                 return
             elif etype == "done":
                 break
+
+        if got_context_error:
+            context_recovery_attempts += 1
+            iteration -= 1  # don't count the failed attempt
+
+            # Strategy 1: truncate oversized tool outputs and let the AI retry with smaller params
+            if _truncate_large_tool_outputs(messages):
+                yield AgentEvent(
+                    kind="token",
+                    data={
+                        "content": (
+                            "\n\n*Context limit reached — tool output was too large. "
+                            "Truncated and retrying with smaller scope...*\n\n"
+                        )
+                    },
+                )
+                continue
+
+            # Strategy 2: compact entire conversation into a summary
+            yield AgentEvent(
+                kind="token",
+                data={"content": "\n\n*Context limit reached — compacting conversation and retrying...*\n\n"},
+            )
+            if await _compact_messages(ai_service, messages):
+                continue
+
+            yield AgentEvent(
+                kind="error",
+                data={
+                    "message": (
+                        "Conversation too long for model context window. "
+                        "Recovery failed after truncation and compaction. "
+                        "Please start a new conversation."
+                    )
+                },
+            )
+            return
 
         if not tool_calls_pending:
             if assistant_content:
@@ -92,8 +236,47 @@ async def run_agent_loop(
 
         # Execute each tool call
         for tc in tool_calls_pending:
+            if cancel_event and cancel_event.is_set():
+                cancelled_result = {"error": "Cancelled by user"}
+                yield AgentEvent(
+                    kind="tool_call_end",
+                    data={
+                        "id": tc["id"],
+                        "tool_name": tc["function_name"],
+                        "output": cancelled_result,
+                        "status": "cancelled",
+                    },
+                )
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(cancelled_result)})
+                continue
             try:
-                result = await tool_executor(tc["function_name"], tc["arguments"])
+                if cancel_event:
+                    cancel_task = asyncio.create_task(cancel_event.wait())
+                    exec_task = asyncio.create_task(tool_executor(tc["function_name"], tc["arguments"]))
+                    done, pending = await asyncio.wait({cancel_task, exec_task}, return_when=asyncio.FIRST_COMPLETED)
+                    for p in pending:
+                        p.cancel()
+                        try:
+                            await p
+                        except asyncio.CancelledError:
+                            pass
+                    if exec_task in done:
+                        result = exec_task.result()
+                    else:
+                        result = {"error": "Cancelled by user"}
+                        yield AgentEvent(
+                            kind="tool_call_end",
+                            data={
+                                "id": tc["id"],
+                                "tool_name": tc["function_name"],
+                                "output": result,
+                                "status": "cancelled",
+                            },
+                        )
+                        messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(result)})
+                        continue
+                else:
+                    result = await tool_executor(tc["function_name"], tc["arguments"])
                 yield AgentEvent(
                     kind="tool_call_end",
                     data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": "success"},
@@ -118,6 +301,10 @@ async def run_agent_loop(
                         "content": json.dumps(error_result),
                     }
                 )
+
+        if cancel_event and cancel_event.is_set():
+            yield AgentEvent(kind="done", data={})
+            return
 
         assistant_content = ""
 

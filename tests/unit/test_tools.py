@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -236,9 +235,7 @@ class TestEditFileTool:
 
         try:
             edit.set_working_dir(os.path.dirname(path))
-            result = await edit.handle(
-                path=path, old_text="hello", new_text="goodbye"
-            )
+            result = await edit.handle(path=path, old_text="hello", new_text="goodbye")
             assert result.get("status") == "ok"
             assert Path(path).read_text() == "goodbye world"
         finally:
@@ -254,9 +251,7 @@ class TestEditFileTool:
 
         try:
             edit.set_working_dir(os.path.dirname(path))
-            result = await edit.handle(
-                path=path, old_text="nonexistent", new_text="replacement"
-            )
+            result = await edit.handle(path=path, old_text="nonexistent", new_text="replacement")
             assert "error" in result
         finally:
             os.unlink(path)

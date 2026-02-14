@@ -117,18 +117,34 @@ async def list_models(request: Request) -> list[str]:
 
 @router.get("/mcp/tools")
 async def list_mcp_tools(request: Request) -> list[McpTool]:
+    result: list[McpTool] = []
+
+    tool_registry = getattr(request.app.state, "tool_registry", None)
+    if tool_registry:
+        for tool_def in tool_registry.get_openai_tools():
+            func = tool_def.get("function", {})
+            result.append(
+                McpTool(
+                    name=func.get("name", ""),
+                    server_name="builtin",
+                    description=func.get("description", ""),
+                    input_schema=func.get("parameters", {}),
+                )
+            )
+
     mcp_manager = request.app.state.mcp_manager
-    if not mcp_manager:
-        return []
-    return [
-        McpTool(
-            name=tool["name"],
-            server_name=tool["server_name"],
-            description=tool["description"],
-            input_schema=tool["input_schema"],
-        )
-        for tool in mcp_manager.get_all_tools()
-    ]
+    if mcp_manager:
+        for tool in mcp_manager.get_all_tools():
+            result.append(
+                McpTool(
+                    name=tool["name"],
+                    server_name=tool["server_name"],
+                    description=tool["description"],
+                    input_schema=tool["input_schema"],
+                )
+            )
+
+    return result
 
 
 # --- Databases ---

@@ -324,10 +324,7 @@ class DatabaseManager:
         return self._databases[self._personal_name]
 
     def list_databases(self) -> list[dict[str, str]]:
-        return [
-            {"name": name, "path": str(self._paths[name])}
-            for name in self._databases
-        ]
+        return [{"name": name, "path": str(self._paths[name])} for name in self._databases]
 
     def remove(self, name: str) -> None:
         if name in self._databases:

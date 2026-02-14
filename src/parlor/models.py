@@ -122,6 +122,17 @@ class DatabaseAdd(BaseModel):
     path: str = Field(min_length=1, max_length=1000)
 
 
+class RewindRequest(BaseModel):
+    to_position: int = Field(ge=0)
+    undo_files: bool = False
+
+
+class RewindResponse(BaseModel):
+    deleted_messages: int
+    reverted_files: list[str]
+    skipped_files: list[str]
+
+
 class ChatRequest(BaseModel):
     message: str = Field(default="", max_length=100000)
     regenerate: bool = False

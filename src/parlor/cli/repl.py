@@ -21,6 +21,8 @@ from ..db import init_db
 from ..services import storage
 from ..services.agent_loop import run_agent_loop
 from ..services.ai_service import AIService
+from ..services.rewind import collect_file_paths
+from ..services.rewind import rewind_conversation as rewind_service
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
 from .instructions import load_instructions
@@ -50,6 +52,7 @@ def _remove_signal_handler(loop: asyncio.AbstractEventLoop, sig: int) -> None:
         loop.remove_signal_handler(sig)
     except NotImplementedError:
         pass
+
 
 async def _watch_for_escape(cancel_event: asyncio.Event) -> None:
     """Watch for Escape key press during AI generation to cancel."""
@@ -131,10 +134,7 @@ def _collapse_long_input(user_input: str) -> None:
     usable = max(term_cols - 5, 10)  # 5 = "you> " / continuation indent
 
     # Estimate terminal rows the prompt_toolkit input occupied
-    total_rows = sum(
-        max(1, (len(ln) + usable - 1) // usable) if ln else 1
-        for ln in lines
-    )
+    total_rows = sum(max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines)
 
     show = 3
     hidden = len(lines) - show
@@ -157,7 +157,9 @@ def _detect_git_branch() -> str | None:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             return result.stdout.strip() or None
@@ -191,14 +193,17 @@ def _load_conversation_messages(db: Any, conversation_id: str) -> list[dict[str,
                 # Add tool result messages
                 messages.append(entry)
                 for tc in tool_calls:
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": json.dumps(tc.get("output", {})),
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": json.dumps(tc.get("output", {})),
+                        }
+                    )
                 continue
             messages.append(entry)
     return messages
+
 
 # Context window management
 _CONTEXT_WARN_TOKENS = 80_000
@@ -213,6 +218,7 @@ def _get_tiktoken_encoding():
     if _tiktoken_encoding is None:
         try:
             import tiktoken
+
             _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
         except Exception:
             _tiktoken_encoding = False  # Signal fallback
@@ -270,7 +276,7 @@ def _expand_file_references(text: str, working_dir: str) -> str:
                 content = resolved.read_text(encoding="utf-8", errors="replace")
                 if len(content) > 100_000:
                     content = content[:100_000] + "\n... (truncated)"
-                return f"\n<file path=\"{raw_path}\">\n{content}\n</file>\n"
+                return f'\n<file path="{raw_path}">\n{content}\n</file>\n'
             except OSError:
                 return match.group(0)
         elif resolved.is_dir():
@@ -281,7 +287,7 @@ def _expand_file_references(text: str, working_dir: str) -> str:
                     suffix = "/" if entry.is_dir() else ""
                     listing.append(f"  {entry.name}{suffix}")
                 content = "\n".join(listing)
-                return f"\n<directory path=\"{raw_path}\">\n{content}\n</directory>\n"
+                return f'\n<directory path="{raw_path}">\n{content}\n</directory>\n'
             except OSError:
                 return match.group(0)
         else:
@@ -482,9 +488,7 @@ async def _run_one_shot(
                     thinking = False
                 renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
             elif event.kind == "tool_call_end":
-                renderer.render_tool_call_end(
-                    event.data["tool_name"], event.data["status"], event.data["output"]
-                )
+                renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
             elif event.kind == "assistant_message":
                 if event.data["content"]:
                     storage.create_message(db, conv["id"], "assistant", event.data["content"])
@@ -560,7 +564,7 @@ async def _run_repl(
             elif "@" in word:
                 # Complete file paths after @
                 at_idx = word.rfind("@")
-                partial = word[at_idx + 1:]
+                partial = word[at_idx + 1 :]
                 base = Path(self._wd)
                 if "/" in partial:
                     parent_str, stem = partial.rsplit("/", 1)
@@ -586,8 +590,18 @@ async def _run_repl(
                     pass
 
     commands = [
-        "new", "last", "list", "resume", "compact",
-        "tools", "skills", "model", "help", "quit", "exit",
+        "new",
+        "last",
+        "list",
+        "resume",
+        "rewind",
+        "compact",
+        "tools",
+        "skills",
+        "model",
+        "help",
+        "quit",
+        "exit",
     ]
     skill_names = [s.name for s in skill_registry.list_skills()] if skill_registry else []
     completer = ParlorCompleter(commands, skill_names, working_dir)
@@ -768,6 +782,81 @@ async def _run_repl(
                 else:
                     renderer.render_error(f"Conversation not found: {resolved_id}")
                 continue
+            elif cmd == "/rewind":
+                stored = storage.list_messages(db, conv["id"])
+                if len(stored) < 2:
+                    renderer.console.print("[grey62]Not enough messages to rewind[/grey62]\n")
+                    continue
+
+                renderer.console.print("\n[bold]Messages:[/bold]")
+                for msg in stored:
+                    role_label = "You" if msg["role"] == "user" else "AI"
+                    preview = msg["content"][:80].replace("\n", " ")
+                    if len(msg["content"]) > 80:
+                        preview += "..."
+                    renderer.console.print(f"  {msg['position']}. [{role_label}] {preview}")
+
+                renderer.console.print(
+                    "\n[grey62]Enter position to rewind to (keep that message, delete after):[/grey62]"
+                )
+                try:
+                    pos_input = input("  Position: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                    continue
+
+                if not pos_input.isdigit():
+                    renderer.render_error("Invalid position")
+                    continue
+
+                target_pos = int(pos_input)
+                positions = [m["position"] for m in stored]
+                if target_pos not in positions:
+                    renderer.render_error(f"Position {target_pos} not found")
+                    continue
+
+                # Check if there are file-modifying tools in messages being deleted
+                msgs_after = [m for m in stored if m["position"] > target_pos]
+                msg_ids_after = [m["id"] for m in msgs_after]
+                file_paths = collect_file_paths(db, msg_ids_after)
+
+                undo_files = False
+                if file_paths:
+                    renderer.console.print(
+                        f"\n[yellow]{len(file_paths)} file(s) were modified after this point:[/yellow]"
+                    )
+                    for fp in sorted(file_paths):
+                        renderer.console.print(f"  - {fp}")
+                    try:
+                        answer = input("  Undo file changes? [y/N] ").strip().lower()
+                        undo_files = answer in ("y", "yes")
+                    except (EOFError, KeyboardInterrupt):
+                        renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                        continue
+
+                result = await rewind_service(
+                    db=db,
+                    conversation_id=conv["id"],
+                    to_position=target_pos,
+                    undo_files=undo_files,
+                    working_dir=working_dir,
+                )
+
+                # Rebuild ai_messages from remaining stored messages
+                ai_messages = _load_conversation_messages(db, conv["id"])
+
+                summary = f"Rewound {result.deleted_messages} message(s)"
+                if result.reverted_files:
+                    summary += f", reverted {len(result.reverted_files)} file(s)"
+                if result.skipped_files:
+                    summary += f", {len(result.skipped_files)} skipped"
+                renderer.console.print(f"[grey62]{summary}[/grey62]\n")
+
+                if result.skipped_files:
+                    for sf in result.skipped_files:
+                        renderer.console.print(f"  [yellow]Skipped: {sf}[/yellow]")
+                    renderer.console.print()
+                continue
 
         # Check for skill invocation
         if skill_registry and user_input.startswith("/"):
@@ -789,9 +878,7 @@ async def _run_repl(
             )
             await _compact_messages(ai_service, ai_messages, db, conv["id"])
         elif token_estimate > _CONTEXT_WARN_TOKENS:
-            renderer.console.print(
-                f"[yellow]Context: ~{token_estimate:,} tokens. Use /compact to free space.[/yellow]"
-            )
+            renderer.console.print(f"[yellow]Context: ~{token_estimate:,} tokens. Use /compact to free space.[/yellow]")
 
         # Store user message
         storage.create_message(db, conv["id"], "user", expanded)
@@ -834,9 +921,7 @@ async def _run_repl(
                         thinking = False
                     renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
                 elif event.kind == "tool_call_end":
-                    renderer.render_tool_call_end(
-                        event.data["tool_name"], event.data["status"], event.data["output"]
-                    )
+                    renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
                 elif event.kind == "assistant_message":
                     if event.data["content"]:
                         storage.create_message(db, conv["id"], "assistant", event.data["content"])
@@ -917,8 +1002,7 @@ async def _compact_messages(
         "- File paths that were read, written, or edited\n"
         "- Important code changes and their purpose\n"
         "- Current state of the task\n"
-        "- Any errors encountered and how they were resolved\n\n"
-        + "\n".join(history_text)
+        "- Any errors encountered and how they were resolved\n\n" + "\n".join(history_text)
     )
 
     try:

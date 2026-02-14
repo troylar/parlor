@@ -19,8 +19,15 @@ logger = logging.getLogger(__name__)
 
 
 _ALLOWED_UPDATE_COLUMNS: set[str] = {
-    "name", "instructions", "model", "updated_at", "parent_id",
-    "collapsed", "position", "color", "folder_id",
+    "name",
+    "instructions",
+    "model",
+    "updated_at",
+    "parent_id",
+    "collapsed",
+    "position",
+    "color",
+    "folder_id",
 }
 
 
@@ -517,8 +524,7 @@ def copy_conversation_to_db(
     new_cid = _uuid()
     now = _now()
     target_db.execute(
-        "INSERT INTO conversations (id, title, model, project_id, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO conversations (id, title, model, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
         (new_cid, conv["title"], conv.get("model"), None, conv.get("created_at", now), now),
     )
 
@@ -526,8 +532,7 @@ def copy_conversation_to_db(
     for msg in messages:
         new_mid = _uuid()
         target_db.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at, position)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, position) VALUES (?, ?, ?, ?, ?, ?)",
             (new_mid, new_cid, msg["role"], msg["content"], msg["created_at"], msg["position"]),
         )
         for att in msg.get("attachments", []):

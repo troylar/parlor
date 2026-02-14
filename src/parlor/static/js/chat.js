@@ -5,6 +5,8 @@ const Chat = (() => {
     let currentAssistantEl = null;
     let currentAssistantContent = '';
     let _streamRawMode = localStorage.getItem('parlor_stream_raw_mode') === 'true';
+    let _rewindPosition = null;
+    let _rewindMsgEl = null;
 
     // Configure marked for safe link rendering (marked v15 passes token object)
     const renderer = new marked.Renderer();
@@ -40,6 +42,8 @@ const Chat = (() => {
         });
 
         input.addEventListener('input', autoResizeInput);
+
+        initRewindModal();
     }
 
     function isRawMode() { return _streamRawMode; }
@@ -202,7 +206,7 @@ const Chat = (() => {
         contentEl.innerHTML = renderMarkdown(currentAssistantContent);
         renderMath(contentEl);
         addCodeCopyButtons(contentEl);
-        addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent);
+        addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent, null, { isLast: true });
         currentAssistantEl = null;
         currentAssistantContent = '';
         scrollToBottom();
@@ -314,7 +318,9 @@ const Chat = (() => {
         });
     }
 
-    function addMessageActions(msgEl, role, content, msgData) {
+    function addMessageActions(msgEl, role, content, msgData, options) {
+        const isLast = options && options.isLast;
+        const hasFileChangesAfter = options && options.hasFileChangesAfter;
         const actions = document.createElement('div');
         actions.className = 'message-actions';
 
@@ -357,6 +363,16 @@ const Chat = (() => {
         }
 
         if (msgData) {
+            // Rewind button (hidden on last message — rewinding to last is a no-op)
+            if (!isLast) {
+                const rewindBtn = document.createElement('button');
+                rewindBtn.className = 'btn-action-icon';
+                rewindBtn.title = 'Rewind to here';
+                rewindBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-11.36L1 10"/></svg>';
+                rewindBtn.addEventListener('click', () => openRewindModal(msgEl, msgData.position, !!hasFileChangesAfter));
+                actions.appendChild(rewindBtn);
+            }
+
             // Fork button
             const forkBtn = document.createElement('button');
             forkBtn.className = 'btn-action-icon';
@@ -383,6 +399,101 @@ const Chat = (() => {
         } catch (err) {
             alert('Fork failed: ' + err.message);
         }
+    }
+
+    function openRewindModal(msgEl, position, hasFileChanges) {
+        _rewindPosition = position;
+        _rewindMsgEl = msgEl;
+        const undoBtn = document.getElementById('rewind-undo-files');
+        const keepBtn = document.getElementById('rewind-keep-files');
+        if (hasFileChanges) {
+            undoBtn.style.display = '';
+            keepBtn.textContent = 'Rewind conversation only';
+        } else {
+            undoBtn.style.display = 'none';
+            keepBtn.textContent = 'Rewind';
+        }
+        document.getElementById('rewind-modal').style.display = 'flex';
+    }
+
+    function closeRewindModal() {
+        document.getElementById('rewind-modal').style.display = 'none';
+        _rewindPosition = null;
+        _rewindMsgEl = null;
+    }
+
+    async function executeRewind(undoFiles) {
+        const conversationId = App.state.currentConversationId;
+        if (!conversationId || _rewindPosition === null || !_rewindMsgEl) return;
+
+        const position = _rewindPosition;
+        const msgEl = _rewindMsgEl;
+        closeRewindModal();
+
+        try {
+            const result = await App.api(`/api/conversations/${conversationId}/rewind`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to_position: position, undo_files: undoFiles }),
+            });
+
+            let sibling = msgEl.nextElementSibling;
+            while (sibling) {
+                const next = sibling.nextElementSibling;
+                sibling.remove();
+                sibling = next;
+            }
+
+            // Update actions on the now-last message (hide rewind, it's now last)
+            const existingActions = msgEl.querySelector('.message-actions');
+            if (existingActions) {
+                const rewindBtn = existingActions.querySelector('[title="Rewind to here"]');
+                if (rewindBtn) rewindBtn.remove();
+            }
+
+            // Show feedback
+            let summary = `Rewound ${result.deleted_messages} message${result.deleted_messages !== 1 ? 's' : ''}`;
+            if (result.reverted_files.length > 0) {
+                summary += `, reverted ${result.reverted_files.length} file${result.reverted_files.length !== 1 ? 's' : ''}`;
+            }
+            if (result.skipped_files.length > 0) {
+                summary += `, ${result.skipped_files.length} skipped`;
+            }
+            showToast(summary);
+        } catch (err) {
+            alert('Rewind failed: ' + err.message);
+        }
+    }
+
+    function showToast(message) {
+        let container = document.getElementById('toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toast-container';
+            document.body.appendChild(container);
+        }
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.add('toast-fade-out');
+            toast.addEventListener('animationend', () => toast.remove());
+        }, 3000);
+    }
+
+    function initRewindModal() {
+        document.getElementById('rewind-close').addEventListener('click', closeRewindModal);
+        document.getElementById('rewind-undo-files').addEventListener('click', () => executeRewind(true));
+        document.getElementById('rewind-keep-files').addEventListener('click', () => executeRewind(false));
+        document.getElementById('rewind-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'rewind-modal') closeRewindModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('rewind-modal').style.display !== 'none') {
+                closeRewindModal();
+            }
+        });
     }
 
     function startEdit(msgEl, msgData) {
@@ -728,8 +839,15 @@ const Chat = (() => {
                 });
             }
 
-            // Add action buttons (copy, fork, edit)
-            addMessageActions(el, msg.role, msg.content, msg);
+            // Add action buttons (copy, fork, edit, rewind)
+            const idx = messages.indexOf(msg);
+            const isLast = idx === messages.length - 1;
+            const hasFileChangesAfter = messages.slice(idx + 1).some(m =>
+                m.tool_calls && m.tool_calls.some(tc =>
+                    tc.tool_name === 'write_file' || tc.tool_name === 'edit_file'
+                )
+            );
+            addMessageActions(el, msg.role, msg.content, msg, { isLast, hasFileChangesAfter });
 
             container.appendChild(el);
         });

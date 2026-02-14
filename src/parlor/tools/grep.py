@@ -76,10 +76,12 @@ def _search_file(
             for j in range(start, end):
                 prefix = ">" if j == i else " "
                 context_lines.append(f"{prefix}{j + 1:>6}\t{lines[j]}")
-            matches.append({
-                "line_number": i + 1,
-                "content": "\n".join(context_lines),
-            })
+            matches.append(
+                {
+                    "line_number": i + 1,
+                    "content": "\n".join(context_lines),
+                }
+            )
     return matches
 
 

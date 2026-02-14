@@ -150,6 +150,9 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     )
 
     return AppConfig(
-        ai=ai, app=app_settings, mcp_servers=mcp_servers,
-        shared_databases=shared_databases, cli=cli_config,
+        ai=ai,
+        app=app_settings,
+        mcp_servers=mcp_servers,
+        shared_databases=shared_databases,
+        cli=cli_config,
     )
