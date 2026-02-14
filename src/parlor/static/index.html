@@ -1,9 +1,15 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="midnight">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Parlor</title>
+    <script>
+    (function(){
+        var t = localStorage.getItem('parlor_theme') || 'midnight';
+        document.documentElement.setAttribute('data-theme', t);
+    })();
+    </script>
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/vendor/highlight-github-dark.min.css">
     <link rel="stylesheet" href="/vendor/katex.min.css">
@@ -14,11 +20,70 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <button class="btn-new-chat" id="btn-new-chat" title="New conversation (Ctrl+Shift+N)">
-                    + New Chat
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="12" y1="8" x2="12" y2="14"/><line x1="9" y1="11" x2="15" y2="11"/></svg>
+                    New Chat
                 </button>
             </div>
             <div class="sidebar-search">
                 <input type="text" id="search-input" placeholder="Search conversations..." autocomplete="off">
+            </div>
+            <div class="sidebar-databases" id="sidebar-databases">
+                <div class="sidebar-section-header">
+                    <span class="sidebar-section-label">Databases</span>
+                    <button class="btn-section-action" id="btn-db-add" title="Add database">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        <span>Add</span>
+                    </button>
+                </div>
+                <div class="db-list" id="db-list">
+                    <!-- Database items populated by JS -->
+                </div>
+            </div>
+            <div class="sidebar-projects" id="sidebar-projects">
+                <div class="sidebar-section-header">
+                    <span class="sidebar-section-label">Projects</span>
+                    <button class="btn-section-action" id="btn-project-add" title="Create new project">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        <span>New</span>
+                    </button>
+                </div>
+                <div class="project-list" id="project-list">
+                    <!-- Project items populated by JS -->
+                </div>
+                <div class="project-active-bar" id="project-active-bar" style="display:none">
+                    <div class="project-active-info">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                        <span class="project-active-name" id="project-active-name"></span>
+                    </div>
+                    <div class="project-active-actions">
+                        <button class="btn-project-action" id="btn-project-edit" title="Edit project">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                        </button>
+                        <button class="btn-project-action btn-project-action-danger" id="btn-project-delete" title="Delete project">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                            </svg>
+                        </button>
+                        <button class="btn-project-action" id="btn-project-clear" title="Show all conversations">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <!-- Hidden select for data binding -->
+                <select id="project-select" style="display:none">
+                    <option value="">All Conversations</option>
+                </select>
+            </div>
+            <div class="sidebar-section-header" style="padding-top:4px">
+                <span class="sidebar-section-label">Conversations</span>
+                <button class="btn-section-action" id="btn-folder-add" title="Create folder">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                    <span>Folder</span>
+                </button>
             </div>
             <div class="conversation-list" id="conversation-list">
                 <!-- Conversation items populated by JS -->
@@ -34,6 +99,9 @@
             </div>
         </aside>
 
+        <!-- Sidebar overlay for mobile -->
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
         <!-- Settings Modal -->
         <div class="modal-overlay" id="settings-modal" style="display:none">
             <div class="modal">
@@ -43,10 +111,16 @@
                 </div>
                 <div class="modal-body">
                     <div class="setting-group">
+                        <label>Theme</label>
+                        <div class="theme-picker" id="theme-picker">
+                            <!-- Theme cards populated by JS -->
+                        </div>
+                    </div>
+                    <div class="setting-group">
                         <label for="setting-model">Model</label>
-                        <input type="text" id="setting-model" placeholder="e.g. gpt-4o or your-custom-model" autocomplete="off">
-                        <div class="model-suggestions" id="model-suggestions"></div>
-                        <span class="setting-hint">Type a custom model name or pick from available models below</span>
+                        <select id="setting-model">
+                            <option value="">Loading models...</option>
+                        </select>
                     </div>
                     <div class="setting-group">
                         <label for="setting-system-prompt">System Prompt</label>
@@ -60,8 +134,99 @@
             </div>
         </div>
 
+        <!-- Project Modal -->
+        <div class="modal-overlay" id="project-modal" style="display:none">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3 id="project-modal-title">New Project</h3>
+                    <button class="modal-close" id="project-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <label for="project-name">Name</label>
+                        <input type="text" id="project-name" placeholder="Project name" autocomplete="off">
+                    </div>
+                    <div class="setting-group">
+                        <label for="project-instructions">Instructions</label>
+                        <textarea id="project-instructions" rows="6" placeholder="Custom system prompt for this project..."></textarea>
+                        <span class="setting-hint">These instructions are prepended to the global system prompt for all conversations in this project.</span>
+                    </div>
+                    <div class="setting-group">
+                        <label for="project-model">Model (optional)</label>
+                        <select id="project-model">
+                            <option value="">Use global default</option>
+                        </select>
+                        <span class="setting-hint">Override the default model for conversations in this project.</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-modal-cancel" id="project-cancel">Cancel</button>
+                    <button class="btn-modal-save" id="project-save">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Database Modal -->
+        <div class="modal-overlay" id="db-modal" style="display:none">
+            <div class="modal" style="width:600px">
+                <div class="modal-header">
+                    <h3>Add Database</h3>
+                    <button class="modal-close" id="db-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <label for="db-name-input">Database Name</label>
+                        <input type="text" id="db-name-input" placeholder="my-database" autocomplete="off">
+                        <span class="setting-hint">Letters, numbers, hyphens, underscores only.</span>
+                    </div>
+                    <div class="setting-group">
+                        <label for="db-path-input">Database Path</label>
+                        <div class="browse-path-row">
+                            <input type="text" id="db-path-input" placeholder="/path/to/database.db" autocomplete="off">
+                            <button class="btn-browse" id="btn-browse">Browse</button>
+                        </div>
+                        <span class="setting-hint">File will be created if it doesn't exist.</span>
+                    </div>
+                    <div class="browse-panel" id="browse-panel" style="display:none">
+                        <div class="browse-current" id="browse-current"></div>
+                        <div class="browse-entries" id="browse-entries"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-modal-cancel" id="db-modal-cancel">Cancel</button>
+                    <button class="btn-modal-save" id="db-modal-save">Add</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Command Palette -->
+        <div class="palette-overlay" id="palette-overlay" style="display:none">
+            <div class="palette-modal">
+                <input type="text" class="palette-input" id="palette-input" placeholder="Type to search..." autocomplete="off">
+                <div class="palette-results" id="palette-results">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+
         <!-- Main Chat Area -->
         <main class="chat-main">
+            <!-- Model selector topbar -->
+            <div class="chat-topbar" id="chat-topbar">
+                <button class="mobile-menu-btn" id="mobile-menu-btn" title="Toggle sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <div class="model-selector" id="model-selector">
+                    <button class="model-selector-btn" id="model-selector-btn" type="button">
+                        <span class="model-selector-label" id="model-selector-label">Default model</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="model-selector-dropdown" id="model-selector-dropdown">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+
             <!-- Setup banner (hidden by default) -->
             <div class="setup-banner" id="setup-banner" style="display:none">
                 <p>AI service not configured. Please set up your <code>~/.ai-chat/config.yaml</code>.</p>
@@ -70,13 +235,14 @@
             <!-- Messages container -->
             <div class="messages-container" id="messages-container">
                 <div class="welcome-message" id="welcome-message">
-                    <h2>Welcome to AI Chat</h2>
+                    <h2>Welcome to Parlor</h2>
                     <p>Start a conversation by typing a message below.</p>
                     <div class="welcome-tips">
                         <p>Tips:</p>
                         <ul>
                             <li><strong>Enter</strong> to send, <strong>Shift+Enter</strong> for new line</li>
                             <li><strong>Ctrl+Shift+N</strong> for new conversation</li>
+                            <li><strong>Cmd/Ctrl+K</strong> for command palette</li>
                             <li><strong>Escape</strong> to stop AI response</li>
                         </ul>
                     </div>
@@ -120,6 +286,7 @@
     <script src="/js/app.js"></script>
     <script src="/js/chat.js"></script>
     <script src="/js/sidebar.js"></script>
+    <script src="/js/palette.js"></script>
     <script src="/js/attachments.js"></script>
 </body>
 </html>

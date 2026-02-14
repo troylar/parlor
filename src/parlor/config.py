@@ -30,6 +30,12 @@ class McpServerConfig:
 
 
 @dataclass
+class SharedDatabaseConfig:
+    name: str
+    path: str
+
+
+@dataclass
 class AppSettings:
     host: str = "127.0.0.1"
     port: int = 8080
@@ -41,6 +47,7 @@ class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
+    shared_databases: list[SharedDatabaseConfig] = field(default_factory=list)
 
 
 def _get_config_path(data_dir: Path | None = None) -> Path:
@@ -106,6 +113,15 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             )
         )
 
+    shared_databases: list[SharedDatabaseConfig] = []
+    for sdb in raw.get("shared_databases", []):
+        shared_databases.append(
+            SharedDatabaseConfig(
+                name=sdb["name"],
+                path=os.path.expanduser(sdb["path"]),
+            )
+        )
+
     app_settings.data_dir.mkdir(parents=True, exist_ok=True)
     try:
         app_settings.data_dir.chmod(stat.S_IRWXU)  # 0700
@@ -114,4 +130,4 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     except OSError:
         pass  # May fail on Windows or non-owned files
 
-    return AppConfig(ai=ai, app=app_settings, mcp_servers=mcp_servers)
+    return AppConfig(ai=ai, app=app_settings, mcp_servers=mcp_servers, shared_databases=shared_databases)

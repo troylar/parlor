@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "parlor"
-version = "0.3.0"
+version = "0.5.1"
 description = "Parlor - a private parlor for AI conversation"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.104.0",

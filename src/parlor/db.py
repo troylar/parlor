@@ -2,17 +2,61 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '',
+    model TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id TEXT DEFAULT NULL,
+    project_id TEXT DEFAULT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    collapsed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS tags (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL DEFAULT '#3b82f6',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_tags (
+    conversation_id TEXT NOT NULL,
+    tag_id TEXT NOT NULL,
+    PRIMARY KEY (conversation_id, tag_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
+    model TEXT DEFAULT NULL,
+    project_id TEXT DEFAULT NULL,
+    folder_id TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -158,8 +202,21 @@ class ThreadSafeConnection:
             self._conn.row_factory = value
 
 
+def _restrict_file_permissions(path: Path) -> None:
+    """Set file to owner-only read/write (0o600)."""
+    try:
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+
+
 def init_db(db_path: Path) -> ThreadSafeConnection:
+    is_new = not db_path.exists()
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
+
+    if is_new:
+        _restrict_file_permissions(db_path)
+
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -172,9 +229,114 @@ def init_db(db_path: Path) -> ThreadSafeConnection:
     except sqlite3.OperationalError:
         pass
 
+    _run_migrations(conn)
+
     conn.commit()
+
+    # Also restrict WAL/SHM sidecar files
+    for suffix in ("-wal", "-shm"):
+        sidecar = db_path.parent / (db_path.name + suffix)
+        if sidecar.exists():
+            _restrict_file_permissions(sidecar)
+
     return ThreadSafeConnection(conn)
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply schema migrations for existing databases."""
+    cursor = conn.execute("PRAGMA table_info(conversations)")
+    cols = {row[1] for row in cursor.fetchall()}
+
+    if "model" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN model TEXT DEFAULT NULL")
+
+    if "project_id" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT DEFAULT NULL")
+
+    if "folder_id" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN folder_id TEXT DEFAULT NULL")
+
+    # Ensure folders table exists for existing databases
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS folders (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            parent_id TEXT DEFAULT NULL,
+            project_id TEXT DEFAULT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            collapsed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+        )"""
+    )
+
+    # Add parent_id to folders if missing
+    folder_cursor = conn.execute("PRAGMA table_info(folders)")
+    folder_cols = {row[1] for row in folder_cursor.fetchall()}
+    if "parent_id" not in folder_cols:
+        conn.execute("ALTER TABLE folders ADD COLUMN parent_id TEXT DEFAULT NULL")
+
+    # Ensure tags tables exist
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS tags (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT NOT NULL DEFAULT '#3b82f6',
+            created_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS conversation_tags (
+            conversation_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            PRIMARY KEY (conversation_id, tag_id),
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        )"""
+    )
 
 
 def get_db(db_path: Path) -> ThreadSafeConnection:
     return init_db(db_path)
+
+
+class DatabaseManager:
+    """Manages personal + shared database connections."""
+
+    def __init__(self) -> None:
+        self._databases: dict[str, ThreadSafeConnection] = {}
+        self._paths: dict[str, Path] = {}
+        self._personal_name = "personal"
+
+    def add(self, name: str, db_path: Path) -> None:
+        self._paths[name] = db_path
+        self._databases[name] = init_db(db_path)
+
+    def get(self, name: str | None = None) -> ThreadSafeConnection:
+        key = name or self._personal_name
+        if key not in self._databases:
+            raise KeyError(f"Database '{key}' not found")
+        return self._databases[key]
+
+    @property
+    def personal(self) -> ThreadSafeConnection:
+        return self._databases[self._personal_name]
+
+    def list_databases(self) -> list[dict[str, str]]:
+        return [
+            {"name": name, "path": str(self._paths[name])}
+            for name in self._databases
+        ]
+
+    def remove(self, name: str) -> None:
+        if name in self._databases:
+            self._databases[name].close()
+            del self._databases[name]
+            del self._paths[name]
+
+    def close_all(self) -> None:
+        for db in self._databases.values():
+            db.close()
+        self._databases.clear()

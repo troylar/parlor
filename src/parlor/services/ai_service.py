@@ -31,8 +31,12 @@ class AIService:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         cancel_event: asyncio.Event | None = None,
+        extra_system_prompt: str | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
-        system_msg = {"role": "system", "content": self.config.system_prompt}
+        system_content = self.config.system_prompt
+        if extra_system_prompt:
+            system_content = extra_system_prompt + "\n\n" + system_content
+        system_msg = {"role": "system", "content": system_content}
         full_messages = [system_msg] + messages
 
         kwargs: dict[str, Any] = {

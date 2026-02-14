@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import AppConfig, load_config
-from .db import init_db
+from .db import DatabaseManager, init_db
 from .services.mcp_manager import McpManager
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db_path = config.app.data_dir / "chat.db"
     app.state.db = init_db(db_path)
 
+    db_manager = DatabaseManager()
+    db_manager.add("personal", db_path)
+    for sdb in config.shared_databases:
+        try:
+            sdb_path = Path(sdb.path)
+            sdb_path.parent.mkdir(parents=True, exist_ok=True)
+            db_manager.add(sdb.name, sdb_path)
+            logger.info(f"Shared DB loaded: {sdb.name} ({sdb.path})")
+        except Exception as e:
+            logger.warning(f"Failed to load shared DB '{sdb.name}': {e}")
+    app.state.db_manager = db_manager
+
     mcp_manager = None
     if config.mcp_servers:
         mcp_manager = McpManager(config.mcp_servers)
@@ -51,6 +63,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if app.state.db:
         app.state.db.close()
+    if hasattr(app.state, "db_manager"):
+        app.state.db_manager.close_all()
     if app.state.mcp_manager:
         await app.state.mcp_manager.shutdown()
 
@@ -66,7 +80,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self'; "
+            "script-src 'self' 'sha256-XOZ/E5zGhh3+pD1xPPme298VAabSp0Pt7SmU0EdZqKY='; "
             "style-src 'self' 'unsafe-inline'; "
             "font-src 'self'; "
             "img-src 'self' data: blob:; "
@@ -78,6 +92,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Pragma"] = "no-cache"
+        elif request.url.path.endswith((".js", ".css")):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
 
 
@@ -206,7 +222,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Parlor",
-        version="0.3.0",
+        version="0.5.1",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -239,12 +255,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     csrf_token = secrets.token_urlsafe(32)
     app.state.csrf_token = csrf_token
+    cache_bust = str(int(time.time()))
 
-    from .routers import chat, config_api, conversations
+    from .routers import chat, config_api, conversations, projects
 
     app.include_router(conversations.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(config_api.router, prefix="/api")
+    app.include_router(projects.router, prefix="/api")
 
     @app.post("/api/logout")
     async def logout():
@@ -259,10 +277,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.get("/")
     async def index():
         """Serve index.html and set auth token via HttpOnly cookie + CSRF cookie."""
+        import re
+
         from fastapi.responses import HTMLResponse
 
         html_path = static_dir / "index.html"
         html = html_path.read_text()
+        html = re.sub(
+            r'src="/js/([^"]+)"',
+            rf'src="/js/\1?v={cache_bust}"',
+            html,
+        )
+        html = re.sub(
+            r'href="/css/([^"]+)"',
+            rf'href="/css/\1?v={cache_bust}"',
+            html,
+        )
         response = HTMLResponse(html)
         response.set_cookie(
             key="parlor_session",

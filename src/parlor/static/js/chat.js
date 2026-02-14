@@ -4,13 +4,21 @@ const Chat = (() => {
     let eventSource = null;
     let currentAssistantEl = null;
     let currentAssistantContent = '';
+    let _streamRawMode = localStorage.getItem('parlor_stream_raw_mode') !== 'false';
 
-    // Configure marked for safe link rendering
+    // Configure marked for safe link rendering (marked v15 passes token object)
     const renderer = new marked.Renderer();
     const originalLink = renderer.link.bind(renderer);
-    renderer.link = function(href, title, text) {
-        const html = originalLink(href, title, text);
-        return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
+    renderer.link = function(token) {
+        try {
+            const html = originalLink(token);
+            if (!html) throw new Error('empty');
+            return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
+        } catch {
+            const href = (token && token.href) || (typeof token === 'string' ? token : '');
+            const text = (token && token.text) || href;
+            return `<a href="${DOMPurify.sanitize(href)}" target="_blank" rel="noopener noreferrer">${DOMPurify.sanitize(text)}</a>`;
+        }
     };
     marked.use({ renderer });
 
@@ -32,6 +40,13 @@ const Chat = (() => {
         });
 
         input.addEventListener('input', autoResizeInput);
+    }
+
+    function isRawMode() { return _streamRawMode; }
+
+    function setRawMode(val) {
+        _streamRawMode = val;
+        localStorage.setItem('parlor_stream_raw_mode', val ? 'true' : 'false');
     }
 
     function autoResizeInput() {
@@ -59,9 +74,6 @@ const Chat = (() => {
         const files = Attachments.getFiles();
         Attachments.clear();
 
-        setStreaming(true);
-        showThinking();
-
         let body;
         let headers = { 'X-CSRF-Token': App._getCsrfToken() };
         if (files.length > 0) {
@@ -74,8 +86,22 @@ const Chat = (() => {
             headers['Content-Type'] = 'application/json';
         }
 
+        await streamChatResponse(App.state.currentConversationId, body, headers);
+    }
+
+    async function streamChatResponse(conversationId, body, headers) {
+        setStreaming(true);
+        showThinking();
+
+        if (!headers) {
+            headers = {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': App._getCsrfToken(),
+            };
+        }
+
         try {
-            const response = await fetch(`/api/conversations/${App.state.currentConversationId}/chat`, {
+            const response = await fetch(`/api/conversations/${conversationId}/chat`, {
                 method: 'POST',
                 headers,
                 body,
@@ -160,8 +186,12 @@ const Chat = (() => {
     function renderAssistantContent() {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
-        contentEl.innerHTML = renderMarkdown(currentAssistantContent);
-        renderMath(contentEl);
+        if (_streamRawMode) {
+            contentEl.textContent = currentAssistantContent;
+        } else {
+            contentEl.innerHTML = renderMarkdown(currentAssistantContent);
+            renderMath(contentEl);
+        }
         scrollToBottom();
     }
 
@@ -171,7 +201,7 @@ const Chat = (() => {
         contentEl.innerHTML = renderMarkdown(currentAssistantContent);
         renderMath(contentEl);
         addCodeCopyButtons(contentEl);
-        addMessageCopyButton(currentAssistantEl, currentAssistantContent);
+        addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent);
         currentAssistantEl = null;
         currentAssistantContent = '';
         scrollToBottom();
@@ -283,27 +313,165 @@ const Chat = (() => {
         });
     }
 
-    function addMessageCopyButton(msgEl, content) {
+    function addMessageActions(msgEl, role, content, msgData) {
         const actions = document.createElement('div');
         actions.className = 'message-actions';
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'btn-copy-message';
-        copyBtn.textContent = 'Copy';
-        copyBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(content).then(() => {
-                copyBtn.textContent = 'Copied!';
-                setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+
+        if (role === 'assistant') {
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'btn-action-icon';
+            copyBtn.title = 'Copy';
+            copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+            copyBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(content).then(() => {
+                    copyBtn.title = 'Copied!';
+                    setTimeout(() => { copyBtn.title = 'Copy'; }, 2000);
+                });
             });
-        });
-        actions.appendChild(copyBtn);
+            actions.appendChild(copyBtn);
+        }
+
+        if (role === 'user' && msgData) {
+            // Edit button
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn-action-icon';
+            editBtn.title = 'Edit';
+            editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+            editBtn.addEventListener('click', () => startEdit(msgEl, msgData));
+            actions.appendChild(editBtn);
+        }
+
+        if (msgData) {
+            // Fork button
+            const forkBtn = document.createElement('button');
+            forkBtn.className = 'btn-action-icon';
+            forkBtn.title = 'Fork from here';
+            forkBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v1a2 2 0 01-2 2H8a2 2 0 01-2-2V9"/><line x1="12" y1="12" x2="12" y2="15"/></svg>';
+            forkBtn.addEventListener('click', () => forkConversation(msgData.position));
+            actions.appendChild(forkBtn);
+        }
+
         msgEl.appendChild(actions);
+    }
+
+    async function forkConversation(position) {
+        const conversationId = App.state.currentConversationId;
+        if (!conversationId) return;
+        try {
+            const newConv = await App.api(`/api/conversations/${conversationId}/fork`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ up_to_position: position }),
+            });
+            await App.loadConversation(newConv.id);
+            await Sidebar.refresh();
+        } catch (err) {
+            alert('Fork failed: ' + err.message);
+        }
+    }
+
+    function startEdit(msgEl, msgData) {
+        const contentDiv = msgEl.querySelector('.message-content');
+        const originalContent = msgData.content;
+        const actionsDiv = msgEl.querySelector('.message-actions');
+        if (actionsDiv) actionsDiv.style.display = 'none';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'message-edit-textarea';
+        textarea.value = originalContent;
+        textarea.rows = Math.max(2, originalContent.split('\n').length);
+
+        const btnRow = document.createElement('div');
+        btnRow.className = 'message-edit-actions';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn-modal-save';
+        saveBtn.textContent = 'Save & Regenerate';
+        saveBtn.addEventListener('click', () => saveEdit(msgEl, msgData, textarea.value));
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn-modal-cancel';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => cancelEdit(msgEl, msgData, contentDiv, actionsDiv));
+
+        btnRow.appendChild(cancelBtn);
+        btnRow.appendChild(saveBtn);
+
+        contentDiv.style.display = 'none';
+        contentDiv.parentNode.insertBefore(textarea, contentDiv.nextSibling);
+        contentDiv.parentNode.insertBefore(btnRow, textarea.nextSibling);
+        textarea.focus();
+    }
+
+    function cancelEdit(msgEl, msgData, contentDiv, actionsDiv) {
+        const textarea = msgEl.querySelector('.message-edit-textarea');
+        const btnRow = msgEl.querySelector('.message-edit-actions');
+        if (textarea) textarea.remove();
+        if (btnRow) btnRow.remove();
+        contentDiv.style.display = '';
+        if (actionsDiv) actionsDiv.style.display = '';
+    }
+
+    async function saveEdit(msgEl, msgData, newContent) {
+        newContent = newContent.trim();
+        if (!newContent) return;
+
+        const conversationId = App.state.currentConversationId;
+
+        try {
+            // 1. Update message content
+            await App.api(`/api/conversations/${conversationId}/messages/${msgData.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: newContent }),
+            });
+
+            // 2. Delete messages after this position
+            await App.api(`/api/conversations/${conversationId}/messages?after_position=${msgData.position}`, {
+                method: 'DELETE',
+            });
+
+            // 3. Remove subsequent message DOM elements
+            let sibling = msgEl.nextElementSibling;
+            while (sibling) {
+                const next = sibling.nextElementSibling;
+                sibling.remove();
+                sibling = next;
+            }
+
+            // 4. Restore edit UI
+            const textarea = msgEl.querySelector('.message-edit-textarea');
+            const btnRow = msgEl.querySelector('.message-edit-actions');
+            const contentDiv = msgEl.querySelector('.message-content');
+            if (textarea) textarea.remove();
+            if (btnRow) btnRow.remove();
+            contentDiv.style.display = '';
+            contentDiv.textContent = newContent;
+
+            const actionsDiv = msgEl.querySelector('.message-actions');
+            if (actionsDiv) actionsDiv.style.display = '';
+
+            // Update msgData so future edits use new content
+            msgData.content = newContent;
+
+            // 5. Regenerate AI response
+            const body = JSON.stringify({ message: '', regenerate: true });
+            const headers = {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': App._getCsrfToken(),
+            };
+            await streamChatResponse(conversationId, body, headers);
+
+        } catch (err) {
+            alert('Edit failed: ' + err.message);
+        }
     }
 
     function _sanitizeId(id) {
         return String(id).replace(/[^a-zA-Z0-9\-_]/g, '');
     }
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, msgData) {
         const container = document.getElementById('messages-container');
         const welcome = document.getElementById('welcome-message');
         if (welcome) welcome.style.display = 'none';
@@ -494,7 +662,6 @@ const Chat = (() => {
             if (msg.role === 'assistant') {
                 renderMath(contentDiv);
                 addCodeCopyButtons(contentDiv);
-                addMessageCopyButton(el, msg.content);
             }
 
             if (msg.attachments && msg.attachments.length > 0) {
@@ -546,6 +713,9 @@ const Chat = (() => {
                 });
             }
 
+            // Add action buttons (copy, fork, edit)
+            addMessageActions(el, msg.role, msg.content, msg);
+
             container.appendChild(el);
         });
         scrollToBottom();
@@ -562,5 +732,8 @@ const Chat = (() => {
         return div.innerHTML;
     }
 
-    return { init, sendMessage, loadMessages, stopGeneration, setStreaming, escapeHtml };
+    return {
+        init, sendMessage, loadMessages, stopGeneration, setStreaming, escapeHtml,
+        streamChatResponse, isRawMode, setRawMode,
+    };
 })();

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import copy
 import json
 import logging
 import uuid as uuid_mod
@@ -35,20 +37,33 @@ def _validate_uuid(value: str) -> str:
     return value
 
 
-def _get_ai_service(request: Request) -> AIService:
+def _get_db(request: Request):
+    """Resolve database connection from optional ?db= query parameter."""
+    db_name = request.query_params.get("db")
+    if hasattr(request.app.state, "db_manager"):
+        return request.app.state.db_manager.get(db_name)
+    return request.app.state.db
+
+
+def _get_ai_service(request: Request, model_override: str | None = None) -> AIService:
     config = request.app.state.config
+    if model_override:
+        ai_config = copy.copy(config.ai)
+        ai_config.model = model_override
+        return AIService(ai_config)
     return AIService(config.ai)
 
 
 @router.post("/conversations/{conversation_id}/chat")
 async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
     _validate_uuid(conversation_id)
-    db = request.app.state.db
+    db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     content_type = request.headers.get("content-type", "")
+    regenerate = False
     if "multipart/form-data" in content_type:
         form = await request.form()
         message_text = str(form.get("message", ""))
@@ -58,58 +73,91 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
     else:
         body = ChatRequest(**(await request.json()))
         message_text = body.message
+        regenerate = body.regenerate
         files = []
 
-    user_msg = storage.create_message(db, conversation_id, "user", message_text)
+    if regenerate:
+        existing = storage.list_messages(db, conversation_id)
+        if not existing:
+            raise HTTPException(status_code=400, detail="No messages to regenerate from")
 
+    user_msg = None
     attachment_contents: list[dict[str, Any]] = []
-    if files:
-        data_dir = request.app.state.config.app.data_dir
-        for f in files:
-            if hasattr(f, "read"):
-                file_data = await f.read()
-                att = storage.save_attachment(
-                    db,
-                    user_msg["id"],
-                    conversation_id,
-                    f.filename or "unnamed",
-                    f.content_type or "application/octet-stream",
-                    file_data,
-                    data_dir,
-                )
-                if f.content_type and f.content_type.startswith("text"):
-                    try:
+
+    if not regenerate:
+        user_msg = storage.create_message(db, conversation_id, "user", message_text)
+
+        if files:
+            data_dir = request.app.state.config.app.data_dir
+            for f in files:
+                if hasattr(f, "read"):
+                    file_data = await f.read()
+                    att = storage.save_attachment(
+                        db,
+                        user_msg["id"],
+                        conversation_id,
+                        f.filename or "unnamed",
+                        f.content_type or "application/octet-stream",
+                        file_data,
+                        data_dir,
+                    )
+                    if f.content_type and f.content_type.startswith("image/"):
+                        b64_data = base64.b64encode(file_data).decode("ascii")
                         attachment_contents.append(
                             {
-                                "type": "text",
-                                "filename": f.filename,
-                                "content": file_data.decode("utf-8", errors="replace"),
+                                "type": "image_url",
+                                "image_url": f"data:{f.content_type};base64,{b64_data}",
                             }
                         )
-                    except Exception:
-                        pass
+                    elif f.content_type and f.content_type.startswith("text"):
+                        try:
+                            attachment_contents.append(
+                                {
+                                    "type": "text",
+                                    "filename": f.filename,
+                                    "content": file_data.decode("utf-8", errors="replace"),
+                                }
+                            )
+                        except Exception:
+                            pass
 
     cancel_event = asyncio.Event()
     _cancel_events[conversation_id].add(cancel_event)
 
-    ai_service = _get_ai_service(request)
+    # Resolve model override: conversation model > project model > global default
+    model_override = conv.get("model") or None
+    project_instructions: str | None = None
+    project_id = conv.get("project_id")
+    if project_id:
+        project = storage.get_project(db, project_id)
+        if project:
+            if not model_override and project.get("model"):
+                model_override = project["model"]
+            if project.get("instructions"):
+                project_instructions = project["instructions"]
+
+    ai_service = _get_ai_service(request, model_override=model_override)
 
     # Build message history
     history = storage.list_messages(db, conversation_id)
     ai_messages: list[dict[str, Any]] = []
     for msg in history:
         content: Any = msg["content"]
-        if msg["id"] == user_msg["id"] and attachment_contents:
-            content = msg["content"]
+        if user_msg and msg["id"] == user_msg["id"] and attachment_contents:
+            parts: list[dict[str, Any]] = [{"type": "text", "text": msg["content"]}]
             for att in attachment_contents:
-                content += f"\n\n[Attached file: {att['filename']}]\n{att['content']}"
+                if att["type"] == "image_url":
+                    parts.append({"type": "image_url", "image_url": {"url": att["image_url"]}})
+                elif att["type"] == "text":
+                    parts.append({"type": "text", "text": f"[Attached file: {att['filename']}]\n{att['content']}"})
+            content = parts
         ai_messages.append({"role": msg["role"], "content": content})
 
     # Get MCP tools if available
     mcp_manager = request.app.state.mcp_manager
     tools = mcp_manager.get_openai_tools() if mcp_manager else None
 
-    is_first_message = len(history) <= 1
+    is_first_message = not regenerate and len(history) <= 1
     first_user_text = message_text
 
     async def event_generator():
@@ -119,7 +167,12 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
             while True:
                 tool_calls_pending: list[dict[str, Any]] = []
 
-                async for event in ai_service.stream_chat(ai_messages, tools=tools, cancel_event=cancel_event):
+                async for event in ai_service.stream_chat(
+                    ai_messages,
+                    tools=tools,
+                    cancel_event=cancel_event,
+                    extra_system_prompt=project_instructions,
+                ):
                     etype = event["event"]
                     if etype == "token":
                         assistant_content += event["data"]["content"]
@@ -233,7 +286,7 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
 @router.post("/conversations/{conversation_id}/stop")
 async def stop_generation(conversation_id: str, request: Request):
     _validate_uuid(conversation_id)
-    db = request.app.state.db
+    db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -247,7 +300,7 @@ async def stop_generation(conversation_id: str, request: Request):
 @router.get("/attachments/{attachment_id}")
 async def get_attachment(attachment_id: str, request: Request):
     _validate_uuid(attachment_id)
-    db = request.app.state.db
+    db = _get_db(request)
     att = storage.get_attachment(db, attachment_id)
     if not att:
         raise HTTPException(status_code=404, detail="Attachment not found")

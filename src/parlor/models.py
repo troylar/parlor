@@ -75,7 +75,32 @@ class AppConfigResponse(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    model: str | None = Field(default=None, max_length=200)
+    folder_id: str | None = Field(default=None, max_length=200)
+
+
+class FolderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    parent_id: str | None = Field(default=None, max_length=200)
+    project_id: str | None = Field(default=None, max_length=200)
+
+
+class FolderUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    parent_id: str | None = Field(default=None, max_length=200)
+    collapsed: bool | None = None
+    position: int | None = Field(default=None, ge=0)
+
+
+class TagCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    color: str = Field(default="#3b82f6", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class TagUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 
 class ConnectionValidation(BaseModel):
@@ -84,5 +109,19 @@ class ConnectionValidation(BaseModel):
     models: list[str] = Field(default_factory=list)
 
 
+class ForkRequest(BaseModel):
+    up_to_position: int = Field(ge=0)
+
+
+class MessageEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=100000)
+
+
+class DatabaseAdd(BaseModel):
+    name: str = Field(min_length=1, max_length=200, pattern=r"^[a-zA-Z0-9_-]+$")
+    path: str = Field(min_length=1, max_length=1000)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(default="", max_length=100000)
+    regenerate: bool = False

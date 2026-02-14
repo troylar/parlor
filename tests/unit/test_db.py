@@ -81,7 +81,7 @@ class TestInitDb:
         conn = _init_in_memory()
         info = conn.execute("PRAGMA table_info(conversations)").fetchall()
         col_names = {r[1] for r in info}
-        assert col_names == {"id", "title", "created_at", "updated_at"}
+        assert col_names == {"id", "title", "model", "project_id", "folder_id", "created_at", "updated_at"}
 
     def test_messages_columns(self) -> None:
         conn = _init_in_memory()
