@@ -35,9 +35,7 @@ const Chat = (() => {
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                if (!App.state.isStreaming) {
-                    sendMessage();
-                }
+                sendMessage();
             }
         });
 
@@ -62,7 +60,7 @@ const Chat = (() => {
     async function sendMessage() {
         const input = document.getElementById('message-input');
         const text = input.value.trim();
-        if (!text || App.state.isStreaming) return;
+        if (!text) return;
 
         const conversationId = App.state.currentConversationId;
         if (!conversationId) {
@@ -71,7 +69,7 @@ const Chat = (() => {
             Sidebar.refresh();
         }
 
-        appendMessage('user', text);
+        const msgEl = appendMessage('user', text);
         input.value = '';
         input.style.height = 'auto';
 
@@ -88,6 +86,40 @@ const Chat = (() => {
         } else {
             body = JSON.stringify({ message: text });
             headers['Content-Type'] = 'application/json';
+        }
+
+        if (App.state.isStreaming) {
+            try {
+                const response = await fetch(`/api/conversations/${App.state.currentConversationId}/chat`, {
+                    method: 'POST',
+                    headers,
+                    body,
+                    credentials: 'same-origin',
+                });
+                if (response.ok) {
+                    const ct = response.headers.get('content-type') || '';
+                    if (ct.includes('application/json')) {
+                        const result = await response.json();
+                        if (result.status === 'queued') {
+                            const badge = document.createElement('span');
+                            badge.className = 'queued-badge';
+                            badge.textContent = 'queued';
+                            msgEl.querySelector('.message-role').appendChild(badge);
+                        }
+                        return;
+                    }
+                } else {
+                    let detail = `Queue failed (${response.status})`;
+                    try {
+                        const err = await response.json();
+                        if (err.detail) detail = err.detail;
+                    } catch (_) { /* ignore parse errors */ }
+                    showToast(detail);
+                }
+            } catch (e) {
+                showToast('Failed to queue message');
+            }
+            return;
         }
 
         await streamChatResponse(App.state.currentConversationId, body, headers);
@@ -175,6 +207,12 @@ const Chat = (() => {
                 break;
             case 'title':
                 Sidebar.updateTitle(App.state.currentConversationId, data.title);
+                break;
+            case 'queued_message':
+                finalizeAssistant();
+                currentAssistantContent = '';
+                currentAssistantEl = appendMessage('assistant', '');
+                document.querySelectorAll('.queued-badge').forEach(b => b.remove());
                 break;
             case 'done':
                 finalizeAssistant();
@@ -733,10 +771,8 @@ const Chat = (() => {
 
     function setStreaming(streaming) {
         App.state.isStreaming = streaming;
-        document.getElementById('btn-send').style.display = streaming ? 'none' : 'flex';
         document.getElementById('btn-stop').style.display = streaming ? 'flex' : 'none';
-        document.getElementById('message-input').disabled = streaming;
-        document.getElementById('btn-send').disabled = streaming;
+        document.getElementById('btn-send').style.display = streaming ? 'inline-flex' : 'flex';
     }
 
     async function stopGeneration() {

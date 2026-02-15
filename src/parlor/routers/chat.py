@@ -12,6 +12,7 @@ from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from ..models import ChatRequest
@@ -23,10 +24,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 MAX_FILES_PER_REQUEST = 10
+MAX_QUEUED_MESSAGES = 10
 
 SAFE_INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 _cancel_events: dict[str, set[asyncio.Event]] = defaultdict(set)
+_message_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
+_active_streams: dict[str, bool] = {}
 
 
 def _validate_uuid(value: str) -> str:
@@ -55,7 +59,7 @@ def _get_ai_service(request: Request, model_override: str | None = None) -> AISe
 
 
 @router.post("/conversations/{conversation_id}/chat")
-async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
+async def chat(conversation_id: str, request: Request):
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -75,6 +79,18 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
         message_text = body.message
         regenerate = body.regenerate
         files = []
+
+    # Queue message if a stream is already active for this conversation
+    if not regenerate and _active_streams.get(conversation_id):
+        queue = _message_queues.get(conversation_id)
+        if queue and queue.qsize() >= MAX_QUEUED_MESSAGES:
+            raise HTTPException(status_code=429, detail="Message queue full (max 10)")
+        storage.create_message(db, conversation_id, "user", message_text)
+        if queue is None:
+            queue = asyncio.Queue()
+            _message_queues[conversation_id] = queue
+        await queue.put({"role": "user", "content": message_text})
+        return JSONResponse({"status": "queued", "position": queue.qsize()})
 
     if regenerate:
         existing = storage.list_messages(db, conversation_id)
@@ -123,6 +139,9 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
 
     cancel_event = asyncio.Event()
     _cancel_events[conversation_id].add(cancel_event)
+    _active_streams[conversation_id] = True
+    if conversation_id not in _message_queues:
+        _message_queues[conversation_id] = asyncio.Queue()
 
     # Resolve model override: conversation model > project model > global default
     model_override = conv.get("model") or None
@@ -188,6 +207,7 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
                 tools_openai=tools,
                 cancel_event=cancel_event,
                 extra_system_prompt=project_instructions,
+                message_queue=_message_queues.get(conversation_id),
             ):
                 kind = agent_event.kind
                 data = agent_event.data
@@ -242,6 +262,10 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
                 elif kind == "error":
                     yield {"event": "error", "data": json.dumps(data)}
 
+                elif kind == "queued_message":
+                    current_assistant_msg = None
+                    yield {"event": "queued_message", "data": json.dumps(data)}
+
                 elif kind == "done":
                     if is_first_message and conv["title"] == "New Conversation":
                         title = await ai_service.generate_title(first_user_text)
@@ -253,6 +277,10 @@ async def chat(conversation_id: str, request: Request) -> EventSourceResponse:
             logger.exception("Chat stream error")
             yield {"event": "error", "data": json.dumps({"message": "An internal error occurred"})}
         finally:
+            _active_streams.pop(conversation_id, None)
+            queue = _message_queues.get(conversation_id)
+            if queue and queue.empty():
+                _message_queues.pop(conversation_id, None)
             _cancel_events.get(conversation_id, set()).discard(cancel_event)
             if not _cancel_events.get(conversation_id):
                 _cancel_events.pop(conversation_id, None)

@@ -116,6 +116,33 @@ async def _compact_messages(
     return True
 
 
+async def _execute_tool(
+    tc: dict[str, Any],
+    tool_executor: Any,
+    cancel_event: asyncio.Event | None,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Execute a single tool call, returning (tool_call, result, status)."""
+    try:
+        if cancel_event:
+            cancel_task = asyncio.create_task(cancel_event.wait())
+            exec_task = asyncio.create_task(tool_executor(tc["function_name"], tc["arguments"]))
+            done, pending = await asyncio.wait({cancel_task, exec_task}, return_when=asyncio.FIRST_COMPLETED)
+            for p in pending:
+                p.cancel()
+                try:
+                    await p
+                except asyncio.CancelledError:
+                    pass
+            if exec_task in done:
+                return tc, exec_task.result(), "success"
+            return tc, {"error": "Cancelled by user"}, "cancelled"
+        else:
+            result = await tool_executor(tc["function_name"], tc["arguments"])
+            return tc, result, "success"
+    except Exception as e:
+        return tc, {"error": str(e)}, "error"
+
+
 async def run_agent_loop(
     ai_service: AIService,
     messages: list[dict[str, Any]],
@@ -124,6 +151,7 @@ async def run_agent_loop(
     cancel_event: asyncio.Event | None = None,
     extra_system_prompt: str | None = None,
     max_iterations: int = 50,
+    message_queue: asyncio.Queue[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -215,6 +243,16 @@ async def run_agent_loop(
             if assistant_content:
                 yield AgentEvent(kind="assistant_message", data={"content": assistant_content})
             yield AgentEvent(kind="done", data={})
+
+            # Check message queue for follow-up messages
+            if message_queue is not None:
+                try:
+                    queued_msg = message_queue.get_nowait()
+                    messages.append(queued_msg)
+                    yield AgentEvent(kind="queued_message", data=queued_msg)
+                    continue
+                except asyncio.QueueEmpty:
+                    pass
             return
 
         # Save assistant message with tool calls into message history
@@ -237,9 +275,9 @@ async def run_agent_loop(
             }
         )
 
-        # Execute each tool call
-        for tc in tool_calls_pending:
-            if cancel_event and cancel_event.is_set():
+        # Execute tool calls in parallel
+        if cancel_event and cancel_event.is_set():
+            for tc in tool_calls_pending:
                 cancelled_result = {"error": "Cancelled by user"}
                 yield AgentEvent(
                     kind="tool_call_end",
@@ -251,57 +289,19 @@ async def run_agent_loop(
                     },
                 )
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(cancelled_result)})
-                continue
-            try:
-                if cancel_event:
-                    cancel_task = asyncio.create_task(cancel_event.wait())
-                    exec_task = asyncio.create_task(tool_executor(tc["function_name"], tc["arguments"]))
-                    done, pending = await asyncio.wait({cancel_task, exec_task}, return_when=asyncio.FIRST_COMPLETED)
-                    for p in pending:
-                        p.cancel()
-                        try:
-                            await p
-                        except asyncio.CancelledError:
-                            pass
-                    if exec_task in done:
-                        result = exec_task.result()
-                    else:
-                        result = {"error": "Cancelled by user"}
-                        yield AgentEvent(
-                            kind="tool_call_end",
-                            data={
-                                "id": tc["id"],
-                                "tool_name": tc["function_name"],
-                                "output": result,
-                                "status": "cancelled",
-                            },
-                        )
-                        messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(result)})
-                        continue
-                else:
-                    result = await tool_executor(tc["function_name"], tc["arguments"])
+        else:
+            tasks = [asyncio.create_task(_execute_tool(tc, tool_executor, cancel_event)) for tc in tool_calls_pending]
+            for coro in asyncio.as_completed(tasks):
+                tc, result, status = await coro
                 yield AgentEvent(
                     kind="tool_call_end",
-                    data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": "success"},
+                    data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": status},
                 )
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tc["id"],
                         "content": json.dumps(result),
-                    }
-                )
-            except Exception as e:
-                error_result = {"error": str(e)}
-                yield AgentEvent(
-                    kind="tool_call_end",
-                    data={"id": tc["id"], "tool_name": tc["function_name"], "output": error_result, "status": "error"},
-                )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": json.dumps(error_result),
                     }
                 )
 
