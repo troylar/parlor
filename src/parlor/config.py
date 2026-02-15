@@ -10,6 +10,101 @@ from typing import Any
 
 import yaml
 
+_BUILTIN_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "read_file": "Read file contents with line numbers",
+    "write_file": "Create or overwrite files",
+    "edit_file": "Exact string replacement in files",
+    "bash": "Run shell commands",
+    "glob_files": "Find files matching glob patterns",
+    "grep": "Regex search across files",
+}
+
+
+def _get_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("parlor")
+    except Exception:
+        return "unknown"
+
+
+def build_runtime_context(
+    *,
+    model: str,
+    builtin_tools: list[str] | None = None,
+    mcp_servers: dict[str, dict[str, Any]] | None = None,
+    interface: str = "web",
+    working_dir: str | None = None,
+    tls_enabled: bool = False,
+) -> str:
+    """Build an XML-tagged runtime context block for the system prompt."""
+    version = _get_version()
+    iface_label = "Web UI" if interface == "web" else "CLI REPL"
+
+    lines = [
+        "<parlor_context>",
+        f"You are Parlor v{version}, running via the {iface_label}.",
+        f"Current model: {model}",
+    ]
+
+    # Tools
+    tool_lines: list[str] = []
+    if builtin_tools:
+        for name in builtin_tools:
+            desc = _BUILTIN_TOOL_DESCRIPTIONS.get(name, "")
+            tool_lines.append(f"  - {name}: {desc}" if desc else f"  - {name}")
+    if mcp_servers:
+        for srv_name, srv_info in mcp_servers.items():
+            status = srv_info.get("status", "unknown")
+            if status == "connected":
+                tools = srv_info.get("tools", [])
+                if isinstance(tools, list):
+                    for t in tools:
+                        t_name = t.get("name", t) if isinstance(t, dict) else t
+                        tool_lines.append(f"  - {t_name} (via MCP server \"{srv_name}\")")
+    if tool_lines:
+        lines.append("")
+        lines.append("Available tools:")
+        lines.extend(tool_lines)
+
+    # MCP servers
+    if mcp_servers:
+        lines.append("")
+        lines.append("MCP servers:")
+        for srv_name, srv_info in mcp_servers.items():
+            status = srv_info.get("status", "unknown")
+            tool_count = srv_info.get("tool_count", 0)
+            lines.append(f"  - {srv_name}: {status} ({tool_count} tools)")
+
+    # Capabilities
+    lines.append("")
+    lines.append("Parlor capabilities:")
+    if interface == "web":
+        lines.append(
+            "  - Web UI: 4 themes (Midnight/Dawn/Aurora/Ember), conversation folders & tags, "
+            "projects with custom instructions, file attachments, command palette (Cmd/Ctrl+K), "
+            "model switching, prompt queuing, shared databases"
+        )
+    else:
+        lines.append(
+            "  - CLI: built-in file/shell tools, MCP integration, skills system, "
+            "@file references, /commands, PARLOR.md project instructions"
+        )
+    lines.append(
+        "  - Shared: SQLite with FTS search, conversation forking & rewinding, "
+        "SSE streaming, OpenAI-compatible API backend"
+    )
+
+    # Config details
+    if interface == "cli" and working_dir:
+        lines.append(f"\nWorking directory: {working_dir}")
+    if interface == "web":
+        lines.append(f"\nTLS: {'enabled' if tls_enabled else 'disabled'}")
+
+    lines.append("</parlor_context>")
+    return "\n".join(lines)
+
 _DEFAULT_SYSTEM_PROMPT = """\
 You are Parlor, a capable AI assistant with direct access to tools for interacting with the user's \
 local system and external services. You operate as a hands-on partner — not a suggestion engine.
