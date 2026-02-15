@@ -30,6 +30,10 @@ _last_spinner_update: float = 0
 # Tool call timing
 _tool_start: float = 0
 
+# Dedup tracking for repeated identical tool results
+_dedup_summary: str = ""
+_dedup_count: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Verbosity
@@ -73,6 +77,7 @@ def clear_turn_history() -> None:
 
 def save_turn_history() -> None:
     """Save current turn tools to history. Called at end of each turn."""
+    _flush_dedup()
     if _current_turn_tools:
         _tool_history.clear()
         _tool_history.extend(_current_turn_tools)
@@ -90,9 +95,8 @@ def _humanize_tool(tool_name: str, arguments: dict[str, Any]) -> str:
     # Built-in tools: extract the key argument
     if name_lower == "bash":
         cmd = arguments.get("command", "")
-        # Show first ~60 chars of command
-        if len(cmd) > 60:
-            cmd = cmd[:57] + "..."
+        if len(cmd) > 100:
+            cmd = cmd[:97] + "..."
         return f"bash {cmd}"
     elif name_lower in ("file_read", "read_file"):
         path = arguments.get("path", arguments.get("file_path", ""))
@@ -243,6 +247,32 @@ def stop_thinking() -> float:
 # ---------------------------------------------------------------------------
 
 
+def flush_buffered_text() -> None:
+    """Flush any buffered AI text to screen immediately.
+
+    Called before tool calls start so the AI's task explanation
+    (e.g. 'Let me review your auth files') renders before the tool output.
+    """
+    global _streaming_buffer
+    text = "".join(_streaming_buffer)
+    _streaming_buffer = []
+    if not text.strip():
+        return
+    from rich.markdown import Markdown
+    from rich.padding import Padding
+
+    _stdout_console.print(Padding(Markdown(text), (0, 2, 0, 2)))
+
+
+def _flush_dedup() -> None:
+    """Flush accumulated dedup counter if needed."""
+    global _dedup_summary, _dedup_count
+    if _dedup_count > 1:
+        console.print(f"    [dim]... repeated {_dedup_count} times total[/dim]")
+    _dedup_summary = ""
+    _dedup_count = 0
+
+
 def render_token(content: str) -> None:
     """Buffer token content silently (no streaming output)."""
     _streaming_buffer.append(content)
@@ -251,6 +281,7 @@ def render_token(content: str) -> None:
 def render_response_end() -> None:
     """Render the complete buffered response with Rich Markdown."""
     global _streaming_buffer
+    _flush_dedup()
     full_text = "".join(_streaming_buffer)
     _streaming_buffer = []
 
@@ -276,6 +307,9 @@ def render_newline() -> None:
 def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
     """Show tool call breadcrumb. Static print (no live spinner) for terminal compatibility."""
     global _tool_start
+
+    # Flush any buffered AI text so task explanations appear before tool output
+    flush_buffered_text()
 
     summary = _humanize_tool(tool_name, arguments)
 
@@ -337,22 +371,37 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
         return
 
     # Build the result line
+    global _dedup_summary, _dedup_count
     status_icon = "[green]  ✓[/green]" if status == "success" else "[red]  ✗[/red]"
     elapsed_str = f" {elapsed:.1f}s" if elapsed >= 0.1 else ""
+
+    # Dedup: collapse identical consecutive tool results (compact/detailed only)
+    if status == "success" and summary == _dedup_summary:
+        _dedup_count += 1
+        return
+
+    # Different tool or first occurrence — flush previous dedup, print new line
+    _flush_dedup()
 
     if status != "success":
         console.print(f"{status_icon} {escape(summary)}{elapsed_str}")
         err = _error_summary(output)
         if err:
             console.print(f"    [red]{escape(err)}[/red]")
+        _dedup_summary = ""
+        _dedup_count = 0
     elif _verbosity == Verbosity.DETAILED:
         detail = _output_summary(output)
         console.print(f"{status_icon} {escape(summary)}{elapsed_str}")
         if detail:
             console.print(f"    [grey62]{escape(detail)}[/grey62]")
+        _dedup_summary = summary
+        _dedup_count = 1
     else:
         # Compact: just result line
         console.print(f"{status_icon} {escape(summary)}{elapsed_str}")
+        _dedup_summary = summary
+        _dedup_count = 1
 
 
 # ---------------------------------------------------------------------------

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from parlor.cli.renderer import (
     Verbosity,
+    _flush_dedup,
     _format_tokens,
     _humanize_tool,
     _output_summary,
     _short_path,
     clear_turn_history,
     cycle_verbosity,
+    flush_buffered_text,
     get_verbosity,
     save_turn_history,
     set_verbosity,
@@ -56,10 +58,15 @@ class TestHumanizeTool:
         assert result == "bash git status"
 
     def test_bash_long_command_truncated(self) -> None:
-        long_cmd = "x" * 100
+        long_cmd = "x" * 150
         result = _humanize_tool("bash", {"command": long_cmd})
-        assert len(result) < 70
+        assert len(result) < 110
         assert result.endswith("...")
+
+    def test_bash_medium_command_not_truncated(self) -> None:
+        cmd = "python manage.py test --settings=config.test"
+        result = _humanize_tool("bash", {"command": cmd})
+        assert result == f"bash {cmd}"
 
     def test_file_read(self) -> None:
         result = _humanize_tool("file_read", {"path": "src/config.py"})
@@ -200,3 +207,48 @@ class TestTurnHistory:
         _current_turn_tools.append({"tool_name": "test"})
         clear_turn_history()
         assert len(_current_turn_tools) == 0
+
+
+class TestDedup:
+    def setup_method(self) -> None:
+        import parlor.cli.renderer as r
+
+        r._dedup_summary = ""
+        r._dedup_count = 0
+
+    def test_flush_dedup_resets_state(self) -> None:
+        import parlor.cli.renderer as r
+
+        r._dedup_summary = "Reading test.py"
+        r._dedup_count = 3
+        _flush_dedup()
+        assert r._dedup_summary == ""
+        assert r._dedup_count == 0
+
+    def test_flush_dedup_noop_when_empty(self) -> None:
+        _flush_dedup()  # Should not crash
+
+
+class TestFlushBufferedText:
+    def setup_method(self) -> None:
+        import parlor.cli.renderer as r
+
+        r._streaming_buffer.clear()
+
+    def test_flush_clears_buffer(self) -> None:
+        import parlor.cli.renderer as r
+
+        r._streaming_buffer.append("hello")
+        r._streaming_buffer.append(" world")
+        flush_buffered_text()
+        assert len(r._streaming_buffer) == 0
+
+    def test_flush_noop_when_empty(self) -> None:
+        flush_buffered_text()  # Should not crash
+
+    def test_flush_noop_for_whitespace(self) -> None:
+        import parlor.cli.renderer as r
+
+        r._streaming_buffer.append("   \n  ")
+        flush_buffered_text()
+        assert len(r._streaming_buffer) == 0
