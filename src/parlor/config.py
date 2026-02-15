@@ -62,7 +62,7 @@ def build_runtime_context(
                 if isinstance(tools, list):
                     for t in tools:
                         t_name = t.get("name", t) if isinstance(t, dict) else t
-                        tool_lines.append(f"  - {t_name} (via MCP server \"{srv_name}\")")
+                        tool_lines.append(f'  - {t_name} (via MCP server "{srv_name}")')
     if tool_lines:
         lines.append("")
         lines.append("Available tools:")
@@ -104,6 +104,7 @@ def build_runtime_context(
 
     lines.append("</parlor_context>")
     return "\n".join(lines)
+
 
 _DEFAULT_SYSTEM_PROMPT = """\
 You are Parlor, a capable AI assistant with direct access to tools for interacting with the user's \
