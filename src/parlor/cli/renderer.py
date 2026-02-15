@@ -498,13 +498,19 @@ def render_error(message: str) -> None:
 
 def _get_build_date() -> str:
     try:
-        from .._build_info import BUILD_TIMESTAMP  # type: ignore[import-not-found]
         from datetime import datetime
+
+        from .._build_info import BUILD_TIMESTAMP  # type: ignore[import-not-found]
 
         dt = datetime.fromisoformat(BUILD_TIMESTAMP)
         return dt.astimezone().strftime("%b %d, %Y %I:%M %p")
     except Exception:
         return ""
+
+
+_BOX_TOP = "\u256d" + "\u2500" * 29 + "\u256e"
+_BOX_BOT = "\u2570" + "\u2500" * 29 + "\u256f"
+_SEP = " \u00b7 "
 
 
 def render_welcome(
@@ -520,10 +526,10 @@ def render_welcome(
     branch = f" ({git_branch})" if git_branch else ""
 
     console.print()
-    console.print("[#C5A059]  \u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e[/]")
+    console.print(f"[#C5A059]  {_BOX_TOP}[/]")
     console.print("[#C5A059]  \u2502         [bold]P A R L O R[/bold]         \u2502[/]")
     console.print("[#C5A059]  \u2502    [#94A3B8]the digital speakeasy[/]    \u2502[/]")
-    console.print("[#C5A059]  \u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f[/]")
+    console.print(f"[#C5A059]  {_BOX_BOT}[/]")
     console.print()
 
     version_parts = []
@@ -532,7 +538,7 @@ def render_welcome(
     if build_date:
         version_parts.append(f"Built {build_date}")
     if version_parts:
-        console.print(f"  [dim]{' \u00b7 '.join(version_parts)}[/dim]")
+        console.print(f"  [dim]{_SEP.join(version_parts)}[/dim]")
     console.print("  [dim]github.com/troylar/parlor[/dim]")
     console.print()
 
@@ -540,7 +546,7 @@ def render_welcome(
     parts = [escape(model), f"{tool_count} tools"]
     if instructions_loaded:
         parts.append("instructions")
-    console.print(f"  [dim]{' \u00b7 '.join(parts)}[/dim]")
+    console.print(f"  [dim]{_SEP.join(parts)}[/dim]")
     console.print()
     console.print("  [dim]Type /help for commands[/dim]\n")
 
@@ -548,7 +554,7 @@ def render_welcome(
 def render_update_available(current: str, latest: str) -> None:
     console.print(
         f"  [#C5A059]Update available:[/] [dim]{current} \u2192 {latest}[/dim]"
-        f" [dim]\u2014 pip install --upgrade parlor[/dim]\n"
+        " [dim]\u2014 pip install --upgrade parlor[/dim]\n"
     )
 
 
