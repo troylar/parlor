@@ -1,0 +1,119 @@
+site_name: Parlor
+site_url: https://parlor.readthedocs.io
+site_description: A private parlor for AI conversation
+repo_url: https://github.com/troylar/parlor
+repo_name: troylar/parlor
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/troylar/parlor
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/parlor/
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - getting-started/installation.md
+    - getting-started/quickstart.md
+    - getting-started/concepts.md
+  - Web UI:
+    - web-ui/index.md
+    - web-ui/conversations.md
+    - web-ui/projects.md
+    - web-ui/streaming.md
+    - web-ui/themes.md
+    - web-ui/keyboard-shortcuts.md
+    - web-ui/attachments.md
+    - web-ui/shared-databases.md
+  - CLI:
+    - cli/index.md
+    - cli/tools.md
+    - cli/skills.md
+    - cli/file-references.md
+    - cli/context-management.md
+    - cli/commands.md
+    - cli/project-instructions.md
+  - Configuration:
+    - configuration/index.md
+    - configuration/config-file.md
+    - configuration/environment-variables.md
+    - configuration/mcp-servers.md
+    - configuration/tls.md
+  - Security:
+    - security/index.md
+    - security/authentication.md
+    - security/tool-safety.md
+    - security/hardening.md
+  - API:
+    - api/index.md
+    - api/conversations.md
+    - api/messages.md
+    - api/projects.md
+    - api/config.md
+  - Tutorials:
+    - tutorials/connect-to-ollama.md
+    - tutorials/connect-to-azure.md
+    - tutorials/add-mcp-tools.md
+    - tutorials/build-custom-skills.md
+  - Advanced:
+    - advanced/architecture.md
+    - advanced/contributing.md
+    - advanced/changelog.md
