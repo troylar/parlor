@@ -341,6 +341,11 @@ async def run_cli(
 
             mcp_manager = McpManager(config.mcp_servers)
             await mcp_manager.startup()
+            # Show per-server errors at startup so user knows immediately
+            for name, status in mcp_manager.get_server_statuses().items():
+                if status.get("status") == "error":
+                    err = status.get("error_message", "unknown error")
+                    renderer.render_error(f"MCP '{name}': {err}")
         except Exception as e:
             logger.warning("Failed to start MCP servers: %s", e)
             renderer.render_error(f"MCP startup failed: {e}")
@@ -789,6 +794,15 @@ async def _run_repl(
                         renderer.render_mcp_status(mcp_manager.get_server_statuses())
                     else:
                         renderer.console.print("[grey62]No MCP servers configured.[/grey62]\n")
+                elif len(parts) >= 2 and parts[1].lower() == "status":
+                    # /mcp status [name] — detailed diagnostics
+                    if not mcp_manager:
+                        renderer.render_error("No MCP servers configured")
+                        continue
+                    if len(parts) >= 3:
+                        renderer.render_mcp_server_detail(parts[2], mcp_manager.get_server_statuses(), mcp_manager)
+                    else:
+                        renderer.render_mcp_status(mcp_manager.get_server_statuses())
                 elif len(parts) >= 3:
                     action = parts[1].lower()
                     server_name = parts[2]
@@ -798,22 +812,35 @@ async def _run_repl(
                     try:
                         if action == "connect":
                             await mcp_manager.connect_server(server_name)
-                            renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
+                            # Show result (might have failed gracefully)
+                            status = mcp_manager.get_server_statuses().get(server_name, {})
+                            if status.get("status") == "connected":
+                                renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
+                            else:
+                                err = status.get("error_message", "unknown error")
+                                renderer.render_error(f"Failed to connect '{server_name}': {err}")
                         elif action == "disconnect":
                             await mcp_manager.disconnect_server(server_name)
                             renderer.console.print(f"[grey62]Disconnected: {server_name}[/grey62]\n")
                         elif action == "reconnect":
                             await mcp_manager.reconnect_server(server_name)
-                            renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
+                            status = mcp_manager.get_server_statuses().get(server_name, {})
+                            if status.get("status") == "connected":
+                                renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
+                            else:
+                                err = status.get("error_message", "unknown error")
+                                renderer.render_error(f"Failed to reconnect '{server_name}': {err}")
                         else:
-                            renderer.render_error(f"Unknown action: {action}. Use connect, disconnect, or reconnect.")
+                            renderer.render_error(
+                                f"Unknown action: {action}. Use connect, disconnect, reconnect, or status."
+                            )
                             continue
                         _rebuild_tools()
                     except ValueError as e:
                         renderer.render_error(str(e))
                 else:
                     renderer.console.print(
-                        "[grey62]Usage: /mcp [connect|disconnect|reconnect <server_name>][/grey62]\n"
+                        "[grey62]Usage: /mcp [status [name]|connect|disconnect|reconnect <name>][/grey62]\n"
                     )
                 continue
             elif cmd == "/model":

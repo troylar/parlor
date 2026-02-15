@@ -147,6 +147,28 @@ class TestLoadConfig:
         assert config.mcp_servers[0].transport == "stdio"
         assert config.mcp_servers[0].command == "python"
         assert config.mcp_servers[0].args == ["-m", "my_server"]
+        assert config.mcp_servers[0].timeout == 30.0  # default
+
+    def test_mcp_server_custom_timeout(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                },
+                "mcp_servers": [
+                    {
+                        "name": "slow-server",
+                        "transport": "stdio",
+                        "command": "python",
+                        "timeout": 60,
+                    }
+                ],
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.mcp_servers[0].timeout == 60.0
 
     def test_nonexistent_config_file_raises(self, tmp_path: Path) -> None:
         missing = tmp_path / "does_not_exist.yaml"

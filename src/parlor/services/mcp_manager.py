@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import os
@@ -92,64 +93,135 @@ class McpManager:
             logger.warning("MCP SDK not installed, skipping MCP server connections")
             return
 
+        logger.info("Starting %d MCP server(s): %s", len(self._configs), ", ".join(self._configs))
         for name, config in self._configs.items():
             await self._connect_one(config)
 
+        # Log startup summary
+        connected = [n for n, s in self._server_status.items() if s.get("status") == "connected"]
+        failed = [n for n, s in self._server_status.items() if s.get("status") == "error"]
+        if failed:
+            logger.warning(
+                "MCP startup complete: %d connected, %d failed (%s)",
+                len(connected),
+                len(failed),
+                ", ".join(failed),
+            )
+        else:
+            logger.info("MCP startup complete: %d/%d connected", len(connected), len(self._configs))
+
+    def _describe_config(self, config: McpServerConfig) -> str:
+        """Build a human-readable description of a server config for diagnostics."""
+        parts = [f"name={config.name}", f"transport={config.transport}"]
+        if config.command:
+            cmd = f"{config.command} {' '.join(config.args)}" if config.args else config.command
+            parts.append(f"command={cmd}")
+        if config.url:
+            parts.append(f"url={config.url}")
+        if config.env:
+            parts.append(f"env_keys={list(config.env.keys())}")
+        parts.append(f"timeout={config.timeout}s")
+        return ", ".join(parts)
+
     async def _connect_one(self, config: McpServerConfig) -> None:
+        desc = self._describe_config(config)
+        logger.info("Connecting MCP server '%s' [%s] (timeout=%gs)", config.name, desc, config.timeout)
+
+        try:
+            await asyncio.wait_for(self._do_connect(config), timeout=config.timeout)
+        except asyncio.TimeoutError:
+            error_msg = f"Connection timed out after {config.timeout}s"
+            logger.error("MCP server '%s': %s [%s]", config.name, error_msg, desc)
+            self._server_status[config.name] = {
+                "status": "error",
+                "tool_count": 0,
+                "error_message": error_msg,
+            }
+
+    async def _do_connect(self, config: McpServerConfig) -> None:
+        """Inner connection logic, called under a timeout by _connect_one."""
+        desc = self._describe_config(config)
+
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
         except ImportError:
+            msg = "MCP SDK not installed (pip install mcp)"
+            logger.error("MCP server '%s': %s", config.name, msg)
             self._server_status[config.name] = {
                 "status": "error",
                 "tool_count": 0,
-                "error_message": "MCP SDK not installed",
+                "error_message": msg,
             }
             return
 
         stack = AsyncExitStack()
         try:
             if config.transport == "stdio" and config.command:
-                _validate_command(config.command)
+                resolved = shutil.which(config.command)
+                if resolved is None:
+                    raise FileNotFoundError(
+                        f"Command '{config.command}' not found on PATH. Searched: {os.environ.get('PATH', '(empty)')}"
+                    )
+                logger.debug(
+                    "MCP '%s': command '%s' resolved to '%s'",
+                    config.name,
+                    config.command,
+                    resolved,
+                )
                 server_params = StdioServerParameters(
                     command=config.command,
                     args=config.args,
                     env={**os.environ, **config.env} if config.env else None,
                 )
+                logger.debug("MCP '%s': launching stdio transport", config.name)
                 stdio_transport = await stack.enter_async_context(stdio_client(server_params))
                 read_stream, write_stream = stdio_transport
+                logger.debug("MCP '%s': initializing session", config.name)
                 session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
                 await session.initialize()
+                logger.debug("MCP '%s': session initialized", config.name)
 
             elif config.transport == "sse" and config.url:
                 try:
                     from mcp.client.sse import sse_client
                 except ImportError:
+                    msg = "SSE client not available (pip install mcp[sse])"
+                    logger.error("MCP server '%s': %s", config.name, msg)
                     self._server_status[config.name] = {
                         "status": "error",
                         "tool_count": 0,
-                        "error_message": "SSE client not available",
+                        "error_message": msg,
                     }
-                    logger.warning(f"SSE client not available for MCP server '{config.name}'")
                     return
 
                 _validate_sse_url(config.url)
+                logger.debug("MCP '%s': connecting SSE to %s", config.name, config.url)
                 sse_transport = await stack.enter_async_context(sse_client(config.url))
                 read_stream, write_stream = sse_transport
+                logger.debug("MCP '%s': initializing session", config.name)
                 session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
                 await session.initialize()
+                logger.debug("MCP '%s': session initialized", config.name)
 
             else:
+                msg = (
+                    f"Invalid transport config: transport='{config.transport}', "
+                    f"command={'set' if config.command else 'missing'}, "
+                    f"url={'set' if config.url else 'missing'}"
+                )
+                logger.error("MCP server '%s': %s", config.name, msg)
                 self._server_status[config.name] = {
                     "status": "error",
                     "tool_count": 0,
-                    "error_message": f"Invalid transport config for '{config.name}'",
+                    "error_message": msg,
                 }
                 return
 
             self._exit_stacks[config.name] = stack
             self._sessions[config.name] = session
 
+            logger.debug("MCP '%s': listing tools", config.name)
             tools_result = await session.list_tools()
             server_tools: list[dict[str, Any]] = []
             for tool in tools_result.tools:
@@ -164,11 +236,17 @@ class McpManager:
             self._server_tools[config.name] = server_tools
             self._rebuild_tool_map()
 
+            tool_names = [t["name"] for t in server_tools]
             self._server_status[config.name] = {
                 "status": "connected",
                 "tool_count": len(server_tools),
             }
-            logger.info(f"MCP server '{config.name}' connected with {len(server_tools)} tools")
+            logger.info(
+                "MCP server '%s' connected: %d tools (%s)",
+                config.name,
+                len(server_tools),
+                ", ".join(tool_names[:10]) + ("..." if len(tool_names) > 10 else ""),
+            )
 
         except BaseException as e:
             # Close the exit stack to clean up any partially-entered async
@@ -177,13 +255,25 @@ class McpManager:
             try:
                 await stack.aclose()
             except Exception:
-                logger.debug(f"Error closing stack for '{config.name}' during cleanup", exc_info=True)
+                logger.debug(
+                    "Error closing stack for '%s' during cleanup",
+                    config.name,
+                    exc_info=True,
+                )
 
-            logger.warning(f"Failed to connect to MCP server '{config.name}': {e}")
+            error_type = type(e).__name__
+            error_msg = f"{error_type}: {e}"
+            logger.error(
+                "MCP server '%s' failed to connect: %s [%s]",
+                config.name,
+                error_msg,
+                desc,
+                exc_info=True,
+            )
             self._server_status[config.name] = {
                 "status": "error",
                 "tool_count": 0,
-                "error_message": str(e),
+                "error_message": error_msg,
             }
 
     def _rebuild_tool_map(self) -> None:

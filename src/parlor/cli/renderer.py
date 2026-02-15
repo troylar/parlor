@@ -145,6 +145,7 @@ def render_help() -> None:
     console.print("  /tools      - List available tools")
     console.print("  /skills     - List available skills")
     console.print("  /mcp        - Show MCP server status / manage servers")
+    console.print("  /mcp status <name> - Detailed diagnostics for a server")
     console.print("  /model NAME - Switch to a different model")
     console.print("  /quit       - Exit")
     console.print("  Escape      - Cancel current response")
@@ -202,7 +203,63 @@ def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
 
     console.print()
     console.print(table)
-    console.print("  [grey62]Usage: /mcp connect|disconnect|reconnect <server_name>[/grey62]\n")
+    console.print("  [grey62]Usage: /mcp [status <name>|connect|disconnect|reconnect <name>][/grey62]\n")
+
+
+def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp_manager: Any) -> None:
+    """Render detailed diagnostics for a single MCP server."""
+    if name not in statuses:
+        console.print(f"\n[red]Unknown server: {escape(name)}[/red]")
+        known = ", ".join(statuses.keys())
+        console.print(f"  [grey62]Available: {known}[/grey62]\n")
+        return
+
+    info = statuses[name]
+    status = info.get("status", "unknown")
+
+    if status == "connected":
+        status_styled = "[green]connected[/green]"
+    elif status == "error":
+        status_styled = "[red]error[/red]"
+    else:
+        status_styled = f"[grey62]{status}[/grey62]"
+
+    console.print(f"\n[bold]MCP Server: {escape(name)}[/bold]")
+    console.print(f"  Status:    {status_styled}")
+    console.print(f"  Transport: {info.get('transport', '?')}")
+
+    # Show config details
+    config = mcp_manager._configs.get(name)
+    if config:
+        if config.command:
+            cmd = f"{config.command} {' '.join(config.args)}" if config.args else config.command
+            console.print(f"  Command:   {escape(cmd)}")
+        if config.url:
+            console.print(f"  URL:       {escape(config.url)}")
+        if config.env:
+            console.print(f"  Env keys:  {', '.join(config.env.keys())}")
+        console.print(f"  Timeout:   {config.timeout}s")
+
+    # Show error details
+    err = info.get("error_message")
+    if err:
+        console.print(f"  [red]Error:     {escape(err)}[/red]")
+
+    # Show tools if connected
+    tool_count = info.get("tool_count", 0)
+    console.print(f"  Tools:     {tool_count}")
+    if tool_count > 0:
+        server_tools = mcp_manager._server_tools.get(name, [])
+        for t in server_tools:
+            desc = t.get("description", "")
+            if desc and len(desc) > 60:
+                desc = desc[:60] + "..."
+            if desc:
+                console.print(f"    - {t['name']} [grey62]({desc})[/grey62]")
+            else:
+                console.print(f"    - {t['name']}")
+
+    console.print()
 
 
 def render_context_footer(

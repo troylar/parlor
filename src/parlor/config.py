@@ -86,6 +86,7 @@ class McpServerConfig:
     args: list[str] = field(default_factory=list)
     url: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    timeout: float = 30.0  # seconds; connection timeout per server
 
 
 @dataclass
@@ -187,6 +188,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
                 args=srv.get("args", []),
                 url=srv.get("url"),
                 env=env,
+                timeout=float(srv.get("timeout", 30.0)),
             )
         )
 

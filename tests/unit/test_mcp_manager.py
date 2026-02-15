@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
@@ -173,7 +174,7 @@ class TestMcpManagerFailedConnection:
 
         with (
             patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager._validate_command"),
+            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(config)
 
@@ -199,7 +200,7 @@ class TestMcpManagerFailedConnection:
 
         with (
             patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager._validate_command"),
+            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(config)
 
@@ -251,7 +252,7 @@ class TestMcpManagerFailedConnection:
 
         with (
             patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager._validate_command"),
+            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(config)
 
@@ -284,10 +285,104 @@ class TestMcpManagerFailedConnection:
 
         with (
             patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager._validate_command"),
+            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(configs[0])
 
         assert mgr.get_all_tools() == []
         assert mgr.get_openai_tools() is None
         assert mgr.get_tool_server_name("any_tool") == "unknown"
+
+    @pytest.mark.asyncio()
+    async def test_error_message_includes_exception_type(self) -> None:
+        """Error message should include the exception class name for diagnostics."""
+        config = McpServerConfig(name="typed-error", transport="stdio", command="echo")
+        mgr = McpManager([config])
+
+        mock_stack = AsyncMock(spec=AsyncExitStack)
+        mock_stack.enter_async_context = AsyncMock(side_effect=TimeoutError("timed out after 30s"))
+
+        with (
+            patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
+            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+        ):
+            await mgr._connect_one(config)
+
+        err = mgr._server_status["typed-error"]["error_message"]
+        assert "TimeoutError" in err
+        assert "timed out after 30s" in err
+
+    @pytest.mark.asyncio()
+    async def test_command_not_found_shows_path(self) -> None:
+        """FileNotFoundError should mention PATH when command is missing."""
+        config = McpServerConfig(name="missing-cmd", transport="stdio", command="nonexistent-mcp-server")
+        mgr = McpManager([config])
+
+        with patch("parlor.services.mcp_manager.shutil.which", return_value=None):
+            await mgr._connect_one(config)
+
+        err = mgr._server_status["missing-cmd"]["error_message"]
+        assert "not found on PATH" in err
+        assert "nonexistent-mcp-server" in err
+
+    def test_describe_config_stdio(self) -> None:
+        """_describe_config should include command and args."""
+        config = McpServerConfig(name="jira", transport="stdio", command="npx", args=["-y", "jira-mcp-server"])
+        mgr = McpManager([config])
+        desc = mgr._describe_config(config)
+        assert "jira" in desc
+        assert "stdio" in desc
+        assert "npx -y jira-mcp-server" in desc
+
+    def test_describe_config_sse(self) -> None:
+        """_describe_config should include URL for SSE."""
+        config = McpServerConfig(name="remote", transport="sse", url="https://mcp.example.com/sse")
+        mgr = McpManager([config])
+        desc = mgr._describe_config(config)
+        assert "sse" in desc
+        assert "https://mcp.example.com/sse" in desc
+
+    def test_describe_config_with_env(self) -> None:
+        """_describe_config should list env key names (not values)."""
+        config = McpServerConfig(
+            name="secret", transport="stdio", command="cmd", env={"API_KEY": "sk-123", "TOKEN": "abc"}
+        )
+        mgr = McpManager([config])
+        desc = mgr._describe_config(config)
+        assert "API_KEY" in desc
+        assert "TOKEN" in desc
+        assert "sk-123" not in desc  # values must not leak
+
+    @pytest.mark.asyncio()
+    async def test_connection_timeout(self) -> None:
+        """Server that hangs should be killed after timeout."""
+        config = McpServerConfig(name="slow-server", transport="stdio", command="echo", timeout=0.1)
+        mgr = McpManager([config])
+
+        async def hang_forever(_config: McpServerConfig) -> None:
+            await asyncio.sleep(999)
+
+        with patch.object(mgr, "_do_connect", side_effect=hang_forever):
+            await mgr._connect_one(config)
+
+        assert mgr._server_status["slow-server"]["status"] == "error"
+        assert "timed out" in mgr._server_status["slow-server"]["error_message"].lower()
+
+    @pytest.mark.asyncio()
+    async def test_custom_timeout_from_config(self) -> None:
+        """Timeout value should come from config."""
+        config = McpServerConfig(name="custom", transport="stdio", command="echo", timeout=60.0)
+        mgr = McpManager([config])
+        assert mgr._configs["custom"].timeout == 60.0
+
+    def test_default_timeout(self) -> None:
+        """Default timeout should be 30s."""
+        config = McpServerConfig(name="default", transport="stdio", command="echo")
+        assert config.timeout == 30.0
+
+    def test_describe_config_includes_timeout(self) -> None:
+        """_describe_config should show timeout."""
+        config = McpServerConfig(name="t", transport="stdio", command="echo", timeout=15.0)
+        mgr = McpManager([config])
+        desc = mgr._describe_config(config)
+        assert "timeout=15.0s" in desc
