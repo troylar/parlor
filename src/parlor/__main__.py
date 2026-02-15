@@ -45,9 +45,9 @@ def _load_config_or_exit() -> tuple[Path, object]:
 
 
 async def _validate_ai_connection(config) -> None:
-    from .services.ai_service import AIService
+    from .services.ai_service import create_ai_service
 
-    ai_service = AIService(config.ai)
+    ai_service = create_ai_service(config.ai)
     valid, message, models = await ai_service.validate_connection()
     if valid:
         print(f"AI connection: OK ({config.ai.model})")
@@ -59,9 +59,9 @@ async def _validate_ai_connection(config) -> None:
 
 
 async def _test_connection(config) -> None:
-    from .services.ai_service import AIService
+    from .services.ai_service import create_ai_service
 
-    ai_service = AIService(config.ai)
+    ai_service = create_ai_service(config.ai)
 
     print("Config:")
     print(f"  Endpoint: {config.ai.base_url}")

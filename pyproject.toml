@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "parlor"
-version = "0.8.3"
+version = "0.9.0"
 description = "Parlor - a private parlor for AI conversation"
 readme = "README.md"
 license = "MIT"
