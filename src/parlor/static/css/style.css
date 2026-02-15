@@ -9,6 +9,8 @@
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/inter-700.woff2') format('woff2'); }
 @font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/jetbrains-mono-regular.woff2') format('woff2'); }
 @font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/jetbrains-mono-500.woff2') format('woff2'); }
+@font-face { font-family: 'Cinzel'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/cinzel-regular.woff2') format('woff2'); }
+@font-face { font-family: 'Cinzel'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/cinzel-700.woff2') format('woff2'); }
 
 /* ============================================================
    THEME SYSTEM — CSS Custom Properties
@@ -21,13 +23,14 @@
     --easing-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
     --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --font-mono: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+    --font-deco: 'Cinzel', 'Georgia', serif;
 }
 
-/* --- Midnight (Default) — Premium tech dark --- */
+/* --- Midnight (Default) — Digital Speakeasy dark --- */
 [data-theme="midnight"], :root {
-    --bg-primary: #0f1117;
+    --bg-primary: #0f1115;
     --bg-secondary: #13151d;
-    --bg-sidebar: rgba(15, 17, 23, 0.85);
+    --bg-sidebar: rgba(15, 17, 21, 0.85);
     --bg-input: #1a1d27;
     --bg-hover: #1e2130;
     --bg-active: #252838;
@@ -35,22 +38,23 @@
     --bg-user-msg: #1e2330;
     --bg-assistant-msg: transparent;
     --bg-tool-call: #141729;
-    --bg-gradient-start: #0f1117;
+    --bg-gradient-start: #0f1115;
     --bg-gradient-end: #0d0f15;
 
     --text-primary: #e4e5e9;
-    --text-secondary: #9295a0;
+    --text-secondary: #94A3B8;
     --text-muted: #5c5f6e;
 
     --border-color: rgba(255, 255, 255, 0.06);
-    --border-glow: rgba(59, 130, 246, 0.2);
+    --border-glow: rgba(197, 160, 89, 0.2);
 
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --accent-glow: rgba(59, 130, 246, 0.3);
-    --accent-subtle: rgba(59, 130, 246, 0.1);
-    --accent-gradient-start: #3b82f6;
-    --accent-gradient-end: #2563eb;
+    --accent: #C5A059;
+    --accent-hover: #b08d4a;
+    --accent-glow: rgba(197, 160, 89, 0.3);
+    --accent-subtle: rgba(197, 160, 89, 0.1);
+    --accent-gradient-start: #C5A059;
+    --accent-gradient-end: #b08d4a;
+    --accent-blue: #3B82F6;
 
     --error: #ef4444;
     --warning: #f59e0b;
@@ -62,20 +66,20 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
     --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
+    --shadow-glow: 0 0 20px rgba(197, 160, 89, 0.15);
 
-    --input-glow: 0 0 0 2px rgba(59, 130, 246, 0.15), 0 0 20px rgba(59, 130, 246, 0.08);
+    --input-glow: 0 0 0 2px rgba(197, 160, 89, 0.15), 0 0 20px rgba(197, 160, 89, 0.08);
     --sidebar-blur: blur(20px);
     --sidebar-opacity: 0.85;
     --modal-backdrop-blur: blur(8px);
 
-    --topbar-bg: rgba(15, 17, 23, 0.8);
+    --topbar-bg: rgba(15, 17, 21, 0.8);
 
     --scrollbar-thumb: #2a2d3a;
     --scrollbar-track: transparent;
 
-    --msg-user-border: var(--accent);
-    --welcome-gradient: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    --msg-user-border: var(--accent-blue);
+    --welcome-gradient: linear-gradient(135deg, #C5A059, #3B82F6);
 }
 
 /* --- Dawn — Warm editorial light --- */
@@ -89,7 +93,7 @@
     --bg-card: #ffffff;
     --bg-user-msg: #ffffff;
     --bg-assistant-msg: transparent;
-    --bg-tool-call: #f5f0fa;
+    --bg-tool-call: #faf6ee;
     --bg-gradient-start: #faf8f5;
     --bg-gradient-end: #f5f2ed;
 
@@ -98,14 +102,15 @@
     --text-muted: #9a9a9a;
 
     --border-color: rgba(0, 0, 0, 0.08);
-    --border-glow: rgba(124, 92, 191, 0.2);
+    --border-glow: rgba(156, 124, 58, 0.2);
 
-    --accent: #7c5cbf;
-    --accent-hover: #6a4aad;
-    --accent-glow: rgba(124, 92, 191, 0.2);
-    --accent-subtle: rgba(124, 92, 191, 0.08);
-    --accent-gradient-start: #7c5cbf;
-    --accent-gradient-end: #6a4aad;
+    --accent: #9C7C3A;
+    --accent-hover: #86692e;
+    --accent-glow: rgba(156, 124, 58, 0.2);
+    --accent-subtle: rgba(156, 124, 58, 0.08);
+    --accent-gradient-start: #9C7C3A;
+    --accent-gradient-end: #86692e;
+    --accent-blue: #2563EB;
 
     --error: #dc2626;
     --warning: #d97706;
@@ -117,9 +122,9 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
-    --shadow-glow: 0 0 20px rgba(124, 92, 191, 0.1);
+    --shadow-glow: 0 0 20px rgba(156, 124, 58, 0.1);
 
-    --input-glow: 0 0 0 2px rgba(124, 92, 191, 0.12), 0 0 16px rgba(124, 92, 191, 0.06);
+    --input-glow: 0 0 0 2px rgba(156, 124, 58, 0.12), 0 0 16px rgba(156, 124, 58, 0.06);
     --sidebar-blur: blur(12px);
     --sidebar-opacity: 0.95;
     --modal-backdrop-blur: blur(6px);
@@ -129,8 +134,8 @@
     --scrollbar-thumb: #d4d0c8;
     --scrollbar-track: transparent;
 
-    --msg-user-border: var(--accent);
-    --welcome-gradient: linear-gradient(135deg, #7c5cbf, #b47ede);
+    --msg-user-border: var(--accent-blue);
+    --welcome-gradient: linear-gradient(135deg, #9C7C3A, #C5A059);
 }
 
 /* --- Aurora — Dark with animated gradient accents --- */
@@ -153,14 +158,15 @@
     --text-muted: #555872;
 
     --border-color: rgba(255, 255, 255, 0.05);
-    --border-glow: rgba(124, 58, 237, 0.3);
+    --border-glow: rgba(197, 160, 89, 0.3);
 
-    --accent: #7c3aed;
-    --accent-hover: #6d28d9;
-    --accent-glow: rgba(124, 58, 237, 0.3);
-    --accent-subtle: rgba(124, 58, 237, 0.1);
-    --accent-gradient-start: #7c3aed;
-    --accent-gradient-end: #06b6d4;
+    --accent: #C5A059;
+    --accent-hover: #b08d4a;
+    --accent-glow: rgba(197, 160, 89, 0.3);
+    --accent-subtle: rgba(197, 160, 89, 0.1);
+    --accent-gradient-start: #C5A059;
+    --accent-gradient-end: #3B82F6;
+    --accent-blue: #3B82F6;
 
     --error: #ef4444;
     --warning: #f59e0b;
@@ -172,9 +178,9 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
-    --shadow-glow: 0 0 30px rgba(124, 58, 237, 0.15), 0 0 60px rgba(6, 182, 212, 0.08);
+    --shadow-glow: 0 0 30px rgba(197, 160, 89, 0.15), 0 0 60px rgba(59, 130, 246, 0.08);
 
-    --input-glow: 0 0 0 2px rgba(124, 58, 237, 0.2), 0 0 20px rgba(124, 58, 237, 0.1);
+    --input-glow: 0 0 0 2px rgba(197, 160, 89, 0.2), 0 0 20px rgba(197, 160, 89, 0.1);
     --sidebar-blur: blur(24px);
     --sidebar-opacity: 0.85;
     --modal-backdrop-blur: blur(12px);
@@ -184,8 +190,8 @@
     --scrollbar-thumb: #1c2030;
     --scrollbar-track: transparent;
 
-    --msg-user-border: linear-gradient(to bottom, #7c3aed, #06b6d4);
-    --welcome-gradient: linear-gradient(135deg, #7c3aed, #06b6d4, #10b981);
+    --msg-user-border: linear-gradient(to bottom, #C5A059, #3B82F6);
+    --welcome-gradient: linear-gradient(135deg, #C5A059, #3B82F6, #10b981);
 }
 
 /* --- Ember — Warm luxury dark --- */
@@ -208,14 +214,15 @@
     --text-muted: #6e5e50;
 
     --border-color: rgba(255, 255, 255, 0.06);
-    --border-glow: rgba(232, 145, 58, 0.25);
+    --border-glow: rgba(197, 160, 89, 0.25);
 
-    --accent: #e8913a;
-    --accent-hover: #d4802e;
-    --accent-glow: rgba(232, 145, 58, 0.25);
-    --accent-subtle: rgba(232, 145, 58, 0.1);
-    --accent-gradient-start: #e8913a;
-    --accent-gradient-end: #d4802e;
+    --accent: #C5A059;
+    --accent-hover: #b08d4a;
+    --accent-glow: rgba(197, 160, 89, 0.25);
+    --accent-subtle: rgba(197, 160, 89, 0.1);
+    --accent-gradient-start: #C5A059;
+    --accent-gradient-end: #b08d4a;
+    --accent-blue: #3B82F6;
 
     --error: #ef4444;
     --warning: #f59e0b;
@@ -227,9 +234,9 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
     --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-glow: 0 0 20px rgba(232, 145, 58, 0.12);
+    --shadow-glow: 0 0 20px rgba(197, 160, 89, 0.12);
 
-    --input-glow: 0 0 0 2px rgba(232, 145, 58, 0.15), 0 0 20px rgba(232, 145, 58, 0.08);
+    --input-glow: 0 0 0 2px rgba(197, 160, 89, 0.15), 0 0 20px rgba(197, 160, 89, 0.08);
     --sidebar-blur: blur(20px);
     --sidebar-opacity: 0.88;
     --modal-backdrop-blur: blur(8px);
@@ -239,8 +246,8 @@
     --scrollbar-thumb: #30261e;
     --scrollbar-track: transparent;
 
-    --msg-user-border: var(--accent);
-    --welcome-gradient: linear-gradient(135deg, #e8913a, #d4802e);
+    --msg-user-border: var(--accent-blue);
+    --welcome-gradient: linear-gradient(135deg, #C5A059, #b08d4a);
 }
 
 
@@ -771,6 +778,7 @@ body {
     animation: fadeIn 0.5s var(--easing);
 }
 .welcome-message h2 {
+    font-family: var(--font-deco);
     font-size: 28px;
     font-weight: 700;
     margin-bottom: 12px;
@@ -830,13 +838,23 @@ body {
     box-shadow: var(--shadow-sm);
 }
 
+.message.assistant .message-content {
+    border-left: 2px solid var(--accent);
+    padding-left: 16px;
+}
+
 .message-role {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 700;
     margin-bottom: 6px;
     color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
 }
 .message.user .message-role {
+    color: var(--accent-blue, var(--accent));
+}
+.message.assistant .message-role {
     color: var(--accent);
 }
 
@@ -1205,16 +1223,17 @@ body {
     display: flex;
     align-items: flex-end;
     gap: 8px;
-    background: var(--bg-input);
-    border-radius: 12px;
-    padding: 8px 12px;
-    border: 1px solid var(--border-color);
+    background: transparent;
+    border-radius: 0;
+    padding: 8px 4px;
+    border: none;
+    border-bottom: 1px solid #334155;
     transition: border-color var(--transition-speed) var(--easing),
                 box-shadow var(--transition-speed) var(--easing);
 }
 .input-row:focus-within {
-    border-color: var(--accent);
-    box-shadow: var(--input-glow);
+    border-bottom-color: var(--accent);
+    box-shadow: 0 1px 0 0 var(--accent);
 }
 
 #message-input {
@@ -1803,7 +1822,7 @@ body {
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.12em;
     color: var(--text-muted);
 }
 .btn-section-action {
@@ -1830,7 +1849,7 @@ body {
 
 .sidebar-databases {
     padding: 4px 0 0;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid rgba(197, 160, 89, 0.15);
     margin-bottom: 4px;
 }
 
@@ -1905,7 +1924,7 @@ body {
 
 .sidebar-projects {
     padding: 4px 0 0;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid rgba(197, 160, 89, 0.15);
     margin-bottom: 4px;
 }
 
@@ -2150,8 +2169,8 @@ body {
     pointer-events: none;
     z-index: 0;
     background:
-        radial-gradient(ellipse at 20% 50%, rgba(124, 58, 237, 0.08) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 20%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
+        radial-gradient(ellipse at 20% 50%, rgba(197, 160, 89, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
         radial-gradient(ellipse at 50% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
     animation: auroraShift 20s ease-in-out infinite alternate;
 }
@@ -2159,43 +2178,43 @@ body {
 @keyframes auroraShift {
     0% {
         background:
-            radial-gradient(ellipse at 20% 50%, rgba(124, 58, 237, 0.08) 0%, transparent 50%),
-            radial-gradient(ellipse at 80% 20%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
+            radial-gradient(ellipse at 20% 50%, rgba(197, 160, 89, 0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 80% 20%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
             radial-gradient(ellipse at 50% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
     }
     33% {
         background:
-            radial-gradient(ellipse at 40% 30%, rgba(124, 58, 237, 0.06) 0%, transparent 50%),
-            radial-gradient(ellipse at 70% 70%, rgba(6, 182, 212, 0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 40% 30%, rgba(197, 160, 89, 0.06) 0%, transparent 50%),
+            radial-gradient(ellipse at 70% 70%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
             radial-gradient(ellipse at 20% 60%, rgba(16, 185, 129, 0.06) 0%, transparent 50%);
     }
     66% {
         background:
-            radial-gradient(ellipse at 60% 70%, rgba(124, 58, 237, 0.07) 0%, transparent 50%),
-            radial-gradient(ellipse at 30% 30%, rgba(6, 182, 212, 0.05) 0%, transparent 50%),
+            radial-gradient(ellipse at 60% 70%, rgba(197, 160, 89, 0.07) 0%, transparent 50%),
+            radial-gradient(ellipse at 30% 30%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
             radial-gradient(ellipse at 80% 50%, rgba(16, 185, 129, 0.07) 0%, transparent 50%);
     }
     100% {
         background:
-            radial-gradient(ellipse at 50% 40%, rgba(124, 58, 237, 0.08) 0%, transparent 50%),
-            radial-gradient(ellipse at 60% 60%, rgba(6, 182, 212, 0.07) 0%, transparent 50%),
+            radial-gradient(ellipse at 50% 40%, rgba(197, 160, 89, 0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 60% 60%, rgba(59, 130, 246, 0.07) 0%, transparent 50%),
             radial-gradient(ellipse at 30% 80%, rgba(16, 185, 129, 0.06) 0%, transparent 50%);
     }
 }
 
 [data-theme="aurora"] .sidebar {
     border-right-color: transparent;
-    border-image: linear-gradient(to bottom, rgba(124, 58, 237, 0.3), rgba(6, 182, 212, 0.2), rgba(16, 185, 129, 0.2)) 1;
+    border-image: linear-gradient(to bottom, rgba(197, 160, 89, 0.3), rgba(59, 130, 246, 0.2), rgba(16, 185, 129, 0.2)) 1;
 }
 
 [data-theme="aurora"] .message.user .message-content {
-    border-image: linear-gradient(to bottom, #7c3aed, #06b6d4) 1;
+    border-image: linear-gradient(to bottom, #C5A059, #3B82F6) 1;
     border-left-style: solid;
     border-left-width: 3px;
 }
 
 [data-theme="aurora"] ::-webkit-scrollbar-thumb {
-    background: linear-gradient(to bottom, #7c3aed, #06b6d4);
+    background: linear-gradient(to bottom, #C5A059, #3B82F6);
     border-radius: 3px;
 }
 
