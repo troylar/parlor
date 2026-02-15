@@ -200,15 +200,17 @@ mcp_servers:
 
 Environment variables in `env` values support `${VAR}` expansion --- so you can reference secrets from your shell environment without hardcoding them in the config file.
 
-### Streaming
+### Streaming & Prompt Queue
 
-Real-time **token-by-token streaming** via Server-Sent Events.
+Real-time **token-by-token streaming** via Server-Sent Events, with **prompt queuing** so you never have to wait.
 
+- **Type while streaming** --- submit new messages while the AI is responding. They queue (up to 10) and process in FIFO order when the current response finishes
 - Markdown and math render live as tokens arrive
 - **Raw mode toggle** (eye icon in top bar) --- view unprocessed text during streaming, persists across sessions
 - Stop generation mid-response with `Escape` or the stop button
 - Animated thinking indicator with pulsing dots while AI processes
 - Error messages show inline with a **Retry** button
+- **Parallel tool execution** --- when the AI calls multiple tools in one response, they run concurrently via `asyncio.as_completed` instead of sequentially
 
 ### Command Palette
 
@@ -295,7 +297,7 @@ Mobile sidebar slides in with `transform` animation. Tap the overlay or hamburge
 
 ## CLI Chat Mode
 
-An agentic terminal REPL --- like Claude Code, but connected to **your own API**. Read files, write code, run commands, search your codebase, all from the terminal. Works on macOS, Linux, and Windows.
+An agentic terminal REPL --- like Claude Code, but connected to **your own API**. Read files, write code, run commands, search your codebase, all from the terminal. **Type while the AI is working** --- messages queue and process in order. Works on macOS, Linux, and Windows.
 
 ```bash
 parlor chat                     # Interactive REPL
@@ -314,7 +316,9 @@ parlor chat --no-tools          # Disable built-in tools
 4. Once complete, the full response renders as **Rich Markdown** --- syntax-highlighted code blocks, tables, headers, lists, bold/italic, and more
 5. A **context footer** shows a color-coded progress bar, token usage, response size, elapsed time, and remaining headroom before auto-compact
 
-The AI runs in an **agentic loop**: it can call tools, inspect results, call more tools, and continue reasoning --- up to 50 iterations per turn by default. This means it can tackle multi-step tasks like "find and fix the bug in auth.py" or "add tests for the user service" autonomously, without you needing to intervene between steps.
+The AI runs in an **agentic loop**: it can call tools, inspect results, call more tools, and continue reasoning --- up to 50 iterations per turn by default. Multiple tool calls in a single response **execute in parallel** for faster results. This means it can tackle multi-step tasks like "find and fix the bug in auth.py" or "add tests for the user service" autonomously, without you needing to intervene between steps.
+
+**Prompt queuing**: You can type and submit messages while the AI is working. They queue (up to 10) and process in FIFO order when the current response finishes. The prompt stays active at the bottom of the terminal while output streams above it.
 
 ### Welcome Banner
 
@@ -664,6 +668,7 @@ app:
   host: "127.0.0.1"     # bind address
   port: 8080             # server port
   data_dir: "~/.parlor" # where DB + attachments live
+  tls: false             # set true for HTTPS with self-signed cert
 
 # Optional: CLI settings
 cli:
@@ -889,7 +894,7 @@ git clone https://github.com/troylar/parlor.git
 cd parlor
 pip install -e ".[dev]"
 
-pytest tests/ -v          # Run 166 tests
+pytest tests/ -v          # Run 343 tests
 ruff check src/ tests/    # Lint
 ruff format src/ tests/   # Format
 ```

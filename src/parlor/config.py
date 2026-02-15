@@ -101,7 +101,7 @@ class AppSettings:
     host: str = "127.0.0.1"
     port: int = 8080
     data_dir: Path = field(default_factory=lambda: Path.home() / ".parlor")
-    tls: bool = True
+    tls: bool = False
 
 
 @dataclass
@@ -173,7 +173,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
 
     app_raw = raw.get("app", {})
     data_dir = Path(os.path.expanduser(app_raw.get("data_dir", "~/.parlor")))
-    tls_raw = app_raw.get("tls", True)
+    tls_raw = app_raw.get("tls", False)
     tls_enabled = str(tls_raw).lower() not in ("false", "0", "no")
 
     app_settings = AppSettings(

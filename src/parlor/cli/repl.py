@@ -264,6 +264,44 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
+_EXIT_COMMANDS = frozenset({"/quit", "/exit"})
+
+
+async def _drain_input_to_msg_queue(
+    input_queue: asyncio.Queue[str],
+    msg_queue: asyncio.Queue[dict[str, Any]],
+    working_dir: str,
+    db: Any,
+    conversation_id: str,
+    cancel_event: asyncio.Event,
+    exit_flag: asyncio.Event,
+    warn_callback: Any | None = None,
+) -> None:
+    """Drain input_queue into msg_queue, filtering out / commands.
+
+    - /quit and /exit trigger cancel_event and exit_flag
+    - Other / commands are ignored with a warning
+    - Normal text is expanded and queued as user messages
+    """
+    while not input_queue.empty():
+        try:
+            queued_text = input_queue.get_nowait()
+            if queued_text.startswith("/"):
+                cmd = queued_text.lower().split()[0]
+                if cmd in _EXIT_COMMANDS:
+                    cancel_event.set()
+                    exit_flag.set()
+                    break
+                if warn_callback:
+                    warn_callback(cmd)
+                continue
+            q_expanded = _expand_file_references(queued_text, working_dir)
+            storage.create_message(db, conversation_id, "user", q_expanded)
+            await msg_queue.put({"role": "user", "content": q_expanded})
+        except asyncio.QueueEmpty:
+            break
+
+
 def _expand_file_references(text: str, working_dir: str) -> str:
     """Expand @path references in user input.
 
@@ -554,6 +592,7 @@ async def _run_repl(
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.document import Document
+    from prompt_toolkit.filters import Condition
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
@@ -717,376 +756,486 @@ async def _run_repl(
         ai_messages: list[dict[str, Any]] = []
         is_first_message = True
 
-    while True:
-        _exit_flag[0] = False
-        try:
-            user_input = await session.prompt_async(_prompt)
-        except EOFError:
-            break
-        except KeyboardInterrupt:
-            continue
+    # -- Concurrent input/output architecture --
+    # Instead of blocking on prompt_async then running agent loop sequentially,
+    # we use two coroutines: one collects input, one processes agent responses.
+    # prompt_toolkit's patch_stdout keeps the input prompt anchored at the bottom.
 
-        if _exit_flag[0]:
-            break
+    input_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=10)
+    agent_busy = asyncio.Event()  # set while agent loop is running
+    exit_flag = asyncio.Event()
+    _current_cancel_event: list[asyncio.Event | None] = [None]
 
-        _collapse_long_input(user_input)
-        user_input = user_input.strip()
-        if not user_input:
-            continue
+    # Escape cancels the agent loop (only active during streaming).
+    # prompt_toolkit's key processor handles the Escape timeout (~100ms)
+    # to distinguish bare Escape from escape sequences (arrow keys, etc.).
+    @kb.add("escape", filter=Condition(lambda: agent_busy.is_set()))
+    def _cancel_on_escape(event: Any) -> None:
+        ce = _current_cancel_event[0]
+        if ce is not None:
+            ce.set()
+            renderer.console.print("[grey62]Cancelled[/grey62]")
 
-        # Handle commands
-        if user_input.startswith("/"):
-            cmd = user_input.lower().split()[0]
-            if cmd in ("/quit", "/exit"):
-                break
-            elif cmd == "/new":
-                conv = storage.create_conversation(db)
-                ai_messages = []
-                is_first_message = True
-                renderer.console.print("[grey62]New conversation started[/grey62]\n")
+    async def _collect_input() -> None:
+        """Continuously collect user input and put on queue."""
+        while not exit_flag.is_set():
+            _exit_flag[0] = False
+            try:
+                user_input_raw = await session.prompt_async(_prompt)
+            except EOFError:
+                exit_flag.set()
+                return
+            except KeyboardInterrupt:
                 continue
-            elif cmd == "/tools":
-                renderer.render_tools(all_tool_names)
+
+            if _exit_flag[0]:
+                exit_flag.set()
+                return
+
+            _collapse_long_input(user_input_raw)
+            text = user_input_raw.strip()
+            if not text:
                 continue
-            elif cmd == "/help":
-                renderer.render_help()
-                continue
-            elif cmd == "/compact":
-                await _compact_messages(ai_service, ai_messages, db, conv["id"])
-                continue
-            elif cmd == "/last":
-                convs = storage.list_conversations(db, limit=1)
-                if convs:
-                    conv = storage.get_conversation(db, convs[0]["id"]) or conv
-                    ai_messages = _load_conversation_messages(db, conv["id"])
-                    is_first_message = False
-                    renderer.console.print(
-                        f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]\n"
-                    )
-                else:
-                    renderer.console.print("[grey62]No previous conversations[/grey62]\n")
-                continue
-            elif cmd == "/list":
-                convs = storage.list_conversations(db, limit=20)
-                if convs:
-                    renderer.console.print("\n[bold]Recent conversations:[/bold]")
-                    for i, c in enumerate(convs):
-                        msg_count = c.get("message_count", 0)
-                        renderer.console.print(
-                            f"  {i + 1}. {c['title']} ({msg_count} msgs) [grey62]{c['id'][:8]}...[/grey62]"
-                        )
-                    renderer.console.print("  Use [bold]/resume <number>[/bold] or [bold]/resume <id>[/bold]\n")
-                else:
-                    renderer.console.print("[grey62]No conversations[/grey62]\n")
-                continue
-            elif cmd == "/skills":
-                if skill_registry:
-                    skills = skill_registry.list_skills()
-                    if skills:
-                        renderer.console.print("\n[bold]Available skills:[/bold]")
-                        for s in skills:
-                            renderer.console.print(f"  /{s.name} - {s.description} [grey62]({s.source})[/grey62]")
-                        renderer.console.print()
-                    else:
-                        renderer.console.print(
-                            "[grey62]No skills loaded. Add .yaml files to"
-                            " ~/.parlor/skills/ or .parlor/skills/[/grey62]\n"
-                        )
-                continue
-            elif cmd == "/mcp":
-                parts = user_input.split()
-                if len(parts) == 1:
-                    if mcp_manager:
-                        renderer.render_mcp_status(mcp_manager.get_server_statuses())
-                    else:
-                        renderer.console.print("[grey62]No MCP servers configured.[/grey62]\n")
-                elif len(parts) >= 2 and parts[1].lower() == "status":
-                    # /mcp status [name] — detailed diagnostics
-                    if not mcp_manager:
-                        renderer.render_error("No MCP servers configured")
-                        continue
-                    if len(parts) >= 3:
-                        renderer.render_mcp_server_detail(parts[2], mcp_manager.get_server_statuses(), mcp_manager)
-                    else:
-                        renderer.render_mcp_status(mcp_manager.get_server_statuses())
-                elif len(parts) >= 3:
-                    action = parts[1].lower()
-                    server_name = parts[2]
-                    if not mcp_manager:
-                        renderer.render_error("No MCP servers configured")
-                        continue
-                    try:
-                        if action == "connect":
-                            await mcp_manager.connect_server(server_name)
-                            # Show result (might have failed gracefully)
-                            status = mcp_manager.get_server_statuses().get(server_name, {})
-                            if status.get("status") == "connected":
-                                renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
-                            else:
-                                err = status.get("error_message", "unknown error")
-                                renderer.render_error(f"Failed to connect '{server_name}': {err}")
-                        elif action == "disconnect":
-                            await mcp_manager.disconnect_server(server_name)
-                            renderer.console.print(f"[grey62]Disconnected: {server_name}[/grey62]\n")
-                        elif action == "reconnect":
-                            await mcp_manager.reconnect_server(server_name)
-                            status = mcp_manager.get_server_statuses().get(server_name, {})
-                            if status.get("status") == "connected":
-                                renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
-                            else:
-                                err = status.get("error_message", "unknown error")
-                                renderer.render_error(f"Failed to reconnect '{server_name}': {err}")
-                        else:
-                            renderer.render_error(
-                                f"Unknown action: {action}. Use connect, disconnect, reconnect, or status."
-                            )
-                            continue
-                        _rebuild_tools()
-                    except ValueError as e:
-                        renderer.render_error(str(e))
-                else:
-                    renderer.console.print(
-                        "[grey62]Usage: /mcp [status [name]|connect|disconnect|reconnect <name>][/grey62]\n"
-                    )
-                continue
-            elif cmd == "/model":
-                parts = user_input.split(maxsplit=1)
-                if len(parts) < 2:
-                    renderer.console.print(f"[grey62]Current model: {current_model}[/grey62]")
-                    renderer.console.print("[grey62]Usage: /model <model_name>[/grey62]\n")
+
+            if agent_busy.is_set():
+                if input_queue.full():
+                    renderer.console.print("[yellow]Queue full (max 10 messages)[/yellow]")
                     continue
-                new_model = parts[1].strip()
-                current_model = new_model
-                ai_service = create_ai_service(config.ai)
-                ai_service.config.model = new_model
-                renderer.console.print(f"[grey62]Switched to model: {new_model}[/grey62]\n")
+                renderer.console.print("[grey62]Message queued[/grey62]")
+
+            await input_queue.put(text)
+
+    async def _agent_runner() -> None:
+        """Process messages from input_queue, run commands and agent loop."""
+        nonlocal conv, ai_messages, is_first_message, tools_openai, all_tool_names
+        nonlocal current_model, ai_service
+
+        while not exit_flag.is_set():
+            try:
+                user_input = await asyncio.wait_for(input_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
                 continue
-            elif cmd == "/verbose":
-                new_v = renderer.cycle_verbosity()
-                renderer.render_verbosity_change(new_v)
-                continue
-            elif cmd == "/detail":
-                renderer.render_tool_detail()
-                continue
-            elif cmd == "/resume":
-                parts = user_input.split(maxsplit=1)
-                if len(parts) < 2:
-                    renderer.console.print("[grey62]Usage: /resume <number> or /resume <conversation_id>[/grey62]\n")
+
+            # Handle commands
+            if user_input.startswith("/"):
+                cmd = user_input.lower().split()[0]
+                if cmd in ("/quit", "/exit"):
+                    exit_flag.set()
+                    return
+                elif cmd == "/new":
+                    conv = storage.create_conversation(db)
+                    ai_messages = []
+                    is_first_message = True
+                    renderer.console.print("[grey62]New conversation started[/grey62]\n")
                     continue
-                target = parts[1].strip()
-                resolved_id = None
-                if target.isdigit():
-                    idx = int(target) - 1
+                elif cmd == "/tools":
+                    renderer.render_tools(all_tool_names)
+                    continue
+                elif cmd == "/help":
+                    renderer.render_help()
+                    continue
+                elif cmd == "/compact":
+                    await _compact_messages(ai_service, ai_messages, db, conv["id"])
+                    continue
+                elif cmd == "/last":
+                    convs = storage.list_conversations(db, limit=1)
+                    if convs:
+                        conv = storage.get_conversation(db, convs[0]["id"]) or conv
+                        ai_messages = _load_conversation_messages(db, conv["id"])
+                        is_first_message = False
+                        renderer.console.print(
+                            f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]\n"
+                        )
+                    else:
+                        renderer.console.print("[grey62]No previous conversations[/grey62]\n")
+                    continue
+                elif cmd == "/list":
                     convs = storage.list_conversations(db, limit=20)
-                    if 0 <= idx < len(convs):
-                        resolved_id = convs[idx]["id"]
+                    if convs:
+                        renderer.console.print("\n[bold]Recent conversations:[/bold]")
+                        for i, c in enumerate(convs):
+                            msg_count = c.get("message_count", 0)
+                            renderer.console.print(
+                                f"  {i + 1}. {c['title']} ({msg_count} msgs) [grey62]{c['id'][:8]}...[/grey62]"
+                            )
+                        renderer.console.print("  Use [bold]/resume <number>[/bold] or [bold]/resume <id>[/bold]\n")
                     else:
-                        renderer.render_error(f"Invalid number: {target}")
+                        renderer.console.print("[grey62]No conversations[/grey62]\n")
+                    continue
+                elif cmd == "/skills":
+                    if skill_registry:
+                        skills = skill_registry.list_skills()
+                        if skills:
+                            renderer.console.print("\n[bold]Available skills:[/bold]")
+                            for s in skills:
+                                renderer.console.print(f"  /{s.name} - {s.description} [grey62]({s.source})[/grey62]")
+                            renderer.console.print()
+                        else:
+                            renderer.console.print(
+                                "[grey62]No skills loaded. Add .yaml files to"
+                                " ~/.parlor/skills/ or .parlor/skills/[/grey62]\n"
+                            )
+                    continue
+                elif cmd == "/mcp":
+                    parts = user_input.split()
+                    if len(parts) == 1:
+                        if mcp_manager:
+                            renderer.render_mcp_status(mcp_manager.get_server_statuses())
+                        else:
+                            renderer.console.print("[grey62]No MCP servers configured.[/grey62]\n")
+                    elif len(parts) >= 2 and parts[1].lower() == "status":
+                        if not mcp_manager:
+                            renderer.render_error("No MCP servers configured")
+                            continue
+                        if len(parts) >= 3:
+                            renderer.render_mcp_server_detail(parts[2], mcp_manager.get_server_statuses(), mcp_manager)
+                        else:
+                            renderer.render_mcp_status(mcp_manager.get_server_statuses())
+                    elif len(parts) >= 3:
+                        action = parts[1].lower()
+                        server_name = parts[2]
+                        if not mcp_manager:
+                            renderer.render_error("No MCP servers configured")
+                            continue
+                        try:
+                            if action == "connect":
+                                await mcp_manager.connect_server(server_name)
+                                status = mcp_manager.get_server_statuses().get(server_name, {})
+                                if status.get("status") == "connected":
+                                    renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
+                                else:
+                                    err = status.get("error_message", "unknown error")
+                                    renderer.render_error(f"Failed to connect '{server_name}': {err}")
+                            elif action == "disconnect":
+                                await mcp_manager.disconnect_server(server_name)
+                                renderer.console.print(f"[grey62]Disconnected: {server_name}[/grey62]\n")
+                            elif action == "reconnect":
+                                await mcp_manager.reconnect_server(server_name)
+                                status = mcp_manager.get_server_statuses().get(server_name, {})
+                                if status.get("status") == "connected":
+                                    renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
+                                else:
+                                    err = status.get("error_message", "unknown error")
+                                    renderer.render_error(f"Failed to reconnect '{server_name}': {err}")
+                            else:
+                                renderer.render_error(
+                                    f"Unknown action: {action}. Use connect, disconnect, reconnect, or status."
+                                )
+                                continue
+                            _rebuild_tools()
+                        except ValueError as e:
+                            renderer.render_error(str(e))
+                    else:
+                        renderer.console.print(
+                            "[grey62]Usage: /mcp [status [name]|connect|disconnect|reconnect <name>][/grey62]\n"
+                        )
+                    continue
+                elif cmd == "/model":
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) < 2:
+                        renderer.console.print(f"[grey62]Current model: {current_model}[/grey62]")
+                        renderer.console.print("[grey62]Usage: /model <model_name>[/grey62]\n")
                         continue
-                else:
-                    resolved_id = target
-                loaded = storage.get_conversation(db, resolved_id)
-                if loaded:
-                    conv = loaded
-                    ai_messages = _load_conversation_messages(db, conv["id"])
-                    is_first_message = False
+                    new_model = parts[1].strip()
+                    current_model = new_model
+                    ai_service = create_ai_service(config.ai)
+                    ai_service.config.model = new_model
+                    renderer.console.print(f"[grey62]Switched to model: {new_model}[/grey62]\n")
+                    continue
+                elif cmd == "/verbose":
+                    new_v = renderer.cycle_verbosity()
+                    renderer.render_verbosity_change(new_v)
+                    continue
+                elif cmd == "/detail":
+                    renderer.render_tool_detail()
+                    continue
+                elif cmd == "/resume":
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) < 2:
+                        renderer.console.print(
+                            "[grey62]Usage: /resume <number> or /resume <conversation_id>[/grey62]\n"
+                        )
+                        continue
+                    target = parts[1].strip()
+                    resolved_id = None
+                    if target.isdigit():
+                        idx = int(target) - 1
+                        convs = storage.list_conversations(db, limit=20)
+                        if 0 <= idx < len(convs):
+                            resolved_id = convs[idx]["id"]
+                        else:
+                            renderer.render_error(f"Invalid number: {target}")
+                            continue
+                    else:
+                        resolved_id = target
+                    loaded = storage.get_conversation(db, resolved_id)
+                    if loaded:
+                        conv = loaded
+                        ai_messages = _load_conversation_messages(db, conv["id"])
+                        is_first_message = False
+                        renderer.console.print(
+                            f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]\n"
+                        )
+                    else:
+                        renderer.render_error(f"Conversation not found: {resolved_id}")
+                    continue
+                elif cmd == "/rewind":
+                    stored = storage.list_messages(db, conv["id"])
+                    if len(stored) < 2:
+                        renderer.console.print("[grey62]Not enough messages to rewind[/grey62]\n")
+                        continue
+
+                    renderer.console.print("\n[bold]Messages:[/bold]")
+                    for msg in stored:
+                        role_label = "You" if msg["role"] == "user" else "AI"
+                        preview = msg["content"][:80].replace("\n", " ")
+                        if len(msg["content"]) > 80:
+                            preview += "..."
+                        renderer.console.print(f"  {msg['position']}. [{role_label}] {preview}")
+
                     renderer.console.print(
-                        f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]\n"
+                        "\n[grey62]Enter position to rewind to (keep that message, delete after):[/grey62]"
                     )
-                else:
-                    renderer.render_error(f"Conversation not found: {resolved_id}")
-                continue
-            elif cmd == "/rewind":
-                stored = storage.list_messages(db, conv["id"])
-                if len(stored) < 2:
-                    renderer.console.print("[grey62]Not enough messages to rewind[/grey62]\n")
-                    continue
-
-                renderer.console.print("\n[bold]Messages:[/bold]")
-                for msg in stored:
-                    role_label = "You" if msg["role"] == "user" else "AI"
-                    preview = msg["content"][:80].replace("\n", " ")
-                    if len(msg["content"]) > 80:
-                        preview += "..."
-                    renderer.console.print(f"  {msg['position']}. [{role_label}] {preview}")
-
-                renderer.console.print(
-                    "\n[grey62]Enter position to rewind to (keep that message, delete after):[/grey62]"
-                )
-                try:
-                    pos_input = input("  Position: ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    renderer.console.print("[grey62]Cancelled[/grey62]\n")
-                    continue
-
-                if not pos_input.isdigit():
-                    renderer.render_error("Invalid position")
-                    continue
-
-                target_pos = int(pos_input)
-                positions = [m["position"] for m in stored]
-                if target_pos not in positions:
-                    renderer.render_error(f"Position {target_pos} not found")
-                    continue
-
-                # Check if there are file-modifying tools in messages being deleted
-                msgs_after = [m for m in stored if m["position"] > target_pos]
-                msg_ids_after = [m["id"] for m in msgs_after]
-                file_paths = collect_file_paths(db, msg_ids_after)
-
-                undo_files = False
-                if file_paths:
-                    renderer.console.print(
-                        f"\n[yellow]{len(file_paths)} file(s) were modified after this point:[/yellow]"
-                    )
-                    for fp in sorted(file_paths):
-                        renderer.console.print(f"  - {fp}")
                     try:
-                        answer = input("  Undo file changes? [y/N] ").strip().lower()
-                        undo_files = answer in ("y", "yes")
+                        pos_input = input("  Position: ").strip()
                     except (EOFError, KeyboardInterrupt):
                         renderer.console.print("[grey62]Cancelled[/grey62]\n")
                         continue
 
-                result = await rewind_service(
-                    db=db,
-                    conversation_id=conv["id"],
-                    to_position=target_pos,
-                    undo_files=undo_files,
-                    working_dir=working_dir,
+                    if not pos_input.isdigit():
+                        renderer.render_error("Invalid position")
+                        continue
+
+                    target_pos = int(pos_input)
+                    positions = [m["position"] for m in stored]
+                    if target_pos not in positions:
+                        renderer.render_error(f"Position {target_pos} not found")
+                        continue
+
+                    msgs_after = [m for m in stored if m["position"] > target_pos]
+                    msg_ids_after = [m["id"] for m in msgs_after]
+                    file_paths = collect_file_paths(db, msg_ids_after)
+
+                    undo_files = False
+                    if file_paths:
+                        renderer.console.print(
+                            f"\n[yellow]{len(file_paths)} file(s) were modified after this point:[/yellow]"
+                        )
+                        for fp in sorted(file_paths):
+                            renderer.console.print(f"  - {fp}")
+                        try:
+                            answer = input("  Undo file changes? [y/N] ").strip().lower()
+                            undo_files = answer in ("y", "yes")
+                        except (EOFError, KeyboardInterrupt):
+                            renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                            continue
+
+                    result = await rewind_service(
+                        db=db,
+                        conversation_id=conv["id"],
+                        to_position=target_pos,
+                        undo_files=undo_files,
+                        working_dir=working_dir,
+                    )
+
+                    ai_messages = _load_conversation_messages(db, conv["id"])
+
+                    summary = f"Rewound {result.deleted_messages} message(s)"
+                    if result.reverted_files:
+                        summary += f", reverted {len(result.reverted_files)} file(s)"
+                    if result.skipped_files:
+                        summary += f", {len(result.skipped_files)} skipped"
+                    renderer.console.print(f"[grey62]{summary}[/grey62]\n")
+
+                    if result.skipped_files:
+                        for sf in result.skipped_files:
+                            renderer.console.print(f"  [yellow]Skipped: {sf}[/yellow]")
+                        renderer.console.print()
+                    continue
+
+            # Check for skill invocation
+            if skill_registry and user_input.startswith("/"):
+                is_skill, skill_prompt = skill_registry.resolve_input(user_input)
+                if is_skill:
+                    user_input = skill_prompt
+
+            # Visual separation between input and response
+            renderer.render_newline()
+
+            # Expand file references
+            expanded = _expand_file_references(user_input, working_dir)
+
+            # Auto-compact if approaching context limit
+            token_estimate = _estimate_tokens(ai_messages)
+            if token_estimate > _CONTEXT_AUTO_COMPACT_TOKENS:
+                renderer.console.print(
+                    f"[yellow]Context approaching limit (~{token_estimate:,} tokens). Auto-compacting...[/yellow]"
+                )
+                await _compact_messages(ai_service, ai_messages, db, conv["id"])
+            elif token_estimate > _CONTEXT_WARN_TOKENS:
+                renderer.console.print(
+                    f"[yellow]Context: ~{token_estimate:,} tokens. Use /compact to free space.[/yellow]"
                 )
 
-                # Rebuild ai_messages from remaining stored messages
-                ai_messages = _load_conversation_messages(db, conv["id"])
+            # Store user message
+            storage.create_message(db, conv["id"], "user", expanded)
+            ai_messages.append({"role": "user", "content": expanded})
 
-                summary = f"Rewound {result.deleted_messages} message(s)"
-                if result.reverted_files:
-                    summary += f", reverted {len(result.reverted_files)} file(s)"
-                if result.skipped_files:
-                    summary += f", {len(result.skipped_files)} skipped"
-                renderer.console.print(f"[grey62]{summary}[/grey62]\n")
+            # Build message queue for queued follow-ups during agent loop
+            msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-                if result.skipped_files:
-                    for sf in result.skipped_files:
-                        renderer.console.print(f"  [yellow]Skipped: {sf}[/yellow]")
-                    renderer.console.print()
-                continue
+            # Stream response
+            renderer.clear_turn_history()
+            cancel_event = asyncio.Event()
+            _current_cancel_event[0] = cancel_event
+            loop = asyncio.get_event_loop()
+            original_handler = signal.getsignal(signal.SIGINT)
+            _add_signal_handler(loop, signal.SIGINT, cancel_event.set)
 
-        # Check for skill invocation
-        if skill_registry and user_input.startswith("/"):
-            is_skill, skill_prompt = skill_registry.resolve_input(user_input)
-            if is_skill:
-                user_input = skill_prompt
+            agent_busy.set()
 
-        # Visual separation between input and response
-        renderer.render_newline()
+            thinking = False
+            try:
+                response_token_count = 0
+                total_elapsed = 0.0
 
-        # Expand file references
-        expanded = _expand_file_references(user_input, working_dir)
-
-        # Auto-compact if approaching context limit
-        token_estimate = _estimate_tokens(ai_messages)
-        if token_estimate > _CONTEXT_AUTO_COMPACT_TOKENS:
-            renderer.console.print(
-                f"[yellow]Context approaching limit (~{token_estimate:,} tokens). Auto-compacting...[/yellow]"
-            )
-            await _compact_messages(ai_service, ai_messages, db, conv["id"])
-        elif token_estimate > _CONTEXT_WARN_TOKENS:
-            renderer.console.print(f"[yellow]Context: ~{token_estimate:,} tokens. Use /compact to free space.[/yellow]")
-
-        # Store user message
-        storage.create_message(db, conv["id"], "user", expanded)
-        ai_messages.append({"role": "user", "content": expanded})
-
-        # Stream response
-        renderer.clear_turn_history()
-        cancel_event = asyncio.Event()
-        loop = asyncio.get_event_loop()
-        original_handler = signal.getsignal(signal.SIGINT)
-        _add_signal_handler(loop, signal.SIGINT, cancel_event.set)
-        escape_task = asyncio.create_task(_watch_for_escape(cancel_event))
-
-        thinking = False
-        try:
-            response_token_count = 0
-            total_elapsed = 0.0
-            async for event in run_agent_loop(
-                ai_service=ai_service,
-                messages=ai_messages,
-                tool_executor=tool_executor,
-                tools_openai=tools_openai,
-                cancel_event=cancel_event,
-                extra_system_prompt=extra_system_prompt,
-                max_iterations=config.cli.max_tool_iterations,
-            ):
-                if event.kind == "thinking":
-                    if not thinking:
-                        renderer.start_thinking()
-                        thinking = True
-                elif event.kind == "token":
-                    if not thinking:
-                        renderer.start_thinking()
-                        thinking = True
-                    renderer.render_token(event.data["content"])
-                    renderer.update_thinking()
-                    enc = _get_tiktoken_encoding()
-                    if enc:
-                        response_token_count += len(enc.encode(event.data["content"]))
-                    else:
-                        response_token_count += max(1, len(event.data["content"]) // 4)
-                elif event.kind == "tool_call_start":
-                    if thinking:
-                        total_elapsed += renderer.stop_thinking()
-                        thinking = False
-                    renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
-                elif event.kind == "tool_call_end":
-                    renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
-                elif event.kind == "assistant_message":
-                    if event.data["content"]:
-                        storage.create_message(db, conv["id"], "assistant", event.data["content"])
-                elif event.kind == "error":
-                    if thinking:
-                        total_elapsed += renderer.stop_thinking()
-                        thinking = False
-                    renderer.render_error(event.data.get("message", "Unknown error"))
-                elif event.kind == "done":
-                    if thinking:
-                        total_elapsed += renderer.stop_thinking()
-                        thinking = False
-                    renderer.save_turn_history()
-                    renderer.render_newline()
-                    renderer.render_response_end()
-                    renderer.render_newline()
-                    # Show context footer
-                    context_tokens = _estimate_tokens(ai_messages)
-                    renderer.render_context_footer(
-                        current_tokens=context_tokens,
-                        auto_compact_threshold=_CONTEXT_AUTO_COMPACT_TOKENS,
-                        response_tokens=response_token_count,
-                        elapsed=total_elapsed,
+                # Drain any messages that arrived while we were setting up
+                def _warn(cmd: str) -> None:
+                    renderer.console.print(
+                        f"[yellow]Command {cmd} ignored during streaming. Queue messages only.[/yellow]"
                     )
-                    renderer.render_newline()
-                    renderer.render_newline()
 
-            # Generate title on first exchange
-            if is_first_message:
-                is_first_message = False
-                try:
-                    title = await ai_service.generate_title(user_input)
-                    storage.update_conversation_title(db, conv["id"], title)
-                except Exception:
-                    pass
+                await _drain_input_to_msg_queue(
+                    input_queue,
+                    msg_queue,
+                    working_dir,
+                    db,
+                    conv["id"],
+                    cancel_event,
+                    exit_flag,
+                    warn_callback=_warn,
+                )
 
-        except KeyboardInterrupt:
-            if thinking:
-                renderer.stop_thinking()
-            renderer.render_response_end()
-        finally:
-            cancel_event.set()
-            escape_task.cancel()
-            _remove_signal_handler(loop, signal.SIGINT)
-            if not _IS_WINDOWS:
-                signal.signal(signal.SIGINT, original_handler)
+                async for event in run_agent_loop(
+                    ai_service=ai_service,
+                    messages=ai_messages,
+                    tool_executor=tool_executor,
+                    tools_openai=tools_openai,
+                    cancel_event=cancel_event,
+                    extra_system_prompt=extra_system_prompt,
+                    max_iterations=config.cli.max_tool_iterations,
+                    message_queue=msg_queue,
+                ):
+                    # Drain input_queue into msg_queue during streaming
+                    await _drain_input_to_msg_queue(
+                        input_queue,
+                        msg_queue,
+                        working_dir,
+                        db,
+                        conv["id"],
+                        cancel_event,
+                        exit_flag,
+                        warn_callback=_warn,
+                    )
+
+                    if event.kind == "thinking":
+                        if not thinking:
+                            renderer.start_thinking()
+                            thinking = True
+                    elif event.kind == "token":
+                        if not thinking:
+                            renderer.start_thinking()
+                            thinking = True
+                        renderer.render_token(event.data["content"])
+                        renderer.update_thinking()
+                        enc = _get_tiktoken_encoding()
+                        if enc:
+                            response_token_count += len(enc.encode(event.data["content"]))
+                        else:
+                            response_token_count += max(1, len(event.data["content"]) // 4)
+                    elif event.kind == "tool_call_start":
+                        if thinking:
+                            total_elapsed += renderer.stop_thinking()
+                            thinking = False
+                        renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
+                    elif event.kind == "tool_call_end":
+                        renderer.render_tool_call_end(
+                            event.data["tool_name"], event.data["status"], event.data["output"]
+                        )
+                    elif event.kind == "assistant_message":
+                        if event.data["content"]:
+                            storage.create_message(db, conv["id"], "assistant", event.data["content"])
+                    elif event.kind == "queued_message":
+                        if thinking:
+                            total_elapsed += renderer.stop_thinking()
+                            thinking = False
+                        renderer.save_turn_history()
+                        renderer.render_newline()
+                        renderer.render_response_end()
+                        renderer.render_newline()
+                        renderer.console.print("[grey62]Processing queued message...[/grey62]")
+                        renderer.render_newline()
+                        renderer.clear_turn_history()
+                        response_token_count = 0
+                    elif event.kind == "error":
+                        if thinking:
+                            total_elapsed += renderer.stop_thinking()
+                            thinking = False
+                        renderer.render_error(event.data.get("message", "Unknown error"))
+                    elif event.kind == "done":
+                        if thinking:
+                            total_elapsed += renderer.stop_thinking()
+                            thinking = False
+                        renderer.save_turn_history()
+                        renderer.render_newline()
+                        renderer.render_response_end()
+                        renderer.render_newline()
+                        context_tokens = _estimate_tokens(ai_messages)
+                        renderer.render_context_footer(
+                            current_tokens=context_tokens,
+                            auto_compact_threshold=_CONTEXT_AUTO_COMPACT_TOKENS,
+                            response_tokens=response_token_count,
+                            elapsed=total_elapsed,
+                        )
+                        renderer.render_newline()
+                        renderer.render_newline()
+
+                # Generate title on first exchange
+                if is_first_message:
+                    is_first_message = False
+                    try:
+                        title = await ai_service.generate_title(user_input)
+                        storage.update_conversation_title(db, conv["id"], title)
+                    except Exception:
+                        pass
+
+            except KeyboardInterrupt:
+                if thinking:
+                    renderer.stop_thinking()
+                renderer.render_response_end()
+            finally:
+                agent_busy.clear()
+                _current_cancel_event[0] = None
+                cancel_event.set()
+                _remove_signal_handler(loop, signal.SIGINT)
+                if not _IS_WINDOWS:
+                    signal.signal(signal.SIGINT, original_handler)
+
+    from prompt_toolkit.patch_stdout import patch_stdout as _patch_stdout
+
+    with _patch_stdout():
+        input_task = asyncio.create_task(_collect_input())
+        runner_task = asyncio.create_task(_agent_runner())
+
+        # Wait for either task to signal exit
+        done_tasks, pending_tasks = await asyncio.wait({input_task, runner_task}, return_when=asyncio.FIRST_COMPLETED)
+        exit_flag.set()
+        for t in pending_tasks:
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 async def _compact_messages(
