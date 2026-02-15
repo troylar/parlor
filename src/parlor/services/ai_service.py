@@ -8,23 +8,55 @@ import logging
 from typing import Any, AsyncGenerator
 
 import httpx
-from openai import AsyncOpenAI, BadRequestError, RateLimitError
+from openai import AsyncOpenAI, AuthenticationError, BadRequestError, RateLimitError
 
 from ..config import AIConfig
+from .token_provider import TokenProvider, TokenProviderError
 
 logger = logging.getLogger(__name__)
 
 
+def create_ai_service(config: AIConfig) -> "AIService":
+    """Factory: create an AIService with TokenProvider if api_key_command is configured."""
+    provider = TokenProvider(config.api_key_command) if config.api_key_command else None
+    return AIService(config, token_provider=provider)
+
+
 class AIService:
-    def __init__(self, config: AIConfig) -> None:
+    def __init__(self, config: AIConfig, token_provider: TokenProvider | None = None) -> None:
         self.config = config
+        self._token_provider = token_provider
+        self._build_client()
+
+    def _build_client(self) -> None:
+        """Build (or rebuild) the AsyncOpenAI client with the current API key."""
+        api_key = self._resolve_api_key()
         kwargs: dict[str, Any] = {
-            "base_url": config.base_url,
-            "api_key": config.api_key,
+            "base_url": self.config.base_url,
+            "api_key": api_key,
         }
-        if not config.verify_ssl:
+        if not self.config.verify_ssl:
             kwargs["http_client"] = httpx.AsyncClient(verify=False)
         self.client = AsyncOpenAI(**kwargs)
+
+    def _resolve_api_key(self) -> str:
+        """Get API key from token provider (if set) or static config."""
+        if self._token_provider:
+            return self._token_provider.get_token()
+        return self.config.api_key
+
+    def _try_refresh_token(self) -> bool:
+        """Attempt to refresh the token. Returns True if successful."""
+        if not self._token_provider:
+            return False
+        try:
+            self._token_provider.refresh()
+            self._build_client()
+            logger.info("Token refreshed and client rebuilt successfully")
+            return True
+        except TokenProviderError:
+            logger.exception("Token refresh failed")
+            return False
 
     async def stream_chat(
         self,
@@ -103,6 +135,20 @@ class AIService:
                     yield {"event": "done", "data": {}}
                     return
 
+        except AuthenticationError:
+            if self._try_refresh_token():
+                logger.info("Retrying request with refreshed token")
+                async for event in self.stream_chat(messages, tools, cancel_event, extra_system_prompt):
+                    yield event
+            else:
+                logger.error("Authentication failed and token refresh unavailable")
+                yield {
+                    "event": "error",
+                    "data": {
+                        "message": "Authentication failed. Check your API key or api_key_command.",
+                        "code": "auth_failed",
+                    },
+                }
         except BadRequestError as e:
             body = getattr(e, "body", {}) or {}
             err_code = body.get("error", {}).get("code", "") if isinstance(body, dict) else ""
@@ -149,6 +195,11 @@ class AIService:
             )
             title = response.choices[0].message.content or "New Conversation"
             return title.strip().strip('"').strip("'")
+        except AuthenticationError:
+            if self._try_refresh_token():
+                return await self.generate_title(user_message)
+            logger.error("Authentication failed during title generation")
+            return "New Conversation"
         except Exception:
             logger.exception("Failed to generate title")
             return "New Conversation"
@@ -158,6 +209,11 @@ class AIService:
             models = await self.client.models.list()
             model_ids = [m.id for m in models.data]
             return True, "Connected successfully", model_ids
+        except AuthenticationError:
+            if self._try_refresh_token():
+                return await self.validate_connection()
+            logger.error("Authentication failed during connection validation")
+            return False, "Authentication failed. Check your API key or api_key_command.", []
         except Exception as e:
             logger.error("AI connection validation failed: %s", e)
             return False, "Connection to AI service failed", []

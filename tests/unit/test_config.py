@@ -54,7 +54,7 @@ class TestLoadConfig:
                 },
             },
         )
-        with pytest.raises(ValueError, match="api_key is required"):
+        with pytest.raises(ValueError, match="api_key or api_key_command is required"):
             load_config(cfg_file)
 
     def test_raises_when_base_url_missing(self, tmp_path: Path) -> None:

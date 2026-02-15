@@ -20,7 +20,7 @@ from ..config import AppConfig
 from ..db import init_db
 from ..services import storage
 from ..services.agent_loop import run_agent_loop
-from ..services.ai_service import AIService
+from ..services.ai_service import AIService, create_ai_service
 from ..services.rewind import collect_file_paths
 from ..services.rewind import rewind_conversation as rewind_service
 from ..tools import ToolRegistry, register_default_tools
@@ -383,7 +383,7 @@ async def run_cli(
     instructions = load_instructions(working_dir)
     extra_system_prompt = _build_system_prompt(config, working_dir, instructions)
 
-    ai_service = AIService(config.ai)
+    ai_service = create_ai_service(config.ai)
 
     all_tool_names = tool_registry.list_tools()
     if mcp_manager:
@@ -853,7 +853,7 @@ async def _run_repl(
                     continue
                 new_model = parts[1].strip()
                 current_model = new_model
-                ai_service = AIService(config.ai)
+                ai_service = create_ai_service(config.ai)
                 ai_service.config.model = new_model
                 renderer.console.print(f"[grey62]Switched to model: {new_model}[/grey62]\n")
                 continue

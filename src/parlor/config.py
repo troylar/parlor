@@ -76,6 +76,7 @@ class AIConfig:
     system_prompt: str = _DEFAULT_SYSTEM_PROMPT
     user_system_prompt: str = ""
     verify_ssl: bool = True
+    api_key_command: str = ""
 
 
 @dataclass
@@ -134,6 +135,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     ai_raw = raw.get("ai", {})
     base_url = ai_raw.get("base_url") or os.environ.get("AI_CHAT_BASE_URL", "")
     api_key = ai_raw.get("api_key") or os.environ.get("AI_CHAT_API_KEY", "")
+    api_key_command = ai_raw.get("api_key_command") or os.environ.get("AI_CHAT_API_KEY_COMMAND", "")
     model = ai_raw.get("model") or os.environ.get("AI_CHAT_MODEL", "gpt-4")
     user_system_prompt = ai_raw.get("system_prompt") or os.environ.get("AI_CHAT_SYSTEM_PROMPT", "")
     if user_system_prompt:
@@ -149,9 +151,10 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             "AI base_url is required. Set 'ai.base_url' in config.yaml "
             f"({path}) or AI_CHAT_BASE_URL environment variable."
         )
-    if not api_key:
+    if not api_key and not api_key_command:
         raise ValueError(
-            f"AI api_key is required. Set 'ai.api_key' in config.yaml ({path}) or AI_CHAT_API_KEY environment variable."
+            f"AI api_key or api_key_command is required. Set 'ai.api_key' or 'ai.api_key_command' "
+            f"in config.yaml ({path}) or AI_CHAT_API_KEY / AI_CHAT_API_KEY_COMMAND environment variable."
         )
 
     verify_ssl_raw = ai_raw.get("verify_ssl", os.environ.get("AI_CHAT_VERIFY_SSL", "true"))
@@ -160,6 +163,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     ai = AIConfig(
         base_url=base_url,
         api_key=api_key,
+        api_key_command=api_key_command,
         model=model,
         system_prompt=system_prompt,
         user_system_prompt=user_system_prompt,

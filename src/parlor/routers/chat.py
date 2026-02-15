@@ -16,7 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..models import ChatRequest
 from ..services import storage
-from ..services.ai_service import AIService
+from ..services.ai_service import AIService, create_ai_service
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,8 @@ def _get_ai_service(request: Request, model_override: str | None = None) -> AISe
     if model_override:
         ai_config = copy.copy(config.ai)
         ai_config.model = model_override
-        return AIService(ai_config)
-    return AIService(config.ai)
+        return create_ai_service(ai_config)
+    return create_ai_service(config.ai)
 
 
 @router.post("/conversations/{conversation_id}/chat")
