@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .. import __version__
 from ..config import AppConfig, build_runtime_context
 from ..db import init_db
 from ..services import storage
@@ -264,6 +265,38 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
+async def _check_for_update(current: str) -> str | None:
+    """Check PyPI for a newer version. Returns latest if newer, else None."""
+    try:
+        proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "pip",
+                "index",
+                "versions",
+                "parlor",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            ),
+            timeout=5.0,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        output = stdout.decode().strip()
+        # Output format: "parlor (X.Y.Z)"
+        if "(" in output and ")" in output:
+            latest = output.split("(")[1].split(")")[0].strip()
+            from packaging.version import Version
+
+            if Version(latest) > Version(current):
+                return latest
+    except Exception:
+        pass
+    return None
+
+
 _EXIT_COMMANDS = frozenset({"/quit", "/exit"})
 
 
@@ -444,6 +477,18 @@ async def run_cli(
 
     ai_service = create_ai_service(config.ai)
 
+    # Validate connection before proceeding
+    valid, message, _ = await ai_service.validate_connection()
+    if not valid:
+        renderer.render_error(f"Cannot connect to AI service: {message}")
+        renderer.console.print(f"  [dim]base_url: {config.ai.base_url}[/dim]")
+        renderer.console.print(f"  [dim]model: {config.ai.model}[/dim]")
+        renderer.console.print("  [dim]Check ~/.parlor/config.yaml[/dim]\n")
+        if mcp_manager:
+            await mcp_manager.shutdown()
+        db.close()
+        return
+
     all_tool_names = tool_registry.list_tools()
     if mcp_manager:
         all_tool_names.extend(t["name"] for t in mcp_manager.get_all_tools())
@@ -475,13 +520,19 @@ async def run_cli(
         )
     else:
         git_branch = _detect_git_branch()
+        build_date = renderer._get_build_date()
+        latest_version = await _check_for_update(__version__)
         renderer.render_welcome(
             model=config.ai.model,
             tool_count=len(all_tool_names),
             instructions_loaded=instructions is not None,
             working_dir=working_dir,
             git_branch=git_branch,
+            version=__version__,
+            build_date=build_date,
         )
+        if latest_version:
+            renderer.render_update_available(__version__, latest_version)
         await _run_repl(
             config=config,
             db=db,

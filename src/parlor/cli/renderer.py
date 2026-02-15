@@ -496,32 +496,60 @@ def render_error(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _get_build_date() -> str:
+    try:
+        from .._build_info import BUILD_TIMESTAMP  # type: ignore[import-not-found]
+        from datetime import datetime
+
+        dt = datetime.fromisoformat(BUILD_TIMESTAMP)
+        return dt.astimezone().strftime("%b %d, %Y %I:%M %p")
+    except Exception:
+        return ""
+
+
 def render_welcome(
     model: str,
     tool_count: int,
     instructions_loaded: bool,
     working_dir: str,
     git_branch: str | None = None,
+    version: str = "",
+    build_date: str = "",
 ) -> None:
-    # Shorten working dir
     display_dir = _short_path(working_dir)
     branch = f" ({git_branch})" if git_branch else ""
 
     console.print()
-    console.print("[#C5A059]       .  *  .       [/]")
-    console.print("[#C5A059]     .  /|\\  .      [/]")
-    console.print("[#C5A059]    . / | \\ .     [/]")
-    console.print("[#C5A059]  ──── [bold]PARLOR[/bold] ────  [/]")
-    console.print("[#C5A059]    . \\ | / .     [/]")
-    console.print("[#C5A059]     .  \\|/  .      [/]")
-    console.print("[#C5A059]       .  *  .       [/]")
+    console.print("[#C5A059]  \u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e[/]")
+    console.print("[#C5A059]  \u2502         [bold]P A R L O R[/bold]         \u2502[/]")
+    console.print("[#C5A059]  \u2502    [#94A3B8]the digital speakeasy[/]    \u2502[/]")
+    console.print("[#C5A059]  \u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f[/]")
     console.print()
-    console.print(f" [#94A3B8]{escape(display_dir)}{branch}[/]")
-    inst = "instructions" if instructions_loaded else ""
+
+    version_parts = []
+    if version:
+        version_parts.append(f"v{version}")
+    if build_date:
+        version_parts.append(f"Built {build_date}")
+    if version_parts:
+        console.print(f"  [dim]{' \u00b7 '.join(version_parts)}[/dim]")
+    console.print("  [dim]github.com/troylar/parlor[/dim]")
+    console.print()
+
+    console.print(f"  [#94A3B8]{escape(display_dir)}{branch}[/]")
     parts = [escape(model), f"{tool_count} tools"]
-    if inst:
-        parts.append(inst)
-    console.print(f" [dim]{' · '.join(parts)}[/dim]\n")
+    if instructions_loaded:
+        parts.append("instructions")
+    console.print(f"  [dim]{' \u00b7 '.join(parts)}[/dim]")
+    console.print()
+    console.print("  [dim]Type /help for commands[/dim]\n")
+
+
+def render_update_available(current: str, latest: str) -> None:
+    console.print(
+        f"  [#C5A059]Update available:[/] [dim]{current} \u2192 {latest}[/dim]"
+        f" [dim]\u2014 pip install --upgrade parlor[/dim]\n"
+    )
 
 
 def render_help() -> None:

@@ -22,3 +22,4 @@ Thumbs.db
 .coverage
 htmlcov/
 site/
+src/parlor/_build_info.py
