@@ -137,7 +137,7 @@ def _collapse_long_input(user_input: str) -> None:
         return
 
     term_cols = shutil.get_terminal_size((80, 24)).columns
-    usable = max(term_cols - 5, 10)  # 5 = "you> " / continuation indent
+    usable = max(term_cols - 2, 10)  # 2 = "❯ " prompt width
 
     # Estimate terminal rows the prompt_toolkit input occupied
     total_rows = sum(max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines)
@@ -148,10 +148,10 @@ def _collapse_long_input(user_input: str) -> None:
     # Move cursor up to input start and clear to end of screen
     sys.stdout.write(f"\033[{total_rows}A\033[J")
     # Reprint truncated with styled prompt
-    sys.stdout.write(f"\033[1;96myou>\033[0m {lines[0]}\n")
+    sys.stdout.write(f"\033[1;96m❯\033[0m {lines[0]}\n")
     for ln in lines[1:show]:
-        sys.stdout.write(f"     {ln}\n")
-    sys.stdout.write(f"     \033[90m... ({hidden} more lines)\033[0m\n")
+        sys.stdout.write(f"  {ln}\n")
+    sys.stdout.write(f"  \033[90m... ({hidden} more lines)\033[0m\n")
     sys.stdout.flush()
 
 
@@ -614,6 +614,8 @@ async def _run_repl(
         "skills",
         "mcp",
         "model",
+        "verbose",
+        "detail",
         "help",
         "quit",
         "exit",
@@ -671,9 +673,9 @@ async def _run_repl(
             _exit_flag[0] = True
             buf.validate_and_handle()
 
-    # Styled prompt: colored "you>" with continuation indent
-    _prompt = HTML("<ansibrightcyan><b>you&gt;</b></ansibrightcyan> ")
-    _continuation = "     "  # 5 chars to align with "you> "
+    # Styled prompt
+    _prompt = HTML("<ansibrightcyan><b>❯</b></ansibrightcyan> ")
+    _continuation = "  "  # 2 chars to align with "❯ "
 
     session: PromptSession[str] = PromptSession(
         history=FileHistory(str(history_path)),
@@ -855,6 +857,13 @@ async def _run_repl(
                 ai_service.config.model = new_model
                 renderer.console.print(f"[grey62]Switched to model: {new_model}[/grey62]\n")
                 continue
+            elif cmd == "/verbose":
+                new_v = renderer.cycle_verbosity()
+                renderer.render_verbosity_change(new_v)
+                continue
+            elif cmd == "/detail":
+                renderer.render_tool_detail()
+                continue
             elif cmd == "/resume":
                 parts = user_input.split(maxsplit=1)
                 if len(parts) < 2:
@@ -986,6 +995,7 @@ async def _run_repl(
         ai_messages.append({"role": "user", "content": expanded})
 
         # Stream response
+        renderer.clear_turn_history()
         cancel_event = asyncio.Event()
         loop = asyncio.get_event_loop()
         original_handler = signal.getsignal(signal.SIGINT)
@@ -1035,6 +1045,7 @@ async def _run_repl(
                     if thinking:
                         total_elapsed += renderer.stop_thinking()
                         thinking = False
+                    renderer.save_turn_history()
                     renderer.render_newline()
                     renderer.render_response_end()
                     renderer.render_newline()

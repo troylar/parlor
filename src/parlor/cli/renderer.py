@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
+from enum import Enum
 from typing import Any
 
 from rich.console import Console
@@ -25,13 +27,193 @@ _thinking_start: float = 0
 _spinner: Status | None = None
 _last_spinner_update: float = 0
 
+# Active tool call spinner (shows while tool is executing)
+_tool_spinner: Status | None = None
+_tool_start: float = 0
+
+
+# ---------------------------------------------------------------------------
+# Verbosity
+# ---------------------------------------------------------------------------
+
+
+class Verbosity(Enum):
+    COMPACT = "compact"
+    DETAILED = "detailed"
+    VERBOSE = "verbose"
+
+
+_verbosity: Verbosity = Verbosity.COMPACT
+
+# Tool call history for /detail replay
+_tool_history: list[dict[str, Any]] = []
+_current_turn_tools: list[dict[str, Any]] = []
+
+
+def get_verbosity() -> Verbosity:
+    return _verbosity
+
+
+def set_verbosity(v: Verbosity) -> None:
+    global _verbosity
+    _verbosity = v
+
+
+def cycle_verbosity() -> Verbosity:
+    global _verbosity
+    order = [Verbosity.COMPACT, Verbosity.DETAILED, Verbosity.VERBOSE]
+    idx = order.index(_verbosity)
+    _verbosity = order[(idx + 1) % len(order)]
+    return _verbosity
+
+
+def clear_turn_history() -> None:
+    """Clear current turn tool history. Called at start of each turn."""
+    _current_turn_tools.clear()
+
+
+def save_turn_history() -> None:
+    """Save current turn tools to history. Called at end of each turn."""
+    if _current_turn_tools:
+        _tool_history.clear()
+        _tool_history.extend(_current_turn_tools)
+
+
+# ---------------------------------------------------------------------------
+# Tool call summary helpers
+# ---------------------------------------------------------------------------
+
+
+def _humanize_tool(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Convert tool_name + args into a human-readable breadcrumb."""
+    name_lower = tool_name.lower()
+
+    # Built-in tools: extract the key argument
+    if name_lower == "bash":
+        cmd = arguments.get("command", "")
+        # Show first ~60 chars of command
+        if len(cmd) > 60:
+            cmd = cmd[:57] + "..."
+        return f"bash {cmd}"
+    elif name_lower in ("file_read", "read_file"):
+        path = arguments.get("path", arguments.get("file_path", ""))
+        return f"Reading {_short_path(path)}"
+    elif name_lower in ("file_write", "write_file"):
+        path = arguments.get("path", arguments.get("file_path", ""))
+        return f"Writing {_short_path(path)}"
+    elif name_lower in ("file_edit", "edit_file"):
+        path = arguments.get("path", arguments.get("file_path", ""))
+        return f"Editing {_short_path(path)}"
+    elif name_lower in ("grep", "search", "ripgrep"):
+        pattern = arguments.get("pattern", arguments.get("query", ""))
+        return f"Searching for '{pattern}'"
+    elif name_lower in ("glob", "find_files"):
+        pattern = arguments.get("pattern", "")
+        return f"Finding {pattern}"
+    elif name_lower == "list_directory":
+        path = arguments.get("path", ".")
+        return f"Listing {_short_path(path)}"
+
+    # MCP / unknown tools: show name + first string arg
+    first_str = ""
+    for v in arguments.values():
+        if isinstance(v, str) and v:
+            first_str = v
+            if len(first_str) > 40:
+                first_str = first_str[:37] + "..."
+            break
+    if first_str:
+        return f"{tool_name} {first_str}"
+    return tool_name
+
+
+def _short_path(path: str) -> str:
+    """Shorten absolute path using ~ for home and cwd-relative."""
+    if not path:
+        return path
+    home = os.path.expanduser("~")
+    cwd = os.getcwd()
+    # Try cwd-relative first
+    try:
+        rel = os.path.relpath(path, cwd)
+        if not rel.startswith(".."):
+            return rel
+    except ValueError:
+        pass
+    # Fall back to ~-relative
+    if path.startswith(home):
+        return "~" + path[len(home) :]
+    return path
+
+
+def _format_tokens(n: int) -> str:
+    """Format token count: 1234 -> '1.2k', 128000 -> '128k'."""
+    if n >= 1000:
+        k = n / 1000
+        if k >= 10:
+            return f"{k:.0f}k"
+        return f"{k:.1f}k"
+    return str(n)
+
+
+def _error_summary(output: Any) -> str:
+    """Extract a one-line error summary from tool output."""
+    if not isinstance(output, dict):
+        return ""
+    err = output.get("error", "")
+    if err:
+        # First line only, truncated
+        first_line = str(err).split("\n")[0]
+        if len(first_line) > 80:
+            first_line = first_line[:77] + "..."
+        return first_line
+    return ""
+
+
+def _output_summary(output: Any) -> str:
+    """Extract a brief output summary for detailed mode."""
+    if not isinstance(output, dict):
+        return ""
+    if "error" in output:
+        return _error_summary(output)
+    if "content" in output:
+        content = output["content"]
+        if isinstance(content, str):
+            lines = content.count("\n") + 1
+            chars = len(content)
+            if chars > 80:
+                return f"{lines} lines, {chars:,} chars"
+            # Short enough to show inline
+            oneline = content.replace("\n", " ").strip()
+            if len(oneline) > 60:
+                return oneline[:57] + "..."
+            return oneline
+    if "stdout" in output:
+        stdout = output.get("stdout", "")
+        if stdout:
+            lines = stdout.count("\n") + 1
+            oneline = stdout.split("\n")[0].strip()
+            if lines > 1:
+                if len(oneline) > 40:
+                    oneline = oneline[:37] + "..."
+                return f"{oneline} (+{lines - 1} lines)"
+            if len(oneline) > 60:
+                return oneline[:57] + "..."
+            return oneline
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Thinking spinner
+# ---------------------------------------------------------------------------
+
 
 def start_thinking() -> None:
     """Show a spinner with timer while AI is generating."""
     global _thinking_start, _spinner, _last_spinner_update
     _thinking_start = time.monotonic()
     _last_spinner_update = _thinking_start
-    _spinner = Status("Thinking...", console=console, spinner="dots")
+    _spinner = Status("[dim]Thinking...[/dim]", console=console, spinner="dots")
     _spinner.start()
 
 
@@ -42,7 +224,7 @@ def update_thinking() -> None:
         now = time.monotonic()
         if now - _last_spinner_update >= 1.0:
             elapsed = now - _thinking_start
-            _spinner.update(f"Thinking... ({elapsed:.0f}s)")
+            _spinner.update(f"[dim]Thinking...[/dim] [grey62]{elapsed:.0f}s[/grey62]")
             _last_spinner_update = now
 
 
@@ -55,6 +237,11 @@ def stop_thinking() -> float:
         _spinner.stop()
         _spinner = None
     return elapsed
+
+
+# ---------------------------------------------------------------------------
+# Token / response rendering
+# ---------------------------------------------------------------------------
 
 
 def render_token(content: str) -> None:
@@ -82,42 +269,124 @@ def render_newline() -> None:
     _stdout.flush()
 
 
+# ---------------------------------------------------------------------------
+# Tool call rendering (verbosity-aware)
+# ---------------------------------------------------------------------------
+
+
 def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
-    args_str = json.dumps(arguments, indent=None, default=str)
-    if len(args_str) > 200:
-        args_str = args_str[:200] + "..."
-    console.print(f"\n  [grey62]> {escape(tool_name)}({escape(args_str)})[/grey62]")
+    """Show tool call breadcrumb. In verbose mode, also show raw args."""
+    global _tool_spinner, _tool_start
+
+    summary = _humanize_tool(tool_name, arguments)
+
+    # Store for history
+    _current_turn_tools.append(
+        {
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "summary": summary,
+            "status": "running",
+            "output": None,
+        }
+    )
+
+    if _verbosity == Verbosity.VERBOSE:
+        # Legacy-style full output
+        args_str = json.dumps(arguments, indent=None, default=str)
+        if len(args_str) > 200:
+            args_str = args_str[:200] + "..."
+        console.print(f"  [grey62]> {escape(tool_name)}({escape(args_str)})[/grey62]")
+    else:
+        # Compact/detailed: show spinner on active tool
+        _tool_start = time.monotonic()
+        _tool_spinner = Status(
+            f"  [dim]●[/dim] {escape(summary)}",
+            console=console,
+            spinner="dots",
+            spinner_style="dim",
+        )
+        _tool_spinner.start()
 
 
 def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
-    if status == "success":
-        style = "green"
-    else:
-        style = "red"
+    """Show tool call result. Style depends on verbosity."""
+    global _tool_spinner
 
-    output_str = ""
-    if isinstance(output, dict):
-        if "error" in output:
-            output_str = f" - {output['error']}"
-        elif "content" in output:
-            content = output["content"]
-            if isinstance(content, str) and len(content) > 200:
-                content = content[:200] + "..."
-            output_str = f" - {content}"
-        elif "stdout" in output:
-            stdout = output["stdout"]
-            if stdout and len(stdout) > 200:
-                stdout = stdout[:200] + "..."
-            output_str = f" - {stdout}" if stdout else ""
-    text = Text(
-        f"  < {tool_name}: {status}{output_str}",
-        style=style,
-    )
-    console.print(text)
+    elapsed = time.monotonic() - _tool_start if _tool_start else 0
+
+    # Update history
+    if _current_turn_tools:
+        _current_turn_tools[-1]["status"] = status
+        _current_turn_tools[-1]["output"] = output
+        _current_turn_tools[-1]["elapsed"] = elapsed
+
+    summary = _current_turn_tools[-1]["summary"] if _current_turn_tools else tool_name
+
+    if _verbosity == Verbosity.VERBOSE:
+        # Legacy-style
+        if status == "success":
+            style = "green"
+        else:
+            style = "red"
+        output_str = ""
+        if isinstance(output, dict):
+            if "error" in output:
+                output_str = f" - {output['error']}"
+            elif "content" in output:
+                content = output["content"]
+                if isinstance(content, str) and len(content) > 200:
+                    content = content[:200] + "..."
+                output_str = f" - {content}"
+            elif "stdout" in output:
+                stdout = output["stdout"]
+                if stdout and len(stdout) > 200:
+                    stdout = stdout[:200] + "..."
+                output_str = f" - {stdout}" if stdout else ""
+        text = Text(f"  < {tool_name}: {status}{output_str}", style=style)
+        console.print(text)
+        return
+
+    # Stop the tool spinner
+    if _tool_spinner:
+        _tool_spinner.stop()
+        _tool_spinner = None
+
+    # Build the result line
+    status_icon = "[green]✓[/green]" if status == "success" else "[red]✗[/red]"
+    elapsed_str = f" {elapsed:.1f}s" if elapsed >= 0.1 else ""
+
+    if status != "success":
+        # Show error: icon + summary + error on next line
+        console.print(f"  [dim]●[/dim] {escape(summary)}  {status_icon}{elapsed_str}")
+        err = _error_summary(output)
+        if err:
+            console.print(f"    [red]{escape(err)}[/red]")
+    elif _verbosity == Verbosity.DETAILED:
+        # Show summary + brief output
+        detail = _output_summary(output)
+        if detail:
+            console.print(f"  [dim]●[/dim] {escape(summary)}  {status_icon}{elapsed_str}")
+            console.print(f"    [grey62]{escape(detail)}[/grey62]")
+        else:
+            console.print(f"  [dim]●[/dim] {escape(summary)}  {status_icon}{elapsed_str}")
+    else:
+        # Compact: just breadcrumb + checkmark
+        console.print(f"  [dim]●[/dim] {escape(summary)}  {status_icon}{elapsed_str}")
+
+
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
 
 
 def render_error(message: str) -> None:
     console.print(f"\n[red bold]Error:[/red bold] {escape(message)}")
+
+
+# ---------------------------------------------------------------------------
+# Welcome / help
+# ---------------------------------------------------------------------------
 
 
 def render_welcome(
@@ -127,34 +396,27 @@ def render_welcome(
     working_dir: str,
     git_branch: str | None = None,
 ) -> None:
-    console.print(f"\n[bold]Parlor CLI[/bold] - {escape(working_dir)}")
-    inst = "loaded" if instructions_loaded else "none"
-    branch_info = f" | Branch: {git_branch}" if git_branch else ""
-    console.print(f"  Model: {escape(model)} | Tools: {tool_count} | Instructions: {inst}{branch_info}")
-    console.print("  Type [bold]/help[/bold] for commands, [bold]Ctrl+D[/bold] to exit\n")
+    # Shorten working dir
+    display_dir = _short_path(working_dir)
+    branch = f" ({git_branch})" if git_branch else ""
+
+    console.print(f"\n [bold]parlor[/bold] [dim]─[/dim] {escape(display_dir)}{branch}")
+    inst = "instructions" if instructions_loaded else ""
+    parts = [escape(model), f"{tool_count} tools"]
+    if inst:
+        parts.append(inst)
+    console.print(f" [dim]{' · '.join(parts)}[/dim]\n")
 
 
 def render_help() -> None:
-    console.print("\n[bold]Commands:[/bold]")
-    console.print("  /new        - Start a new conversation")
-    console.print("  /last       - Resume the most recent conversation")
-    console.print("  /list       - Show recent conversations")
-    console.print("  /resume N   - Resume conversation by number or ID")
-    console.print("  /rewind     - Rewind to a previous message (optionally undo file changes)")
-    console.print("  /compact    - Summarize and compact message history")
-    console.print("  /tools      - List available tools")
-    console.print("  /skills     - List available skills")
-    console.print("  /mcp        - Show MCP server status / manage servers")
-    console.print("  /mcp status <name> - Detailed diagnostics for a server")
-    console.print("  /model NAME - Switch to a different model")
-    console.print("  /quit       - Exit")
-    console.print("  Escape      - Cancel current response")
-    console.print("  Ctrl+C      - Cancel current response")
-    console.print("  Ctrl+D      - Exit")
-    console.print("\n[bold]Input:[/bold]")
-    console.print("  @<path>     - Reference a file or directory")
-    console.print("  /<skill>    - Run a registered skill")
-    console.print("  Alt+Enter   - Newline (multiline input)\n")
+    console.print()
+    console.print(" [bold]Conversations[/bold]  /new · /last · /list · /resume N · /rewind")
+    console.print(" [bold]Context[/bold]        /compact · /model NAME")
+    console.print(" [bold]Tools[/bold]          /tools · /skills · /mcp · /mcp status <name>")
+    console.print(" [bold]Display[/bold]        /verbose · /detail")
+    console.print(" [bold]Input[/bold]          @<path> file ref · Alt+Enter newline")
+    console.print(" [bold]Exit[/bold]           /quit · Ctrl+D · Escape to cancel")
+    console.print()
 
 
 def render_tools(tool_names: list[str]) -> None:
@@ -166,6 +428,11 @@ def render_tools(tool_names: list[str]) -> None:
 
 def render_compact_done(original: int, compacted: int) -> None:
     console.print(f"\n[grey62]Compacted {original} messages -> {compacted} messages[/grey62]")
+
+
+# ---------------------------------------------------------------------------
+# MCP status
+# ---------------------------------------------------------------------------
 
 
 def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
@@ -185,14 +452,19 @@ def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
     for name, info in statuses.items():
         status = info.get("status", "unknown")
         if status == "connected":
-            status_text = "[green]connected[/green]"
+            status_text = "[green]● connected[/green]"
         elif status == "error":
             err = info.get("error_message", "")
-            status_text = "[red]error[/red]"
+            status_text = "[red]● error[/red]"
             if err:
+                # Truncate long error messages in table
+                if len(err) > 40:
+                    err = err[:37] + "..."
                 status_text += f" [grey62]({err})[/grey62]"
+        elif status == "disconnected":
+            status_text = "[grey62]○ disconnected[/grey62]"
         else:
-            status_text = f"[grey62]{status}[/grey62]"
+            status_text = f"[grey62]○ {status}[/grey62]"
 
         table.add_row(
             name,
@@ -218,17 +490,16 @@ def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp
     status = info.get("status", "unknown")
 
     if status == "connected":
-        status_styled = "[green]connected[/green]"
+        status_styled = "[green]● connected[/green]"
     elif status == "error":
-        status_styled = "[red]error[/red]"
+        status_styled = "[red]● error[/red]"
     else:
-        status_styled = f"[grey62]{status}[/grey62]"
+        status_styled = f"[grey62]○ {status}[/grey62]"
 
     console.print(f"\n[bold]MCP Server: {escape(name)}[/bold]")
     console.print(f"  Status:    {status_styled}")
     console.print(f"  Transport: {info.get('transport', '?')}")
 
-    # Show config details
     config = mcp_manager._configs.get(name)
     if config:
         if config.command:
@@ -240,12 +511,10 @@ def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp
             console.print(f"  Env keys:  {', '.join(config.env.keys())}")
         console.print(f"  Timeout:   {config.timeout}s")
 
-    # Show error details
     err = info.get("error_message")
     if err:
         console.print(f"  [red]Error:     {escape(err)}[/red]")
 
-    # Show tools if connected
     tool_count = info.get("tool_count", 0)
     console.print(f"  Tools:     {tool_count}")
     if tool_count > 0:
@@ -262,6 +531,76 @@ def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp
     console.print()
 
 
+# ---------------------------------------------------------------------------
+# /detail - replay last turn's tool calls with full output
+# ---------------------------------------------------------------------------
+
+
+def render_tool_detail() -> None:
+    """Render full detail of the last turn's tool calls."""
+    if not _tool_history:
+        console.print("[grey62]No tool calls in the last turn.[/grey62]\n")
+        return
+
+    console.print(f"\n[bold]Last turn: {len(_tool_history)} tool call(s)[/bold]\n")
+    for i, tc in enumerate(_tool_history, 1):
+        status = tc.get("status", "unknown")
+        elapsed = tc.get("elapsed", 0)
+        status_icon = "[green]✓[/green]" if status == "success" else "[red]✗[/red]"
+        elapsed_str = f" ({elapsed:.1f}s)" if elapsed >= 0.1 else ""
+
+        console.print(f"  {status_icon} [bold]{escape(tc['tool_name'])}[/bold]{elapsed_str}")
+
+        # Show full arguments
+        args_str = json.dumps(tc["arguments"], indent=2, default=str)
+        for line in args_str.split("\n"):
+            console.print(f"    [dim]{escape(line)}[/dim]")
+
+        # Show output
+        output = tc.get("output")
+        if output:
+            if isinstance(output, dict):
+                if "error" in output:
+                    console.print(f"    [red]{escape(str(output['error'])[:500])}[/red]")
+                elif "content" in output:
+                    content = str(output["content"])
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    for line in content.split("\n")[:20]:
+                        console.print(f"    [grey62]{escape(line)}[/grey62]")
+                    total_lines = str(output["content"]).count("\n") + 1
+                    if total_lines > 20:
+                        console.print(f"    [dim]... ({total_lines - 20} more lines)[/dim]")
+                elif "stdout" in output:
+                    stdout = str(output.get("stdout", ""))
+                    if len(stdout) > 500:
+                        stdout = stdout[:500] + "..."
+                    for line in stdout.split("\n")[:20]:
+                        console.print(f"    [grey62]{escape(line)}[/grey62]")
+            else:
+                console.print(f"    [grey62]{escape(str(output)[:200])}[/grey62]")
+        console.print()
+
+
+# ---------------------------------------------------------------------------
+# Verbosity display
+# ---------------------------------------------------------------------------
+
+
+def render_verbosity_change(v: Verbosity) -> None:
+    labels = {
+        Verbosity.COMPACT: "compact",
+        Verbosity.DETAILED: "detailed",
+        Verbosity.VERBOSE: "verbose",
+    }
+    console.print(f"[grey62]Verbosity: {labels[v]}[/grey62]\n")
+
+
+# ---------------------------------------------------------------------------
+# Context footer (compact)
+# ---------------------------------------------------------------------------
+
+
 def render_context_footer(
     current_tokens: int,
     auto_compact_threshold: int,
@@ -269,7 +608,7 @@ def render_context_footer(
     elapsed: float = 0.0,
     max_context: int = 128_000,
 ) -> None:
-    """Render a footer showing context usage after each response."""
+    """Render a compact footer showing context usage."""
     pct_full = min(100, (current_tokens / max_context) * 100)
     tokens_remaining = auto_compact_threshold - current_tokens
 
@@ -280,14 +619,12 @@ def render_context_footer(
     else:
         color = "grey62"
 
-    bar_width = 20
-    filled = int(bar_width * pct_full / 100)
-    bar = "=" * filled + "-" * (bar_width - filled)
+    parts = [f"{_format_tokens(current_tokens)}/{_format_tokens(max_context)} ({pct_full:.0f}%)"]
+    if response_tokens:
+        parts.append(f"{_format_tokens(response_tokens)} resp")
+    if elapsed > 0:
+        parts.append(f"{elapsed:.1f}s")
+    if pct_full > 50:
+        parts.append(f"compact in {_format_tokens(max(0, tokens_remaining))}")
 
-    elapsed_info = f" | {elapsed:.1f}s" if elapsed > 0 else ""
-    resp_info = f" | response: {response_tokens:,}" if response_tokens else ""
-    console.print(
-        f"[{color}]  [{bar}] {current_tokens:,}/{max_context:,} "
-        f"tokens ({pct_full:.0f}%){resp_info}{elapsed_info}"
-        f" | {tokens_remaining:,} until auto-compact[/{color}]"
-    )
+    console.print(f"[{color}]  ▪ {' · '.join(parts)}[/{color}]")
