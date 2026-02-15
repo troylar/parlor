@@ -45,7 +45,7 @@ class TestCommandFiltering:
         db = MagicMock()
         drain_env["input_queue"].put_nowait("Hello, help me with code")
 
-        with patch("parlor.services.storage.create_message") as mock_storage:
+        with patch("parlor.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
