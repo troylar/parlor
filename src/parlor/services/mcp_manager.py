@@ -107,9 +107,8 @@ class McpManager:
             }
             return
 
+        stack = AsyncExitStack()
         try:
-            stack = AsyncExitStack()
-
             if config.transport == "stdio" and config.command:
                 _validate_command(config.command)
                 server_params = StdioServerParameters(
@@ -171,7 +170,15 @@ class McpManager:
             }
             logger.info(f"MCP server '{config.name}' connected with {len(server_tools)} tools")
 
-        except Exception as e:
+        except BaseException as e:
+            # Close the exit stack to clean up any partially-entered async
+            # contexts (stdio subprocess, task groups, etc.) so they don't
+            # leak and crash with "unhandled exception in a TaskGroup".
+            try:
+                await stack.aclose()
+            except Exception:
+                logger.debug(f"Error closing stack for '{config.name}' during cleanup", exc_info=True)
+
             logger.warning(f"Failed to connect to MCP server '{config.name}': {e}")
             self._server_status[config.name] = {
                 "status": "error",
