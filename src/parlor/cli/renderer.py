@@ -216,7 +216,7 @@ def start_thinking() -> None:
     global _thinking_start, _spinner, _last_spinner_update
     _thinking_start = time.monotonic()
     _last_spinner_update = _thinking_start
-    _spinner = Status("[dim]Thinking...[/dim]", console=console, spinner="dots")
+    _spinner = Status("[#C5A059]Thinking...[/]", console=console, spinner="dots12")
     _spinner.start()
 
 
@@ -227,7 +227,7 @@ def update_thinking() -> None:
         now = time.monotonic()
         if now - _last_spinner_update >= 1.0:
             elapsed = now - _thinking_start
-            _spinner.update(f"[dim]Thinking...[/dim] [grey62]{elapsed:.0f}s[/grey62]")
+            _spinner.update(f"[#C5A059]Thinking...[/] [grey62]{elapsed:.0f}s[/grey62]")
             _last_spinner_update = now
 
 
@@ -429,7 +429,16 @@ def render_welcome(
     display_dir = _short_path(working_dir)
     branch = f" ({git_branch})" if git_branch else ""
 
-    console.print(f"\n [bold]parlor[/bold] [dim]─[/dim] {escape(display_dir)}{branch}")
+    console.print()
+    console.print("[#C5A059]       .  *  .       [/]")
+    console.print("[#C5A059]     .  /|\\  .      [/]")
+    console.print("[#C5A059]    . / | \\ .     [/]")
+    console.print("[#C5A059]  ──── [bold]PARLOR[/bold] ────  [/]")
+    console.print("[#C5A059]    . \\ | / .     [/]")
+    console.print("[#C5A059]     .  \\|/  .      [/]")
+    console.print("[#C5A059]       .  *  .       [/]")
+    console.print()
+    console.print(f" [#94A3B8]{escape(display_dir)}{branch}[/]")
     inst = "instructions" if instructions_loaded else ""
     parts = [escape(model), f"{tool_count} tools"]
     if inst:

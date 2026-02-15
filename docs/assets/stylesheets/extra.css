@@ -1,20 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
+
 :root {
-  --md-primary-fg-color: #5c6bc0;
-  --md-accent-fg-color: #ffb300;
+  --md-primary-fg-color: #C5A059;
+  --md-primary-fg-color--light: #d4b06a;
+  --md-primary-fg-color--dark: #9C7C3A;
+  --md-accent-fg-color: #3B82F6;
 }
 
 [data-md-color-scheme="slate"] {
-  --md-default-bg-color: #0f1117;
+  --md-default-bg-color: #0f1115;
+  --md-primary-fg-color: #C5A059;
+  --md-accent-fg-color: #3B82F6;
 }
 
 .md-header {
   backdrop-filter: blur(10px);
+  background-color: rgba(15, 17, 21, 0.85);
 }
 
 .md-typeset h1 {
+  font-family: 'Cinzel', Georgia, serif;
   font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .md-typeset table:not([class]) th {
   min-width: 6rem;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-color: #C5A059;
+}
+
+.md-typeset .admonition-title::before,
+.md-typeset summary::before {
+  color: #C5A059;
+}
+
+.md-typeset code {
+  border-radius: 4px;
 }

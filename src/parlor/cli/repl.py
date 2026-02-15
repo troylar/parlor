@@ -717,8 +717,8 @@ async def _run_repl(
             buf.validate_and_handle()
 
     # Styled prompt
-    _prompt = HTML("<ansibrightcyan><b>❯</b></ansibrightcyan> ")
-    _continuation = "  "  # 2 chars to align with "❯ "
+    _prompt = HTML("<style fg='#C5A059'>guest</style> <style fg='#334155'>›</style> ")
+    _continuation = "        "  # align with "guest › "
 
     session: PromptSession[str] = PromptSession(
         history=FileHistory(str(history_path)),

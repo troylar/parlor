@@ -645,7 +645,7 @@ const Chat = (() => {
 
         const roleDiv = document.createElement('div');
         roleDiv.className = 'message-role';
-        roleDiv.textContent = role === 'user' ? 'You' : 'Assistant';
+        roleDiv.textContent = role === 'user' ? 'YOU' : 'SYSTEM';
         el.appendChild(roleDiv);
 
         const contentDiv = document.createElement('div');
@@ -794,7 +794,7 @@ const Chat = (() => {
                 const w = document.createElement('div');
                 w.id = 'welcome-message';
                 w.className = 'welcome-message';
-                w.innerHTML = '<h2>Welcome to AI Chat</h2><p>Start a conversation by typing a message below.</p>';
+                w.innerHTML = '<h2>Welcome to the Parlor</h2><p>Your connection is secure. How may I assist you today?</p>';
                 container.appendChild(w);
             } else {
                 welcome.style.display = '';
@@ -809,7 +809,7 @@ const Chat = (() => {
 
             const roleDiv = document.createElement('div');
             roleDiv.className = 'message-role';
-            roleDiv.textContent = msg.role === 'user' ? 'You' : 'Assistant';
+            roleDiv.textContent = msg.role === 'user' ? 'YOU' : 'SYSTEM';
             el.appendChild(roleDiv);
 
             const contentDiv = document.createElement('div');
