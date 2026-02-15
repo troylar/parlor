@@ -40,6 +40,7 @@ def use_stdout_console() -> None:
     _stdout = _real_stderr
     _repl_mode = True
 
+
 # Response buffer (tokens collected silently, rendered on completion)
 _streaming_buffer: list[str] = []
 
