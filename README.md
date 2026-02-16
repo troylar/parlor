@@ -43,9 +43,10 @@ Step inside. Parlor connects to **any** OpenAI-compatible endpoint --- your comp
 
 ```bash
 pip install parlor
+parlor init         # Interactive setup wizard
 ```
 
-Create `~/.parlor/config.yaml`:
+Or create `~/.parlor/config.yaml` manually:
 
 ```yaml
 ai:
@@ -58,6 +59,7 @@ ai:
 parlor --test       # Verify connection
 parlor              # Web UI at http://127.0.0.1:8080
 parlor chat         # Terminal CLI
+parlor --version    # Show version
 ```
 
 ---
@@ -78,9 +80,10 @@ Full-featured ChatGPT-style interface with conversations, projects, folders, tag
 An agentic terminal REPL with built-in tools (read/write/edit files, bash, glob, grep), MCP integration, skills system, and Rich markdown rendering. Type while the AI works --- messages queue automatically.
 
 ```bash
-parlor chat                     # Interactive REPL
-parlor chat "explain main.py"   # One-shot mode
-parlor chat -c                  # Continue last conversation
+parlor chat                          # Interactive REPL
+parlor chat "explain main.py"        # One-shot mode
+parlor chat -c                       # Continue last conversation
+parlor chat --model gpt-4o "hello"   # Override model
 ```
 
 ### Shared Core

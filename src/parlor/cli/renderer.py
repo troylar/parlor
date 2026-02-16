@@ -560,12 +560,36 @@ def render_update_available(current: str, latest: str) -> None:
 
 def render_help() -> None:
     console.print()
-    console.print(" [bold]Conversations[/bold]  /new · /last · /list · /resume N · /rewind")
-    console.print(" [bold]Context[/bold]        /compact · /model NAME")
-    console.print(" [bold]Tools[/bold]          /tools · /skills · /mcp · /mcp status <name>")
-    console.print(" [bold]Display[/bold]        /verbose · /detail")
-    console.print(" [bold]Input[/bold]          @<path> file ref · Alt+Enter newline")
-    console.print(" [bold]Exit[/bold]           /quit · Ctrl+D · Escape to cancel")
+    console.print(" [bold]Conversations[/bold]")
+    console.print("   /new                  Start a new conversation")
+    console.print("   /last                 Resume the most recent conversation")
+    console.print("   /list [N]             Show recent conversations (default 20)")
+    console.print("   /search <query>       Search conversations by content")
+    console.print("   /resume <N|id>        Resume conversation by number or ID")
+    console.print("   /delete <N|id>        Delete a conversation")
+    console.print("   /rewind               Roll back to an earlier message")
+    console.print()
+    console.print(" [bold]Context[/bold]")
+    console.print("   /compact              Summarize history to free context space")
+    console.print("   /model <name>         Switch AI model mid-session")
+    console.print()
+    console.print(" [bold]Tools[/bold]")
+    console.print("   /tools                List available tools")
+    console.print("   /skills               List loaded skills")
+    console.print("   /mcp                  Show MCP server status")
+    console.print("   /mcp status <name>    Detailed diagnostics for one server")
+    console.print()
+    console.print(" [bold]Display[/bold]")
+    console.print("   /verbose              Cycle verbosity: compact > detailed > verbose")
+    console.print("   /detail               Replay last turn's tool calls with full output")
+    console.print()
+    console.print(" [bold]Input[/bold]")
+    console.print("   @<path>               Include file contents inline")
+    console.print("   Alt+Enter             Insert newline")
+    console.print("   Escape                Cancel AI generation")
+    console.print()
+    console.print(" [bold]Exit[/bold]")
+    console.print("   /quit · Ctrl+D")
     console.print()
 
 
@@ -573,6 +597,39 @@ def render_tools(tool_names: list[str]) -> None:
     console.print("\n[bold]Available tools:[/bold]")
     for name in sorted(tool_names):
         console.print(f"  - {name}")
+    console.print()
+
+
+def render_conversation_recap(messages: list[dict[str, Any]]) -> None:
+    """Show the last user/assistant exchange for context on resume."""
+    last_user = None
+    last_assistant = None
+    for msg in reversed(messages):
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if not content or not isinstance(content, str):
+            continue
+        if role == "assistant" and last_assistant is None:
+            last_assistant = content
+        elif role == "user" and last_user is None:
+            last_user = content
+        if last_user and last_assistant:
+            break
+
+    if not last_user and not last_assistant:
+        return
+
+    console.print("  [dim]Last exchange:[/dim]")
+    if last_user:
+        truncated = last_user[:200].replace("\n", " ")
+        if len(last_user) > 200:
+            truncated += "..."
+        console.print(f"  [#94A3B8]You:[/] [dim]{escape(truncated)}[/dim]")
+    if last_assistant:
+        truncated = last_assistant[:300].replace("\n", " ")
+        if len(last_assistant) > 300:
+            truncated += "..."
+        console.print(f"  [#94A3B8]AI:[/]  [dim]{escape(truncated)}[/dim]")
     console.print()
 
 

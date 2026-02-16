@@ -15,7 +15,10 @@ pip install -e ".[dev]"
 # Run the app
 parlor                              # Web UI at http://127.0.0.1:8080
 parlor chat                         # CLI REPL
+parlor init                         # Interactive setup wizard
 parlor --test                       # Validate AI connection
+parlor --version                    # Show version
+parlor chat --model gpt-4o          # Override model
 
 # Testing
 pytest tests/ -v                    # All tests (~343 tests)

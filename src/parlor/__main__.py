@@ -10,12 +10,15 @@ from pathlib import Path
 
 import uvicorn
 
+from . import __version__
 from .config import _get_config_path, load_config
 
 
 def _print_setup_guide(config_path: Path) -> None:
     print(
-        f"\nTo get started, create {config_path} with:\n\n"
+        f"\nTo get started, run:\n\n"
+        "  parlor init\n\n"
+        f"Or create {config_path} manually:\n\n"
         "ai:\n"
         '  base_url: "https://your-ai-endpoint/v1"\n'
         '  api_key: "your-api-key"\n'
@@ -27,6 +30,65 @@ def _print_setup_guide(config_path: Path) -> None:
         "  AI_CHAT_MODEL=gpt-4\n",
         file=sys.stderr,
     )
+
+
+def _run_init() -> None:
+    """Interactive setup wizard for ~/.parlor/config.yaml."""
+    config_path = _get_config_path()
+    if config_path.exists():
+        print(f"Config already exists at {config_path}")
+        try:
+            answer = input("Overwrite? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return
+        if answer not in ("y", "yes"):
+            print("Cancelled.")
+            return
+
+    print("\nParlor Setup")
+    print("============\n")
+
+    try:
+        base_url = input("AI endpoint URL (e.g., https://api.openai.com/v1): ").strip()
+        if not base_url:
+            print("Error: base_url is required.", file=sys.stderr)
+            sys.exit(1)
+
+        api_key = input("API key: ").strip()
+        model = input("Model name [gpt-4]: ").strip() or "gpt-4"
+        default_prompt = "You are a helpful assistant."
+        system_prompt = input(f"System prompt [{default_prompt}]: ").strip() or default_prompt
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        return
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # SECURITY-REVIEW: API key written to user's local config file with restricted permissions
+    import stat
+
+    import yaml
+
+    config_data = {
+        "ai": {
+            "base_url": base_url,
+            "model": model,
+            "system_prompt": system_prompt,
+        }
+    }
+    if api_key:
+        config_data["ai"]["api_key"] = api_key
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+    # Restrict permissions to owner only (600)
+    config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    print(f"\nConfig written to {config_path}")
+    print("Run 'parlor --test' to verify your connection.")
+    print("Run 'parlor' for the web UI or 'parlor chat' for the CLI.\n")
 
 
 def _load_config_or_exit() -> tuple[Path, object]:
@@ -144,6 +206,7 @@ def _run_chat(
     continue_last: bool = False,
     resume_id: str | None = None,
     project_path: str | None = None,
+    model: str | None = None,
 ) -> None:
     """Launch the CLI chat mode."""
     import os
@@ -156,23 +219,32 @@ def _run_chat(
             sys.exit(1)
         os.chdir(resolved)
 
+    if model:
+        config.ai.model = model
+
     from .cli.repl import run_cli
 
     # SECURITY-REVIEW: CLI args from local user; all storage queries use parameterized ?
-    asyncio.run(
-        run_cli(
-            config,
-            prompt=prompt,
-            no_tools=no_tools,
-            continue_last=continue_last,
-            conversation_id=resume_id,
+    try:
+        asyncio.run(
+            run_cli(
+                config,
+                prompt=prompt,
+                no_tools=no_tools,
+                continue_last=continue_last,
+                conversation_id=resume_id,
+            )
         )
-    )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="parlor", description="Parlor - a private parlor for AI conversation")
     subparsers = parser.add_subparsers(dest="command")
+
+    # `parlor init` subcommand
+    subparsers.add_parser("init", help="Interactive setup wizard for config")
 
     # `parlor chat` subcommand
     chat_parser = subparsers.add_parser("chat", help="Interactive CLI chat mode")
@@ -199,11 +271,23 @@ def main() -> None:
         default=None,
         help="Project root directory (default: cwd)",
     )
+    chat_parser.add_argument(
+        "-m",
+        "--model",
+        dest="model",
+        default=None,
+        help="Override AI model (e.g., gpt-4o, claude-3-opus)",
+    )
 
     # Global flags
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--test", action="store_true", help="Test connection settings and exit")
 
     args = parser.parse_args()
+
+    if args.command == "init":
+        _run_init()
+        return
 
     config_path, config = _load_config_or_exit()
 
@@ -219,6 +303,7 @@ def main() -> None:
             continue_last=args.continue_last,
             resume_id=args.resume_id,
             project_path=args.project_path,
+            model=args.model,
         )
     else:
         _run_web(config, config_path)

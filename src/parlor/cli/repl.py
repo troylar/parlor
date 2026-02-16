@@ -267,21 +267,19 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
 
 async def _check_for_update(current: str) -> str | None:
     """Check PyPI for a newer version. Returns latest if newer, else None."""
+    proc = None
     try:
-        proc = await asyncio.wait_for(
-            asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "pip",
-                "index",
-                "versions",
-                "parlor",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            ),
-            timeout=5.0,
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "pip",
+            "index",
+            "versions",
+            "parlor",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
         if proc.returncode != 0:
             return None
         output = stdout.decode().strip()
@@ -293,8 +291,22 @@ async def _check_for_update(current: str) -> str | None:
             if Version(latest) > Version(current):
                 return latest
     except Exception:
-        pass
+        if proc and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
     return None
+
+
+def _show_resume_info(db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]) -> None:
+    """Display resume header with last exchange context."""
+    stored = storage.list_messages(db, conv["id"])
+    renderer.console.print(
+        f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]"
+    )
+    renderer.render_conversation_recap(stored)
 
 
 _EXIT_COMMANDS = frozenset({"/quit", "/exit"})
@@ -496,6 +508,8 @@ async def run_cli(
     # Load skills
     skill_registry = SkillRegistry()
     skill_registry.load(working_dir)
+    for warn in skill_registry.load_warnings:
+        renderer.console.print(f"[yellow]Skill warning:[/yellow] {warn}")
 
     # Resolve conversation to continue
     resume_conversation_id: str | None = None
@@ -722,7 +736,9 @@ async def _run_repl(
         "new",
         "last",
         "list",
+        "search",
         "resume",
+        "delete",
         "rewind",
         "compact",
         "tools",
@@ -830,9 +846,7 @@ async def _run_repl(
             conv = conv_data
             ai_messages = _load_conversation_messages(db, resume_conversation_id)
             is_first_message = False
-            renderer.console.print(
-                f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]\n"
-            )
+            _show_resume_info(db, conv, ai_messages)
         else:
             renderer.render_error(f"Conversation {resume_conversation_id} not found, starting new")
             conv = storage.create_conversation(db)
@@ -941,24 +955,90 @@ async def _run_repl(
                         conv = storage.get_conversation(db, convs[0]["id"]) or conv
                         ai_messages = _load_conversation_messages(db, conv["id"])
                         is_first_message = False
-                        renderer.console.print(
-                            f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]\n"
-                        )
+                        _show_resume_info(db, conv, ai_messages)
                     else:
                         renderer.console.print("[grey62]No previous conversations[/grey62]\n")
                     continue
                 elif cmd == "/list":
-                    convs = storage.list_conversations(db, limit=20)
-                    if convs:
+                    parts = user_input.split()
+                    list_limit = 20
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        list_limit = max(1, int(parts[1]))
+                    convs = storage.list_conversations(db, limit=list_limit + 1)
+                    has_more = len(convs) > list_limit
+                    display_convs = convs[:list_limit]
+                    if display_convs:
                         renderer.console.print("\n[bold]Recent conversations:[/bold]")
-                        for i, c in enumerate(convs):
+                        for i, c in enumerate(display_convs):
                             msg_count = c.get("message_count", 0)
                             renderer.console.print(
                                 f"  {i + 1}. {c['title']} ({msg_count} msgs) [grey62]{c['id'][:8]}...[/grey62]"
                             )
+                        if has_more:
+                            more_n = list_limit + 20
+                            renderer.console.print(
+                                f"  [dim]... more available. Use /list {more_n} to show more.[/dim]"
+                            )
                         renderer.console.print("  Use [bold]/resume <number>[/bold] or [bold]/resume <id>[/bold]\n")
                     else:
                         renderer.console.print("[grey62]No conversations[/grey62]\n")
+                    continue
+                elif cmd == "/delete":
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) < 2:
+                        renderer.console.print(
+                            "[grey62]Usage: /delete <number> or /delete <conversation_id>[/grey62]\n"
+                        )
+                        continue
+                    target = parts[1].strip()
+                    resolved_id = None
+                    if target.isdigit():
+                        idx = int(target) - 1
+                        convs = storage.list_conversations(db, limit=20)
+                        if 0 <= idx < len(convs):
+                            resolved_id = convs[idx]["id"]
+                        else:
+                            renderer.render_error(f"Invalid number: {target}. Use /list to see conversations.")
+                            continue
+                    else:
+                        resolved_id = target
+                    to_delete = storage.get_conversation(db, resolved_id)
+                    if not to_delete:
+                        renderer.render_error(f"Conversation not found: {target}")
+                        continue
+                    title = to_delete.get("title", "Untitled")
+                    try:
+                        answer = input(f"  Delete \"{title}\"? [y/N] ").strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                        continue
+                    if answer not in ("y", "yes"):
+                        renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                        continue
+                    storage.delete_conversation(db, resolved_id, config.app.data_dir)
+                    renderer.console.print(f"[grey62]Deleted: {title}[/grey62]\n")
+                    if conv.get("id") == resolved_id:
+                        conv = storage.create_conversation(db)
+                        ai_messages = []
+                        is_first_message = True
+                    continue
+                elif cmd == "/search":
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) < 2 or not parts[1].strip():
+                        renderer.console.print("[grey62]Usage: /search <query>[/grey62]\n")
+                        continue
+                    query = parts[1].strip()
+                    results = storage.list_conversations(db, search=query, limit=20)
+                    if results:
+                        renderer.console.print(f"\n[bold]Search results for '{query}':[/bold]")
+                        for i, c in enumerate(results):
+                            msg_count = c.get("message_count", 0)
+                            renderer.console.print(
+                                f"  {i + 1}. {c['title']} ({msg_count} msgs) [grey62]{c['id'][:8]}...[/grey62]"
+                            )
+                        renderer.console.print("  Use [bold]/resume <number>[/bold] to open\n")
+                    else:
+                        renderer.console.print(f"[grey62]No conversations matching '{query}'[/grey62]\n")
                     continue
                 elif cmd == "/skills":
                     if skill_registry:
@@ -1051,7 +1131,7 @@ async def _run_repl(
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2:
                         renderer.console.print(
-                            "[grey62]Usage: /resume <number> or /resume <conversation_id>[/grey62]\n"
+                            "[grey62]Usage: /resume <number> (from /list) or /resume <conversation_id>[/grey62]\n"
                         )
                         continue
                     target = parts[1].strip()
@@ -1062,7 +1142,7 @@ async def _run_repl(
                         if 0 <= idx < len(convs):
                             resolved_id = convs[idx]["id"]
                         else:
-                            renderer.render_error(f"Invalid number: {target}")
+                            renderer.render_error(f"Invalid number: {target}. Use /list to see conversations.")
                             continue
                     else:
                         resolved_id = target
@@ -1071,9 +1151,7 @@ async def _run_repl(
                         conv = loaded
                         ai_messages = _load_conversation_messages(db, conv["id"])
                         is_first_message = False
-                        renderer.console.print(
-                            f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]\n"
-                        )
+                        _show_resume_info(db, conv, ai_messages)
                     else:
                         renderer.render_error(f"Conversation not found: {resolved_id}")
                     continue

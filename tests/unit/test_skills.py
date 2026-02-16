@@ -117,3 +117,27 @@ class TestSkillRegistry:
             assert "commit" in names
             assert "review" in names
             assert "explain" in names
+
+    def test_load_warnings_for_invalid_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".parlor" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "bad.yaml").write_text("not: valid: yaml: [[[")
+            (skills_dir / "noprompt.yaml").write_text("name: noprompt\ndescription: No prompt\n")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert len(reg.load_warnings) >= 2
+            warning_text = " ".join(reg.load_warnings)
+            assert "bad.yaml" in warning_text
+            assert "noprompt.yaml" in warning_text
+
+    def test_no_warnings_for_valid_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".parlor" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "good.yaml").write_text(
+                "name: good\ndescription: Works\nprompt: Do something\n"
+            )
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert len(reg.load_warnings) == 0

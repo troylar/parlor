@@ -61,26 +61,29 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> list[Skill]:
     return skills
 
 
-def load_skills(working_dir: str | None = None) -> list[Skill]:
-    """Load skills from global and project directories."""
-    skills: list[Skill] = []
-
-    # Global skills
-    global_dir = Path.home() / ".parlor" / "skills"
-    skills.extend(_load_skills_from_dir(global_dir, "global"))
-
-    # Project skills (walk up to find .parlor/skills/)
+def _skill_dirs(working_dir: str | None = None) -> list[Path]:
+    """Return skill directories (global + project)."""
+    dirs = [Path.home() / ".parlor" / "skills"]
     current = Path(working_dir or os.getcwd()).resolve()
     while True:
         project_dir = current / ".parlor" / "skills"
         if project_dir.is_dir():
-            skills.extend(_load_skills_from_dir(project_dir, "project"))
+            dirs.append(project_dir)
             break
         parent = current.parent
         if parent == current:
             break
         current = parent
+    return dirs
 
+
+def load_skills(working_dir: str | None = None) -> list[Skill]:
+    """Load skills from global and project directories."""
+    skills: list[Skill] = []
+    dirs = _skill_dirs(working_dir)
+    sources = ["global"] + ["project"] * (len(dirs) - 1)
+    for d, source in zip(dirs, sources):
+        skills.extend(_load_skills_from_dir(d, source))
     return skills
 
 
@@ -89,8 +92,11 @@ class SkillRegistry:
 
     def __init__(self) -> None:
         self._skills: dict[str, Skill] = {}
+        self.load_warnings: list[str] = []
 
     def load(self, working_dir: str | None = None) -> None:
+        self.load_warnings.clear()
+
         # Load bundled default skills first (can be overridden by user skills)
         default_dir = Path(__file__).parent / "default_skills"
         for skill in _load_skills_from_dir(default_dir, "default"):
@@ -99,6 +105,22 @@ class SkillRegistry:
         # Load user skills (override defaults with same name)
         for skill in load_skills(working_dir):
             self._skills[skill.name] = skill
+
+        # Capture any warnings from the logger
+        # Re-scan for parse errors to surface them
+        for skills_dir in _skill_dirs(working_dir):
+            if not skills_dir.is_dir():
+                continue
+            for path in sorted(skills_dir.glob("*.yaml")):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        data = yaml.safe_load(f)
+                    if not isinstance(data, dict):
+                        self.load_warnings.append(f"Skipped {path.name}: invalid format")
+                    elif not data.get("prompt"):
+                        self.load_warnings.append(f"Skipped {path.name}: missing 'prompt' field")
+                except Exception as e:
+                    self.load_warnings.append(f"Failed to load {path.name}: {e}")
 
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)

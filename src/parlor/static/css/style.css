@@ -1094,6 +1094,21 @@ body {
 .tool-call .tool-content pre {
     margin: 4px 0;
 }
+.tool-call.tool-status-success summary::after {
+    content: '\2713';
+    color: #22c55e;
+    margin-left: 6px;
+    font-size: 12px;
+}
+.tool-call.tool-status-error summary::after {
+    content: '\2717';
+    color: var(--error);
+    margin-left: 6px;
+    font-size: 12px;
+}
+.tool-call.tool-status-error {
+    border-color: rgba(239, 68, 68, 0.3);
+}
 .tool-call .tool-spinner {
     display: inline-block;
     width: 12px;
@@ -1334,6 +1349,20 @@ body {
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
+}
+
+
+/* ============================================================
+   OFFLINE BANNER
+   ============================================================ */
+
+.offline-banner {
+    padding: 8px 16px;
+    background: rgba(239, 68, 68, 0.15);
+    border-bottom: 1px solid var(--error);
+    color: var(--error);
+    font-size: 13px;
+    text-align: center;
 }
 
 

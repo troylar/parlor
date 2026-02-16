@@ -7,6 +7,7 @@ const Chat = (() => {
     let _streamRawMode = localStorage.getItem('parlor_stream_raw_mode') === 'true';
     let _rewindPosition = null;
     let _rewindMsgEl = null;
+    let _lastSentText = '';
 
     // Configure marked for safe link rendering (marked v15 passes token object)
     const renderer = new marked.Renderer();
@@ -69,6 +70,7 @@ const Chat = (() => {
             Sidebar.refresh();
         }
 
+        _lastSentText = text;
         const msgEl = appendMessage('user', text);
         input.value = '';
         input.style.height = 'auto';
@@ -710,7 +712,14 @@ const Chat = (() => {
         retryBtn.textContent = 'Retry';
         retryBtn.addEventListener('click', () => {
             errDiv.remove();
-            sendMessage();
+            if (_lastSentText) {
+                const body = JSON.stringify({ message: _lastSentText });
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': App._getCsrfToken(),
+                };
+                streamChatResponse(App.state.currentConversationId, body, headers);
+            }
         });
         errDiv.appendChild(retryBtn);
 
@@ -743,8 +752,10 @@ const Chat = (() => {
         toolContent.appendChild(inputLabel);
         const inputPre = document.createElement('pre');
         const inputCode = document.createElement('code');
+        inputCode.className = 'language-json';
         inputCode.textContent = JSON.stringify(data.input, null, 2);
         inputPre.appendChild(inputCode);
+        hljs.highlightElement(inputCode);
         toolContent.appendChild(inputPre);
 
         details.appendChild(toolContent);
@@ -758,14 +769,22 @@ const Chat = (() => {
         const spinner = details.querySelector('.tool-spinner');
         if (spinner) spinner.remove();
 
+        const summary = details.querySelector('summary');
+        if (summary) {
+            const statusClass = data.status === 'success' ? 'tool-status-success' : 'tool-status-error';
+            details.classList.add(statusClass);
+        }
+
         const toolContent = details.querySelector('.tool-content');
         const outputLabel = document.createElement('strong');
         outputLabel.textContent = `Output (${data.status}):`;
         toolContent.appendChild(outputLabel);
         const outputPre = document.createElement('pre');
         const outputCode = document.createElement('code');
+        outputCode.className = 'language-json';
         outputCode.textContent = JSON.stringify(data.output, null, 2);
         outputPre.appendChild(outputCode);
+        hljs.highlightElement(outputCode);
         toolContent.appendChild(outputPre);
     }
 
@@ -841,7 +860,8 @@ const Chat = (() => {
             if (msg.tool_calls && msg.tool_calls.length > 0) {
                 msg.tool_calls.forEach(tc => {
                     const details = document.createElement('details');
-                    details.className = 'tool-call';
+                    const statusClass = tc.status === 'success' ? 'tool-status-success' : 'tool-status-error';
+                    details.className = `tool-call ${statusClass}`;
 
                     const summary = document.createElement('summary');
                     summary.textContent = `Tool: ${tc.tool_name} (${tc.status})`;
@@ -855,8 +875,10 @@ const Chat = (() => {
                     toolContent.appendChild(inputLabel);
                     const inputPre = document.createElement('pre');
                     const inputCode = document.createElement('code');
+                    inputCode.className = 'language-json';
                     inputCode.textContent = JSON.stringify(tc.input, null, 2);
                     inputPre.appendChild(inputCode);
+                    hljs.highlightElement(inputCode);
                     toolContent.appendChild(inputPre);
 
                     if (tc.output) {
@@ -865,8 +887,10 @@ const Chat = (() => {
                         toolContent.appendChild(outputLabel);
                         const outputPre = document.createElement('pre');
                         const outputCode = document.createElement('code');
+                        outputCode.className = 'language-json';
                         outputCode.textContent = JSON.stringify(tc.output, null, 2);
                         outputPre.appendChild(outputCode);
+                        hljs.highlightElement(outputCode);
                         toolContent.appendChild(outputPre);
                     }
 

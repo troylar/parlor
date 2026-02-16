@@ -136,6 +136,18 @@ const App = (() => {
         _initMobileSidebar();
         _renderThemePicker();
 
+        // Offline detection
+        const offlineBanner = document.getElementById('offline-banner');
+        window.addEventListener('offline', () => {
+            if (offlineBanner) offlineBanner.style.display = '';
+        });
+        window.addEventListener('online', () => {
+            if (offlineBanner) offlineBanner.style.display = 'none';
+        });
+        if (!navigator.onLine && offlineBanner) {
+            offlineBanner.style.display = '';
+        }
+
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'N') {
