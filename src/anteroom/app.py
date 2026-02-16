@@ -119,11 +119,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async def _confirm_destructive(message: str) -> bool:
         # Broadcast a UI event and wait for response.
         approval_id = await approval_manager.request(message)
+        # Publish into the global channel(s) Web UI clients subscribe to.
+        # Default UI subscribes to global:{db} based on its current db query param.
         event_bus.publish(
             "global:personal",
             "destructive_approval_requested",
             {"approval_id": approval_id, "message": message},
         )
+        # Also publish to common shared DBs to avoid mismatches when UI is on a non-personal DB.
+        for sdb in getattr(config, "shared_databases", []) or []:
+            if getattr(sdb, "name", None):
+                event_bus.publish(
+                    f"global:{sdb.name}",
+                    "destructive_approval_requested",
+                    {"approval_id": approval_id, "message": message},
+                )
         return await approval_manager.wait(approval_id)
 
     tool_registry.set_confirm_callback(_confirm_destructive)
