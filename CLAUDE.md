@@ -21,7 +21,7 @@ parlor --version                    # Show version
 parlor chat --model gpt-4o          # Override model
 
 # Testing
-pytest tests/ -v                    # All tests (~343 tests)
+pytest tests/ -v                    # All tests (~358 tests)
 pytest tests/unit/ -v               # Unit tests only
 pytest tests/unit/test_tools.py -v  # Single test file
 pytest tests/unit/test_tools.py::test_name -v  # Single test
