@@ -51,8 +51,12 @@ async def create_project(body: ProjectCreate, request: Request):
     db = request.app.state.db
     uid, uname = _get_identity(request)
     return storage.create_project(
-        db, name=body.name, instructions=body.instructions, model=body.model,
-        user_id=uid, user_display_name=uname,
+        db,
+        name=body.name,
+        instructions=body.instructions,
+        model=body.model,
+        user_id=uid,
+        user_display_name=uname,
     )
 
 

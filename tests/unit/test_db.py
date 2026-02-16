@@ -82,8 +82,15 @@ class TestInitDb:
         info = conn.execute("PRAGMA table_info(conversations)").fetchall()
         col_names = {r[1] for r in info}
         assert col_names == {
-            "id", "title", "model", "project_id", "folder_id",
-            "user_id", "user_display_name", "created_at", "updated_at",
+            "id",
+            "title",
+            "model",
+            "project_id",
+            "folder_id",
+            "user_id",
+            "user_display_name",
+            "created_at",
+            "updated_at",
         }
 
     def test_messages_columns(self) -> None:
@@ -91,8 +98,14 @@ class TestInitDb:
         info = conn.execute("PRAGMA table_info(messages)").fetchall()
         col_names = {r[1] for r in info}
         assert col_names == {
-            "id", "conversation_id", "role", "content",
-            "user_id", "user_display_name", "created_at", "position",
+            "id",
+            "conversation_id",
+            "role",
+            "content",
+            "user_id",
+            "user_display_name",
+            "created_at",
+            "position",
         }
 
     def test_creates_users_table(self) -> None:
@@ -186,9 +199,7 @@ class TestMigrations:
 
         conn = self._init_legacy_db()
         _run_migrations(conn)
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()}
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "users" in tables
 
     def test_migration_adds_user_columns_to_conversations(self) -> None:

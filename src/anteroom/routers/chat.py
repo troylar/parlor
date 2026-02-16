@@ -342,8 +342,12 @@ async def chat(conversation_id: str, request: Request):
 
                 elif kind == "assistant_message":
                     current_assistant_msg = storage.create_message(
-                        db, conversation_id, "assistant", data["content"],
-                        user_id=uid, user_display_name=uname,
+                        db,
+                        conversation_id,
+                        "assistant",
+                        data["content"],
+                        user_id=uid,
+                        user_display_name=uname,
                     )
 
                     if event_bus and current_assistant_msg:

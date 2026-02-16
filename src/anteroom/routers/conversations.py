@@ -284,8 +284,12 @@ async def create_folder(body: FolderCreate, request: Request):
     db = _get_db(request)
     uid, uname = _get_identity(request)
     return storage.create_folder(
-        db, name=body.name, parent_id=body.parent_id, project_id=body.project_id,
-        user_id=uid, user_display_name=uname,
+        db,
+        name=body.name,
+        parent_id=body.parent_id,
+        project_id=body.project_id,
+        user_id=uid,
+        user_display_name=uname,
     )
 
 

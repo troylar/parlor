@@ -76,9 +76,14 @@ def create_project(
     )
     db.commit()
     return {
-        "id": pid, "name": name, "instructions": instructions, "model": model,
-        "user_id": user_id, "user_display_name": user_display_name,
-        "created_at": now, "updated_at": now,
+        "id": pid,
+        "name": name,
+        "instructions": instructions,
+        "model": model,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
+        "created_at": now,
+        "updated_at": now,
     }
 
 
@@ -271,8 +276,12 @@ def create_tag(
     )
     db.commit()
     return {
-        "id": tid, "name": name, "color": color,
-        "user_id": user_id, "user_display_name": user_display_name, "created_at": now,
+        "id": tid,
+        "name": name,
+        "color": color,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
+        "created_at": now,
     }
 
 
@@ -363,9 +372,14 @@ def create_conversation(
     )
     db.commit()
     return {
-        "id": cid, "title": title, "model": None, "project_id": project_id,
-        "user_id": user_id, "user_display_name": user_display_name,
-        "created_at": now, "updated_at": now,
+        "id": cid,
+        "title": title,
+        "model": None,
+        "project_id": project_id,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
+        "created_at": now,
+        "updated_at": now,
     }
 
 
@@ -487,8 +501,16 @@ def fork_conversation(
             "INSERT INTO conversations (id, title, model, project_id, user_id, user_display_name,"
             " created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (new_cid, fork_title, conv.get("model"), conv.get("project_id"),
-             conv.get("user_id"), conv.get("user_display_name"), now, now),
+            (
+                new_cid,
+                fork_title,
+                conv.get("model"),
+                conv.get("project_id"),
+                conv.get("user_id"),
+                conv.get("user_display_name"),
+                now,
+                now,
+            ),
         )
 
         old_msgs = conn.execute(
@@ -503,9 +525,16 @@ def fork_conversation(
                 "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
                 " created_at, position)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (new_mid, new_cid, msg["role"], msg["content"],
-                 msg.get("user_id"), msg.get("user_display_name"),
-                 msg["created_at"], msg["position"]),
+                (
+                    new_mid,
+                    new_cid,
+                    msg["role"],
+                    msg["content"],
+                    msg.get("user_id"),
+                    msg.get("user_display_name"),
+                    msg["created_at"],
+                    msg["position"],
+                ),
             )
 
             old_atts = conn.execute("SELECT * FROM attachments WHERE message_id = ?", (msg["id"],)).fetchall()
@@ -562,9 +591,16 @@ def copy_conversation_to_db(
     target_db.execute(
         "INSERT INTO conversations (id, title, model, project_id, user_id, user_display_name,"
         " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (new_cid, conv["title"], conv.get("model"), None,
-         conv.get("user_id"), conv.get("user_display_name"),
-         conv.get("created_at", now), now),
+        (
+            new_cid,
+            conv["title"],
+            conv.get("model"),
+            None,
+            conv.get("user_id"),
+            conv.get("user_display_name"),
+            conv.get("created_at", now),
+            now,
+        ),
     )
 
     messages = list_messages(source_db, conversation_id)
@@ -573,9 +609,16 @@ def copy_conversation_to_db(
         target_db.execute(
             "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
             " created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (new_mid, new_cid, msg["role"], msg["content"],
-             msg.get("user_id"), msg.get("user_display_name"),
-             msg["created_at"], msg["position"]),
+            (
+                new_mid,
+                new_cid,
+                msg["role"],
+                msg["content"],
+                msg.get("user_id"),
+                msg.get("user_display_name"),
+                msg["created_at"],
+                msg["position"],
+            ),
         )
         for att in msg.get("attachments", []):
             target_db.execute(
@@ -846,8 +889,7 @@ def register_user(
         )
     else:
         db.execute(
-            "INSERT INTO users (user_id, display_name, public_key, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO users (user_id, display_name, public_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (user_id, display_name, public_key, now, now),
         )
     db.commit()
