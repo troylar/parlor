@@ -54,6 +54,13 @@ def _get_db_name(request: Request) -> str:
     return db_name
 
 
+def _get_identity(request: Request) -> tuple[str | None, str | None]:
+    identity = getattr(request.app.state.config, "identity", None)
+    if identity:
+        return identity.user_id, identity.display_name
+    return None, None
+
+
 def _get_event_bus(request: Request):
     return getattr(request.app.state, "event_bus", None)
 
@@ -89,7 +96,8 @@ async def create_conversation(request: Request):
     project_id = body.get("project_id") if isinstance(body, dict) else None
     if project_id:
         _validate_uuid(project_id)
-    conv = storage.create_conversation(db, project_id=project_id)
+    uid, uname = _get_identity(request)
+    conv = storage.create_conversation(db, project_id=project_id, user_id=uid, user_display_name=uname)
 
     event_bus = _get_event_bus(request)
     if event_bus:
@@ -274,7 +282,15 @@ async def create_folder(body: FolderCreate, request: Request):
     if body.project_id:
         _validate_uuid(body.project_id)
     db = _get_db(request)
-    return storage.create_folder(db, name=body.name, parent_id=body.parent_id, project_id=body.project_id)
+    uid, uname = _get_identity(request)
+    return storage.create_folder(
+        db,
+        name=body.name,
+        parent_id=body.parent_id,
+        project_id=body.project_id,
+        user_id=uid,
+        user_display_name=uname,
+    )
 
 
 @router.patch("/folders/{folder_id}")
@@ -320,7 +336,8 @@ async def list_tags(request: Request):
 @router.post("/tags", status_code=201)
 async def create_tag(body: TagCreate, request: Request):
     db = _get_db(request)
-    return storage.create_tag(db, name=body.name, color=body.color)
+    uid, uname = _get_identity(request)
+    return storage.create_tag(db, name=body.name, color=body.color, user_id=uid, user_display_name=uname)
 
 
 @router.patch("/tags/{tag_id}")

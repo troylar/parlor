@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .config import AppConfig, load_config
+from .config import AppConfig, ensure_identity, load_config
 from .db import DatabaseManager, init_db
 from .services.event_bus import EventBus
 from .services.mcp_manager import McpManager
@@ -36,17 +36,53 @@ SESSION_IDLE_TIMEOUT = 30 * 60  # 30 minutes
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     config: AppConfig = app.state.config
+
+    # Ensure user identity exists (auto-generate if missing)
+    if not config.identity:
+        try:
+            identity = ensure_identity()
+            config.identity = identity
+        except Exception:
+            logger.warning("Failed to auto-generate user identity")
+
     db_path = config.app.data_dir / "chat.db"
     app.state.db = init_db(db_path)
 
     db_manager = DatabaseManager()
     db_manager.add("personal", db_path)
+
+    # Register user in personal DB
+    if config.identity:
+        from .services import storage
+
+        try:
+            storage.register_user(
+                db_manager.personal,
+                config.identity.user_id,
+                config.identity.display_name,
+                config.identity.public_key,
+            )
+        except Exception:
+            logger.warning("Failed to register user in personal DB")
     for sdb in config.shared_databases:
         try:
             sdb_path = Path(sdb.path)
             sdb_path.parent.mkdir(parents=True, exist_ok=True)
             db_manager.add(sdb.name, sdb_path, passphrase_hash=sdb.passphrase_hash)
             logger.info(f"Shared DB loaded: {sdb.name} ({sdb.path})")
+            # Register user in shared DB
+            if config.identity:
+                from .services import storage as _storage
+
+                try:
+                    _storage.register_user(
+                        db_manager.get(sdb.name),
+                        config.identity.user_id,
+                        config.identity.display_name,
+                        config.identity.public_key,
+                    )
+                except Exception:
+                    logger.warning(f"Failed to register user in shared DB '{sdb.name}'")
         except Exception as e:
             logger.warning(f"Failed to load shared DB '{sdb.name}': {e}")
     app.state.db_manager = db_manager

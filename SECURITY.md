@@ -42,6 +42,8 @@ Parlor is a **personal, single-user application** intended to run on a user's lo
 | Information leakage | Generic error messages, no stack traces in responses | Implemented |
 | Sensitive data in cache | Cache-Control: no-store on all API responses | Implemented |
 | API key exposure | Token provider with in-memory caching, no logging of secrets | Implemented |
+| Identity key exposure | Private key in 0600 config file, never exposed via API | Implemented |
+| Identity spoofing in shared DBs | Ed25519 keypair per user, public key registered on connect | Implemented |
 
 ## OWASP ASVS v4.0 Compliance
 
@@ -88,6 +90,7 @@ Parlor targets **ASVS Level 1** (Opportunistic) compliance for a single-user loc
 |------------|--------|-------|
 | V6.2 Random values | Pass | secrets.token_urlsafe(32) for tokens, CSPRNG-backed |
 | V6.3 Secret management | Pass | API keys via env vars or api_key_command, never hardcoded |
+| V6.4 User identity keys | Pass | Ed25519 via `cryptography` library, PKCS8 PEM serialization, config file 0600 permissions |
 
 ### V7: Error Handling and Logging
 

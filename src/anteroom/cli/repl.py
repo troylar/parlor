@@ -319,6 +319,7 @@ async def _drain_input_to_msg_queue(
     cancel_event: asyncio.Event,
     exit_flag: asyncio.Event,
     warn_callback: Any | None = None,
+    identity_kwargs: dict[str, str | None] | None = None,
 ) -> None:
     """Drain input_queue into msg_queue, filtering out / commands.
 
@@ -339,7 +340,7 @@ async def _drain_input_to_msg_queue(
                     warn_callback(cmd)
                 continue
             q_expanded = _expand_file_references(queued_text, working_dir)
-            storage.create_message(db, conversation_id, "user", q_expanded)
+            storage.create_message(db, conversation_id, "user", q_expanded, **(identity_kwargs or {}))
             await msg_queue.put({"role": "user", "content": q_expanded})
         except asyncio.QueueEmpty:
             break
@@ -406,6 +407,13 @@ def _build_system_prompt(
     if instructions:
         parts.append(f"\n{instructions}")
     return "\n".join(parts)
+
+
+def _identity_kwargs(config: AppConfig) -> dict[str, str | None]:
+    """Extract user_id/user_display_name from config identity, or empty dict."""
+    if config.identity:
+        return {"user_id": config.identity.user_id, "user_display_name": config.identity.display_name}
+    return {"user_id": None, "user_display_name": None}
 
 
 async def run_cli(
@@ -578,6 +586,7 @@ async def _run_one_shot(
     resume_conversation_id: str | None = None,
 ) -> None:
     """Run a single prompt and exit."""
+    id_kw = _identity_kwargs(config)
     expanded = _expand_file_references(prompt, working_dir)
 
     if resume_conversation_id:
@@ -587,10 +596,10 @@ async def _run_one_shot(
             return
         messages = _load_conversation_messages(db, resume_conversation_id)
     else:
-        conv = storage.create_conversation(db)
+        conv = storage.create_conversation(db, **id_kw)
         messages = []
 
-    storage.create_message(db, conv["id"], "user", expanded)
+    storage.create_message(db, conv["id"], "user", expanded, **id_kw)
     messages.append({"role": "user", "content": expanded})
 
     cancel_event = asyncio.Event()
@@ -629,7 +638,7 @@ async def _run_one_shot(
                 renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
             elif event.kind == "assistant_message":
                 if event.data["content"]:
-                    storage.create_message(db, conv["id"], "assistant", event.data["content"])
+                    storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
             elif event.kind == "error":
                 if thinking:
                     renderer.stop_thinking()
@@ -673,6 +682,8 @@ async def _run_repl(
     tool_registry: Any = None,
 ) -> None:
     """Run the interactive REPL."""
+    id_kw = _identity_kwargs(config)
+
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.document import Document
@@ -847,11 +858,11 @@ async def _run_repl(
             _show_resume_info(db, conv, ai_messages)
         else:
             renderer.render_error(f"Conversation {resume_conversation_id} not found, starting new")
-            conv = storage.create_conversation(db)
+            conv = storage.create_conversation(db, **id_kw)
             ai_messages = []
             is_first_message = True
     else:
-        conv = storage.create_conversation(db)
+        conv = storage.create_conversation(db, **id_kw)
         ai_messages: list[dict[str, Any]] = []
         is_first_message = True
 
@@ -1005,7 +1016,7 @@ async def _run_repl(
                     exit_flag.set()
                     return
                 elif cmd == "/new":
-                    conv = storage.create_conversation(db)
+                    conv = storage.create_conversation(db, **id_kw)
                     ai_messages = []
                     is_first_message = True
                     renderer.console.print("[grey62]New conversation started[/grey62]\n")
@@ -1086,7 +1097,7 @@ async def _run_repl(
                     storage.delete_conversation(db, resolved_id, config.app.data_dir)
                     renderer.console.print(f"[grey62]Deleted: {title}[/grey62]\n")
                     if conv.get("id") == resolved_id:
-                        conv = storage.create_conversation(db)
+                        conv = storage.create_conversation(db, **id_kw)
                         ai_messages = []
                         is_first_message = True
                     continue
@@ -1322,7 +1333,7 @@ async def _run_repl(
                 )
 
             # Store user message
-            storage.create_message(db, conv["id"], "user", expanded)
+            storage.create_message(db, conv["id"], "user", expanded, **id_kw)
             ai_messages.append({"role": "user", "content": expanded})
 
             # Build message queue for queued follow-ups during agent loop
@@ -1358,6 +1369,7 @@ async def _run_repl(
                     cancel_event,
                     exit_flag,
                     warn_callback=_warn,
+                    identity_kwargs=id_kw,
                 )
 
                 async for event in run_agent_loop(
@@ -1380,6 +1392,7 @@ async def _run_repl(
                         cancel_event,
                         exit_flag,
                         warn_callback=_warn,
+                        identity_kwargs=id_kw,
                     )
 
                     if event.kind == "thinking":
@@ -1408,7 +1421,7 @@ async def _run_repl(
                         )
                     elif event.kind == "assistant_message":
                         if event.data["content"]:
-                            storage.create_message(db, conv["id"], "assistant", event.data["content"])
+                            storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
                     elif event.kind == "queued_message":
                         if thinking:
                             total_elapsed += renderer.stop_thinking()

@@ -14,7 +14,9 @@
 GET /api/config
 ```
 
-Returns the current configuration including MCP server connection statuses. The API key is returned as a boolean (`has_api_key`) --- never the actual value.
+Returns the current configuration including MCP server connection statuses and user identity. The API key is returned as a boolean (`has_api_key`) --- never the actual value.
+
+The response includes an `identity` field with `user_id` and `display_name` (the private key is never exposed via the API).
 
 ### Update Config
 

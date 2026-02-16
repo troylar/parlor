@@ -21,7 +21,7 @@ aroom --version                     # Show version
 aroom chat --model gpt-4o           # Override model
 
 # Testing
-pytest tests/ -v                    # All tests (~375 tests)
+pytest tests/ -v                    # All tests (~453 tests)
 pytest tests/unit/ -v               # Unit tests only
 pytest tests/unit/test_tools.py -v  # Single test file
 pytest tests/unit/test_tools.py::test_name -v  # Single test
@@ -51,7 +51,8 @@ CLI (cli/repl.py) ──┘         │
 ### Key Modules
 
 - **`app.py`** — FastAPI app factory, middleware stack (auth, rate limiting, CSRF, security headers with conditional HSTS based on TLS config, body size limit)
-- **`config.py`** — YAML config loading with env var overrides, dataclass hierarchy (`AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `McpServerConfig`). `AppSettings.tls` controls HTTPS, HSTS, and secure cookies
+- **`config.py`** — YAML config loading with env var overrides, dataclass hierarchy (`AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `McpServerConfig`, `UserIdentity`). `AppSettings.tls` controls HTTPS, HSTS, and secure cookies. `ensure_identity()` auto-generates Ed25519 keypair on first run
+- **`identity.py`** — User identity generation: Ed25519 keypair via `cryptography`, UUID4 user IDs, PEM serialization
 - **`services/agent_loop.py`** — Shared agentic loop: streams responses, parses tool calls, executes tools in parallel via `asyncio.as_completed`, loops up to `max_tool_iterations` (50). Auto-compacts at 100K tokens. Emits `"thinking"` event between tool execution and next API call for UI spinners. Accepts optional `message_queue` param for prompt queuing — checks queue after each `done` event and continues the loop if messages are pending
 - **`services/ai_service.py`** — OpenAI SDK wrapper with streaming and transparent token refresh on 401
 - **`services/storage.py`** — SQLite DAL with column-allowlisted SQL builder, parameterized queries, UUID-based IDs
@@ -66,11 +67,11 @@ Single-user local app with OWASP ASVS Level 1. Auth via HttpOnly session cookies
 
 ### Database
 
-SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Schema defined in `db.py`. Tables: conversations, messages, attachments, tool_calls, projects, folders, tags.
+SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Schema defined in `db.py`. Tables: users, conversations, messages, attachments, tool_calls, projects, folders, tags. All entity tables carry `user_id` and `user_display_name` columns for identity attribution.
 
 ### Configuration
 
-Config file at `~/.anteroom/config.yaml` (falls back to `~/.parlor/config.yaml` for backward compat). Environment variables override config values with `AI_CHAT_` prefix (e.g., `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_MODEL`). Token provider pattern (`api_key_command`) enables dynamic API key refresh via external commands. TLS is disabled by default (`app.tls: false`); set to `true` to enable HTTPS with a self-signed certificate.
+Config file at `~/.anteroom/config.yaml` (falls back to `~/.parlor/config.yaml` for backward compat). Environment variables override config values with `AI_CHAT_` prefix (e.g., `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_MODEL`, `AI_CHAT_USER_ID`, `AI_CHAT_DISPLAY_NAME`). Token provider pattern (`api_key_command`) enables dynamic API key refresh via external commands. TLS is disabled by default (`app.tls: false`); set to `true` to enable HTTPS with a self-signed certificate. User identity (Ed25519 keypair + UUID) is auto-generated on first run and stored in the `identity` config section.
 
 ### Deployment
 

@@ -82,6 +82,13 @@ def _get_client_id(request: Request) -> str:
         return ""
 
 
+def _get_identity(request: Request) -> tuple[str | None, str | None]:
+    identity = getattr(request.app.state.config, "identity", None)
+    if identity:
+        return identity.user_id, identity.display_name
+    return None, None
+
+
 def _get_ai_service(request: Request, model_override: str | None = None) -> AIService:
     config = request.app.state.config
     if model_override:
@@ -113,12 +120,14 @@ async def chat(conversation_id: str, request: Request):
         regenerate = body.regenerate
         files = []
 
+    uid, uname = _get_identity(request)
+
     # Queue message if a stream is already active for this conversation
     if not regenerate and _active_streams.get(conversation_id):
         queue = _message_queues.get(conversation_id)
         if queue and queue.qsize() >= MAX_QUEUED_MESSAGES:
             raise HTTPException(status_code=429, detail="Message queue full (max 10)")
-        storage.create_message(db, conversation_id, "user", message_text)
+        storage.create_message(db, conversation_id, "user", message_text, user_id=uid, user_display_name=uname)
         if queue is None:
             queue = asyncio.Queue()
             _message_queues[conversation_id] = queue
@@ -138,7 +147,9 @@ async def chat(conversation_id: str, request: Request):
     client_id = _get_client_id(request)
 
     if not regenerate:
-        user_msg = storage.create_message(db, conversation_id, "user", message_text)
+        user_msg = storage.create_message(
+            db, conversation_id, "user", message_text, user_id=uid, user_display_name=uname
+        )
 
         if event_bus and user_msg:
             asyncio.ensure_future(
@@ -330,7 +341,14 @@ async def chat(conversation_id: str, request: Request):
                     }
 
                 elif kind == "assistant_message":
-                    current_assistant_msg = storage.create_message(db, conversation_id, "assistant", data["content"])
+                    current_assistant_msg = storage.create_message(
+                        db,
+                        conversation_id,
+                        "assistant",
+                        data["content"],
+                        user_id=uid,
+                        user_display_name=uname,
+                    )
 
                     if event_bus and current_assistant_msg:
                         await event_bus.publish(

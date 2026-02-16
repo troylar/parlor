@@ -14,94 +14,29 @@ from . import __version__
 from .config import _get_config_path, load_config
 
 
-def _print_setup_guide(config_path: Path) -> None:
-    print(
-        f"\nTo get started, run:\n\n"
-        "  aroom init\n\n"
-        f"Or create {config_path} manually:\n\n"
-        "ai:\n"
-        '  base_url: "https://your-ai-endpoint/v1"\n'
-        '  api_key: "your-api-key"\n'
-        '  model: "gpt-4"\n'
-        '  system_prompt: "You are a helpful assistant."\n'
-        "\nOr set environment variables:\n"
-        "  AI_CHAT_BASE_URL=https://your-ai-endpoint/v1\n"
-        "  AI_CHAT_API_KEY=your-api-key\n"
-        "  AI_CHAT_MODEL=gpt-4\n",
-        file=sys.stderr,
-    )
-
-
-def _run_init() -> None:
+def _run_init(force: bool = False) -> None:
     """Interactive setup wizard for ~/.anteroom/config.yaml."""
-    config_path = _get_config_path()
-    if config_path.exists():
-        print(f"Config already exists at {config_path}")
-        try:
-            answer = input("Overwrite? [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\nCancelled.")
-            return
-        if answer not in ("y", "yes"):
-            print("Cancelled.")
-            return
+    from .cli.setup import run_init_wizard
 
-    print("\nAnteroom Setup")
-    print("==============\n")
-
-    try:
-        base_url = input("AI endpoint URL (e.g., https://api.openai.com/v1): ").strip()
-        if not base_url:
-            print("Error: base_url is required.", file=sys.stderr)
-            sys.exit(1)
-
-        api_key = input("API key: ").strip()
-        model = input("Model name [gpt-4]: ").strip() or "gpt-4"
-        default_prompt = "You are a helpful assistant."
-        system_prompt = input(f"System prompt [{default_prompt}]: ").strip() or default_prompt
-    except (EOFError, KeyboardInterrupt):
-        print("\nCancelled.")
-        return
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # SECURITY-REVIEW: API key written to user's local config file with restricted permissions
-    import stat
-
-    import yaml
-
-    config_data = {
-        "ai": {
-            "base_url": base_url,
-            "model": model,
-            "system_prompt": system_prompt,
-        }
-    }
-    if api_key:
-        config_data["ai"]["api_key"] = api_key
-
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
-
-    # Restrict permissions to owner only (600)
-    config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-
-    print(f"\nConfig written to {config_path}")
-    print("Run 'aroom --test' to verify your connection.")
-    print("Run 'aroom' for the web UI or 'aroom chat' for the CLI.\n")
+    run_init_wizard(force=force)
 
 
 def _load_config_or_exit() -> tuple[Path, object]:
     config_path = _get_config_path()
     if not config_path.exists():
         print(f"No configuration file found at {config_path}", file=sys.stderr)
-        _print_setup_guide(config_path)
-        sys.exit(1)
+        from .cli.setup import run_init_wizard
+
+        if not run_init_wizard():
+            sys.exit(1)
+        # Re-check after wizard
+        if not config_path.exists():
+            sys.exit(1)
     try:
         config = load_config()
     except ValueError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
-        _print_setup_guide(config_path)
+        print("Run 'aroom config' to fix your configuration.", file=sys.stderr)
         sys.exit(1)
     return config_path, config
 
@@ -332,7 +267,11 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command")
 
     # `aroom init` subcommand
-    subparsers.add_parser("init", help="Interactive setup wizard for config")
+    init_parser = subparsers.add_parser("init", help="Interactive setup wizard for config")
+    init_parser.add_argument("--force", action="store_true", help="Overwrite existing config without asking")
+
+    # `aroom config` subcommand
+    subparsers.add_parser("config", help="View and edit configuration")
 
     # `aroom chat` subcommand
     chat_parser = subparsers.add_parser("chat", help="Interactive CLI chat mode")
@@ -380,7 +319,13 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "init":
-        _run_init()
+        _run_init(force=getattr(args, "force", False))
+        return
+
+    if args.command == "config":
+        from .cli.setup import run_config_editor
+
+        run_config_editor()
         return
 
     if args.command == "db":

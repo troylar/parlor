@@ -64,15 +64,27 @@ def create_project(
     name: str,
     instructions: str = "",
     model: str | None = None,
+    user_id: str | None = None,
+    user_display_name: str | None = None,
 ) -> dict[str, Any]:
     pid = _uuid()
     now = _now()
     db.execute(
-        "INSERT INTO projects (id, name, instructions, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (pid, name, instructions, model or None, now, now),
+        "INSERT INTO projects (id, name, instructions, model, user_id, user_display_name, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (pid, name, instructions, model or None, user_id, user_display_name, now, now),
     )
     db.commit()
-    return {"id": pid, "name": name, "instructions": instructions, "model": model, "created_at": now, "updated_at": now}
+    return {
+        "id": pid,
+        "name": name,
+        "instructions": instructions,
+        "model": model,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
+        "created_at": now,
+        "updated_at": now,
+    }
 
 
 def get_project(db: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
@@ -128,6 +140,8 @@ def create_folder(
     name: str,
     parent_id: str | None = None,
     project_id: str | None = None,
+    user_id: str | None = None,
+    user_display_name: str | None = None,
 ) -> dict[str, Any]:
     fid = _uuid()
     now = _now()
@@ -137,9 +151,10 @@ def create_folder(
     )
     position = pos_row[0] if pos_row else 0
     db.execute(
-        "INSERT INTO folders (id, name, parent_id, project_id, position, collapsed, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
-        (fid, name, parent_id, project_id, position, now, now),
+        "INSERT INTO folders (id, name, parent_id, project_id, position, collapsed,"
+        " user_id, user_display_name, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+        (fid, name, parent_id, project_id, position, user_id, user_display_name, now, now),
     )
     db.commit()
     return {
@@ -149,6 +164,8 @@ def create_folder(
         "project_id": project_id,
         "position": position,
         "collapsed": False,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
         "created_at": now,
         "updated_at": now,
     }
@@ -244,12 +261,28 @@ def move_conversation_to_folder(
 # --- Tags ---
 
 
-def create_tag(db: sqlite3.Connection, name: str, color: str = "#3b82f6") -> dict[str, Any]:
+def create_tag(
+    db: sqlite3.Connection,
+    name: str,
+    color: str = "#3b82f6",
+    user_id: str | None = None,
+    user_display_name: str | None = None,
+) -> dict[str, Any]:
     tid = _uuid()
     now = _now()
-    db.execute("INSERT INTO tags (id, name, color, created_at) VALUES (?, ?, ?, ?)", (tid, name, color, now))
+    db.execute(
+        "INSERT INTO tags (id, name, color, user_id, user_display_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (tid, name, color, user_id, user_display_name, now),
+    )
     db.commit()
-    return {"id": tid, "name": name, "color": color, "created_at": now}
+    return {
+        "id": tid,
+        "name": name,
+        "color": color,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
+        "created_at": now,
+    }
 
 
 def list_tags(db: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -327,15 +360,27 @@ def create_conversation(
     db: sqlite3.Connection,
     title: str = "New Conversation",
     project_id: str | None = None,
+    user_id: str | None = None,
+    user_display_name: str | None = None,
 ) -> dict[str, Any]:
     cid = _uuid()
     now = _now()
     db.execute(
-        "INSERT INTO conversations (id, title, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        (cid, title, project_id, now, now),
+        "INSERT INTO conversations (id, title, project_id, user_id, user_display_name, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (cid, title, project_id, user_id, user_display_name, now, now),
     )
     db.commit()
-    return {"id": cid, "title": title, "model": None, "project_id": project_id, "created_at": now, "updated_at": now}
+    return {
+        "id": cid,
+        "title": title,
+        "model": None,
+        "project_id": project_id,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
+        "created_at": now,
+        "updated_at": now,
+    }
 
 
 def get_conversation(db: sqlite3.Connection, conversation_id: str) -> dict[str, Any] | None:
@@ -453,9 +498,19 @@ def fork_conversation(
 
     with db.transaction() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, title, model, project_id, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (new_cid, fork_title, conv.get("model"), conv.get("project_id"), now, now),
+            "INSERT INTO conversations (id, title, model, project_id, user_id, user_display_name,"
+            " created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                new_cid,
+                fork_title,
+                conv.get("model"),
+                conv.get("project_id"),
+                conv.get("user_id"),
+                conv.get("user_display_name"),
+                now,
+                now,
+            ),
         )
 
         old_msgs = conn.execute(
@@ -467,9 +522,19 @@ def fork_conversation(
             msg = dict(msg)
             new_mid = _uuid()
             conn.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, created_at, position)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (new_mid, new_cid, msg["role"], msg["content"], msg["created_at"], msg["position"]),
+                "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
+                " created_at, position)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_mid,
+                    new_cid,
+                    msg["role"],
+                    msg["content"],
+                    msg.get("user_id"),
+                    msg.get("user_display_name"),
+                    msg["created_at"],
+                    msg["position"],
+                ),
             )
 
             old_atts = conn.execute("SELECT * FROM attachments WHERE message_id = ?", (msg["id"],)).fetchall()
@@ -524,16 +589,36 @@ def copy_conversation_to_db(
     new_cid = _uuid()
     now = _now()
     target_db.execute(
-        "INSERT INTO conversations (id, title, model, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (new_cid, conv["title"], conv.get("model"), None, conv.get("created_at", now), now),
+        "INSERT INTO conversations (id, title, model, project_id, user_id, user_display_name,"
+        " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            new_cid,
+            conv["title"],
+            conv.get("model"),
+            None,
+            conv.get("user_id"),
+            conv.get("user_display_name"),
+            conv.get("created_at", now),
+            now,
+        ),
     )
 
     messages = list_messages(source_db, conversation_id)
     for msg in messages:
         new_mid = _uuid()
         target_db.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at, position) VALUES (?, ?, ?, ?, ?, ?)",
-            (new_mid, new_cid, msg["role"], msg["content"], msg["created_at"], msg["position"]),
+            "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
+            " created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                new_mid,
+                new_cid,
+                msg["role"],
+                msg["content"],
+                msg.get("user_id"),
+                msg.get("user_display_name"),
+                msg["created_at"],
+                msg["position"],
+            ),
         )
         for att in msg.get("attachments", []):
             target_db.execute(
@@ -582,6 +667,8 @@ def create_message(
     conversation_id: str,
     role: str,
     content: str,
+    user_id: str | None = None,
+    user_display_name: str | None = None,
 ) -> dict[str, Any]:
     mid = _uuid()
     now = _now()
@@ -592,8 +679,9 @@ def create_message(
         ).fetchone()
         position = pos_row[0]
         conn.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at, position) VALUES (?, ?, ?, ?, ?, ?)",
-            (mid, conversation_id, role, content, now, position),
+            "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
+            " created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (mid, conversation_id, role, content, user_id, user_display_name, now, position),
         )
         conn.execute(
             "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -604,6 +692,8 @@ def create_message(
         "conversation_id": conversation_id,
         "role": role,
         "content": content,
+        "user_id": user_id,
+        "user_display_name": user_display_name,
         "created_at": now,
         "position": position,
     }
@@ -778,6 +868,31 @@ def get_attachment(db: sqlite3.Connection, attachment_id: str) -> dict[str, Any]
 def list_attachments(db: sqlite3.Connection, message_id: str) -> list[dict[str, Any]]:
     rows = db.execute_fetchall("SELECT * FROM attachments WHERE message_id = ?", (message_id,))
     return [dict(r) for r in rows]
+
+
+# --- Users ---
+
+
+def register_user(
+    db: sqlite3.Connection,
+    user_id: str,
+    display_name: str,
+    public_key: str,
+) -> None:
+    """Upsert a user into the users table."""
+    now = _now()
+    existing = db.execute_fetchone("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+    if existing:
+        db.execute(
+            "UPDATE users SET display_name = ?, public_key = ?, updated_at = ? WHERE user_id = ?",
+            (display_name, public_key, now, user_id),
+        )
+    else:
+        db.execute(
+            "INSERT INTO users (user_id, display_name, public_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, display_name, public_key, now, now),
+        )
+    db.commit()
 
 
 # --- Tool Calls ---
