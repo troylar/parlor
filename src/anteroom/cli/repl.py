@@ -456,11 +456,19 @@ async def run_cli(
     # Set up confirmation prompt for destructive operations
     async def _confirm_destructive(message: str) -> bool:
         renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {message}")
-        try:
-            answer = input("  Proceed? [y/N] ").strip().lower()
-            return answer in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            return False
+        from prompt_toolkit import PromptSession
+
+        session = PromptSession()
+        while True:
+            try:
+                answer = (await session.prompt_async("  Proceed? [y/N] ")).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return False
+            if answer in ("", "n", "no"):
+                return False
+            if answer in ("y", "yes"):
+                return True
+            renderer.console.print("  Please type 'y' or 'n'.")
 
     tool_registry.set_confirm_callback(_confirm_destructive)
 

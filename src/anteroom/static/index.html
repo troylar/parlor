@@ -5,16 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Anteroom</title>
     <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNSIgZmlsbD0iIzBmMTExNSIgc3Ryb2tlPSIjQzVBMDU5IiBzdHJva2Utd2lkdGg9IjEuNSIvPjxsaW5lIHgxPSIxNiIgeTE9IjQiIHgyPSIxNiIgeTI9IjI4IiBzdHJva2U9IiNDNUEwNTkiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC42Ii8+PGxpbmUgeDE9IjQiIHkxPSIxNiIgeDI9IjI4IiB5Mj0iMTYiIHN0cm9rZT0iI0M1QTA1OSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjYiLz48bGluZSB4MT0iNy41IiB5MT0iNy41IiB4Mj0iMjQuNSIgeTI9IjI0LjUiIHN0cm9rZT0iI0M1QTA1OSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjQiLz48bGluZSB4MT0iMjQuNSIgeTE9IjcuNSIgeDI9IjcuNSIgeTI9IjI0LjUiIHN0cm9rZT0iI0M1QTA1OSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjQiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNDNUEwNTkiIHN0cm9rZS13aWR0aD0iMS41Ii8+PGNpcmNsZSBjeD0iMTYiIGN5PSI0IiByPSIxLjUiIGZpbGw9IiMzQjgyRjYiLz48Y2lyY2xlIGN4PSIyOCIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzQjgyRjYiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjI4IiByPSIxLjUiIGZpbGw9IiMzQjgyRjYiLz48Y2lyY2xlIGN4PSI0IiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzNCODJGNiIvPjwvc3ZnPg==">
-    <script>
-    (function(){
-        var t = localStorage.getItem('anteroom_theme') || localStorage.getItem('parlor_theme');
-        if (!t) {
-            t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'dawn' : 'midnight';
-        }
-        document.documentElement.setAttribute('data-theme', t);
-    })();
-    </script>
+    <script src="/js/theme_bootstrap.js"></script>
     <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/approvals.css">
     <link rel="stylesheet" href="/vendor/highlight-github-dark.min.css">
     <link rel="stylesheet" href="/vendor/katex.min.css">
 </head>
@@ -326,6 +319,7 @@
     <script src="/vendor/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
     <script src="/vendor/katex-auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"></script>
     <script src="/js/app.js"></script>
+    <script src="/js/approvals.js"></script>
     <script src="/js/chat.js"></script>
     <script src="/js/sidebar.js"></script>
     <script src="/js/palette.js"></script>

@@ -145,6 +145,10 @@ const App = (() => {
     // --- Init ---
 
     async function init() {
+        // Approvals modal hook (if loaded)
+        if (window.Approvals && typeof window.Approvals.showApprovalModal === 'function') {
+            state._showApprovalModal = window.Approvals.showApprovalModal;
+        }
         _migrateLocalStorage();
         Chat.init();
         Sidebar.init();
@@ -478,6 +482,22 @@ const App = (() => {
                 Chat.loadMessages([]);
             }
             Sidebar.refresh();
+        });
+
+        _eventSource.addEventListener('destructive_approval_requested', (e) => {
+            const data = JSON.parse(e.data);
+            // Only show if modal hook exists
+            if (state._showApprovalModal) {
+                state._showApprovalModal(data);
+            } else {
+                // Fallback: native confirm
+                const ok = window.confirm(`${data.message}\n\nProceed?`);
+                api('/api/approvals/respond', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ approval_id: data.approval_id, approved: ok })
+                }).catch(() => {});
+            }
         });
 
         _eventSource.onerror = () => {
@@ -1062,4 +1082,5 @@ const App = (() => {
         loadProjects, loadDatabases, addDatabase, refreshModels, formatTimestamp,
         getTheme, setTheme, THEMES, openMcpModal,
     };
+window.App = App;
 })();

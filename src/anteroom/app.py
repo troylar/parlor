@@ -110,6 +110,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.tool_registry = tool_registry
     logger.info(f"Built-in tools: {len(tool_registry.list_tools())} registered (cwd: {working_dir})")
 
+    # Destructive tool approvals (Web UI)
+    from .services.approvals import ApprovalManager
+
+    approval_manager = ApprovalManager()
+    app.state.approval_manager = approval_manager
+
+    async def _confirm_destructive(message: str) -> bool:
+        # Broadcast a UI event and wait for response.
+        approval_id = await approval_manager.request(message)
+        event_bus.publish(
+            f"global:{config.app.db_name}",
+            "destructive_approval_requested",
+            {"approval_id": approval_id, "message": message},
+        )
+        return await approval_manager.wait(approval_id)
+
+    tool_registry.set_confirm_callback(_confirm_destructive)
+
     # Expose vec support flag
     raw_conn = app.state.db._conn if hasattr(app.state.db, "_conn") else None
     app.state.vec_enabled = has_vec_support(raw_conn) if raw_conn else False
@@ -161,7 +179,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'sha256-XOZ/E5zGhh3+pD1xPPme298VAabSp0Pt7SmU0EdZqKY='; "
+            "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "font-src 'self'; "
             "img-src 'self' data: blob:; "
@@ -343,10 +361,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.csrf_token = csrf_token
     cache_bust = str(int(time.time()))
 
-    from .routers import chat, config_api, conversations, databases, events, projects, search
+    from .routers import approvals, chat, config_api, conversations, databases, events, projects, search
 
     app.include_router(conversations.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
+    app.include_router(approvals.router, prefix="/api")
     app.include_router(config_api.router, prefix="/api")
     app.include_router(projects.router, prefix="/api")
     app.include_router(databases.router, prefix="/api")

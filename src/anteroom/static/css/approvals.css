@@ -1,0 +1,53 @@
+#approval-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+#approval-modal-overlay .approval-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+}
+
+#approval-modal-overlay .approval-modal {
+  position: absolute;
+  left: 50%;
+  top: 20%;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 32px));
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 70px rgba(0,0,0,0.6);
+  padding: 14px 14px 12px;
+}
+
+#approval-modal-overlay .approval-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+#approval-modal-overlay .approval-message {
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+#approval-modal-overlay .approval-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+#approval-modal-overlay .btn-danger {
+  background: #7f1d1d;
+  border-color: #7f1d1d;
+}
