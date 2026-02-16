@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from sse_starlette.sse import EventSourceResponse
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,6 @@ async def event_stream(request: Request, db: str = "personal", conversation_id: 
         _validate_uuid(conversation_id)
 
     if not hasattr(request.app.state, "event_bus"):
-        from sse_starlette.sse import EventSourceResponse
-
         async def empty():
             yield {"event": "error", "data": json.dumps({"message": "Event bus not available"})}
 
