@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
-from parlor.cli.repl import _PASTE_THRESHOLD, _is_paste
+from anteroom.cli.repl import _PASTE_THRESHOLD, _is_paste
 
 
 class TestIsPaste:

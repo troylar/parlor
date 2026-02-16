@@ -1,14 +1,14 @@
 # Web UI
 
-Parlor's web interface is a self-hosted ChatGPT-style chat UI that runs entirely on your machine.
+Anteroom's web interface is a self-hosted ChatGPT-style chat UI that runs entirely on your machine.
 
 ```bash
-$ parlor
+$ aroom
 ```
 
 Your browser opens to `http://127.0.0.1:8080`.
 
-![Parlor Web UI](../screenshots/theme-midnight.png)
+![Anteroom Web UI](../screenshots/theme-midnight.png)
 
 ## Features at a Glance
 
@@ -24,7 +24,7 @@ Your browser opens to `http://127.0.0.1:8080`.
 
 ## Rich Rendering
 
-Parlor renders AI responses with full Markdown support:
+Anteroom renders AI responses with full Markdown support:
 
 | Format | Support |
 |---|---|

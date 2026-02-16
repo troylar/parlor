@@ -5,13 +5,13 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from parlor.cli.skills import SkillRegistry, load_skills
+from anteroom.cli.skills import SkillRegistry, load_skills
 
 
 class TestLoadSkills:
     def test_load_from_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            skills_dir = Path(tmpdir) / ".parlor" / "skills"
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
             skills_dir.mkdir(parents=True)
             (skills_dir / "greet.yaml").write_text(
                 "name: greet\ndescription: Say hello\nprompt: Say hello to the user\n"
@@ -28,7 +28,7 @@ class TestLoadSkills:
 
     def test_skip_invalid_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            skills_dir = Path(tmpdir) / ".parlor" / "skills"
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
             skills_dir.mkdir(parents=True)
             (skills_dir / "bad.yaml").write_text("not: valid: yaml: [[[")
             skills = load_skills(tmpdir)
@@ -37,7 +37,7 @@ class TestLoadSkills:
 
     def test_skip_no_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            skills_dir = Path(tmpdir) / ".parlor" / "skills"
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
             skills_dir.mkdir(parents=True)
             (skills_dir / "empty.yaml").write_text("name: empty\ndescription: No prompt\n")
             skills = load_skills(tmpdir)
@@ -46,7 +46,7 @@ class TestLoadSkills:
 
 class TestSkillRegistry:
     def _make_registry(self, tmpdir: str) -> SkillRegistry:
-        skills_dir = Path(tmpdir) / ".parlor" / "skills"
+        skills_dir = Path(tmpdir) / ".anteroom" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "commit.yaml").write_text(
             "name: commit\ndescription: Commit changes\nprompt: Make a git commit\n"
@@ -120,7 +120,7 @@ class TestSkillRegistry:
 
     def test_load_warnings_for_invalid_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            skills_dir = Path(tmpdir) / ".parlor" / "skills"
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
             skills_dir.mkdir(parents=True)
             (skills_dir / "bad.yaml").write_text("not: valid: yaml: [[[")
             (skills_dir / "noprompt.yaml").write_text("name: noprompt\ndescription: No prompt\n")
@@ -133,7 +133,7 @@ class TestSkillRegistry:
 
     def test_no_warnings_for_valid_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            skills_dir = Path(tmpdir) / ".parlor" / "skills"
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
             skills_dir.mkdir(parents=True)
             (skills_dir / "good.yaml").write_text("name: good\ndescription: Works\nprompt: Do something\n")
             reg = SkillRegistry()

@@ -1,6 +1,6 @@
 # Security
 
-Parlor is hardened for use on corporate networks and shared machines. Built to OWASP ASVS Level 1 standards.
+Anteroom is hardened for use on corporate networks and shared machines. Built to OWASP ASVS Level 1 standards.
 
 ## Security Layers
 
@@ -23,7 +23,7 @@ Parlor is hardened for use on corporate networks and shared machines. Built to O
 
 ## Threat Model
 
-Parlor is a **personal, single-user application** intended to run on a user's local machine. The threat model accounts for:
+Anteroom is a **personal, single-user application** intended to run on a user's local machine. The threat model accounts for:
 
 - Unauthorized local access
 - Cross-site attacks (XSS, CSRF, clickjacking)
@@ -33,7 +33,7 @@ Parlor is a **personal, single-user application** intended to run on a user's lo
 - Request flooding and oversized payloads
 - Information leakage
 
-See the full [SECURITY.md](https://github.com/troylar/parlor/blob/main/SECURITY.md) for the complete OWASP ASVS compliance matrix.
+See the full [SECURITY.md](https://github.com/troylar/anteroom/blob/main/SECURITY.md) for the complete OWASP ASVS compliance matrix.
 
 ## Pages
 

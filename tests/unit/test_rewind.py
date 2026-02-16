@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from parlor.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, ThreadSafeConnection
-from parlor.models import RewindRequest
-from parlor.routers.conversations import rewind_conversation
-from parlor.services.rewind import collect_file_paths
-from parlor.services.rewind import rewind_conversation as rewind_service
-from parlor.services.storage import (
+from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, ThreadSafeConnection
+from anteroom.models import RewindRequest
+from anteroom.routers.conversations import rewind_conversation
+from anteroom.services.rewind import collect_file_paths
+from anteroom.services.rewind import rewind_conversation as rewind_service
+from anteroom.services.storage import (
     create_conversation,
     create_message,
     create_tool_call,
@@ -77,7 +77,7 @@ class TestRewindService:
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
         with (
-            patch("parlor.services.rewind.check_git_repo", return_value=True),
+            patch("anteroom.services.rewind.check_git_repo", return_value=True),
             patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec,
         ):
             result = await rewind_service(db, conv["id"], to_position=0, undo_files=True, data_dir=tmp_path)
@@ -99,7 +99,7 @@ class TestRewindService:
         mock_proc.communicate = AsyncMock(return_value=(b"", b"error: pathspec did not match"))
 
         with (
-            patch("parlor.services.rewind.check_git_repo", return_value=True),
+            patch("anteroom.services.rewind.check_git_repo", return_value=True),
             patch("asyncio.create_subprocess_exec", return_value=mock_proc),
         ):
             result = await rewind_service(db, conv["id"], to_position=0, undo_files=True, data_dir=tmp_path)
@@ -115,7 +115,7 @@ class TestRewindService:
         msg1 = create_message(db, conv["id"], "assistant", "wrote a file")
         create_tool_call(db, msg1["id"], "write_file", "builtin", {"path": "/tmp/test.py", "content": "hello"})
 
-        with patch("parlor.services.rewind.check_git_repo", return_value=False):
+        with patch("anteroom.services.rewind.check_git_repo", return_value=False):
             result = await rewind_service(db, conv["id"], to_position=0, undo_files=True, data_dir=tmp_path)
 
         assert result.deleted_messages == 1
@@ -155,7 +155,7 @@ class TestRewindService:
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
         with (
-            patch("parlor.services.rewind.check_git_repo", return_value=True),
+            patch("anteroom.services.rewind.check_git_repo", return_value=True),
             patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec,
         ):
             result = await rewind_service(db, conv["id"], to_position=0, undo_files=True, data_dir=tmp_path)

@@ -1,10 +1,10 @@
 # Add MCP Tools
 
-Connect external tools to Parlor via the Model Context Protocol (MCP).
+Connect external tools to Anteroom via the Model Context Protocol (MCP).
 
 ## What is MCP?
 
-MCP (Model Context Protocol) is a standard for connecting AI models to external tools. Parlor supports both **stdio** (local process) and **SSE** (remote HTTP) MCP servers.
+MCP (Model Context Protocol) is a standard for connecting AI models to external tools. Anteroom supports both **stdio** (local process) and **SSE** (remote HTTP) MCP servers.
 
 ## Step 1: Find an MCP Server
 
@@ -21,7 +21,7 @@ Add the MCP server to your `config.yaml`:
 
 === "stdio (local process)"
 
-    ```yaml title="~/.parlor/config.yaml"
+    ```yaml title="~/.anteroom/config.yaml"
     mcp_servers:
       - name: "filesystem"
         transport: "stdio"
@@ -31,7 +31,7 @@ Add the MCP server to your `config.yaml`:
 
 === "SSE (remote server)"
 
-    ```yaml title="~/.parlor/config.yaml"
+    ```yaml title="~/.anteroom/config.yaml"
     mcp_servers:
       - name: "remote-tools"
         transport: "sse"
@@ -62,7 +62,7 @@ $ export MY_API_KEY="sk-..."
 
 ## Step 4: Verify
 
-Restart Parlor and check that the tools are available:
+Restart Anteroom and check that the tools are available:
 
 === "CLI"
 

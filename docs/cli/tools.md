@@ -89,7 +89,7 @@ Built-in tools are checked before MCP tools. If a tool name matches a built-in, 
 ## Disabling Tools
 
 ```bash
-$ parlor chat --no-tools
+$ aroom chat --no-tools
 ```
 
 Or in `config.yaml`:

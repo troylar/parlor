@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from parlor.routers.chat import (
+from anteroom.routers.chat import (
     MAX_QUEUED_MESSAGES,
     _active_streams,
     _cancel_events,

@@ -1,12 +1,12 @@
 # Contributing
 
-How to set up a development environment and contribute to Parlor.
+How to set up a development environment and contribute to Anteroom.
 
 ## Development Setup
 
 ```bash
-$ git clone https://github.com/troylar/parlor.git
-$ cd parlor
+$ git clone https://github.com/troylar/anteroom.git
+$ cd anteroom
 $ pip install -e ".[dev]"
 ```
 
@@ -16,7 +16,7 @@ $ pip install -e ".[dev]"
 $ pytest tests/ -v              # All tests (~343 tests)
 $ pytest tests/unit/ -v         # Unit tests only
 $ pytest tests/integration/ -v  # Integration tests
-$ pytest --cov=parlor --cov-report=html  # With coverage
+$ pytest --cov=aroom --cov-report=html  # With coverage
 ```
 
 ## Linting and Formatting

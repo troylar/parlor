@@ -1,4 +1,4 @@
-"""CLI entry point for Parlor."""
+"""CLI entry point for Anteroom."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from .config import _get_config_path, load_config
 def _print_setup_guide(config_path: Path) -> None:
     print(
         f"\nTo get started, run:\n\n"
-        "  parlor init\n\n"
+        "  aroom init\n\n"
         f"Or create {config_path} manually:\n\n"
         "ai:\n"
         '  base_url: "https://your-ai-endpoint/v1"\n'
@@ -33,7 +33,7 @@ def _print_setup_guide(config_path: Path) -> None:
 
 
 def _run_init() -> None:
-    """Interactive setup wizard for ~/.parlor/config.yaml."""
+    """Interactive setup wizard for ~/.anteroom/config.yaml."""
     config_path = _get_config_path()
     if config_path.exists():
         print(f"Config already exists at {config_path}")
@@ -46,8 +46,8 @@ def _run_init() -> None:
             print("Cancelled.")
             return
 
-    print("\nParlor Setup")
-    print("============\n")
+    print("\nAnteroom Setup")
+    print("==============\n")
 
     try:
         base_url = input("AI endpoint URL (e.g., https://api.openai.com/v1): ").strip()
@@ -87,8 +87,8 @@ def _run_init() -> None:
     config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     print(f"\nConfig written to {config_path}")
-    print("Run 'parlor --test' to verify your connection.")
-    print("Run 'parlor' for the web UI or 'parlor chat' for the CLI.\n")
+    print("Run 'aroom --test' to verify your connection.")
+    print("Run 'aroom' for the web UI or 'aroom chat' for the CLI.\n")
 
 
 def _load_config_or_exit() -> tuple[Path, object]:
@@ -160,6 +160,94 @@ async def _test_connection(config) -> None:
     print("\nAll checks passed.")
 
 
+def _run_db(args) -> None:
+    """Handle `aroom db` subcommands."""
+    import getpass
+    import stat
+
+    import yaml
+
+    from .services.db_auth import hash_passphrase
+
+    config_path = _get_config_path()
+    raw: dict = {}
+    if config_path.exists():
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+
+    action = args.db_action
+
+    if action == "create":
+        name = args.name
+        db_path = args.path
+        if not name or not db_path:
+            print("Error: --name and --path are required for 'db create'", file=sys.stderr)
+            sys.exit(1)
+
+        passphrase = getpass.getpass("Set passphrase (empty for no auth): ")
+        passphrase_hash = ""
+        if passphrase:
+            confirm = getpass.getpass("Confirm passphrase: ")
+            if passphrase != confirm:
+                print("Error: passphrases do not match", file=sys.stderr)
+                sys.exit(1)
+            passphrase_hash = hash_passphrase(passphrase)
+
+        databases = raw.setdefault("databases", {})
+        databases[name] = {"path": db_path}
+        if passphrase_hash:
+            databases[name]["passphrase_hash"] = passphrase_hash
+
+        # Ensure the DB file's parent directory exists
+        db_dir = Path(db_path).expanduser().parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+        config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+        print(f"Database '{name}' registered at {db_path}")
+        if passphrase_hash:
+            print("Passphrase protection enabled.")
+
+    elif action == "list":
+        databases = raw.get("databases", {})
+        shared = raw.get("shared_databases", [])
+        if not databases and not shared:
+            print("No shared databases configured.")
+            return
+        print("Databases:")
+        for db_name, db_conf in databases.items():
+            path = db_conf.get("path", "?") if isinstance(db_conf, dict) else db_conf
+            auth = "yes" if isinstance(db_conf, dict) and db_conf.get("passphrase_hash") else "no"
+            print(f"  {db_name}: {path} (auth: {auth})")
+        for sdb in shared:
+            print(f"  {sdb['name']}: {sdb['path']} (legacy format)")
+
+    elif action == "connect":
+        name = args.name
+        if not name:
+            print("Error: database name is required", file=sys.stderr)
+            sys.exit(1)
+        databases = raw.get("databases", {})
+        if name not in databases:
+            print(f"Error: database '{name}' not found in config", file=sys.stderr)
+            sys.exit(1)
+        db_conf = databases[name]
+        if isinstance(db_conf, dict) and db_conf.get("passphrase_hash"):
+            passphrase = getpass.getpass(f"Passphrase for '{name}': ")
+            from .services.db_auth import verify_passphrase
+
+            if not verify_passphrase(passphrase, db_conf["passphrase_hash"]):
+                print("Error: invalid passphrase", file=sys.stderr)
+                sys.exit(1)
+        print(f"Connected to '{name}' at {db_conf.get('path', db_conf) if isinstance(db_conf, dict) else db_conf}")
+
+    else:
+        print(f"Unknown db action: {action}", file=sys.stderr)
+        sys.exit(1)
+
+
 def _run_web(config, config_path: Path) -> None:
     """Launch the web UI server."""
     print(f"Config loaded from {config_path}")
@@ -189,7 +277,7 @@ def _run_web(config, config_path: Path) -> None:
         scheme = "https"
 
     url = f"{scheme}://{config.app.host}:{config.app.port}"
-    print(f"\nStarting Parlor at {url}")
+    print(f"\nStarting Anteroom at {url}")
 
     if config.app.host in ("0.0.0.0", "::"):
         print("  WARNING: Binding to all interfaces. The app is accessible from the network.", file=sys.stderr)
@@ -240,13 +328,13 @@ def _run_chat(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="parlor", description="Parlor - a private parlor for AI conversation")
+    parser = argparse.ArgumentParser(prog="aroom", description="Anteroom - your gateway to AI conversation")
     subparsers = parser.add_subparsers(dest="command")
 
-    # `parlor init` subcommand
+    # `aroom init` subcommand
     subparsers.add_parser("init", help="Interactive setup wizard for config")
 
-    # `parlor chat` subcommand
+    # `aroom chat` subcommand
     chat_parser = subparsers.add_parser("chat", help="Interactive CLI chat mode")
     chat_parser.add_argument("prompt", nargs="?", default=None, help="One-shot prompt (omit for REPL)")
     chat_parser.add_argument("--no-tools", action="store_true", help="Disable built-in tools")
@@ -279,6 +367,12 @@ def main() -> None:
         help="Override AI model (e.g., gpt-4o, claude-3-opus)",
     )
 
+    # `aroom db` subcommand
+    db_parser = subparsers.add_parser("db", help="Manage shared databases")
+    db_parser.add_argument("db_action", choices=["create", "list", "connect"], help="Database action")
+    db_parser.add_argument("name", nargs="?", default=None, help="Database name")
+    db_parser.add_argument("--path", default=None, help="Path to database file")
+
     # Global flags
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--test", action="store_true", help="Test connection settings and exit")
@@ -287,6 +381,10 @@ def main() -> None:
 
     if args.command == "init":
         _run_init()
+        return
+
+    if args.command == "db":
+        _run_db(args)
         return
 
     config_path, config = _load_config_or_exit()

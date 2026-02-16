@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parlor.cli.renderer import (
+from anteroom.cli.renderer import (
     Verbosity,
     _flush_dedup,
     _format_tokens,
@@ -185,7 +185,7 @@ class TestTurnHistory:
         # Should not crash
 
     def test_save_preserves_tools(self) -> None:
-        from parlor.cli.renderer import _current_turn_tools, _tool_history
+        from anteroom.cli.renderer import _current_turn_tools, _tool_history
 
         _current_turn_tools.append(
             {
@@ -202,7 +202,7 @@ class TestTurnHistory:
         assert _tool_history[0]["tool_name"] == "bash"
 
     def test_clear_removes_current(self) -> None:
-        from parlor.cli.renderer import _current_turn_tools
+        from anteroom.cli.renderer import _current_turn_tools
 
         _current_turn_tools.append({"tool_name": "test"})
         clear_turn_history()
@@ -211,13 +211,13 @@ class TestTurnHistory:
 
 class TestDedup:
     def setup_method(self) -> None:
-        import parlor.cli.renderer as r
+        import anteroom.cli.renderer as r
 
         r._dedup_summary = ""
         r._dedup_count = 0
 
     def test_flush_dedup_resets_state(self) -> None:
-        import parlor.cli.renderer as r
+        import anteroom.cli.renderer as r
 
         r._dedup_summary = "Reading test.py"
         r._dedup_count = 3
@@ -231,12 +231,12 @@ class TestDedup:
 
 class TestFlushBufferedText:
     def setup_method(self) -> None:
-        import parlor.cli.renderer as r
+        import anteroom.cli.renderer as r
 
         r._streaming_buffer.clear()
 
     def test_flush_clears_buffer(self) -> None:
-        import parlor.cli.renderer as r
+        import anteroom.cli.renderer as r
 
         r._streaming_buffer.append("hello")
         r._streaming_buffer.append(" world")
@@ -247,7 +247,7 @@ class TestFlushBufferedText:
         flush_buffered_text()  # Should not crash
 
     def test_flush_noop_for_whitespace(self) -> None:
-        import parlor.cli.renderer as r
+        import anteroom.cli.renderer as r
 
         r._streaming_buffer.append("   \n  ")
         flush_buffered_text()

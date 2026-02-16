@@ -1,4 +1,4 @@
-"""Tests for parlor init and --version."""
+"""Tests for anteroom init and --version."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import sys
 class TestVersion:
     def test_version_flag(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "parlor", "--version"],
+            [sys.executable, "-m", "anteroom", "--version"],
             capture_output=True,
             text=True,
             timeout=10,
         )
         assert result.returncode == 0
-        assert "parlor" in result.stdout.lower()
+        assert "aroom" in result.stdout.lower()
 
 
 class TestInit:
@@ -26,7 +26,7 @@ class TestInit:
 
         import yaml
 
-        from parlor.__main__ import _run_init
+        from anteroom.__main__ import _run_init
 
         inputs = iter(
             [
@@ -37,7 +37,7 @@ class TestInit:
             ]
         )
         with (
-            patch("parlor.__main__._get_config_path", return_value=config_path),
+            patch("anteroom.__main__._get_config_path", return_value=config_path),
             patch("builtins.input", side_effect=lambda _: next(inputs)),
         ):
             _run_init()
@@ -57,10 +57,10 @@ class TestInit:
         config_path = tmp_path / "config.yaml"
         from unittest.mock import patch
 
-        from parlor.__main__ import _run_init
+        from anteroom.__main__ import _run_init
 
         with (
-            patch("parlor.__main__._get_config_path", return_value=config_path),
+            patch("anteroom.__main__._get_config_path", return_value=config_path),
             patch("builtins.input", side_effect=EOFError),
         ):
             _run_init()

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from parlor.services.agent_loop import AgentEvent, _execute_tool, run_agent_loop
+from anteroom.services.agent_loop import AgentEvent, _execute_tool, run_agent_loop
 
 # -- Helpers --
 

@@ -1,6 +1,6 @@
 # Config File
 
-The config file lives at `~/.parlor/config.yaml`.
+The config file lives at `~/.anteroom/config.yaml`.
 
 ## Full Reference
 
@@ -16,7 +16,7 @@ ai:
 app:
   host: "127.0.0.1"      # Bind address
   port: 8080              # Server port
-  data_dir: "~/.parlor"   # Where DB + attachments live
+  data_dir: "~/.anteroom"   # Where DB + attachments live
   tls: false              # Set true for HTTPS with self-signed cert
 
 cli:
@@ -59,7 +59,7 @@ mcp_servers:
 |---|---|---|---|
 | `host` | string | `127.0.0.1` | Bind address for the web server |
 | `port` | integer | `8080` | Port for the web server |
-| `data_dir` | string | `~/.parlor` | Directory for database, attachments, config |
+| `data_dir` | string | `~/.anteroom` | Directory for database, attachments, config |
 | `tls` | boolean | `false` | Enable HTTPS with self-signed certificate |
 
 ### cli
@@ -93,5 +93,5 @@ The `api_key_command` field runs an external command to obtain API keys with aut
 
 ```yaml
 ai:
-  api_key_command: "aws secretsmanager get-secret-value --secret-id parlor-key --query SecretString --output text"
+  api_key_command: "aws secretsmanager get-secret-value --secret-id anteroom-key --query SecretString --output text"
 ```

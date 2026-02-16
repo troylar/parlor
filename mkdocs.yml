@@ -1,8 +1,8 @@
-site_name: Parlor
-site_url: https://parlor.readthedocs.io
-site_description: A private parlor for AI conversation
-repo_url: https://github.com/troylar/parlor
-repo_name: troylar/parlor
+site_name: Anteroom
+site_url: https://anteroom.readthedocs.io
+site_description: Your gateway to AI conversation
+repo_url: https://github.com/troylar/anteroom
+repo_name: troylar/anteroom
 edit_uri: edit/main/docs/
 
 theme:
@@ -67,9 +67,9 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/troylar/parlor
+      link: https://github.com/troylar/anteroom
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/parlor/
+      link: https://pypi.org/project/anteroom/
 
 extra_css:
   - assets/stylesheets/extra.css

@@ -102,8 +102,8 @@ The new model applies to all subsequent turns. Conversation history carries over
 You can also set the model from the command line:
 
 ```bash
-parlor chat --model gpt-4-turbo
-parlor chat --model gpt-4o "explain this code"
+aroom chat --model gpt-4-turbo
+aroom chat --model gpt-4o "explain this code"
 ```
 
 ## Display Modes
@@ -145,4 +145,4 @@ When you paste more than 6 lines, the terminal display collapses to show the fir
 
 ## Command History
 
-Input history is persisted to `~/.parlor/cli_history`. Previous commands are available with up/down arrow keys across sessions.
+Input history is persisted to `~/.anteroom/cli_history`. Previous commands are available with up/down arrow keys across sessions.

@@ -4,10 +4,14 @@ const Chat = (() => {
     let eventSource = null;
     let currentAssistantEl = null;
     let currentAssistantContent = '';
-    let _streamRawMode = localStorage.getItem('parlor_stream_raw_mode') === 'true';
+    let _streamRawMode = localStorage.getItem('anteroom_stream_raw_mode') === 'true';
     let _rewindPosition = null;
     let _rewindMsgEl = null;
     let _lastSentText = '';
+
+    // Remote collaboration state
+    let _remoteAssistantEl = null;
+    let _remoteAssistantContent = '';
 
     // Configure marked for safe link rendering (marked v15 passes token object)
     const renderer = new marked.Renderer();
@@ -49,7 +53,7 @@ const Chat = (() => {
 
     function setRawMode(val) {
         _streamRawMode = val;
-        localStorage.setItem('parlor_stream_raw_mode', val ? 'true' : 'false');
+        localStorage.setItem('anteroom_stream_raw_mode', val ? 'true' : 'false');
     }
 
     function autoResizeInput() {
@@ -79,7 +83,7 @@ const Chat = (() => {
         Attachments.clear();
 
         let body;
-        let headers = { 'X-CSRF-Token': App._getCsrfToken() };
+        let headers = { 'X-CSRF-Token': App._getCsrfToken(), 'X-Client-Id': App.state.clientId };
         if (files.length > 0) {
             const formData = new FormData();
             formData.append('message', text);
@@ -137,6 +141,7 @@ const Chat = (() => {
                 'X-CSRF-Token': App._getCsrfToken(),
             };
         }
+        headers['X-Client-Id'] = App.state.clientId;
 
         try {
             const response = await fetch(`/api/conversations/${conversationId}/chat`, {
@@ -813,7 +818,7 @@ const Chat = (() => {
                 const w = document.createElement('div');
                 w.id = 'welcome-message';
                 w.className = 'welcome-message';
-                w.innerHTML = '<h2>Welcome to the Parlor</h2><p>Your connection is secure. How may I assist you today?</p>';
+                w.innerHTML = '<h2>Welcome to the Anteroom</h2><p>Your connection is secure. How may I assist you today?</p>';
                 container.appendChild(w);
             } else {
                 welcome.style.display = '';
@@ -925,8 +930,51 @@ const Chat = (() => {
         return div.innerHTML;
     }
 
+    // --- Remote Collaboration ---
+
+    function appendRemoteMessage(role, content) {
+        const el = appendMessage(role, content);
+        const roleDiv = el.querySelector('.message-role');
+        if (roleDiv && role === 'user') {
+            roleDiv.textContent = 'TEAMMATE';
+            el.classList.add('remote');
+        }
+        return el;
+    }
+
+    function startRemoteStream() {
+        _remoteAssistantContent = '';
+        _remoteAssistantEl = appendMessage('assistant', '');
+        const roleDiv = _remoteAssistantEl.querySelector('.message-role');
+        if (roleDiv) {
+            roleDiv.textContent = 'SYSTEM (remote)';
+        }
+    }
+
+    function handleRemoteToken(content) {
+        if (!_remoteAssistantEl) return;
+        _remoteAssistantContent += content;
+        const contentEl = _remoteAssistantEl.querySelector('.message-content');
+        contentEl.innerHTML = renderMarkdown(_remoteAssistantContent);
+        renderMath(contentEl);
+        highlightCode(contentEl);
+        scrollToBottom();
+    }
+
+    function finalizeRemoteStream() {
+        if (!_remoteAssistantEl) return;
+        const contentEl = _remoteAssistantEl.querySelector('.message-content');
+        contentEl.innerHTML = renderMarkdown(_remoteAssistantContent);
+        renderMath(contentEl);
+        addCodeCopyButtons(contentEl);
+        _remoteAssistantEl = null;
+        _remoteAssistantContent = '';
+        scrollToBottom();
+    }
+
     return {
         init, sendMessage, loadMessages, stopGeneration, setStreaming, escapeHtml,
         streamChatResponse, isRawMode, setRawMode,
+        appendRemoteMessage, startRemoteStream, handleRemoteToken, finalizeRemoteStream,
     };
 })();

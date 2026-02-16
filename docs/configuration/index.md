@@ -1,6 +1,6 @@
 # Configuration
 
-Parlor is configured through a YAML file with environment variable overrides.
+Anteroom is configured through a YAML file with environment variable overrides.
 
 ## Quick Reference
 
@@ -13,7 +13,7 @@ Parlor is configured through a YAML file with environment variable overrides.
 | SSL verification | `ai.verify_ssl` | `AI_CHAT_VERIFY_SSL` | `true` |
 | Host | `app.host` | --- | `127.0.0.1` |
 | Port | `app.port` | --- | `8080` |
-| Data directory | `app.data_dir` | --- | `~/.parlor` |
+| Data directory | `app.data_dir` | --- | `~/.anteroom` |
 | TLS | `app.tls` | --- | `false` |
 | Built-in tools | `cli.builtin_tools` | --- | `true` |
 | Max tool iterations | `cli.max_tool_iterations` | --- | `50` |
@@ -23,7 +23,7 @@ Parlor is configured through a YAML file with environment variable overrides.
 Configuration follows a layered approach with later sources overriding earlier ones:
 
 1. **Defaults** --- sensible defaults for all settings
-2. **Config file** --- `~/.parlor/config.yaml`
+2. **Config file** --- `~/.anteroom/config.yaml`
 3. **Environment variables** --- `AI_CHAT_*` prefix
 
 ## Pages

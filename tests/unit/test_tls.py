@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from parlor.tls import _is_cert_valid, ensure_certificates
+from anteroom.tls import _is_cert_valid, ensure_certificates
 
 
 def test_ensure_certificates_creates_files(tmp_path):

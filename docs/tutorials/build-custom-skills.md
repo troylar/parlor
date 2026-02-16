@@ -18,17 +18,17 @@ prompt: |
 
 | Location | Scope | Priority |
 |---|---|---|
-| `.parlor/skills/` | Project-specific | Highest |
-| `~/.parlor/skills/` | Global (all projects) | Medium |
+| `.anteroom/skills/` | Project-specific | Highest |
+| `~/.anteroom/skills/` | Global (all projects) | Medium |
 | Built-in | Default skills | Lowest |
 
 Project skills override global skills with the same name. Global skills override built-in skills.
 
-Parlor walks up from the working directory to find the nearest `.parlor/skills/` directory, similar to [PARLOR.md](../cli/project-instructions.md) discovery.
+Anteroom walks up from the working directory to find the nearest `.anteroom/skills/` directory, similar to [ANTEROOM.md](../cli/project-instructions.md) discovery.
 
 ## Example: Test Runner
 
-```yaml title=".parlor/skills/test.yaml"
+```yaml title=".anteroom/skills/test.yaml"
 name: test
 description: Run tests and fix failures
 prompt: |
@@ -49,7 +49,7 @@ you> /test just the auth module
 
 ## Example: Documentation Writer
 
-```yaml title="~/.parlor/skills/docs.yaml"
+```yaml title="~/.anteroom/skills/docs.yaml"
 name: docs
 description: Generate documentation for a module
 prompt: |
@@ -63,7 +63,7 @@ prompt: |
 
 ## Example: Code Reviewer
 
-```yaml title=".parlor/skills/pr-review.yaml"
+```yaml title=".anteroom/skills/pr-review.yaml"
 name: pr-review
 description: Review staged changes like a PR
 prompt: |

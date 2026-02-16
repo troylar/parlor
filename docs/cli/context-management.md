@@ -1,6 +1,6 @@
 # Context Management
 
-Parlor tracks token usage across the conversation and automatically manages context window limits.
+Anteroom tracks token usage across the conversation and automatically manages context window limits.
 
 ## Token Tracking
 

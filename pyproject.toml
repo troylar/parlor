@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "parlor"
+name = "anteroom"
 version = "0.15.1"
-description = "Parlor - a private parlor for AI conversation"
+description = "Anteroom - your gateway to AI conversation"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -29,6 +29,7 @@ dependencies = [
     "prompt-toolkit>=3.0.0",
     "tiktoken>=0.7.0",
     "cryptography>=42.0.0",
+    "argon2-cffi>=23.1.0",
 ]
 
 [project.optional-dependencies]
@@ -43,13 +44,14 @@ dev = [
 ]
 
 [project.scripts]
-parlor = "parlor.__main__:main"
+aroom = "anteroom.__main__:main"
+anteroom = "anteroom.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-parlor = ["static/**/*", "cli/default_skills/*.yaml"]
+anteroom = ["static/**/*", "cli/default_skills/*.yaml"]
 
 [tool.ruff]
 target-version = "py310"
@@ -63,7 +65,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["parlor"]
+source = ["anteroom"]
 
 [tool.coverage.report]
 show_missing = true

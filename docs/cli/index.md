@@ -3,11 +3,11 @@
 An agentic terminal REPL --- like Claude Code, but connected to **your own API**. Read files, write code, run commands, search your codebase, all from the terminal.
 
 ```bash
-$ parlor chat
+$ aroom chat
 ```
 
 ```
-Parlor CLI - /path/to/your/project
+Anteroom CLI - /path/to/your/project
   Model: gpt-4 | Tools: 6 | Instructions: loaded | Branch: main
   Type /help for commands, Ctrl+D to exit
 ```
@@ -17,19 +17,19 @@ Parlor CLI - /path/to/your/project
 === "Interactive REPL"
 
     ```bash
-    $ parlor chat                       # Start fresh
-    $ parlor chat -c                    # Continue last conversation
-    $ parlor chat -r <id>               # Resume specific conversation
-    $ parlor chat -p /path/to/project   # Set project root
-    $ parlor chat --no-tools            # Disable built-in tools
+    $ aroom chat                       # Start fresh
+    $ aroom chat -c                    # Continue last conversation
+    $ aroom chat -r <id>               # Resume specific conversation
+    $ aroom chat -p /path/to/project   # Set project root
+    $ aroom chat --no-tools            # Disable built-in tools
     ```
 
 === "One-Shot"
 
     ```bash
-    $ parlor chat "explain main.py"
-    $ parlor chat -c "now add rate limiting"
-    $ parlor chat -r a1b2c3d4 "fix the failing test"
+    $ aroom chat "explain main.py"
+    $ aroom chat -c "now add rate limiting"
+    $ aroom chat -r a1b2c3d4 "fix the failing test"
     ```
 
     One-shot mode creates a conversation in the database, generates a title, and exits after the response. The AI still has access to all tools and can run multiple agentic iterations.
@@ -67,4 +67,4 @@ Works on macOS, Linux, and Windows:
 | Inline file contents | [File References](file-references.md) |
 | Token tracking & compact | [Context Management](context-management.md) |
 | All /commands | [Commands](commands.md) |
-| PARLOR.md project context | [Project Instructions](project-instructions.md) |
+| ANTEROOM.md project context | [Project Instructions](project-instructions.md) |

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from parlor.tools import ToolRegistry, register_default_tools
-from parlor.tools.security import sanitize_command, validate_path
+from anteroom.tools import ToolRegistry, register_default_tools
+from anteroom.tools.security import sanitize_command, validate_path
 
 
 class TestToolRegistry:
@@ -158,7 +158,7 @@ class TestSanitizeCommand:
 class TestReadFileTool:
     @pytest.mark.asyncio
     async def test_read_file(self) -> None:
-        from parlor.tools import read
+        from anteroom.tools import read
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("line one\nline two\nline three\n")
@@ -175,7 +175,7 @@ class TestReadFileTool:
 
     @pytest.mark.asyncio
     async def test_read_file_with_offset(self) -> None:
-        from parlor.tools import read
+        from anteroom.tools import read
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("line one\nline two\nline three\n")
@@ -193,7 +193,7 @@ class TestReadFileTool:
 
     @pytest.mark.asyncio
     async def test_read_nonexistent(self) -> None:
-        from parlor.tools import read
+        from anteroom.tools import read
 
         read.set_working_dir("/tmp")
         result = await read.handle(path="/tmp/nonexistent_12345.txt")
@@ -203,7 +203,7 @@ class TestReadFileTool:
 class TestWriteFileTool:
     @pytest.mark.asyncio
     async def test_write_file(self) -> None:
-        from parlor.tools import write
+        from anteroom.tools import write
 
         with tempfile.TemporaryDirectory() as tmpdir:
             write.set_working_dir(tmpdir)
@@ -214,7 +214,7 @@ class TestWriteFileTool:
 
     @pytest.mark.asyncio
     async def test_write_creates_dirs(self) -> None:
-        from parlor.tools import write
+        from anteroom.tools import write
 
         with tempfile.TemporaryDirectory() as tmpdir:
             write.set_working_dir(tmpdir)
@@ -227,7 +227,7 @@ class TestWriteFileTool:
 class TestEditFileTool:
     @pytest.mark.asyncio
     async def test_edit_file(self) -> None:
-        from parlor.tools import edit
+        from anteroom.tools import edit
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("hello world")
@@ -243,7 +243,7 @@ class TestEditFileTool:
 
     @pytest.mark.asyncio
     async def test_edit_not_found(self) -> None:
-        from parlor.tools import edit
+        from anteroom.tools import edit
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("hello world")
@@ -258,7 +258,7 @@ class TestEditFileTool:
 
     @pytest.mark.asyncio
     async def test_edit_ambiguous(self) -> None:
-        from parlor.tools import edit
+        from anteroom.tools import edit
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("aaa bbb aaa")
@@ -275,7 +275,7 @@ class TestEditFileTool:
 class TestBashTool:
     @pytest.mark.asyncio
     async def test_bash_echo(self) -> None:
-        from parlor.tools import bash
+        from anteroom.tools import bash
 
         bash.set_working_dir("/tmp")
         result = await bash.handle(command="echo hello")
@@ -284,7 +284,7 @@ class TestBashTool:
 
     @pytest.mark.asyncio
     async def test_bash_timeout(self) -> None:
-        from parlor.tools import bash
+        from anteroom.tools import bash
 
         bash.set_working_dir("/tmp")
         result = await bash.handle(command="sleep 10", timeout=1)
@@ -292,7 +292,7 @@ class TestBashTool:
 
     @pytest.mark.asyncio
     async def test_bash_exit_code(self) -> None:
-        from parlor.tools import bash
+        from anteroom.tools import bash
 
         bash.set_working_dir("/tmp")
         result = await bash.handle(command="exit 42")
@@ -302,7 +302,7 @@ class TestBashTool:
 class TestGlobTool:
     @pytest.mark.asyncio
     async def test_glob_files(self) -> None:
-        from parlor.tools import glob_tool
+        from anteroom.tools import glob_tool
 
         with tempfile.TemporaryDirectory() as tmpdir:
             Path(tmpdir, "a.txt").touch()
@@ -321,7 +321,7 @@ class TestGlobTool:
 class TestGrepTool:
     @pytest.mark.asyncio
     async def test_grep_files(self) -> None:
-        from parlor.tools import grep
+        from anteroom.tools import grep
 
         with tempfile.TemporaryDirectory() as tmpdir:
             Path(tmpdir, "test.py").write_text("def hello():\n    return 42\n")

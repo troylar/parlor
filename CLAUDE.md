@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Parlor is a self-hosted, private ChatGPT-style web UI and agentic CLI that connects to any OpenAI-compatible API. It provides two interfaces: a FastAPI web UI with vanilla JS frontend, and a Rich-based CLI REPL with built-in tools and MCP integration. Single-user, local-first, SQLite-backed.
+Anteroom is a self-hosted, private ChatGPT-style web UI and agentic CLI that connects to any OpenAI-compatible API. It provides two interfaces: a FastAPI web UI with vanilla JS frontend, and a Rich-based CLI REPL with built-in tools and MCP integration. Single-user, local-first, SQLite-backed.
 
 ## Development Commands
 
@@ -13,19 +13,19 @@ Parlor is a self-hosted, private ChatGPT-style web UI and agentic CLI that conne
 pip install -e ".[dev]"
 
 # Run the app
-parlor                              # Web UI at http://127.0.0.1:8080
-parlor chat                         # CLI REPL
-parlor init                         # Interactive setup wizard
-parlor --test                       # Validate AI connection
-parlor --version                    # Show version
-parlor chat --model gpt-4o          # Override model
+aroom                               # Web UI at http://127.0.0.1:8080
+aroom chat                          # CLI REPL
+aroom init                          # Interactive setup wizard
+aroom --test                        # Validate AI connection
+aroom --version                     # Show version
+aroom chat --model gpt-4o           # Override model
 
 # Testing
-pytest tests/ -v                    # All tests (~358 tests)
+pytest tests/ -v                    # All tests (~375 tests)
 pytest tests/unit/ -v               # Unit tests only
 pytest tests/unit/test_tools.py -v  # Single test file
 pytest tests/unit/test_tools.py::test_name -v  # Single test
-pytest --cov=parlor --cov-report=html  # With coverage
+pytest --cov=anteroom --cov-report=html  # With coverage
 
 # Linting & formatting
 ruff check src/ tests/              # Lint
@@ -70,11 +70,11 @@ SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Schema defin
 
 ### Configuration
 
-Config file at `~/.parlor/config.yaml`. Environment variables override config values with `AI_CHAT_` prefix (e.g., `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_MODEL`). Token provider pattern (`api_key_command`) enables dynamic API key refresh via external commands. TLS is disabled by default (`app.tls: false`); set to `true` to enable HTTPS with a self-signed certificate.
+Config file at `~/.anteroom/config.yaml` (falls back to `~/.parlor/config.yaml` for backward compat). Environment variables override config values with `AI_CHAT_` prefix (e.g., `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_MODEL`). Token provider pattern (`api_key_command`) enables dynamic API key refresh via external commands. TLS is disabled by default (`app.tls: false`); set to `true` to enable HTTPS with a self-signed certificate.
 
 ### Deployment
 
-PyPI package: `parlor`. Deploy via `/deploy` Claude Code skill which handles: merge PR, wait for CI, version bump, build, and `twine upload`. Requires `build` and `twine` installed. Credentials via `~/.pypirc` or `TWINE_USERNAME`/`TWINE_PASSWORD` env vars.
+PyPI package: `anteroom`. Deploy via `/deploy` Claude Code skill which handles: merge PR, wait for CI, version bump, build, and `twine upload`. Requires `build` and `twine` installed. Credentials via `~/.pypirc` or `TWINE_USERNAME`/`TWINE_PASSWORD` env vars.
 
 ## Testing Patterns
 

@@ -539,7 +539,7 @@ def render_welcome(
         version_parts.append(f"Built {build_date}")
     if version_parts:
         console.print(f"  [dim]{_SEP.join(version_parts)}[/dim]")
-    console.print("  [dim]github.com/troylar/parlor[/dim]")
+    console.print("  [dim]github.com/troylar/anteroom[/dim]")
     console.print()
 
     console.print(f"  [#94A3B8]{escape(display_dir)}{branch}[/]")
@@ -554,7 +554,7 @@ def render_welcome(
 def render_update_available(current: str, latest: str) -> None:
     console.print(
         f"  [#C5A059]Update available:[/] [dim]{current} \u2192 {latest}[/dim]"
-        " [dim]\u2014 pip install --upgrade parlor[/dim]\n"
+        " [dim]\u2014 pip install --upgrade anteroom[/dim]\n"
     )
 
 

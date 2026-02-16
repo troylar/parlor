@@ -8,7 +8,10 @@ const App = (() => {
         isStreaming: false,
         availableModels: [],
         databases: [],
+        clientId: crypto.randomUUID(),
     };
+
+    let _eventSource = null;
 
     // --- Theme System ---
 
@@ -19,14 +22,27 @@ const App = (() => {
         ember:    { label: 'Ember',     colors: ['#171210', '#211a16', '#e8913a'] },
     };
 
+    function _migrateLocalStorage() {
+        const migrations = [
+            ['parlor_theme', 'anteroom_theme'],
+            ['parlor_stream_raw_mode', 'anteroom_stream_raw_mode'],
+        ];
+        migrations.forEach(([oldKey, newKey]) => {
+            if (localStorage.getItem(oldKey) !== null && localStorage.getItem(newKey) === null) {
+                localStorage.setItem(newKey, localStorage.getItem(oldKey));
+                localStorage.removeItem(oldKey);
+            }
+        });
+    }
+
     function getTheme() {
-        return localStorage.getItem('parlor_theme') || 'midnight';
+        return localStorage.getItem('anteroom_theme') || 'midnight';
     }
 
     function setTheme(name) {
         if (!THEMES[name]) return;
         document.documentElement.setAttribute('data-theme', name);
-        localStorage.setItem('parlor_theme', name);
+        localStorage.setItem('anteroom_theme', name);
         _updateThemePicker();
     }
 
@@ -94,7 +110,7 @@ const App = (() => {
     // --- CSRF & API ---
 
     function _getCsrfToken() {
-        const match = document.cookie.split('; ').find(c => c.startsWith('parlor_csrf='));
+        const match = document.cookie.split('; ').find(c => c.startsWith('anteroom_csrf='));
         return match ? match.split('=')[1] : '';
     }
 
@@ -105,6 +121,7 @@ const App = (() => {
         }
         options.credentials = 'same-origin';
         if (!options.headers) options.headers = {};
+        options.headers['X-Client-Id'] = state.clientId;
         if (['POST', 'PATCH', 'PUT', 'DELETE'].includes((options.method || '').toUpperCase())) {
             options.headers['X-CSRF-Token'] = _getCsrfToken();
         }
@@ -128,6 +145,7 @@ const App = (() => {
     // --- Init ---
 
     async function init() {
+        _migrateLocalStorage();
         Chat.init();
         Sidebar.init();
         Palette.init();
@@ -197,13 +215,29 @@ const App = (() => {
         // Load projects
         await loadProjects();
 
+        // Read URL params for shared DB links
+        const urlParams = _readUrlParams();
+
         // Load conversations
         await Sidebar.refresh();
 
-        // Load most recent conversation or show welcome
-        const conversations = await api('/api/conversations');
-        if (conversations && conversations.length > 0) {
-            await loadConversation(conversations[0].id);
+        // Load conversation from URL param, or most recent
+        if (urlParams.conversationId) {
+            try {
+                await loadConversation(urlParams.conversationId);
+            } catch {
+                const conversations = await api('/api/conversations');
+                if (conversations && conversations.length > 0) {
+                    await loadConversation(conversations[0].id);
+                }
+            }
+        } else {
+            const conversations = await api('/api/conversations');
+            if (conversations && conversations.length > 0) {
+                await loadConversation(conversations[0].id);
+            } else {
+                _connectEventSource();
+            }
         }
     }
 
@@ -336,6 +370,8 @@ const App = (() => {
         document.getElementById('model-selector-label').textContent = 'Default model';
         await Sidebar.refresh();
         Sidebar.setActive(conv.id);
+        _updateUrl();
+        _connectEventSource();
         document.getElementById('message-input').focus();
     }
 
@@ -346,6 +382,109 @@ const App = (() => {
         Sidebar.setActive(id);
         _currentModel = detail.model || '';
         document.getElementById('model-selector-label').textContent = _currentModel || 'Default model';
+        _updateUrl();
+        _connectEventSource();
+    }
+
+    // --- URL Params ---
+
+    function _readUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        const db = params.get('db');
+        const c = params.get('c');
+        if (db) state.currentDatabase = db;
+        return { db, conversationId: c };
+    }
+
+    function _updateUrl() {
+        const params = new URLSearchParams();
+        if (state.currentDatabase) params.set('db', state.currentDatabase);
+        if (state.currentConversationId) params.set('c', state.currentConversationId);
+        const qs = params.toString();
+        const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        if (newUrl !== window.location.pathname + window.location.search) {
+            window.history.replaceState(null, '', newUrl);
+        }
+    }
+
+    // --- Real-time Event Source ---
+
+    function _connectEventSource() {
+        if (_eventSource) {
+            _eventSource.close();
+            _eventSource = null;
+        }
+
+        const db = state.currentDatabase || 'personal';
+        let url = `/api/events?db=${encodeURIComponent(db)}&client_id=${encodeURIComponent(state.clientId)}`;
+        if (state.currentConversationId) {
+            url += `&conversation_id=${encodeURIComponent(state.currentConversationId)}`;
+        }
+
+        _eventSource = new EventSource(url);
+
+        _eventSource.addEventListener('new_message', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.client_id === state.clientId) return;
+            if (data.conversation_id === state.currentConversationId) {
+                Chat.appendRemoteMessage(data.role, data.content);
+            }
+        });
+
+        _eventSource.addEventListener('stream_start', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.client_id === state.clientId) return;
+            if (data.conversation_id === state.currentConversationId) {
+                Chat.startRemoteStream();
+            }
+        });
+
+        _eventSource.addEventListener('stream_token', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.client_id === state.clientId) return;
+            if (data.conversation_id === state.currentConversationId) {
+                Chat.handleRemoteToken(data.content);
+            }
+        });
+
+        _eventSource.addEventListener('stream_done', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.client_id === state.clientId) return;
+            if (data.conversation_id === state.currentConversationId) {
+                Chat.finalizeRemoteStream();
+            }
+        });
+
+        _eventSource.addEventListener('title_changed', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.client_id === state.clientId) return;
+            Sidebar.updateTitle(data.conversation_id, data.title);
+        });
+
+        _eventSource.addEventListener('conversation_created', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.client_id === state.clientId) return;
+            Sidebar.refresh();
+        });
+
+        _eventSource.addEventListener('conversation_deleted', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.client_id === state.clientId) return;
+            if (data.conversation_id === state.currentConversationId) {
+                state.currentConversationId = null;
+                Chat.loadMessages([]);
+            }
+            Sidebar.refresh();
+        });
+
+        _eventSource.onerror = () => {
+            // Reconnect after a delay
+            setTimeout(() => {
+                if (_eventSource && _eventSource.readyState === EventSource.CLOSED) {
+                    _connectEventSource();
+                }
+            }, 3000);
+        };
     }
 
     function formatTimestamp(iso) {
@@ -661,6 +800,8 @@ const App = (() => {
                 state.currentConversationId = null;
                 Chat.loadMessages([]);
                 _renderDatabaseList();
+                _updateUrl();
+                _connectEventSource();
                 await Sidebar.refresh();
             });
             list.appendChild(item);

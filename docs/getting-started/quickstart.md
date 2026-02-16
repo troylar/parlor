@@ -1,13 +1,13 @@
 # Quickstart
 
-A 5-minute walkthrough of Parlor's core features across both interfaces.
+A 5-minute walkthrough of Anteroom's core features across both interfaces.
 
 ## Web UI
 
 **1. Start the server:**
 
 ```bash
-$ parlor
+$ aroom
 ```
 
 Your browser opens to `http://127.0.0.1:8080`.
@@ -25,11 +25,11 @@ Your browser opens to `http://127.0.0.1:8080`.
 **1. Start the REPL:**
 
 ```bash
-$ parlor chat
+$ aroom chat
 ```
 
 ```
-Parlor CLI - /path/to/your/project
+Anteroom CLI - /path/to/your/project
   Model: gpt-4 | Tools: 6 | Instructions: loaded | Branch: main
   Type /help for commands, Ctrl+D to exit
 ```
@@ -55,8 +55,8 @@ The `@` prefix inlines the file contents into your prompt automatically.
 Run a single prompt and exit:
 
 ```bash
-$ parlor chat "list all Python files in src/"
-$ parlor chat -c "now explain the main module"    # Continue last conversation
+$ aroom chat "list all Python files in src/"
+$ aroom chat -c "now explain the main module"    # Continue last conversation
 ```
 
 ## Shared Database

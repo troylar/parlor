@@ -92,6 +92,17 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     created_at TEXT NOT NULL,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_log_id ON change_log(id);
 """
 
 _FTS_SCHEMA = """
@@ -296,6 +307,19 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         )"""
     )
 
+    # Ensure change_log table exists for cross-process event polling
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS change_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            process_id TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_change_log_id ON change_log(id)")
+
 
 def get_db(db_path: Path) -> ThreadSafeConnection:
     return init_db(db_path)
@@ -307,11 +331,14 @@ class DatabaseManager:
     def __init__(self) -> None:
         self._databases: dict[str, ThreadSafeConnection] = {}
         self._paths: dict[str, Path] = {}
+        self._passphrase_hashes: dict[str, str] = {}
         self._personal_name = "personal"
 
-    def add(self, name: str, db_path: Path) -> None:
+    def add(self, name: str, db_path: Path, passphrase_hash: str = "") -> None:
         self._paths[name] = db_path
         self._databases[name] = init_db(db_path)
+        if passphrase_hash:
+            self._passphrase_hashes[name] = passphrase_hash
 
     def get(self, name: str | None = None) -> ThreadSafeConnection:
         key = name or self._personal_name
@@ -323,16 +350,31 @@ class DatabaseManager:
     def personal(self) -> ThreadSafeConnection:
         return self._databases[self._personal_name]
 
+    def get_passphrase_hash(self, name: str) -> str:
+        return self._passphrase_hashes.get(name, "")
+
+    def requires_auth(self, name: str) -> bool:
+        return bool(self._passphrase_hashes.get(name))
+
     def list_databases(self) -> list[dict[str, str]]:
-        return [{"name": name, "path": str(self._paths[name])} for name in self._databases]
+        return [
+            {
+                "name": name,
+                "path": str(self._paths[name]),
+                "requires_auth": str(self.requires_auth(name)).lower(),
+            }
+            for name in self._databases
+        ]
 
     def remove(self, name: str) -> None:
         if name in self._databases:
             self._databases[name].close()
             del self._databases[name]
             del self._paths[name]
+            self._passphrase_hashes.pop(name, None)
 
     def close_all(self) -> None:
         for db in self._databases.values():
             db.close()
         self._databases.clear()
+        self._passphrase_hashes.clear()

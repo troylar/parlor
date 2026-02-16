@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from parlor.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, ThreadSafeConnection
-from parlor.services.storage import (
+from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, ThreadSafeConnection
+from anteroom.services.storage import (
     add_tag_to_conversation,
     copy_conversation_to_db,
     create_conversation,
@@ -279,7 +279,7 @@ class TestForkConversation:
             fork_conversation(db, "no-such-id", 0)
 
     def test_fork_inherits_project_and_model(self, db: sqlite3.Connection) -> None:
-        from parlor.services.storage import create_project, update_conversation_model
+        from anteroom.services.storage import create_project, update_conversation_model
 
         project = create_project(db, "TestProj")
         conv = create_conversation(db, title="WithProject", project_id=project["id"])
@@ -380,7 +380,7 @@ class TestFolders:
         assert updated_conv["folder_id"] is None
 
     def test_create_folder_with_project(self, db: sqlite3.Connection) -> None:
-        from parlor.services.storage import create_project
+        from anteroom.services.storage import create_project
 
         proj = create_project(db, "Test Project")
         folder = create_folder(db, "Research", project_id=proj["id"])
@@ -406,7 +406,7 @@ class TestFolders:
         assert [f["name"] for f in folders] == ["A", "B", "C"]
 
     def test_list_folders_filtered_by_project(self, db: sqlite3.Connection) -> None:
-        from parlor.services.storage import create_project
+        from anteroom.services.storage import create_project
 
         proj = create_project(db, "P1")
         create_folder(db, "In project", project_id=proj["id"])
@@ -632,7 +632,7 @@ class TestCopyConversationToDb:
 
 class TestDatabaseManager:
     def test_add_and_get(self, tmp_path) -> None:
-        from parlor.db import DatabaseManager
+        from anteroom.db import DatabaseManager
 
         mgr = DatabaseManager()
         mgr.add("personal", tmp_path / "personal.db")
@@ -643,14 +643,14 @@ class TestDatabaseManager:
         assert mgr.personal is not None
 
     def test_get_default_returns_personal(self, tmp_path) -> None:
-        from parlor.db import DatabaseManager
+        from anteroom.db import DatabaseManager
 
         mgr = DatabaseManager()
         mgr.add("personal", tmp_path / "personal.db")
         assert mgr.get() is mgr.personal
 
     def test_get_unknown_raises(self, tmp_path) -> None:
-        from parlor.db import DatabaseManager
+        from anteroom.db import DatabaseManager
 
         mgr = DatabaseManager()
         mgr.add("personal", tmp_path / "personal.db")
@@ -658,7 +658,7 @@ class TestDatabaseManager:
             mgr.get("unknown")
 
     def test_list_databases(self, tmp_path) -> None:
-        from parlor.db import DatabaseManager
+        from anteroom.db import DatabaseManager
 
         mgr = DatabaseManager()
         mgr.add("personal", tmp_path / "personal.db")
@@ -671,7 +671,7 @@ class TestDatabaseManager:
         assert "shared" in names
 
     def test_remove(self, tmp_path) -> None:
-        from parlor.db import DatabaseManager
+        from anteroom.db import DatabaseManager
 
         mgr = DatabaseManager()
         mgr.add("personal", tmp_path / "personal.db")
@@ -685,7 +685,7 @@ class TestDatabaseManager:
             mgr.get("shared")
 
     def test_close_all(self, tmp_path) -> None:
-        from parlor.db import DatabaseManager
+        from anteroom.db import DatabaseManager
 
         mgr = DatabaseManager()
         mgr.add("personal", tmp_path / "personal.db")

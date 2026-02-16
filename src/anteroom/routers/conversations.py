@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 import uuid
@@ -43,6 +44,32 @@ def _get_db(request: Request):
     return request.app.state.db
 
 
+def _get_db_name(request: Request) -> str:
+    """Return validated database name from query param."""
+    import re
+
+    db_name = request.query_params.get("db") or "personal"
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", db_name):
+        return "personal"
+    return db_name
+
+
+def _get_event_bus(request: Request):
+    return getattr(request.app.state, "event_bus", None)
+
+
+def _get_client_id(request: Request) -> str:
+    """Return validated client ID from header. Must be a valid UUID or empty."""
+    raw = request.headers.get("x-client-id", "")
+    if not raw:
+        return ""
+    try:
+        uuid.UUID(raw)
+        return raw
+    except ValueError:
+        return ""
+
+
 @router.get("/conversations")
 async def list_conversations(request: Request, search: str | None = None, project_id: str | None = None):
     if project_id:
@@ -62,7 +89,25 @@ async def create_conversation(request: Request):
     project_id = body.get("project_id") if isinstance(body, dict) else None
     if project_id:
         _validate_uuid(project_id)
-    return storage.create_conversation(db, project_id=project_id)
+    conv = storage.create_conversation(db, project_id=project_id)
+
+    event_bus = _get_event_bus(request)
+    if event_bus:
+        asyncio.ensure_future(
+            event_bus.publish(
+                f"global:{_get_db_name(request)}",
+                {
+                    "type": "conversation_created",
+                    "data": {
+                        "conversation_id": conv["id"],
+                        "title": conv["title"],
+                        "client_id": _get_client_id(request),
+                    },
+                },
+            )
+        )
+
+    return conv
 
 
 @router.get("/conversations/{conversation_id}")
@@ -85,6 +130,23 @@ async def update_conversation(conversation_id: str, body: ConversationUpdate, re
         raise HTTPException(status_code=404, detail="Conversation not found")
     if body.title is not None:
         conv = storage.update_conversation_title(db, conversation_id, body.title)
+
+        event_bus = _get_event_bus(request)
+        if event_bus:
+            asyncio.ensure_future(
+                event_bus.publish(
+                    f"global:{_get_db_name(request)}",
+                    {
+                        "type": "title_changed",
+                        "data": {
+                            "conversation_id": conversation_id,
+                            "title": body.title,
+                            "client_id": _get_client_id(request),
+                        },
+                    },
+                )
+            )
+
     if body.model is not None:
         conv = storage.update_conversation_model(db, conversation_id, body.model)
     if body.folder_id is not None:
@@ -103,6 +165,22 @@ async def delete_conversation(conversation_id: str, request: Request):
     deleted = storage.delete_conversation(db, conversation_id, data_dir)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    event_bus = _get_event_bus(request)
+    if event_bus:
+        asyncio.ensure_future(
+            event_bus.publish(
+                f"global:{_get_db_name(request)}",
+                {
+                    "type": "conversation_deleted",
+                    "data": {
+                        "conversation_id": conversation_id,
+                        "client_id": _get_client_id(request),
+                    },
+                },
+            )
+        )
+
     return Response(status_code=204)
 
 

@@ -24,7 +24,7 @@ Environment variables override config file values. This is useful for:
 $ export AI_CHAT_BASE_URL="https://api.openai.com/v1"
 $ export AI_CHAT_API_KEY="sk-..."
 $ export AI_CHAT_MODEL="gpt-4-turbo"
-$ parlor chat
+$ aroom chat
 ```
 
 ## Precedence
@@ -32,5 +32,5 @@ $ parlor chat
 Environment variables take highest priority:
 
 1. Defaults (lowest)
-2. Config file (`~/.parlor/config.yaml`)
+2. Config file (`~/.anteroom/config.yaml`)
 3. Environment variables (highest)

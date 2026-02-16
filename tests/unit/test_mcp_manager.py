@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from parlor.config import McpServerConfig
-from parlor.services.mcp_manager import McpManager, _validate_tool_args
+from anteroom.config import McpServerConfig
+from anteroom.services.mcp_manager import McpManager, _validate_tool_args
 
 
 class TestValidateToolArgs:
@@ -173,8 +173,8 @@ class TestMcpManagerFailedConnection:
         mock_stack.enter_async_context = AsyncMock(side_effect=ConnectionError("server crashed"))
 
         with (
-            patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(config)
 
@@ -199,8 +199,8 @@ class TestMcpManagerFailedConnection:
         mock_stack.enter_async_context = AsyncMock(side_effect=exc_group)
 
         with (
-            patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(config)
 
@@ -251,8 +251,8 @@ class TestMcpManagerFailedConnection:
         mock_stack.aclose = AsyncMock(side_effect=RuntimeError("cleanup exploded"))
 
         with (
-            patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(config)
 
@@ -284,8 +284,8 @@ class TestMcpManagerFailedConnection:
         mock_stack.enter_async_context = AsyncMock(side_effect=ConnectionRefusedError("refused"))
 
         with (
-            patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(configs[0])
 
@@ -303,8 +303,8 @@ class TestMcpManagerFailedConnection:
         mock_stack.enter_async_context = AsyncMock(side_effect=TimeoutError("timed out after 30s"))
 
         with (
-            patch("parlor.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
-            patch("parlor.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack", return_value=mock_stack),
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
         ):
             await mgr._connect_one(config)
 
@@ -318,7 +318,7 @@ class TestMcpManagerFailedConnection:
         config = McpServerConfig(name="missing-cmd", transport="stdio", command="nonexistent-mcp-server")
         mgr = McpManager([config])
 
-        with patch("parlor.services.mcp_manager.shutil.which", return_value=None):
+        with patch("anteroom.services.mcp_manager.shutil.which", return_value=None):
             await mgr._connect_one(config)
 
         err = mgr._server_status["missing-cmd"]["error_message"]

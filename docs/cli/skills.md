@@ -28,8 +28,8 @@ Anything after the skill name is appended to the skill's prompt template as extr
 
 Add YAML files to create your own skills:
 
-- `~/.parlor/skills/` --- global skills (available everywhere)
-- `.parlor/skills/` --- project-specific skills (available only in that project)
+- `~/.anteroom/skills/` --- global skills (available everywhere)
+- `.anteroom/skills/` --- project-specific skills (available only in that project)
 
 ### YAML Format
 
@@ -61,9 +61,9 @@ prompt: |
 
 ## Precedence
 
-Project skills (`.parlor/skills/`) override global skills (`~/.parlor/skills/`), which override default built-in skills.
+Project skills (`.anteroom/skills/`) override global skills (`~/.anteroom/skills/`), which override default built-in skills.
 
-Parlor walks up from the working directory to find the nearest `.parlor/skills/` directory, similar to how [PARLOR.md](project-instructions.md) is discovered.
+Anteroom walks up from the working directory to find the nearest `.anteroom/skills/` directory, similar to how [ANTEROOM.md](project-instructions.md) is discovered.
 
 ## Listing Skills
 

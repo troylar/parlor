@@ -1,6 +1,6 @@
 # Authentication
 
-Parlor uses token-based authentication with HttpOnly session cookies.
+Anteroom uses token-based authentication with HttpOnly session cookies.
 
 ## Session Management
 
@@ -12,7 +12,7 @@ Parlor uses token-based authentication with HttpOnly session cookies.
 
 ## CSRF Protection
 
-Parlor uses the double-submit cookie pattern:
+Anteroom uses the double-submit cookie pattern:
 
 - A CSRF token is generated per session
 - The token is included in a cookie and must be sent as a header on state-changing requests
@@ -21,6 +21,6 @@ Parlor uses the double-submit cookie pattern:
 
 ## How It Works
 
-On first visit, Parlor generates a session token and sets it as an HttpOnly cookie. All subsequent API requests must include this cookie. For state-changing operations, the CSRF token must also be included as a request header.
+On first visit, Anteroom generates a session token and sets it as an HttpOnly cookie. All subsequent API requests must include this cookie. For state-changing operations, the CSRF token must also be included as a request header.
 
 No passwords are involved --- this is a single-user local application. The session token prevents unauthorized access from other processes or users on the same machine.

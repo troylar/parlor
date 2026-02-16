@@ -78,7 +78,7 @@ jobs:
 
     environment:
       name: pypi
-      url: https://pypi.org/p/parlor
+      url: https://pypi.org/p/anteroom
 
     permissions:
       id-token: write
@@ -101,7 +101,7 @@ jobs:
 
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/parlor
+      url: https://test.pypi.org/p/anteroom
 
     permissions:
       id-token: write

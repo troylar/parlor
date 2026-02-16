@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from parlor.cli.renderer import render_conversation_recap, render_help
+from anteroom.cli.renderer import render_conversation_recap, render_help
 
 
 class TestRenderConversationRecap:
@@ -15,20 +15,20 @@ class TestRenderConversationRecap:
             {"role": "user", "content": "How are you?"},
             {"role": "assistant", "content": "I'm doing well."},
         ]
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap(messages)
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "How are you?" in output
             assert "doing well" in output
 
     def test_no_messages(self) -> None:
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap([])
             mock_console.print.assert_not_called()
 
     def test_only_user_message(self) -> None:
         messages = [{"role": "user", "content": "Hello"}]
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap(messages)
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "Hello" in output
@@ -39,7 +39,7 @@ class TestRenderConversationRecap:
             {"role": "assistant", "content": ""},
             {"role": "assistant", "content": "Real response"},
         ]
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap(messages)
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "Real response" in output
@@ -49,7 +49,7 @@ class TestRenderConversationRecap:
             {"role": "user", "content": "x" * 300},
             {"role": "assistant", "content": "ok"},
         ]
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap(messages)
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "..." in output
@@ -59,7 +59,7 @@ class TestRenderConversationRecap:
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "y" * 400},
         ]
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap(messages)
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "..." in output
@@ -69,7 +69,7 @@ class TestRenderConversationRecap:
             {"role": "user", "content": ["list", "content"]},
             {"role": "user", "content": "text message"},
         ]
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap(messages)
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "text message" in output
@@ -80,7 +80,7 @@ class TestRenderConversationRecap:
             {"role": "tool", "content": "tool output"},
             {"role": "assistant", "content": "done"},
         ]
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_conversation_recap(messages)
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "do something" in output
@@ -90,7 +90,7 @@ class TestRenderConversationRecap:
 
 class TestRenderHelp:
     def test_help_includes_all_commands(self) -> None:
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_help()
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             for cmd in [
@@ -113,7 +113,7 @@ class TestRenderHelp:
                 assert cmd in output, f"Missing {cmd} in /help output"
 
     def test_help_includes_input_section(self) -> None:
-        with patch("parlor.cli.renderer.console") as mock_console:
+        with patch("anteroom.cli.renderer.console") as mock_console:
             render_help()
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "@<path>" in output

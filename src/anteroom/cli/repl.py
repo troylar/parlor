@@ -275,7 +275,7 @@ async def _check_for_update(current: str) -> str | None:
             "pip",
             "index",
             "versions",
-            "parlor",
+            "anteroom",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -283,7 +283,7 @@ async def _check_for_update(current: str) -> str | None:
         if proc.returncode != 0:
             return None
         output = stdout.decode().strip()
-        # Output format: "parlor (X.Y.Z)"
+        # Output format: "anteroom (X.Y.Z)"
         if "(" in output and ")" in output:
             latest = output.split("(")[1].split(")")[0].strip()
             from packaging.version import Version
@@ -493,7 +493,7 @@ async def run_cli(
         renderer.render_error(f"Cannot connect to AI service: {message}")
         renderer.console.print(f"  [dim]base_url: {config.ai.base_url}[/dim]")
         renderer.console.print(f"  [dim]model: {config.ai.model}[/dim]")
-        renderer.console.print("  [dim]Check ~/.parlor/config.yaml[/dim]\n")
+        renderer.console.print("  [dim]Check ~/.anteroom/config.yaml[/dim]\n")
         if mcp_manager:
             await mcp_manager.shutdown()
         db.close()
@@ -1119,7 +1119,7 @@ async def _run_repl(
                         else:
                             renderer.console.print(
                                 "[grey62]No skills loaded. Add .yaml files to"
-                                " ~/.parlor/skills/ or .parlor/skills/[/grey62]\n"
+                                " ~/.anteroom/skills/ or .anteroom/skills/[/grey62]\n"
                             )
                     continue
                 elif cmd == "/mcp":

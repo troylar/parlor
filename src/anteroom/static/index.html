@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parlor</title>
+    <title>Anteroom</title>
     <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNSIgZmlsbD0iIzBmMTExNSIgc3Ryb2tlPSIjQzVBMDU5IiBzdHJva2Utd2lkdGg9IjEuNSIvPjxsaW5lIHgxPSIxNiIgeTE9IjQiIHgyPSIxNiIgeTI9IjI4IiBzdHJva2U9IiNDNUEwNTkiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC42Ii8+PGxpbmUgeDE9IjQiIHkxPSIxNiIgeDI9IjI4IiB5Mj0iMTYiIHN0cm9rZT0iI0M1QTA1OSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjYiLz48bGluZSB4MT0iNy41IiB5MT0iNy41IiB4Mj0iMjQuNSIgeTI9IjI0LjUiIHN0cm9rZT0iI0M1QTA1OSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjQiLz48bGluZSB4MT0iMjQuNSIgeTE9IjcuNSIgeDI9IjcuNSIgeTI9IjI0LjUiIHN0cm9rZT0iI0M1QTA1OSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjQiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNDNUEwNTkiIHN0cm9rZS13aWR0aD0iMS41Ii8+PGNpcmNsZSBjeD0iMTYiIGN5PSI0IiByPSIxLjUiIGZpbGw9IiMzQjgyRjYiLz48Y2lyY2xlIGN4PSIyOCIgY3k9IjE2IiByPSIxLjUiIGZpbGw9IiMzQjgyRjYiLz48Y2lyY2xlIGN4PSIxNiIgY3k9IjI4IiByPSIxLjUiIGZpbGw9IiMzQjgyRjYiLz48Y2lyY2xlIGN4PSI0IiBjeT0iMTYiIHI9IjEuNSIgZmlsbD0iIzNCODJGNiIvPjwvc3ZnPg==">
     <script>
     (function(){
-        var t = localStorage.getItem('parlor_theme');
+        var t = localStorage.getItem('anteroom_theme') || localStorage.getItem('parlor_theme');
         if (!t) {
             t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'dawn' : 'midnight';
         }
@@ -23,7 +23,7 @@
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-brand" style="text-align:center;padding:4px 0 8px;font-family:'Cinzel',Georgia,serif;font-size:16px;font-weight:700;letter-spacing:0.15em;color:var(--accent)">PARLOR</div>
+                <div class="sidebar-brand" style="text-align:center;padding:4px 0 8px;font-family:'Cinzel',Georgia,serif;font-size:16px;font-weight:700;letter-spacing:0.15em;color:var(--accent)">ANTEROOM</div>
                 <button class="btn-new-chat" id="btn-new-chat" title="New conversation (Ctrl+Shift+N)">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><line x1="12" y1="8" x2="12" y2="14"/><line x1="9" y1="11" x2="15" y2="11"/></svg>
                     New Chat
@@ -266,7 +266,7 @@
 
             <!-- Setup banner (hidden by default) -->
             <div class="setup-banner" id="setup-banner" style="display:none">
-                <p>AI service not configured. Please set up your <code>~/.parlor/config.yaml</code>.</p>
+                <p>AI service not configured. Please set up your <code>~/.anteroom/config.yaml</code>.</p>
             </div>
 
             <!-- Offline banner (hidden by default) -->
@@ -277,7 +277,7 @@
             <!-- Messages container -->
             <div class="messages-container" id="messages-container">
                 <div class="welcome-message" id="welcome-message">
-                    <h2>Welcome to the Parlor</h2>
+                    <h2>Welcome to the Anteroom</h2>
                     <p>Your connection is secure. How may I assist you today?</p>
                     <div class="welcome-tips">
                         <p>Tips:</p>

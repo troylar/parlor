@@ -30,7 +30,7 @@ Updates the model and/or system prompt. Changes persist to `config.yaml` and tak
 POST /api/config/validate
 ```
 
-Tests the API connection and lists available models. Equivalent to `parlor --test` on the command line.
+Tests the API connection and lists available models. Equivalent to `aroom --test` on the command line.
 
 ## Models
 

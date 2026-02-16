@@ -1,6 +1,6 @@
 # Installation
 
-Parlor runs on Python 3.10+ and installs via pip.
+Anteroom runs on Python 3.10+ and installs via pip.
 
 ## Prerequisites
 
@@ -11,19 +11,19 @@ Parlor runs on Python 3.10+ and installs via pip.
 ## Install
 
 ```bash
-$ pip install parlor
+$ pip install anteroom
 ```
 
 !!! tip "Virtual environment recommended"
     ```bash
     $ python -m venv .venv
     $ source .venv/bin/activate  # macOS/Linux
-    $ pip install parlor
+    $ pip install anteroom
     ```
 
 ## Configure
 
-Create the config file at `~/.parlor/config.yaml`:
+Create the config file at `~/.anteroom/config.yaml`:
 
 ```yaml
 ai:
@@ -48,7 +48,7 @@ ai:
 Test your connection:
 
 ```bash
-$ parlor --test
+$ aroom --test
 ```
 
 Expected output:
@@ -73,7 +73,7 @@ All checks passed.
 === "Web UI"
 
     ```bash
-    $ parlor
+    $ aroom
     ```
 
     Your browser opens to `http://127.0.0.1:8080`.
@@ -81,17 +81,17 @@ All checks passed.
 === "CLI"
 
     ```bash
-    $ parlor chat
+    $ aroom chat
     ```
 
     An interactive REPL starts in your terminal.
 
 ## Data Directory
 
-Parlor creates `~/.parlor/` on first run:
+Anteroom creates `~/.anteroom/` on first run:
 
 ```
-~/.parlor/
+~/.anteroom/
   config.yaml          # Configuration          (permissions: 0600)
   chat.db              # SQLite + WAL journal   (permissions: 0600)
   cli_history          # REPL command history
@@ -104,4 +104,4 @@ The data directory is created with `0700` permissions (owner-only). Database fil
 
 - [Quickstart](quickstart.md) --- 5-minute guided walkthrough
 - [Configuration](../configuration/index.md) --- full config reference
-- [Concepts](concepts.md) --- how Parlor works under the hood
+- [Concepts](concepts.md) --- how Anteroom works under the hood

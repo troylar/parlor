@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from parlor.cli.repl import _EXIT_COMMANDS, _drain_input_to_msg_queue
+from anteroom.cli.repl import _EXIT_COMMANDS, _drain_input_to_msg_queue
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ class TestCommandFiltering:
         db = MagicMock()
         drain_env["input_queue"].put_nowait("Hello, help me with code")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -71,7 +71,7 @@ class TestCommandFiltering:
         db = MagicMock()
         drain_env["input_queue"].put_nowait("/quit")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -93,7 +93,7 @@ class TestCommandFiltering:
         db = MagicMock()
         drain_env["input_queue"].put_nowait("/exit")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -115,7 +115,7 @@ class TestCommandFiltering:
         drain_env["input_queue"].put_nowait("/new")
         drain_env["input_queue"].put_nowait("/help")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -137,7 +137,7 @@ class TestCommandFiltering:
         db = MagicMock()
         drain_env["input_queue"].put_nowait("/QUIT")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -158,7 +158,7 @@ class TestCommandFiltering:
         db = MagicMock()
         drain_env["input_queue"].put_nowait("/model gpt-4")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -189,7 +189,7 @@ class TestMixedInput:
         drain_env["input_queue"].put_nowait("/quit")
         drain_env["input_queue"].put_nowait("should not be processed")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -218,7 +218,7 @@ class TestMixedInput:
         drain_env["input_queue"].put_nowait("/help")
         drain_env["input_queue"].put_nowait("msg 3")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -242,7 +242,7 @@ class TestMixedInput:
         """Empty input queue does nothing."""
         db = MagicMock()
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -264,7 +264,7 @@ class TestMixedInput:
         drain_env["input_queue"].put_nowait("/tools")
         drain_env["input_queue"].put_nowait("real message")
 
-        with patch("parlor.services.storage.create_message"):
+        with patch("anteroom.services.storage.create_message"):
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],
@@ -286,7 +286,7 @@ class TestMixedInput:
         drain_env["input_queue"].put_nowait("/new")  # ignored
         drain_env["input_queue"].put_nowait("msg B")
 
-        with patch("parlor.services.storage.create_message") as mock_create:
+        with patch("anteroom.services.storage.create_message") as mock_create:
             await _drain_input_to_msg_queue(
                 drain_env["input_queue"],
                 drain_env["msg_queue"],

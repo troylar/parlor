@@ -1,6 +1,6 @@
 # Streaming and Prompt Queue
 
-Parlor streams AI responses in real-time via Server-Sent Events (SSE) and supports prompt queuing so you never have to wait.
+Anteroom streams AI responses in real-time via Server-Sent Events (SSE) and supports prompt queuing so you never have to wait.
 
 ## Token-by-Token Streaming
 
@@ -33,4 +33,4 @@ Tool calls render as expandable detail panels:
 
 ## Thinking Indicator
 
-Between tool execution and the next API call, Parlor emits a `"thinking"` event that triggers a pulsing dots animation in the UI. This provides visual feedback that the AI is processing tool results before continuing.
+Between tool execution and the next API call, Anteroom emits a `"thinking"` event that triggers a pulsing dots animation in the UI. This provides visual feedback that the AI is processing tool results before continuing.

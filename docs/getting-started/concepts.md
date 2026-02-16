@@ -1,10 +1,10 @@
 # Concepts
 
-How Parlor works under the hood.
+How Anteroom works under the hood.
 
 ## Dual Interface, Shared Core
 
-Parlor provides two interfaces --- a web UI and a CLI --- that share the same agent loop and storage layer. This is the central design pattern.
+Anteroom provides two interfaces --- a web UI and a CLI --- that share the same agent loop and storage layer. This is the central design pattern.
 
 ```
 Web UI (routers/) ──┐
@@ -19,7 +19,7 @@ Changes to tool handling, streaming, or message building affect both interfaces.
 
 ## Agent Loop
 
-The agent loop (`services/agent_loop.py`) is Parlor's core execution engine. When you send a message:
+The agent loop (`services/agent_loop.py`) is Anteroom's core execution engine. When you send a message:
 
 1. Your message is added to the conversation history
 2. The history is sent to the AI API with available tool definitions
@@ -42,7 +42,7 @@ In the web UI, queued messages return `{"status": "queued"}` instead of opening 
 
 ## Auto-Compact
 
-Parlor tracks token usage using tiktoken (`cl100k_base` encoding). When the conversation exceeds 100,000 tokens, auto-compact triggers before the next prompt. The full history is summarized into a single message, preserving key decisions, file paths, code changes, and task state.
+Anteroom tracks token usage using tiktoken (`cl100k_base` encoding). When the conversation exceeds 100,000 tokens, auto-compact triggers before the next prompt. The full history is summarized into a single message, preserving key decisions, file paths, code changes, and task state.
 
 See [Context Management](../cli/context-management.md) for details.
 
@@ -64,7 +64,7 @@ Everything is stored in SQLite with WAL journaling and FTS5 full-text search. Th
 Configuration follows a layered approach:
 
 1. **Defaults** --- sensible defaults for all settings
-2. **Config file** --- `~/.parlor/config.yaml` overrides defaults
+2. **Config file** --- `~/.anteroom/config.yaml` overrides defaults
 3. **Environment variables** --- `AI_CHAT_*` prefix overrides config file values
 
 See [Configuration](../configuration/index.md) for the full reference.

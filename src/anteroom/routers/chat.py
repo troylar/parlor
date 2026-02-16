@@ -50,6 +50,38 @@ def _get_db(request: Request):
     return request.app.state.db
 
 
+def _get_db_name(request: Request) -> str:
+    """Return validated database name from query param."""
+    db_name = request.query_params.get("db") or "personal"
+    # SECURITY: only allow alphanumeric, hyphens, underscores (max 64 chars)
+    if not _is_safe_name(db_name):
+        return "personal"
+    return db_name
+
+
+def _is_safe_name(name: str) -> bool:
+    """Validate a name contains only safe characters."""
+    import re
+
+    return bool(re.match(r"^[a-zA-Z0-9_-]{1,64}$", name))
+
+
+def _get_event_bus(request: Request):
+    return getattr(request.app.state, "event_bus", None)
+
+
+def _get_client_id(request: Request) -> str:
+    """Return validated client ID from header. Must be a valid UUID or empty."""
+    raw = request.headers.get("x-client-id", "")
+    if not raw:
+        return ""
+    try:
+        uuid_mod.UUID(raw)
+        return raw
+    except ValueError:
+        return ""
+
+
 def _get_ai_service(request: Request, model_override: str | None = None) -> AIService:
     config = request.app.state.config
     if model_override:
@@ -101,8 +133,30 @@ async def chat(conversation_id: str, request: Request):
     user_msg = None
     attachment_contents: list[dict[str, Any]] = []
 
+    event_bus = _get_event_bus(request)
+    db_name = _get_db_name(request)
+    client_id = _get_client_id(request)
+
     if not regenerate:
         user_msg = storage.create_message(db, conversation_id, "user", message_text)
+
+        if event_bus and user_msg:
+            asyncio.ensure_future(
+                event_bus.publish(
+                    f"conversation:{conversation_id}",
+                    {
+                        "type": "new_message",
+                        "data": {
+                            "conversation_id": conversation_id,
+                            "message_id": user_msg["id"],
+                            "role": "user",
+                            "content": message_text,
+                            "position": user_msg["position"],
+                            "client_id": client_id,
+                        },
+                    },
+                )
+            )
 
         if files:
             data_dir = request.app.state.config.app.data_dir
@@ -206,10 +260,22 @@ async def chat(conversation_id: str, request: Request):
 
     from ..services.agent_loop import run_agent_loop
 
+    _token_throttle_interval = 0.1  # seconds between broadcast token events
+    _last_token_broadcast = 0.0
+
     async def event_generator():
-        nonlocal ai_messages
+        nonlocal ai_messages, _last_token_broadcast
         current_assistant_msg = None
         _pending_tool_inputs: dict[str, Any] = {}
+        _streamed_content = ""
+
+        # Broadcast stream_start
+        if event_bus:
+            await event_bus.publish(
+                f"conversation:{conversation_id}",
+                {"type": "stream_start", "data": {"conversation_id": conversation_id, "client_id": client_id}},
+            )
+
         try:
             async for agent_event in run_agent_loop(
                 ai_service=ai_service,
@@ -228,9 +294,28 @@ async def chat(conversation_id: str, request: Request):
 
                 elif kind == "token":
                     yield {"event": "token", "data": json.dumps(data)}
+                    _streamed_content += data.get("content", "")
+
+                    # Throttled broadcast of streaming tokens to other clients
+                    if event_bus:
+                        import time
+
+                        now = time.monotonic()
+                        if now - _last_token_broadcast >= _token_throttle_interval:
+                            _last_token_broadcast = now
+                            await event_bus.publish(
+                                f"conversation:{conversation_id}",
+                                {
+                                    "type": "stream_token",
+                                    "data": {
+                                        "conversation_id": conversation_id,
+                                        "content": data.get("content", ""),
+                                        "client_id": client_id,
+                                    },
+                                },
+                            )
 
                 elif kind == "tool_call_start":
-                    # Track input args for DB persistence
                     _pending_tool_inputs[data["id"]] = data["arguments"]
                     yield {
                         "event": "tool_call_start",
@@ -246,6 +331,22 @@ async def chat(conversation_id: str, request: Request):
 
                 elif kind == "assistant_message":
                     current_assistant_msg = storage.create_message(db, conversation_id, "assistant", data["content"])
+
+                    if event_bus and current_assistant_msg:
+                        await event_bus.publish(
+                            f"conversation:{conversation_id}",
+                            {
+                                "type": "new_message",
+                                "data": {
+                                    "conversation_id": conversation_id,
+                                    "message_id": current_assistant_msg["id"],
+                                    "role": "assistant",
+                                    "content": data["content"],
+                                    "position": current_assistant_msg["position"],
+                                    "client_id": client_id,
+                                },
+                            },
+                        )
 
                 elif kind == "tool_call_end":
                     if current_assistant_msg:
@@ -275,6 +376,7 @@ async def chat(conversation_id: str, request: Request):
 
                 elif kind == "queued_message":
                     current_assistant_msg = None
+                    _streamed_content = ""
                     yield {"event": "queued_message", "data": json.dumps(data)}
 
                 elif kind == "done":
@@ -282,6 +384,30 @@ async def chat(conversation_id: str, request: Request):
                         title = await ai_service.generate_title(first_user_text)
                         storage.update_conversation_title(db, conversation_id, title)
                         yield {"event": "title", "data": json.dumps({"title": title})}
+
+                        if event_bus:
+                            await event_bus.publish(
+                                f"global:{db_name}",
+                                {
+                                    "type": "title_changed",
+                                    "data": {
+                                        "conversation_id": conversation_id,
+                                        "title": title,
+                                        "client_id": client_id,
+                                    },
+                                },
+                            )
+
+                    # Broadcast stream_done
+                    if event_bus:
+                        await event_bus.publish(
+                            f"conversation:{conversation_id}",
+                            {
+                                "type": "stream_done",
+                                "data": {"conversation_id": conversation_id, "client_id": client_id},
+                            },
+                        )
+
                     yield {"event": "done", "data": json.dumps({})}
 
         except Exception:

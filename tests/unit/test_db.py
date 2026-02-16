@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from parlor.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA
+from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA
 
 
 def _init_in_memory() -> sqlite3.Connection:

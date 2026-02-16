@@ -5,11 +5,11 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from parlor.cli.instructions import (
+from anteroom.cli.instructions import (
     find_project_instructions,
     load_instructions,
 )
-from parlor.cli.repl import (
+from anteroom.cli.repl import (
     _detect_git_branch,
     _estimate_tokens,
     _expand_file_references,

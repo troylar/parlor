@@ -1,9 +1,9 @@
 """Skill system for custom CLI commands.
 
-Skills are YAML files in ~/.parlor/skills/ or .parlor/skills/ (project-level).
+Skills are YAML files in ~/.anteroom/skills/ or .anteroom/skills/ (project-level).
 Each skill defines a prompt template that gets injected when invoked via /skill_name.
 
-Example skill file (~/.parlor/skills/commit.yaml):
+Example skill file (~/.anteroom/skills/commit.yaml):
     name: commit
     description: Create a git commit with a conventional message
     prompt: |
@@ -63,13 +63,17 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> list[Skill]:
 
 def _skill_dirs(working_dir: str | None = None) -> list[Path]:
     """Return skill directories (global + project)."""
-    dirs = [Path.home() / ".parlor" / "skills"]
+    from ..config import _resolve_data_dir
+
+    data_dir = _resolve_data_dir()
+    dirs = [data_dir / "skills"]
     current = Path(working_dir or os.getcwd()).resolve()
     while True:
-        project_dir = current / ".parlor" / "skills"
-        if project_dir.is_dir():
-            dirs.append(project_dir)
-            break
+        for dirname in (".anteroom", ".parlor"):
+            project_dir = current / dirname / "skills"
+            if project_dir.is_dir():
+                dirs.append(project_dir)
+                return dirs
         parent = current.parent
         if parent == current:
             break

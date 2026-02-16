@@ -1,6 +1,6 @@
 # Conversations
 
-Parlor provides a full conversation lifecycle with powerful management features.
+Anteroom provides a full conversation lifecycle with powerful management features.
 
 ## Creating and Managing
 
@@ -14,7 +14,7 @@ Parlor provides a full conversation lifecycle with powerful management features.
 
 ## Auto-Titles
 
-After your first message, Parlor sends the prompt to the AI to generate a short, descriptive title. Titles appear in the sidebar and are stored in the database. Title generation is asynchronous --- failures are silently ignored.
+After your first message, Anteroom sends the prompt to the AI to generate a short, descriptive title. Titles appear in the sidebar and are stored in the database. Title generation is asynchronous --- failures are silently ignored.
 
 ## Per-Conversation Model
 

@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from parlor.services.token_provider import TokenProvider, TokenProviderError
+from anteroom.services.token_provider import TokenProvider, TokenProviderError
 
 
 class TestTokenProvider:

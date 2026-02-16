@@ -24,7 +24,7 @@ def _get_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("parlor")
+        return version("anteroom")
     except Exception:
         return "unknown"
 
@@ -43,8 +43,8 @@ def build_runtime_context(
     iface_label = "Web UI" if interface == "web" else "CLI REPL"
 
     lines = [
-        "<parlor_context>",
-        f"You are Parlor v{version}, running via the {iface_label}.",
+        "<anteroom_context>",
+        f"You are Anteroom v{version}, running via the {iface_label}.",
         f"Current model: {model}",
     ]
 
@@ -79,7 +79,7 @@ def build_runtime_context(
 
     # Capabilities
     lines.append("")
-    lines.append("Parlor capabilities:")
+    lines.append("Anteroom capabilities:")
     if interface == "web":
         lines.append(
             "  - Web UI: 4 themes (Midnight/Dawn/Aurora/Ember), conversation folders & tags, "
@@ -89,7 +89,7 @@ def build_runtime_context(
     else:
         lines.append(
             "  - CLI: built-in file/shell tools, MCP integration, skills system, "
-            "@file references, /commands, PARLOR.md project instructions"
+            "@file references, /commands, ANTEROOM.md project instructions"
         )
     lines.append(
         "  - Shared: SQLite with FTS search, conversation forking & rewinding, "
@@ -102,12 +102,12 @@ def build_runtime_context(
     if interface == "web":
         lines.append(f"\nTLS: {'enabled' if tls_enabled else 'disabled'}")
 
-    lines.append("</parlor_context>")
+    lines.append("</anteroom_context>")
     return "\n".join(lines)
 
 
 _DEFAULT_SYSTEM_PROMPT = """\
-You are Parlor, a capable AI assistant with direct access to tools for interacting with the user's \
+You are Anteroom, a capable AI assistant with direct access to tools for interacting with the user's \
 local system and external services. You operate as a hands-on partner — not a suggestion engine.
 
 <agentic_behavior>
@@ -190,13 +190,14 @@ class McpServerConfig:
 class SharedDatabaseConfig:
     name: str
     path: str
+    passphrase_hash: str = ""
 
 
 @dataclass
 class AppSettings:
     host: str = "127.0.0.1"
     port: int = 8080
-    data_dir: Path = field(default_factory=lambda: Path.home() / ".parlor")
+    data_dir: Path = field(default_factory=lambda: Path.home() / ".anteroom")
     tls: bool = False
 
 
@@ -215,10 +216,21 @@ class AppConfig:
     cli: CliConfig = field(default_factory=CliConfig)
 
 
+def _resolve_data_dir() -> Path:
+    """Resolve data directory: prefer ~/.anteroom, fall back to ~/.parlor for backward compat."""
+    anteroom_dir = Path.home() / ".anteroom"
+    parlor_dir = Path.home() / ".parlor"
+    if anteroom_dir.exists():
+        return anteroom_dir
+    if parlor_dir.exists():
+        return parlor_dir
+    return anteroom_dir
+
+
 def _get_config_path(data_dir: Path | None = None) -> Path:
     if data_dir:
         return data_dir / "config.yaml"
-    return Path.home() / ".parlor" / "config.yaml"
+    return _resolve_data_dir() / "config.yaml"
 
 
 def load_config(config_path: Path | None = None) -> AppConfig:
@@ -268,7 +280,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     )
 
     app_raw = raw.get("app", {})
-    data_dir = Path(os.path.expanduser(app_raw.get("data_dir", "~/.parlor")))
+    default_data_dir = str(_resolve_data_dir())
+    data_dir = Path(os.path.expanduser(app_raw.get("data_dir", default_data_dir)))
     tls_raw = app_raw.get("tls", False)
     tls_enabled = str(tls_raw).lower() not in ("false", "0", "no")
 
@@ -303,8 +316,22 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             SharedDatabaseConfig(
                 name=sdb["name"],
                 path=os.path.expanduser(sdb["path"]),
+                passphrase_hash=sdb.get("passphrase_hash", ""),
             )
         )
+
+    # Also support the "databases" key (newer config format)
+    for db_name, db_conf in raw.get("databases", {}).items():
+        if db_name == "personal":
+            continue
+        if isinstance(db_conf, dict):
+            shared_databases.append(
+                SharedDatabaseConfig(
+                    name=db_name,
+                    path=os.path.expanduser(db_conf.get("path", "")),
+                    passphrase_hash=db_conf.get("passphrase_hash", ""),
+                )
+            )
 
     app_settings.data_dir.mkdir(parents=True, exist_ok=True)
     try:

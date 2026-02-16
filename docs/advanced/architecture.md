@@ -1,11 +1,11 @@
 # Architecture
 
-Parlor's internal architecture and module map.
+Anteroom's internal architecture and module map.
 
 ## Module Map
 
 ```
-src/parlor/
+src/anteroom/
 ├── app.py                    # FastAPI app factory, middleware stack
 ├── config.py                 # YAML config loading, dataclass hierarchy
 ├── db.py                     # SQLite schema definition

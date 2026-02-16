@@ -1,6 +1,6 @@
 # TLS
 
-Parlor supports HTTPS with self-signed certificates for localhost.
+Anteroom supports HTTPS with self-signed certificates for localhost.
 
 ## Enabling TLS
 
@@ -11,7 +11,7 @@ app:
   tls: true
 ```
 
-Parlor generates a self-signed certificate using the `cryptography` package and starts the server on `https://127.0.0.1:8080`.
+Anteroom generates a self-signed certificate using the `cryptography` package and starts the server on `https://127.0.0.1:8080`.
 
 ## What Changes with TLS
 
@@ -26,8 +26,8 @@ When TLS is enabled:
 
 TLS is useful when:
 
-- Running Parlor on a non-localhost network interface
-- Accessing Parlor from another device on your network
+- Running Anteroom on a non-localhost network interface
+- Accessing Anteroom from another device on your network
 - Testing TLS-dependent features (Secure cookies, HSTS)
 
 !!! info

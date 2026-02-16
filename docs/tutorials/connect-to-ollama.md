@@ -1,6 +1,6 @@
 # Connect to Ollama
 
-Run Parlor with a local LLM via [Ollama](https://ollama.ai).
+Run Anteroom with a local LLM via [Ollama](https://ollama.ai).
 
 ## Prerequisites
 
@@ -17,9 +17,9 @@ $ ollama pull llama3.1
 $ ollama serve
 ```
 
-## Configure Parlor
+## Configure Anteroom
 
-```yaml title="~/.parlor/config.yaml"
+```yaml title="~/.anteroom/config.yaml"
 ai:
   base_url: "http://localhost:11434/v1"
   api_key: "ollama"
@@ -32,7 +32,7 @@ ai:
 ## Verify
 
 ```bash
-$ parlor --test
+$ aroom --test
 ```
 
 You should see your Ollama models listed and a successful test prompt.
@@ -40,8 +40,8 @@ You should see your Ollama models listed and a successful test prompt.
 ## Launch
 
 ```bash
-$ parlor           # Web UI
-$ parlor chat      # CLI
+$ aroom           # Web UI
+$ aroom chat      # CLI
 ```
 
 ## Tips
@@ -56,7 +56,7 @@ $ parlor chat      # CLI
 If your model doesn't support function calling well, disable tools:
 
 ```bash
-$ parlor chat --no-tools
+$ aroom chat --no-tools
 ```
 
 Or in config:

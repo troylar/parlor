@@ -1,6 +1,6 @@
 # API Reference
 
-Parlor exposes a REST API for all operations. All endpoints require authentication via session cookie + CSRF token.
+Anteroom exposes a REST API for all operations. All endpoints require authentication via session cookie + CSRF token.
 
 ## Authentication
 

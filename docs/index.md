@@ -1,16 +1,16 @@
-# Parlor
+# Anteroom
 
-**A private parlor for AI conversation.**
+**A private anteroom for AI conversation.**
 
 Self-hosted ChatGPT-style web UI **and** agentic CLI that connects to any OpenAI-compatible API. Install with pip. Run locally. Own your data.
 
-![Parlor - Midnight Theme](screenshots/theme-midnight.png)
+![Anteroom - Midnight Theme](screenshots/theme-midnight.png)
 
 ---
 
 ## Two Interfaces, One Brain
 
-Parlor gives you two ways to interact with your AI --- a polished **web UI** and a powerful **agentic CLI** --- both backed by the same conversation database and agent loop.
+Anteroom gives you two ways to interact with your AI --- a polished **web UI** and a powerful **agentic CLI** --- both backed by the same conversation database and agent loop.
 
 <div class="grid cards" markdown>
 
@@ -18,7 +18,7 @@ Parlor gives you two ways to interact with your AI --- a polished **web UI** and
 
     ---
 
-    Full-featured chat interface with conversations, projects, folders, tags, file attachments, themes, and a command palette. Launch with `parlor`.
+    Full-featured chat interface with conversations, projects, folders, tags, file attachments, themes, and a command palette. Launch with `aroom`.
 
     [:octicons-arrow-right-24: Web UI docs](web-ui/index.md)
 
@@ -26,7 +26,7 @@ Parlor gives you two ways to interact with your AI --- a polished **web UI** and
 
     ---
 
-    Agentic terminal chat with built-in tools (file I/O, bash, grep, glob), skills, MCP integration, and prompt queuing. Launch with `parlor chat`.
+    Agentic terminal chat with built-in tools (file I/O, bash, grep, glob), skills, MCP integration, and prompt queuing. Launch with `aroom chat`.
 
     [:octicons-arrow-right-24: CLI docs](cli/index.md)
 
@@ -50,12 +50,12 @@ Parlor gives you two ways to interact with your AI --- a polished **web UI** and
 ## Quick Install
 
 ```bash
-pip install parlor
+pip install anteroom
 ```
 
 Then configure your AI endpoint:
 
-```yaml title="~/.parlor/config.yaml"
+```yaml title="~/.anteroom/config.yaml"
 ai:
   base_url: "https://your-ai-endpoint/v1"
   api_key: "your-api-key"
@@ -63,9 +63,9 @@ ai:
 ```
 
 ```bash
-$ parlor --test    # Verify connection
-$ parlor           # Launch web UI
-$ parlor chat      # Launch CLI
+$ aroom --test    # Verify connection
+$ aroom           # Launch web UI
+$ aroom chat      # Launch CLI
 ```
 
 [:octicons-arrow-right-24: Full installation guide](getting-started/installation.md)

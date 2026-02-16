@@ -21,11 +21,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import AppConfig, load_config
 from .db import DatabaseManager, init_db
+from .services.event_bus import EventBus
 from .services.mcp_manager import McpManager
 from .tools import ToolRegistry, register_default_tools
 
 logger = logging.getLogger(__name__)
-security_logger = logging.getLogger("parlor.security")
+security_logger = logging.getLogger("anteroom.security")
 
 MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024  # 15 MB
 SESSION_ABSOLUTE_TIMEOUT = 12 * 60 * 60  # 12 hours
@@ -44,11 +45,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             sdb_path = Path(sdb.path)
             sdb_path.parent.mkdir(parents=True, exist_ok=True)
-            db_manager.add(sdb.name, sdb_path)
+            db_manager.add(sdb.name, sdb_path, passphrase_hash=sdb.passphrase_hash)
             logger.info(f"Shared DB loaded: {sdb.name} ({sdb.path})")
         except Exception as e:
             logger.warning(f"Failed to load shared DB '{sdb.name}': {e}")
     app.state.db_manager = db_manager
+
+    event_bus = EventBus()
+    app.state.event_bus = event_bus
+    event_bus.start_polling(db_manager)
 
     mcp_manager = None
     if config.mcp_servers:
@@ -69,6 +74,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    if hasattr(app.state, "event_bus"):
+        app.state.event_bus.stop_polling()
     if app.state.db:
         app.state.db.close()
     if hasattr(app.state, "db_manager"):
@@ -208,11 +215,11 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Check HttpOnly session cookie
-        cookie_token = request.cookies.get("parlor_session", "")
+        cookie_token = request.cookies.get("anteroom_session", "")
         if cookie_token and self._check_token(cookie_token):
             # Verify CSRF token for state-changing requests
             if request.method in ("POST", "PATCH", "PUT", "DELETE"):
-                csrf_cookie = request.cookies.get("parlor_csrf", "")
+                csrf_cookie = request.cookies.get("anteroom_csrf", "")
                 csrf_header = request.headers.get("x-csrf-token", "")
                 if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
                     security_logger.warning("CSRF validation failed from %s: %s %s", client_ip, request.method, path)
@@ -235,7 +242,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
 
     app = FastAPI(
-        title="Parlor",
+        title="Anteroom",
         version="0.5.3",
         lifespan=lifespan,
         docs_url=None,
@@ -259,7 +266,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             f"{scheme}://localhost:{config.app.port}",
         ],
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-Client-Id"],
         allow_credentials=True,
     )
 
@@ -276,18 +283,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.csrf_token = csrf_token
     cache_bust = str(int(time.time()))
 
-    from .routers import chat, config_api, conversations, projects
+    from .routers import chat, config_api, conversations, databases, events, projects
 
     app.include_router(conversations.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(config_api.router, prefix="/api")
     app.include_router(projects.router, prefix="/api")
+    app.include_router(databases.router, prefix="/api")
+    app.include_router(events.router, prefix="/api")
 
     @app.post("/api/logout")
     async def logout():
         response = JSONResponse(content={"status": "logged out"})
-        response.delete_cookie("parlor_session", path="/api/")
-        response.delete_cookie("parlor_csrf", path="/")
+        response.delete_cookie("anteroom_session", path="/api/")
+        response.delete_cookie("anteroom_csrf", path="/")
         return response
 
     static_dir = Path(__file__).parent / "static"
@@ -314,7 +323,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         response = HTMLResponse(html)
         response.set_cookie(
-            key="parlor_session",
+            key="anteroom_session",
             value=auth_token,
             httponly=True,
             secure=secure_cookies,
@@ -322,7 +331,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             path="/api/",
         )
         response.set_cookie(
-            key="parlor_csrf",
+            key="anteroom_csrf",
             value=csrf_token,
             httponly=False,
             secure=secure_cookies,

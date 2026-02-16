@@ -1,15 +1,15 @@
 # Connect to Azure OpenAI
 
-Use Parlor with Azure OpenAI Service.
+Use Anteroom with Azure OpenAI Service.
 
 ## Prerequisites
 
 1. An Azure subscription with Azure OpenAI access
 2. A deployed model in Azure OpenAI Studio
 
-## Configure Parlor
+## Configure Anteroom
 
-```yaml title="~/.parlor/config.yaml"
+```yaml title="~/.anteroom/config.yaml"
 ai:
   base_url: "https://your-resource.openai.azure.com/openai/deployments/your-deployment/v1"
   api_key: "your-azure-api-key"
@@ -25,14 +25,14 @@ ai:
 $ export AI_CHAT_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment/v1"
 $ export AI_CHAT_API_KEY="your-azure-api-key"
 $ export AI_CHAT_MODEL="your-deployment-name"
-$ parlor chat
+$ aroom chat
 ```
 
 ## Dynamic API Key with Azure CLI
 
 Use `api_key_command` to get tokens from Azure CLI:
 
-```yaml title="~/.parlor/config.yaml"
+```yaml title="~/.anteroom/config.yaml"
 ai:
   base_url: "https://your-resource.openai.azure.com/openai/deployments/your-deployment/v1"
   api_key_command: "az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv"
@@ -44,7 +44,7 @@ This automatically refreshes the token when it expires (transparent retry on HTT
 ## Verify
 
 ```bash
-$ parlor --test
+$ aroom --test
 ```
 
 ## SSL Verification

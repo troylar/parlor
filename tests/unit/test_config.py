@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from parlor.config import AppConfig, load_config
+from anteroom.config import AppConfig, load_config
 
 
 def _write_config(path: Path, data: dict) -> Path:
@@ -93,7 +93,7 @@ class TestLoadConfig:
             },
         )
         config = load_config(cfg_file)
-        assert "Parlor" in config.ai.system_prompt
+        assert "Anteroom" in config.ai.system_prompt
         assert "<agentic_behavior>" in config.ai.system_prompt
 
     def test_default_app_settings(self, tmp_path: Path) -> None:
@@ -213,7 +213,7 @@ class TestLoadConfig:
         )
         config = load_config(cfg_file)
         assert config.ai.user_system_prompt == "Always respond in French."
-        assert "Parlor" in config.ai.system_prompt
+        assert "Anteroom" in config.ai.system_prompt
         assert "<agentic_behavior>" in config.ai.system_prompt
         assert "<user_instructions>" in config.ai.system_prompt
         assert "Always respond in French." in config.ai.system_prompt
@@ -230,7 +230,7 @@ class TestLoadConfig:
         )
         config = load_config(cfg_file)
         assert config.ai.user_system_prompt == ""
-        assert "Parlor" in config.ai.system_prompt
+        assert "Anteroom" in config.ai.system_prompt
         assert "<user_instructions>" not in config.ai.system_prompt
 
     def test_user_system_prompt_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -241,4 +241,4 @@ class TestLoadConfig:
         config = load_config(cfg_file)
         assert config.ai.user_system_prompt == "Be very brief."
         assert "Be very brief." in config.ai.system_prompt
-        assert "Parlor" in config.ai.system_prompt
+        assert "Anteroom" in config.ai.system_prompt
