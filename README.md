@@ -1,17 +1,17 @@
 <p align="center">
-  <img src="https://img.shields.io/pypi/v/parlor?style=for-the-badge&color=3b82f6&labelColor=0f1117" alt="PyPI Version">
+  <img src="https://img.shields.io/pypi/v/anteroom?style=for-the-badge&color=3b82f6&labelColor=0f1117" alt="PyPI Version">
   <img src="https://img.shields.io/badge/python-3.10%2B-10b981?style=for-the-badge&labelColor=0f1117" alt="Python 3.10+">
-  <a href="https://codecov.io/gh/troylar/parlor"><img src="https://img.shields.io/codecov/c/github/troylar/parlor?style=for-the-badge&color=7c3aed&labelColor=0f1117&label=coverage" alt="Coverage"></a>
-  <img src="https://img.shields.io/github/license/troylar/parlor?style=for-the-badge&color=e8913a&labelColor=0f1117" alt="License">
+  <a href="https://codecov.io/gh/troylar/anteroom"><img src="https://img.shields.io/codecov/c/github/troylar/anteroom?style=for-the-badge&color=7c3aed&labelColor=0f1117&label=coverage" alt="Coverage"></a>
+  <img src="https://img.shields.io/github/license/troylar/anteroom?style=for-the-badge&color=e8913a&labelColor=0f1117" alt="License">
 </p>
 
 <p align="center">
-  <img src="docs/logo.svg" alt="Parlor Logo" width="120" height="120">
+  <img src="docs/logo.svg" alt="Anteroom Logo" width="120" height="120">
 </p>
 
-<h1 align="center">Parlor</h1>
+<h1 align="center">Anteroom</h1>
 
-<h3 align="center">The secure digital speakeasy for AI conversation.</h3>
+<h3 align="center">The room before the room &mdash; where you prepare before meeting the machine.</h3>
 
 <p align="center">
   Self-hosted ChatGPT-style web UI <strong>and</strong> agentic CLI that connects to any OpenAI-compatible API.<br>
@@ -19,21 +19,23 @@
 </p>
 
 <p align="center">
-  <a href="https://parlor.readthedocs.io">Documentation</a> &bull;
+  <a href="https://anteroom.readthedocs.io">Documentation</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#features">Features</a> &bull;
   <a href="#security">Security</a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/theme-midnight.png" alt="Parlor - Midnight Theme" width="800">
+  <img src="docs/screenshots/theme-midnight.png" alt="Anteroom - Midnight Theme" width="800">
 </p>
 
 ---
 
-## Why Parlor?
+## Why Anteroom?
 
-Step inside. Parlor connects to **any** OpenAI-compatible endpoint --- your company's internal API, OpenAI, Azure, Ollama, LM Studio, or anything else that speaks the OpenAI protocol. Built to [OWASP ASVS L1](SECURITY.md) standards because your conversations deserve real security, not security theater.
+An **anteroom** is the small, private chamber you pass through before entering a grander space --- a place to collect yourself, set your terms, and decide what comes next. That's exactly what this is: *your* room, on *your* machine, where you control the conversation before it reaches any AI.
+
+Anteroom connects to **any** OpenAI-compatible endpoint --- your company's internal API, OpenAI, Azure, Ollama, LM Studio, or anything else that speaks the OpenAI protocol. Built to [OWASP ASVS L1](SECURITY.md) standards because your conversations deserve real security, not security theater.
 
 > **One command. No cloud. No telemetry. No compromise.**
 
@@ -42,11 +44,11 @@ Step inside. Parlor connects to **any** OpenAI-compatible endpoint --- your comp
 ## Quick Start
 
 ```bash
-pip install parlor
-parlor init         # Interactive setup wizard
+pip install anteroom
+aroom init         # Interactive setup wizard
 ```
 
-Or create `~/.parlor/config.yaml` manually:
+Or create `~/.anteroom/config.yaml` manually:
 
 ```yaml
 ai:
@@ -56,10 +58,10 @@ ai:
 ```
 
 ```bash
-parlor --test       # Verify connection
-parlor              # Web UI at http://127.0.0.1:8080
-parlor chat         # Terminal CLI
-parlor --version    # Show version
+aroom --test       # Verify connection
+aroom              # Web UI at http://127.0.0.1:8080
+aroom chat         # Terminal CLI
+aroom --version    # Show version
 ```
 
 ---
@@ -80,10 +82,10 @@ Full-featured ChatGPT-style interface with conversations, projects, folders, tag
 An agentic terminal REPL with built-in tools (read/write/edit files, bash, glob, grep), MCP integration, skills system, and Rich markdown rendering. Type while the AI works --- messages queue automatically.
 
 ```bash
-parlor chat                          # Interactive REPL
-parlor chat "explain main.py"        # One-shot mode
-parlor chat -c                       # Continue last conversation
-parlor chat --model gpt-4o "hello"   # Override model
+aroom chat                          # Interactive REPL
+aroom chat "explain main.py"        # One-shot mode
+aroom chat -c                       # Continue last conversation
+aroom chat --model gpt-4o "hello"   # Override model
 ```
 
 ### Shared Core
@@ -111,15 +113,15 @@ Full details in [SECURITY.md](SECURITY.md).
 
 ## Documentation
 
-For complete documentation including configuration, CLI commands, API reference, themes, MCP setup, skills, and development guides, visit **[parlor.readthedocs.io](https://parlor.readthedocs.io)**.
+For complete documentation including configuration, CLI commands, API reference, themes, MCP setup, skills, and development guides, visit **[anteroom.readthedocs.io](https://anteroom.readthedocs.io)**.
 
 ---
 
 ## Development
 
 ```bash
-git clone https://github.com/troylar/parlor.git
-cd parlor
+git clone https://github.com/troylar/anteroom.git
+cd anteroom
 pip install -e ".[dev]"
 pytest tests/ -v
 ```
@@ -138,5 +140,5 @@ pytest tests/ -v
 <p align="center">
   <strong>MIT License</strong><br>
   Built for people who care about their conversations.<br>
-  <a href="https://parlor.readthedocs.io">parlor.readthedocs.io</a>
+  <a href="https://anteroom.readthedocs.io">anteroom.readthedocs.io</a>
 </p>
