@@ -7,47 +7,64 @@
 #approval-modal-overlay .approval-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.55);
+  /* Darker + slight blur to make the modal feel more pronounced */
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(2px);
 }
 
 #approval-modal-overlay .approval-modal {
   position: absolute;
   left: 50%;
-  top: 20%;
+  top: 18%;
   transform: translateX(-50%);
-  width: min(720px, calc(100vw - 32px));
+  width: min(760px, calc(100vw - 32px));
   background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 20px 70px rgba(0,0,0,0.6);
-  padding: 14px 14px 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  box-shadow: 0 30px 120px rgba(0,0,0,0.80);
+  padding: 16px 16px 14px;
 }
 
 #approval-modal-overlay .approval-title {
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.2px;
   color: var(--text);
 }
 
 #approval-modal-overlay .approval-message {
-  margin: 10px 0 0;
-  padding: 10px;
-  border-radius: 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.12);
   color: var(--text);
-  max-height: 40vh;
+  max-height: 45vh;
   overflow: auto;
   white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 #approval-modal-overlay .approval-actions {
-  margin-top: 12px;
+  margin-top: 14px;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
 }
 
 #approval-modal-overlay .btn-danger {
-  background: #7f1d1d;
-  border-color: #7f1d1d;
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: white;
 }
+
+#approval-modal-overlay .btn-danger:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+#approval-modal-overlay .btn {
+  min-height: 36px;
+}
+
