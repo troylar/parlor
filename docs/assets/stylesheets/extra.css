@@ -18,6 +18,24 @@
   background-color: rgba(15, 17, 21, 0.85);
 }
 
+.md-header .md-header__title,
+.md-header .md-header__topic,
+.md-header .md-tabs__link,
+.md-header .md-header__button,
+.md-header .md-header-nav__button,
+.md-header .md-search__input,
+.md-header nav a {
+  color: #0f1115;
+}
+
+[data-md-color-scheme="slate"] .md-header .md-header__title,
+[data-md-color-scheme="slate"] .md-header .md-header__topic,
+[data-md-color-scheme="slate"] .md-header .md-tabs__link,
+[data-md-color-scheme="slate"] .md-header .md-header__button,
+[data-md-color-scheme="slate"] .md-header nav a {
+  color: #C5A059;
+}
+
 .md-typeset h1 {
   font-family: 'Cinzel', Georgia, serif;
   font-weight: 700;

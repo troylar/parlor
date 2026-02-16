@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from anteroom.config import AppConfig, load_config
+from anteroom.config import AppConfig, UserIdentity, load_config
 
 
 def _write_config(path: Path, data: dict) -> Path:
@@ -242,3 +242,199 @@ class TestLoadConfig:
         assert config.ai.user_system_prompt == "Be very brief."
         assert "Be very brief." in config.ai.system_prompt
         assert "Anteroom" in config.ai.system_prompt
+
+
+class TestIdentityConfig:
+    def test_identity_none_when_missing(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.identity is None
+
+    def test_identity_parsed_from_config(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                },
+                "identity": {
+                    "user_id": "abc-123",
+                    "display_name": "Alice",
+                    "public_key": "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+                    "private_key": "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.identity is not None
+        assert isinstance(config.identity, UserIdentity)
+        assert config.identity.user_id == "abc-123"
+        assert config.identity.display_name == "Alice"
+        assert "PUBLIC KEY" in config.identity.public_key
+        assert "PRIVATE KEY" in config.identity.private_key
+
+    def test_identity_none_when_empty_section(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                },
+                "identity": {},
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.identity is None
+
+    def test_identity_none_when_user_id_empty(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                },
+                "identity": {
+                    "user_id": "",
+                    "display_name": "Alice",
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.identity is None
+
+    def test_identity_env_var_overrides(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_BASE_URL", "https://env.example.com")
+        monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
+        monkeypatch.setenv("AI_CHAT_USER_ID", "env-user-id")
+        monkeypatch.setenv("AI_CHAT_DISPLAY_NAME", "EnvUser")
+        monkeypatch.setenv("AI_CHAT_PUBLIC_KEY", "env-pub-key")
+        monkeypatch.setenv("AI_CHAT_PRIVATE_KEY", "env-priv-key")
+        cfg_file = _write_config(tmp_path, {})
+        config = load_config(cfg_file)
+        assert config.identity is not None
+        assert config.identity.user_id == "env-user-id"
+        assert config.identity.display_name == "EnvUser"
+        assert config.identity.public_key == "env-pub-key"
+        assert config.identity.private_key == "env-priv-key"
+
+    def test_identity_config_takes_precedence_over_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_USER_ID", "env-user-id")
+        monkeypatch.setenv("AI_CHAT_DISPLAY_NAME", "EnvUser")
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                },
+                "identity": {
+                    "user_id": "config-user-id",
+                    "display_name": "ConfigUser",
+                    "public_key": "config-pub",
+                    "private_key": "config-priv",
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.identity is not None
+        assert config.identity.user_id == "config-user-id"
+        assert config.identity.display_name == "ConfigUser"
+
+    def test_identity_partial_env_vars(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_BASE_URL", "https://env.example.com")
+        monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
+        monkeypatch.setenv("AI_CHAT_USER_ID", "env-user-id")
+        cfg_file = _write_config(tmp_path, {})
+        config = load_config(cfg_file)
+        assert config.identity is not None
+        assert config.identity.user_id == "env-user-id"
+        assert config.identity.display_name == ""
+
+
+class TestEnsureIdentity:
+    def test_generates_identity_when_missing(self, tmp_path: Path) -> None:
+        from anteroom.config import ensure_identity
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.dump({"ai": {"base_url": "http://test", "api_key": "sk-test"}}))
+
+        identity = ensure_identity(config_path)
+        assert identity.user_id
+        assert identity.display_name
+        assert identity.public_key
+        assert identity.private_key
+
+        data = yaml.safe_load(config_path.read_text())
+        assert "identity" in data
+        assert data["identity"]["user_id"] == identity.user_id
+
+    def test_returns_existing_identity(self, tmp_path: Path) -> None:
+        from anteroom.config import ensure_identity
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "ai": {"base_url": "http://test", "api_key": "sk-test"},
+                    "identity": {
+                        "user_id": "existing-id",
+                        "display_name": "Existing",
+                        "public_key": "pub",
+                        "private_key": "priv",
+                    },
+                }
+            )
+        )
+
+        identity = ensure_identity(config_path)
+        assert identity.user_id == "existing-id"
+        assert identity.display_name == "Existing"
+
+    def test_creates_config_file_if_missing(self, tmp_path: Path) -> None:
+        from anteroom.config import ensure_identity
+
+        config_path = tmp_path / "subdir" / "config.yaml"
+        identity = ensure_identity(config_path)
+        assert config_path.exists()
+        assert identity.user_id
+
+    def test_preserves_existing_config_sections(self, tmp_path: Path) -> None:
+        from anteroom.config import ensure_identity
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "ai": {"base_url": "http://test", "api_key": "sk-test", "model": "gpt-4o"},
+                    "app": {"port": 9090},
+                }
+            )
+        )
+
+        ensure_identity(config_path)
+        data = yaml.safe_load(config_path.read_text())
+        assert data["ai"]["model"] == "gpt-4o"
+        assert data["app"]["port"] == 9090
+        assert "identity" in data
+
+    def test_idempotent(self, tmp_path: Path) -> None:
+        from anteroom.config import ensure_identity
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.dump({"ai": {"base_url": "http://test", "api_key": "sk-test"}}))
+
+        identity1 = ensure_identity(config_path)
+        identity2 = ensure_identity(config_path)
+        assert identity1.user_id == identity2.user_id
+        assert identity1.public_key == identity2.public_key

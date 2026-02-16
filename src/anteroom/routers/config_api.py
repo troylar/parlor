@@ -43,6 +43,13 @@ async def get_config(request: Request) -> AppConfigResponse:
                 )
             )
 
+    identity_data: dict[str, str] | None = None
+    if config.identity:
+        identity_data = {
+            "user_id": config.identity.user_id,
+            "display_name": config.identity.display_name,
+        }
+
     return AppConfigResponse(
         ai={
             "base_url": config.ai.base_url,
@@ -51,6 +58,7 @@ async def get_config(request: Request) -> AppConfigResponse:
             "system_prompt": config.ai.user_system_prompt,
         },
         mcp_servers=mcp_statuses,
+        identity=identity_data,
     )
 
 

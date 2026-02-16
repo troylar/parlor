@@ -9,11 +9,21 @@ from contextlib import contextmanager
 from pathlib import Path
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     instructions TEXT NOT NULL DEFAULT '',
     model TEXT DEFAULT NULL,
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -25,6 +35,8 @@ CREATE TABLE IF NOT EXISTS folders (
     project_id TEXT DEFAULT NULL,
     position INTEGER NOT NULL DEFAULT 0,
     collapsed INTEGER NOT NULL DEFAULT 0,
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE,
@@ -35,6 +47,8 @@ CREATE TABLE IF NOT EXISTS tags (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     color TEXT NOT NULL DEFAULT '#3b82f6',
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
     created_at TEXT NOT NULL
 );
 
@@ -52,6 +66,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     model TEXT DEFAULT NULL,
     project_id TEXT DEFAULT NULL,
     folder_id TEXT DEFAULT NULL,
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
@@ -63,6 +79,8 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
     content TEXT NOT NULL DEFAULT '',
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     position INTEGER NOT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
@@ -306,6 +324,26 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
         )"""
     )
+
+    # Ensure users table exists
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+
+    # Add user_id / user_display_name columns to all entity tables
+    for table in ("conversations", "messages", "projects", "folders", "tags"):
+        table_cursor = conn.execute(f"PRAGMA table_info({table})")
+        table_cols = {row[1] for row in table_cursor.fetchall()}
+        if "user_id" not in table_cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT DEFAULT NULL")
+        if "user_display_name" not in table_cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN user_display_name TEXT DEFAULT NULL")
 
     # Ensure change_log table exists for cross-process event polling
     conn.execute(

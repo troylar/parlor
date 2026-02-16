@@ -208,12 +208,21 @@ class CliConfig:
 
 
 @dataclass
+class UserIdentity:
+    user_id: str
+    display_name: str
+    public_key: str  # PEM
+    private_key: str  # PEM
+
+
+@dataclass
 class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
     shared_databases: list[SharedDatabaseConfig] = field(default_factory=list)
     cli: CliConfig = field(default_factory=CliConfig)
+    identity: UserIdentity | None = None
 
 
 def _resolve_data_dir() -> Path:
@@ -347,10 +356,76 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         max_tool_iterations=int(cli_raw.get("max_tool_iterations", 50)),
     )
 
+    identity_raw = raw.get("identity", {})
+    identity_user_id = identity_raw.get("user_id") or os.environ.get("AI_CHAT_USER_ID", "")
+    identity_display_name = identity_raw.get("display_name") or os.environ.get("AI_CHAT_DISPLAY_NAME", "")
+    identity_public_key = identity_raw.get("public_key") or os.environ.get("AI_CHAT_PUBLIC_KEY", "")
+    identity_private_key = identity_raw.get("private_key") or os.environ.get("AI_CHAT_PRIVATE_KEY", "")
+
+    identity: UserIdentity | None = None
+    if identity_user_id:
+        identity = UserIdentity(
+            user_id=identity_user_id,
+            display_name=identity_display_name,
+            public_key=identity_public_key,
+            private_key=identity_private_key,
+        )
+
     return AppConfig(
         ai=ai,
         app=app_settings,
         mcp_servers=mcp_servers,
         shared_databases=shared_databases,
         cli=cli_config,
+        identity=identity,
+    )
+
+
+def ensure_identity(config_path: Path | None = None) -> UserIdentity:
+    """Ensure config has an identity section; auto-generate if missing.
+
+    Returns the UserIdentity (existing or newly created).
+    """
+    import getpass
+
+    import yaml
+
+    from .identity import generate_identity
+
+    path = config_path or _get_config_path()
+    raw: dict[str, Any] = {}
+    if path.exists():
+        with open(path) as f:
+            raw = yaml.safe_load(f) or {}
+
+    identity_raw = raw.get("identity", {})
+    if identity_raw.get("user_id"):
+        return UserIdentity(
+            user_id=identity_raw["user_id"],
+            display_name=identity_raw.get("display_name", ""),
+            public_key=identity_raw.get("public_key", ""),
+            private_key=identity_raw.get("private_key", ""),
+        )
+
+    try:
+        display_name = getpass.getuser()
+    except Exception:
+        display_name = "user"
+
+    identity_data = generate_identity(display_name)
+    raw["identity"] = identity_data
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+    try:
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+
+    return UserIdentity(
+        user_id=identity_data["user_id"],
+        display_name=identity_data["display_name"],
+        public_key=identity_data["public_key"],
+        private_key=identity_data["private_key"],
     )

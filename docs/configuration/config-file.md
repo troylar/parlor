@@ -23,6 +23,12 @@ cli:
   builtin_tools: true      # Enable built-in tools (default: true)
   max_tool_iterations: 50  # Max tool calls per response (default: 50)
 
+identity:
+  user_id: "auto-generated-uuid"
+  display_name: "Your Name"
+  public_key: "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+  private_key: "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+
 shared_databases:
   - name: "team-shared"
     path: "~/shared/team.db"
@@ -68,6 +74,20 @@ mcp_servers:
 |---|---|---|---|
 | `builtin_tools` | boolean | `true` | Enable the 6 built-in tools |
 | `max_tool_iterations` | integer | `50` | Max agentic loop iterations per turn |
+
+### identity
+
+User identity for message attribution in shared databases. Auto-generated on first run via `aroom init` or on startup if missing.
+
+| Field | Type | Description |
+|---|---|---|
+| `user_id` | string | UUID identifying this user (auto-generated, immutable) |
+| `display_name` | string | Human-readable name shown on messages |
+| `public_key` | string | Ed25519 public key in PEM format (auto-generated) |
+| `private_key` | string | Ed25519 private key in PEM format (auto-generated) |
+
+!!! warning "Back up your identity"
+    The `identity` section contains a private key that proves ownership of your user ID. If you lose it, your messages in shared databases become unverifiable. Back up your `config.yaml` to preserve your identity across reinstalls.
 
 ### shared_databases
 

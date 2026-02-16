@@ -73,6 +73,7 @@ class McpServerStatus(BaseModel):
 class AppConfigResponse(BaseModel):
     ai: dict
     mcp_servers: list[McpServerStatus] = Field(default_factory=list)
+    identity: dict | None = None
 
 
 class ConversationUpdate(BaseModel):

@@ -29,6 +29,7 @@ from anteroom.services.storage import (
     list_tags,
     list_tool_calls,
     move_conversation_to_folder,
+    register_user,
     remove_tag_from_conversation,
     update_conversation_title,
     update_folder,
@@ -692,3 +693,133 @@ class TestDatabaseManager:
         mgr.add("shared", tmp_path / "shared.db")
         mgr.close_all()
         assert mgr.list_databases() == []
+
+
+class TestUserIdentityInStorage:
+    def test_create_conversation_with_identity(self, db: sqlite3.Connection) -> None:
+        conv = create_conversation(db, title="Hello", user_id="u1", user_display_name="Alice")
+        assert conv["title"] == "Hello"
+        row = db.execute_fetchone("SELECT user_id, user_display_name FROM conversations WHERE id = ?", (conv["id"],))
+        assert row is not None
+        assert row["user_id"] == "u1"
+        assert row["user_display_name"] == "Alice"
+
+    def test_create_conversation_without_identity(self, db: sqlite3.Connection) -> None:
+        conv = create_conversation(db, title="No ID")
+        row = db.execute_fetchone("SELECT user_id, user_display_name FROM conversations WHERE id = ?", (conv["id"],))
+        assert row is not None
+        assert row["user_id"] is None
+        assert row["user_display_name"] is None
+
+    def test_create_message_with_identity(self, db: sqlite3.Connection) -> None:
+        conv = create_conversation(db, title="Msgs")
+        msg = create_message(db, conv["id"], "user", "hi", user_id="u1", user_display_name="Alice")
+        assert msg["content"] == "hi"
+        row = db.execute_fetchone("SELECT user_id, user_display_name FROM messages WHERE id = ?", (msg["id"],))
+        assert row is not None
+        assert row["user_id"] == "u1"
+        assert row["user_display_name"] == "Alice"
+
+    def test_create_message_without_identity(self, db: sqlite3.Connection) -> None:
+        conv = create_conversation(db, title="Msgs")
+        msg = create_message(db, conv["id"], "user", "hi")
+        row = db.execute_fetchone("SELECT user_id, user_display_name FROM messages WHERE id = ?", (msg["id"],))
+        assert row is not None
+        assert row["user_id"] is None
+        assert row["user_display_name"] is None
+
+    def test_create_folder_with_identity(self, db: sqlite3.Connection) -> None:
+        folder = create_folder(db, "Work", user_id="u1", user_display_name="Alice")
+        row = db.execute_fetchone("SELECT user_id, user_display_name FROM folders WHERE id = ?", (folder["id"],))
+        assert row is not None
+        assert row["user_id"] == "u1"
+        assert row["user_display_name"] == "Alice"
+
+    def test_create_tag_with_identity(self, db: sqlite3.Connection) -> None:
+        tag = create_tag(db, "important", user_id="u1", user_display_name="Alice")
+        row = db.execute_fetchone("SELECT user_id, user_display_name FROM tags WHERE id = ?", (tag["id"],))
+        assert row is not None
+        assert row["user_id"] == "u1"
+        assert row["user_display_name"] == "Alice"
+
+    def test_create_project_with_identity(self, db: sqlite3.Connection) -> None:
+        from anteroom.services.storage import create_project
+
+        proj = create_project(db, "Test", user_id="u1", user_display_name="Alice")
+        row = db.execute_fetchone("SELECT user_id, user_display_name FROM projects WHERE id = ?", (proj["id"],))
+        assert row is not None
+        assert row["user_id"] == "u1"
+        assert row["user_display_name"] == "Alice"
+
+    def test_fork_preserves_user_identity(self, db: sqlite3.Connection) -> None:
+        conv = create_conversation(db, title="Original", user_id="u1", user_display_name="Alice")
+        create_message(db, conv["id"], "user", "msg0", user_id="u1", user_display_name="Alice")
+        create_message(db, conv["id"], "assistant", "msg1")
+
+        forked = fork_conversation(db, conv["id"], 1)
+        forked_msgs = list_messages(db, forked["id"])
+        row0 = db.execute_fetchone(
+            "SELECT user_id, user_display_name FROM messages WHERE id = ?", (forked_msgs[0]["id"],)
+        )
+        assert row0["user_id"] == "u1"
+        assert row0["user_display_name"] == "Alice"
+
+    def test_copy_conversation_preserves_user_identity(self, db) -> None:
+        target_conn = sqlite3.connect(":memory:", check_same_thread=False)
+        target_conn.row_factory = sqlite3.Row
+        target_conn.execute("PRAGMA foreign_keys=ON")
+        target_conn.executescript(_SCHEMA)
+        try:
+            target_conn.executescript(_FTS_SCHEMA)
+            target_conn.executescript(_FTS_TRIGGERS)
+        except sqlite3.OperationalError:
+            pass
+        target_conn.commit()
+        target_db = ThreadSafeConnection(target_conn)
+
+        conv = create_conversation(db, title="Copy", user_id="u1", user_display_name="Alice")
+        create_message(db, conv["id"], "user", "hi", user_id="u1", user_display_name="Alice")
+
+        copied = copy_conversation_to_db(db, target_db, conv["id"])
+        assert copied is not None
+        msgs = list_messages(target_db, copied["id"])
+        row = target_db.execute_fetchone(
+            "SELECT user_id, user_display_name FROM messages WHERE id = ?", (msgs[0]["id"],)
+        )
+        assert row["user_id"] == "u1"
+        assert row["user_display_name"] == "Alice"
+
+
+class TestRegisterUser:
+    def test_register_new_user(self, db: sqlite3.Connection) -> None:
+        register_user(db, "u1", "Alice", "pub-key-pem")
+        row = db.execute_fetchone("SELECT * FROM users WHERE user_id = ?", ("u1",))
+        assert row is not None
+        assert row["display_name"] == "Alice"
+        assert row["public_key"] == "pub-key-pem"
+        assert row["created_at"]
+        assert row["updated_at"]
+
+    def test_register_user_upsert_updates(self, db: sqlite3.Connection) -> None:
+        register_user(db, "u1", "Alice", "pub-key-1")
+        register_user(db, "u1", "Alice Updated", "pub-key-2")
+        row = db.execute_fetchone("SELECT * FROM users WHERE user_id = ?", ("u1",))
+        assert row is not None
+        assert row["display_name"] == "Alice Updated"
+        assert row["public_key"] == "pub-key-2"
+
+    def test_register_multiple_users(self, db: sqlite3.Connection) -> None:
+        register_user(db, "u1", "Alice", "pub1")
+        register_user(db, "u2", "Bob", "pub2")
+        rows = db.execute_fetchall("SELECT * FROM users ORDER BY user_id")
+        assert len(rows) == 2
+        assert rows[0]["user_id"] == "u1"
+        assert rows[1]["user_id"] == "u2"
+
+    def test_register_user_preserves_created_at(self, db: sqlite3.Connection) -> None:
+        register_user(db, "u1", "Alice", "pub1")
+        row1 = db.execute_fetchone("SELECT created_at FROM users WHERE user_id = ?", ("u1",))
+        created_at = row1["created_at"]
+        register_user(db, "u1", "Alice v2", "pub2")
+        row2 = db.execute_fetchone("SELECT created_at FROM users WHERE user_id = ?", ("u1",))
+        assert row2["created_at"] == created_at

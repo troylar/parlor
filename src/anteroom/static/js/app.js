@@ -198,6 +198,9 @@ const App = (() => {
                 document.getElementById('mcp-status').textContent =
                     `${totalTools} tools / ${connected.length} servers`;
             }
+            if (config.identity && config.identity.user_id) {
+                App.state.localUserId = config.identity.user_id;
+            }
         } catch {
             // Config endpoint may not exist yet
         }

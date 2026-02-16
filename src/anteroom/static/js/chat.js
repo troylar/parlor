@@ -652,7 +652,18 @@ const Chat = (() => {
 
         const roleDiv = document.createElement('div');
         roleDiv.className = 'message-role';
-        roleDiv.textContent = role === 'user' ? 'YOU' : 'SYSTEM';
+        if (role === 'user') {
+            const localUserId = (App.state && App.state.localUserId) || null;
+            const msgUserId = msgData && msgData.user_id;
+            if (msgUserId && localUserId && msgUserId !== localUserId) {
+                roleDiv.textContent = (msgData && msgData.user_display_name) || 'TEAMMATE';
+                el.classList.add('remote');
+            } else {
+                roleDiv.textContent = 'YOU';
+            }
+        } else {
+            roleDiv.textContent = 'SYSTEM';
+        }
         el.appendChild(roleDiv);
 
         const contentDiv = document.createElement('div');
@@ -833,7 +844,17 @@ const Chat = (() => {
 
             const roleDiv = document.createElement('div');
             roleDiv.className = 'message-role';
-            roleDiv.textContent = msg.role === 'user' ? 'YOU' : 'SYSTEM';
+            if (msg.role === 'user') {
+                const localUserId = (App.state && App.state.localUserId) || null;
+                if (msg.user_id && localUserId && msg.user_id !== localUserId) {
+                    roleDiv.textContent = msg.user_display_name || 'TEAMMATE';
+                    el.classList.add('remote');
+                } else {
+                    roleDiv.textContent = 'YOU';
+                }
+            } else {
+                roleDiv.textContent = 'SYSTEM';
+            }
             el.appendChild(roleDiv);
 
             const contentDiv = document.createElement('div');

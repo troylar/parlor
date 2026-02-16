@@ -39,10 +39,21 @@ async def list_projects(request: Request):
     return storage.list_projects(db)
 
 
+def _get_identity(request: Request) -> tuple[str | None, str | None]:
+    identity = getattr(request.app.state.config, "identity", None)
+    if identity:
+        return identity.user_id, identity.display_name
+    return None, None
+
+
 @router.post("/projects", status_code=201)
 async def create_project(body: ProjectCreate, request: Request):
     db = request.app.state.db
-    return storage.create_project(db, name=body.name, instructions=body.instructions, model=body.model)
+    uid, uname = _get_identity(request)
+    return storage.create_project(
+        db, name=body.name, instructions=body.instructions, model=body.model,
+        user_id=uid, user_display_name=uname,
+    )
 
 
 @router.get("/projects/{project_id}")
