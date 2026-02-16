@@ -93,9 +93,23 @@ class TestRenderHelp:
         with patch("parlor.cli.renderer.console") as mock_console:
             render_help()
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
-            for cmd in ["/new", "/last", "/list", "/search", "/resume", "/delete",
-                        "/rewind", "/compact", "/model", "/tools", "/skills",
-                        "/mcp", "/verbose", "/detail", "/quit"]:
+            for cmd in [
+                "/new",
+                "/last",
+                "/list",
+                "/search",
+                "/resume",
+                "/delete",
+                "/rewind",
+                "/compact",
+                "/model",
+                "/tools",
+                "/skills",
+                "/mcp",
+                "/verbose",
+                "/detail",
+                "/quit",
+            ]:
                 assert cmd in output, f"Missing {cmd} in /help output"
 
     def test_help_includes_input_section(self) -> None:

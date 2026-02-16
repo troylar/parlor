@@ -28,12 +28,14 @@ class TestInit:
 
         from parlor.__main__ import _run_init
 
-        inputs = iter([
-            "https://api.openai.com/v1",
-            "sk-test-key",
-            "gpt-4",
-            "",
-        ])
+        inputs = iter(
+            [
+                "https://api.openai.com/v1",
+                "sk-test-key",
+                "gpt-4",
+                "",
+            ]
+        )
         with (
             patch("parlor.__main__._get_config_path", return_value=config_path),
             patch("builtins.input", side_effect=lambda _: next(inputs)),

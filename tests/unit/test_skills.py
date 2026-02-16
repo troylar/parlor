@@ -135,9 +135,7 @@ class TestSkillRegistry:
         with tempfile.TemporaryDirectory() as tmpdir:
             skills_dir = Path(tmpdir) / ".parlor" / "skills"
             skills_dir.mkdir(parents=True)
-            (skills_dir / "good.yaml").write_text(
-                "name: good\ndescription: Works\nprompt: Do something\n"
-            )
+            (skills_dir / "good.yaml").write_text("name: good\ndescription: Works\nprompt: Do something\n")
             reg = SkillRegistry()
             reg.load(tmpdir)
             assert len(reg.load_warnings) == 0

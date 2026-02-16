@@ -303,9 +303,7 @@ async def _check_for_update(current: str) -> str | None:
 def _show_resume_info(db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]) -> None:
     """Display resume header with last exchange context."""
     stored = storage.list_messages(db, conv["id"])
-    renderer.console.print(
-        f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]"
-    )
+    renderer.console.print(f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]")
     renderer.render_conversation_recap(stored)
 
 
@@ -976,9 +974,7 @@ async def _run_repl(
                             )
                         if has_more:
                             more_n = list_limit + 20
-                            renderer.console.print(
-                                f"  [dim]... more available. Use /list {more_n} to show more.[/dim]"
-                            )
+                            renderer.console.print(f"  [dim]... more available. Use /list {more_n} to show more.[/dim]")
                         renderer.console.print("  Use [bold]/resume <number>[/bold] or [bold]/resume <id>[/bold]\n")
                     else:
                         renderer.console.print("[grey62]No conversations[/grey62]\n")
@@ -1008,7 +1004,7 @@ async def _run_repl(
                         continue
                     title = to_delete.get("title", "Untitled")
                     try:
-                        answer = input(f"  Delete \"{title}\"? [y/N] ").strip().lower()
+                        answer = input(f'  Delete "{title}"? [y/N] ').strip().lower()
                     except (EOFError, KeyboardInterrupt):
                         renderer.console.print("[grey62]Cancelled[/grey62]\n")
                         continue
