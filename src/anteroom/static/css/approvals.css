@@ -54,14 +54,18 @@
 }
 
 #approval-modal-overlay .btn-danger {
-  background: #b91c1c;
-  border-color: #b91c1c;
-  color: white;
+  /* Match product accent (logo/orange-gold) */
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
+  font-weight: 700;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.25) inset, 0 10px 30px var(--accent-glow);
 }
 
 #approval-modal-overlay .btn-danger:hover {
-  background: #dc2626;
-  border-color: #dc2626;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.25) inset, 0 14px 38px var(--accent-glow);
 }
 
 #approval-modal-overlay .btn {
