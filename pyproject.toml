@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anteroom"
-version = "1.3.0"
+version = "1.3.1"
 description = "Anteroom - your gateway to AI conversation"
 readme = "README.md"
 license = "MIT"
