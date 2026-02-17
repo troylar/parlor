@@ -70,7 +70,7 @@ aroom --version    # Show version
 
 ### Web UI
 
-Full-featured ChatGPT-style interface with conversations, projects, folders, tags, file attachments, MCP tool integration, prompt queuing, canvas panels for AI-generated content (CodeMirror 6 editor), inline safety approvals, command palette, and four built-in themes.
+Full-featured ChatGPT-style interface with conversations, projects, folders, tags, file attachments, MCP tool integration, prompt queuing, canvas panels for AI-generated content (CodeMirror 6 editor), inline safety approvals, sub-agent progress cards for parallel AI execution, command palette, and four built-in themes.
 
 <p align="center">
   <img src="docs/screenshots/theme-midnight.png" alt="Midnight Theme" width="400">
@@ -79,7 +79,7 @@ Full-featured ChatGPT-style interface with conversations, projects, folders, tag
 
 ### CLI Chat
 
-An agentic terminal REPL with built-in tools (read/write/edit files, bash, glob, grep, canvas), MCP integration, skills system, safety approval prompts for destructive operations, and Rich markdown rendering. Type while the AI works --- messages queue automatically.
+An agentic terminal REPL with built-in tools (read/write/edit files, bash, glob, grep, canvas, run_agent), MCP integration, sub-agent orchestration for parallel task execution, skills system, safety approval prompts for destructive operations, and Rich markdown rendering. Type while the AI works --- messages queue automatically.
 
 ```bash
 aroom chat                          # Interactive REPL

@@ -842,7 +842,7 @@ def render_subagent_start(agent_id: str, prompt: str, model: str, depth: int) ->
     console.print(f"{indent}  [grey62]{escape(truncated_prompt)}[/grey62]")
 
 
-def render_subagent_tool(agent_id: str, tool_name: str) -> None:
+def render_subagent_tool(agent_id: str, tool_name: str, arguments: dict[str, Any] | None = None) -> None:
     """Show a tool being used by a sub-agent (compact breadcrumb)."""
     info = _active_subagents.get(agent_id)
     if not info:
@@ -850,7 +850,7 @@ def render_subagent_tool(agent_id: str, tool_name: str) -> None:
     info["tools"].append(tool_name)
     depth = info.get("depth", 1)
     indent = "  " * depth
-    summary = _humanize_tool(tool_name, {})
+    summary = _humanize_tool(tool_name, arguments or {})
     console.print(f"{indent}  [grey62]  ✓ {escape(summary)}[/grey62]")
 
 

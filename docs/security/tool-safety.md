@@ -126,6 +126,43 @@ safety:
     - "~/.config/gh"
 ```
 
+## Sub-agent Safety
+
+The `run_agent` tool spawns isolated child AI sessions for parallel task execution. Multiple layers of protection prevent abuse:
+
+### Concurrency and Resource Limits
+
+`SubagentLimiter` enforces per-request caps:
+
+- **Max concurrent**: 5 sub-agents running at the same time
+- **Max total**: 20 sub-agents per root request
+- **Semaphore timeout**: 30 seconds waiting for a slot before failing
+- **Max nesting depth**: 3 levels (sub-agents can spawn sub-agents, up to 3 deep)
+- **Prompt size cap**: 32,000 characters per sub-agent prompt
+- **Output truncation**: 4,000 characters max per sub-agent response
+
+### Input Validation
+
+- **Model ID**: Regex-validated against `^[a-zA-Z0-9._:/-]{1,128}$` to prevent injection
+- **Empty prompts**: Rejected before any processing
+- **Depth tracking**: Each child increments a depth counter; at max depth, `run_agent` is removed from the child's available tools
+
+### Isolation
+
+- Each sub-agent gets a deep-copied `AIService` config (no shared mutable state with parent)
+- Sub-agents have their own message history — they cannot see the parent conversation
+- A defensive system prompt constrains sub-agent behavior (no destructive operations unless explicitly instructed)
+
+### Safety Gate Propagation
+
+The parent's `confirm_callback` is threaded through to child tool executors. Destructive operations inside sub-agents trigger the same approval flow (CLI prompt or Web UI inline approval) as direct tool calls.
+
+### Error Handling
+
+- Generic error messages are returned to the AI — internal limits and implementation details are not exposed
+- If no limiter context is provided, the operation is blocked (fails closed)
+- Sub-agent execution failures are caught and logged server-side
+
 ## MCP Tool Safety
 
 MCP tool arguments are also protected:

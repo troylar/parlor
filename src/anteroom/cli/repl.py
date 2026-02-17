@@ -525,7 +525,7 @@ async def run_cli(
                 agent_id, data.get("prompt", ""), data.get("model", ""), data.get("depth", 1)
             )
         elif kind == "tool_call_start":
-            renderer.render_subagent_tool(agent_id, data.get("tool_name", ""))
+            renderer.render_subagent_tool(agent_id, data.get("tool_name", ""), data.get("arguments"))
         elif kind == "subagent_end":
             renderer.render_subagent_end(
                 agent_id, data.get("elapsed_seconds", 0), data.get("tool_calls", []), data.get("error")
@@ -544,6 +544,7 @@ async def run_cli(
                 "_agent_id": f"agent-{_subagent_counter}",
                 "_event_sink": _cli_event_sink,
                 "_limiter": _subagent_limiter,
+                "_confirm_callback": _confirm_destructive,
             }
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
@@ -660,6 +661,7 @@ async def run_cli(
             mcp_manager=mcp_manager,
             tool_registry=tool_registry,
             cancel_event_ref=_active_cancel_event,
+            subagent_limiter=_subagent_limiter,
         )
 
     # Cleanup
@@ -779,6 +781,7 @@ async def _run_repl(
     mcp_manager: Any = None,
     tool_registry: Any = None,
     cancel_event_ref: list[asyncio.Event | None] | None = None,
+    subagent_limiter: Any = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -1540,6 +1543,9 @@ async def _run_repl(
 
             # Stream response
             renderer.clear_turn_history()
+            renderer.clear_subagent_state()
+            if subagent_limiter is not None:
+                subagent_limiter.reset()
             cancel_event = asyncio.Event()
             _current_cancel_event[0] = cancel_event
             if cancel_event_ref is not None:

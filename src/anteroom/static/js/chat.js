@@ -723,7 +723,7 @@ const Chat = (() => {
     }
 
     function _sanitizeId(id) {
-        return String(id).replace(/[^a-zA-Z0-9\-_]/g, '');
+        return String(id).replace(/\./g, '-').replace(/[^a-zA-Z0-9\-_]/g, '');
     }
 
     function _dateLabel(dateStr) {

@@ -76,22 +76,34 @@ class SubagentLimiter:
         max_concurrent: int = MAX_CONCURRENT_SUBAGENTS,
         max_total: int = MAX_TOTAL_SUBAGENTS,
     ) -> None:
+        self._max_concurrent = max_concurrent
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._total_spawned = 0
         self._max_total = max_total
         self._lock = asyncio.Lock()
 
-    async def acquire(self) -> bool:
-        """Try to acquire a slot. Returns False if total cap exceeded."""
+    async def acquire(self, timeout: float = 30.0) -> bool:
+        """Try to acquire a slot. Returns False if total cap exceeded or timeout waiting for a slot."""
         async with self._lock:
             if self._total_spawned >= self._max_total:
                 return False
             self._total_spawned += 1
-        await self._semaphore.acquire()
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
+        except asyncio.TimeoutError:
+            async with self._lock:
+                self._total_spawned -= 1
+            return False
         return True
 
     def release(self) -> None:
         self._semaphore.release()
+
+    def reset(self) -> None:
+        """Reset for a new request/turn."""
+        self._total_spawned = 0
+        self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        self._lock = asyncio.Lock()
 
     @property
     def total_spawned(self) -> int:
@@ -109,10 +121,14 @@ async def handle(
     _event_sink: EventSink | None = None,
     _agent_id: str = "",
     _limiter: SubagentLimiter | None = None,
+    _confirm_callback: Any | None = None,
 ) -> dict[str, Any]:
     """Execute a sub-agent with an isolated conversation context."""
     if _ai_service is None:
         return {"error": "Sub-agent requires AI service context"}
+
+    if not prompt or not prompt.strip():
+        return {"error": "Prompt must not be empty"}
 
     if len(prompt) > MAX_PROMPT_CHARS:
         return {"error": f"Prompt exceeds maximum length ({MAX_PROMPT_CHARS} characters)"}
@@ -133,8 +149,7 @@ async def handle(
     acquired = await _limiter.acquire()
     if not acquired:
         return {
-            "error": f"Maximum total sub-agents ({_limiter._max_total}) reached for this request. "
-            "Reuse existing sub-agent results or reduce parallelism."
+            "error": "Sub-agent limit reached for this request. Reuse existing sub-agent results or reduce parallelism."
         }
 
     try:
@@ -148,6 +163,7 @@ async def handle(
             _event_sink=_event_sink,
             _agent_id=_agent_id,
             _limiter=_limiter,
+            _confirm_callback=_confirm_callback,
         )
     finally:
         _limiter.release()
@@ -164,6 +180,7 @@ async def _run_subagent(
     _event_sink: EventSink | None,
     _agent_id: str,
     _limiter: SubagentLimiter,
+    _confirm_callback: Any | None = None,
 ) -> dict[str, Any]:
     """Internal: run the sub-agent after limiter acquisition."""
     child_depth = _depth + 1
@@ -196,7 +213,8 @@ async def _run_subagent(
             arguments["_agent_id"] = f"{_agent_id}.{_child_counter}"
             arguments["_event_sink"] = _event_sink
             arguments["_limiter"] = _limiter
-        return await _tool_registry.call_tool(tool_name, arguments)
+            arguments["_confirm_callback"] = _confirm_callback
+        return await _tool_registry.call_tool(tool_name, arguments, confirm_callback=_confirm_callback)
 
     # Isolated message history for the child
     messages: list[dict[str, Any]] = [

@@ -441,7 +441,7 @@ class TestSubagentLimiter:
             _limiter=limiter,
         )
         assert "error" in result
-        assert "Maximum total sub-agents" in result["error"]
+        assert "Sub-agent limit reached" in result["error"]
 
     @pytest.mark.asyncio
     async def test_limiter_released_on_success(self) -> None:
@@ -564,15 +564,13 @@ class TestSubagentNestedAgentId:
     async def test_nested_subagent_gets_unique_agent_id(self) -> None:
         """Child tool executor should inject unique _agent_id for nested run_agent calls."""
         mock_registry = MagicMock()
-        mock_registry.get_openai_tools.return_value = [
-            {"function": {"name": "run_agent"}, "type": "function"}
-        ]
+        mock_registry.get_openai_tools.return_value = [{"function": {"name": "run_agent"}, "type": "function"}]
 
         captured_agent_ids: list[str] = []
 
         # The child_tool_executor is called when the child agent loop invokes tools.
         # We mock call_tool to capture the _agent_id injected for nested run_agent calls.
-        async def mock_call_tool(name, args):
+        async def mock_call_tool(name, args, confirm_callback=None):
             if name == "run_agent":
                 captured_agent_ids.append(args.get("_agent_id", ""))
             return {"output": "ok"}

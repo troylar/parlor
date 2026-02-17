@@ -600,6 +600,7 @@ async def chat(conversation_id: str, request: Request):
                 "_agent_id": f"agent-{_subagent_counter}",
                 "_event_sink": _web_event_sink,
                 "_limiter": _subagent_limiter,
+                "_confirm_callback": _web_confirm,
             }
 
         def _scope_to_decision() -> str:
