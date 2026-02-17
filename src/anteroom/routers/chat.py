@@ -496,7 +496,8 @@ async def chat(conversation_id: str, request: Request):
                 try:
                     from ..config import write_allowed_tool
 
-                    write_allowed_tool(verdict.tool_name)
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, write_allowed_tool, verdict.tool_name)
                 except Exception as e:
                     logger.warning("Could not persist 'Allow Always' for %s: %s", verdict.tool_name, e)
 
@@ -833,7 +834,7 @@ async def chat(conversation_id: str, request: Request):
             if not _cancel_events.get(conversation_id):
                 _cancel_events.pop(conversation_id, None)
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), ping=15)
 
 
 @router.post("/conversations/{conversation_id}/stop")
