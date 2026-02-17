@@ -886,7 +886,6 @@ const Chat = (() => {
 
         // Check if we need a date header
         const dateKey = _dateKey(msg.created_at);
-        const lastHeader = container.querySelector('.note-date-header:last-of-type');
         const lastEntry = container.querySelector('.note-entry:last-of-type');
         let needsHeader = true;
         if (lastEntry) {

@@ -262,28 +262,7 @@ const Canvas = (() => {
         const titleEl = document.getElementById('canvas-title');
         if (data.title && titleEl) titleEl.textContent = data.title;
 
-        if (_cmView && data.patches && data.patches.length > 0) {
-            const doc = _cmView.state.doc.toString();
-            const changes = [];
-            let applied = true;
-
-            for (const patch of data.patches) {
-                const idx = doc.indexOf(patch.search);
-                if (idx === -1) {
-                    applied = false;
-                    break;
-                }
-                changes.push({ from: idx, to: idx + patch.search.length, insert: patch.replace });
-            }
-
-            if (applied && changes.length > 0) {
-                _suppressDirty = true;
-                _cmView.dispatch({ changes });
-                _suppressDirty = false;
-            } else {
-                _setCmContent(data.content);
-            }
-        } else if (data.content != null) {
+        if (data.content != null) {
             _setCmContent(data.content);
         }
 
@@ -355,11 +334,7 @@ const Canvas = (() => {
             const canvas = await App.api(
                 `/api/conversations/${App.state.currentConversationId}/canvas`
             );
-            if (_canvasData) {
-                openCanvas(_canvasData);
-            } else {
-                openCanvas(canvas);
-            }
+            openCanvas(canvas);
         } catch {
             if (!_canvasData) createNewCanvas();
         }

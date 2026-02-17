@@ -228,6 +228,13 @@ async def handle_patch_canvas(
 
         offset = content.index(search)
         content = content[:offset] + replace + content[offset + len(search) :]
+
+        if len(content) > MAX_CANVAS_CONTENT:
+            return {
+                "error": f"Content exceeded size limit after edit {i + 1} "
+                f"({len(content)} chars). Maximum is {MAX_CANVAS_CONTENT}."
+            }
+
         applied_patches.append(
             {
                 "search": search,

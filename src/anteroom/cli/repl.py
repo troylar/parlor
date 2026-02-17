@@ -462,8 +462,9 @@ async def run_cli(
     async def _confirm_destructive(verdict: SafetyVerdict) -> bool:
         renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
         try:
-            answer = input("  Proceed? [y/N] ").strip().lower()
-            return answer in ("y", "yes")
+            loop = asyncio.get_event_loop()
+            answer = await loop.run_in_executor(None, input, "  Proceed? [y/N] ")
+            return answer.strip().lower() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
             return False
 
@@ -478,9 +479,12 @@ async def run_cli(
             return await mcp_manager.call_tool(tool_name, arguments)
         raise ValueError(f"Unknown tool: {tool_name}")
 
-    # Build unified tool list
+    # Build unified tool list (exclude canvas tools — they require web UI context)
+    _canvas_tool_names = {"create_canvas", "update_canvas", "patch_canvas"}
     tools_openai: list[dict[str, Any]] = []
-    tools_openai.extend(tool_registry.get_openai_tools())
+    tools_openai.extend(
+        t for t in tool_registry.get_openai_tools() if t.get("function", {}).get("name") not in _canvas_tool_names
+    )
     if mcp_manager:
         mcp_tools = mcp_manager.get_openai_tools()
         if mcp_tools:
@@ -1153,12 +1157,15 @@ async def _run_repl(
                         if not search_arg:
                             renderer.console.print("[grey62]Usage: /search --keyword <query>[/grey62]\n")
                             continue
-                    if search_arg.startswith("--type "):
+                    elif search_arg.startswith("--type "):
                         rest = search_arg[len("--type ") :].strip()
                         type_parts = rest.split(maxsplit=1)
                         if type_parts and type_parts[0] in ("chat", "note", "document"):
                             type_filter = type_parts[0]
                             search_arg = type_parts[1] if len(type_parts) > 1 else ""
+                        else:
+                            renderer.render_error("Invalid type. Use: chat, note, or document")
+                            continue
                         if not search_arg:
                             renderer.console.print("[grey62]Usage: /search --type <type> <query>[/grey62]\n")
                             continue

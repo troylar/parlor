@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ConversationSummary(BaseModel):
@@ -156,12 +156,18 @@ class DocumentContent(BaseModel):
 class CanvasCreate(BaseModel):
     title: str = Field(default="Untitled", min_length=1, max_length=200)
     content: str = Field(default="", max_length=100000)
-    language: str | None = Field(default=None, max_length=50)
+    language: str | None = Field(default=None, max_length=50, pattern=r"^[a-zA-Z0-9+#_.-]+$")
 
 
 class CanvasUpdate(BaseModel):
     content: str | None = Field(default=None, max_length=100000)
     title: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> "CanvasUpdate":
+        if self.content is None and self.title is None:
+            raise ValueError("At least one of 'content' or 'title' must be provided")
+        return self
 
 
 class ChatRequest(BaseModel):

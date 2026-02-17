@@ -1096,10 +1096,7 @@ def update_canvas(
             (now, title, canvas_id),
         )
     else:
-        db.execute(
-            "UPDATE canvases SET version = version + 1, updated_at = ? WHERE id = ?",
-            (now, canvas_id),
-        )
+        return canvas
     db.commit()
     return get_canvas(db, canvas_id)
 

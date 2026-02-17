@@ -422,6 +422,8 @@ async def update_canvas(conversation_id: str, body: CanvasUpdate, request: Reque
     canvas = storage.get_canvas_for_conversation(db, conversation_id)
     if not canvas:
         raise HTTPException(status_code=404, detail="No canvas for this conversation")
+    if body.content is None and body.title is None:
+        raise HTTPException(status_code=400, detail="At least one of 'content' or 'title' must be provided")
     updated = storage.update_canvas(db, canvas["id"], content=body.content, title=body.title)
     if not updated:
         raise HTTPException(status_code=404, detail="Canvas not found")

@@ -22,6 +22,10 @@ class ApprovalRequest(BaseModel):
 
 @router.post("/approvals/{approval_id}/respond")
 async def respond_approval(approval_id: str, body: ApprovalRequest, request: Request):
+    ct = request.headers.get("content-type", "")
+    if not ct.startswith("application/json"):
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
+
     if not _APPROVAL_ID_RE.match(approval_id):
         logger.warning("Invalid approval ID format: %r", approval_id[:80])
         raise HTTPException(status_code=400, detail="Invalid approval ID format")

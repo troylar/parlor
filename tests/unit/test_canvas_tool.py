@@ -456,7 +456,7 @@ class TestPatchCanvas:
             _db=MagicMock(),
         )
         assert "error" in result
-        assert "too large" in result["error"].lower()
+        assert "size limit" in result["error"].lower()
 
     @pytest.mark.asyncio()
     async def test_patch_storage_failure_after_apply(self, mock_storage: MagicMock) -> None:

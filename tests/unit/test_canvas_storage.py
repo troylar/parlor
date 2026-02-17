@@ -167,8 +167,8 @@ class TestUpdateCanvas:
         original_updated_at = canvas["updated_at"]
         updated = update_canvas(db, canvas["id"], content=None, title=None)
         assert updated is not None
-        assert updated["version"] == original_version + 1
-        assert updated["updated_at"] >= original_updated_at
+        assert updated["version"] == original_version
+        assert updated["updated_at"] == original_updated_at
         assert updated["content"] == "Original Content"
         assert updated["title"] == "Original Title"
 
