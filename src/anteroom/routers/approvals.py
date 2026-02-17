@@ -17,9 +17,6 @@ router = APIRouter(tags=["approvals"])
 _APPROVAL_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
-_VALID_SCOPES = {"once", "session", "always"}
-
-
 class ApprovalRequest(BaseModel):
     approved: bool = False
     scope: Literal["once", "session", "always"] = "once"

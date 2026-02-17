@@ -540,37 +540,48 @@ def write_allowed_tool(tool_name: str, config_path: Path | None = None) -> None:
     Preserves existing config structure. Creates the safety section if missing.
     Uses advisory file locking to prevent concurrent writes from corrupting the file.
     """
-    import fcntl
+    try:
+        import fcntl
+
+        _has_fcntl = True
+    except ImportError:
+        _has_fcntl = False
 
     if not _SAFE_TOOL_NAME_RE.match(tool_name):
         raise ValueError(f"Invalid tool name format: {tool_name!r}")
 
     path = config_path or _get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(".lock")
 
-    with open(lock_path, "w") as lock_f:
-        fcntl.flock(lock_f, fcntl.LOCK_EX)
-        try:
-            raw: dict[str, Any] = {}
-            if path.exists():
-                with open(path) as f:
-                    raw = yaml.safe_load(f) or {}
+    def _read_modify_write() -> None:
+        raw: dict[str, Any] = {}
+        if path.exists():
+            with open(path) as f:
+                raw = yaml.safe_load(f) or {}
 
-            safety_section = raw.setdefault("safety", {})
-            allowed = safety_section.setdefault("allowed_tools", [])
-            if not isinstance(allowed, list):
-                allowed = []
-                safety_section["allowed_tools"] = allowed
+        safety_section = raw.setdefault("safety", {})
+        allowed = safety_section.setdefault("allowed_tools", [])
+        if not isinstance(allowed, list):
+            allowed = []
+            safety_section["allowed_tools"] = allowed
 
-            if tool_name not in allowed:
-                allowed.append(tool_name)
+        if tool_name not in allowed:
+            allowed.append(tool_name)
 
-                with open(path, "w", encoding="utf-8") as f:
-                    yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
-                try:
-                    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-                except OSError:
-                    pass
-        finally:
-            fcntl.flock(lock_f, fcntl.LOCK_UN)
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+            try:
+                path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            except OSError:
+                pass
+
+    if _has_fcntl:
+        lock_path = path.with_suffix(".lock")
+        with open(lock_path, "w") as lock_f:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+            try:
+                _read_modify_write()
+            finally:
+                fcntl.flock(lock_f, fcntl.LOCK_UN)
+    else:
+        _read_modify_write()

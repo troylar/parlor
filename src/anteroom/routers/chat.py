@@ -428,12 +428,12 @@ async def chat(conversation_id: str, request: Request):
     safety_config = getattr(request.app.state.config, "safety", None)
     approval_timeout = safety_config.approval_timeout if safety_config else 120
 
-    _approval_scopes: dict[str, str] = {}  # keyed by tool_name for per-call scope tracking
+    # Track the last resolved scope per _web_confirm call, keyed by id(coroutine)
+    # to avoid races when concurrent tool calls to the same tool pend approval.
+    _last_resolved_scope: dict[int, str] = {}
 
     async def _web_confirm(verdict: SafetyVerdict) -> bool:
         import secrets as _secrets
-
-        _approval_scopes[verdict.tool_name] = "once"
 
         # Cap pending approvals to prevent unbounded memory growth on client disconnects
         max_pending = 100
@@ -485,7 +485,11 @@ async def chat(conversation_id: str, request: Request):
         approved = entry.get("approved", False)
         if approved:
             scope = entry.get("scope", "once")
-            _approval_scopes[verdict.tool_name] = scope
+            # Store scope keyed by task identity so _tool_executor can read it
+            # without races from concurrent calls to the same tool name.
+            task = asyncio.current_task()
+            if task is not None:
+                _last_resolved_scope[id(task)] = scope
             if scope in ("session", "always"):
                 tool_registry.grant_session_permission(verdict.tool_name)
             if scope == "always":
@@ -508,8 +512,10 @@ async def chat(conversation_id: str, request: Request):
                 "_user_display_name": uname,
             }
 
-        def _scope_to_decision(tname: str) -> str:
-            scope = _approval_scopes.get(tname, "once")
+        def _scope_to_decision() -> str:
+            task = asyncio.current_task()
+            task_id = id(task) if task is not None else None
+            scope = _last_resolved_scope.pop(task_id, "once") if task_id else "once"
             return {"once": "allowed_once", "session": "allowed_session", "always": "allowed_always"}.get(
                 scope, "allowed_once"
             )
@@ -518,7 +524,7 @@ async def chat(conversation_id: str, request: Request):
             result = await tool_registry.call_tool(tool_name, arguments, confirm_callback=_web_confirm)
             # Upgrade generic "allowed_once" with actual scope if user chose session/always
             if result.get("_approval_decision") == "allowed_once":
-                result["_approval_decision"] = _scope_to_decision(tool_name)
+                result["_approval_decision"] = _scope_to_decision()
             return result
         if mcp_manager:
             # MCP tools bypass ToolRegistry — apply safety gate here
@@ -534,7 +540,7 @@ async def chat(conversation_id: str, request: Request):
                 if not confirmed:
                     return {"error": "Operation denied by user", "exit_code": -1, "_approval_decision": "denied"}
                 result = await mcp_manager.call_tool(tool_name, arguments)
-                result["_approval_decision"] = _scope_to_decision(tool_name)
+                result["_approval_decision"] = _scope_to_decision()
                 return result
             result = await mcp_manager.call_tool(tool_name, arguments)
             result["_approval_decision"] = "auto"
