@@ -351,6 +351,15 @@ def main() -> None:
     _allowed_tools = getattr(args, "allowed_tools", None)
     if _approval_mode:
         config.safety.approval_mode = _approval_mode
+        if _approval_mode == "auto":
+            print(
+                "WARNING: Auto-approval mode active. ALL tool calls will execute without confirmation,",
+                file=sys.stderr,
+            )
+            print(
+                "  including destructive commands (rm, git push --force, etc.).",
+                file=sys.stderr,
+            )
     if _allowed_tools:
         extra = [t.strip() for t in _allowed_tools.split(",") if t.strip()]
         existing = set(config.safety.allowed_tools)

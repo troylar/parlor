@@ -502,7 +502,7 @@ async def run_cli(
             # MCP tools bypass ToolRegistry — apply safety gate here
             verdict = tool_registry.check_safety(tool_name, arguments)
             if verdict and verdict.needs_approval:
-                if verdict.details.get("hard_denied") == "true":
+                if verdict.hard_denied:
                     return {"error": f"Tool '{tool_name}' is blocked by configuration", "safety_blocked": True}
                 confirmed = await _confirm_destructive(verdict)
                 if not confirmed:

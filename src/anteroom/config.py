@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -530,6 +531,9 @@ def ensure_identity(config_path: Path | None = None) -> UserIdentity:
     )
 
 
+_SAFE_TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+
+
 def write_allowed_tool(tool_name: str, config_path: Path | None = None) -> None:
     """Append a tool name to safety.allowed_tools in the config file.
 
@@ -537,6 +541,9 @@ def write_allowed_tool(tool_name: str, config_path: Path | None = None) -> None:
     Uses advisory file locking to prevent concurrent writes from corrupting the file.
     """
     import fcntl
+
+    if not _SAFE_TOOL_NAME_RE.match(tool_name):
+        raise ValueError(f"Invalid tool name format: {tool_name!r}")
 
     path = config_path or _get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)

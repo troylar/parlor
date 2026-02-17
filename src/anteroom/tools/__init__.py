@@ -35,6 +35,11 @@ class ToolRegistry:
         self._working_dir = working_dir
 
     def grant_session_permission(self, tool_name: str) -> None:
+        import re
+
+        if not re.match(r"^[a-zA-Z0-9_\-]{1,128}$", tool_name):
+            logger.warning("Rejected invalid tool name for session permission: %r", tool_name)
+            return
         self._session_allowed.add(tool_name)
 
     def clear_session_permissions(self) -> None:
@@ -71,7 +76,8 @@ class ToolRegistry:
         if not config or not config.enabled:
             return None
 
-        # Legacy per-tool enabled checks (backward compat)
+        # Legacy per-tool safety toggle: when disabled, skip safety checks for this tool.
+        # NOTE: this disables *safety checks*, not the tool itself. The tool still executes.
         if tool_name == "bash" and not config.bash.enabled:
             return None
         if tool_name == "write_file" and not config.write_file.enabled:
@@ -94,7 +100,7 @@ class ToolRegistry:
                 needs_approval=True,
                 reason=f"Tool '{tool_name}' is in the denied tools list",
                 tool_name=tool_name,
-                details={"hard_denied": "true"},
+                hard_denied=True,
             )
 
         # Check tool-specific destructive patterns even when tier says auto-allow,
@@ -155,7 +161,7 @@ class ToolRegistry:
         verdict = self.check_safety(name, arguments)
         approval_decision = "auto"
         if verdict and verdict.needs_approval:
-            if verdict.details.get("hard_denied") == "true":
+            if verdict.hard_denied:
                 logger.warning("Tool hard-denied by config: %s", name)
                 return {
                     "error": f"Tool '{name}' is blocked by configuration",

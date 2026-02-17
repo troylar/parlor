@@ -356,7 +356,7 @@ class TestToolTierSafety:
         reg.set_safety_config(SafetyConfig(denied_tools=["bash"]), working_dir="/tmp")
         verdict = reg.check_safety("bash", {"command": "echo hello"})
         assert verdict is not None
-        assert verdict.details.get("hard_denied") == "true"
+        assert verdict.hard_denied is True
 
 
 class TestApprovalDecisionAudit:
@@ -417,23 +417,28 @@ class TestApprovalDecisionAudit:
 
 
 class TestMetadataStripping:
-    """Verify that _-prefixed metadata is stripped from tool results for LLM."""
+    """Verify that _approval_decision is stripped from tool results for LLM."""
 
-    def test_underscore_keys_stripped(self) -> None:
+    def test_approval_decision_stripped(self) -> None:
         result = {"output": "hello", "_approval_decision": "auto", "_internal": True}
-        llm_result = {k: v for k, v in result.items() if not k.startswith("_")}
-        assert llm_result == {"output": "hello"}
+        llm_result = {k: v for k, v in result.items() if k != "_approval_decision"}
         assert "_approval_decision" not in llm_result
+        assert llm_result == {"output": "hello", "_internal": True}
+
+    def test_other_underscore_keys_preserved(self) -> None:
+        result = {"output": "hello", "_id": "abc123", "_approval_decision": "auto"}
+        llm_result = {k: v for k, v in result.items() if k != "_approval_decision"}
+        assert llm_result == {"output": "hello", "_id": "abc123"}
 
     def test_no_underscore_keys_unchanged(self) -> None:
         result = {"output": "hello", "status": "ok"}
-        llm_result = {k: v for k, v in result.items() if not k.startswith("_")}
+        llm_result = {k: v for k, v in result.items() if k != "_approval_decision"}
         assert llm_result == result
 
     def test_non_dict_result_passes_through(self) -> None:
         result = "raw string"
         if isinstance(result, dict):
-            llm_result = {k: v for k, v in result.items() if not k.startswith("_")}
+            llm_result = {k: v for k, v in result.items() if k != "_approval_decision"}
         else:
             llm_result = result
         assert llm_result == "raw string"

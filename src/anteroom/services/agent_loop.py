@@ -299,9 +299,9 @@ async def run_agent_loop(
                     kind="tool_call_end",
                     data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": status},
                 )
-                # Strip internal metadata (e.g. _approval_decision) before sending to the LLM
+                # Strip internal metadata before sending to the LLM
                 if isinstance(result, dict):
-                    llm_result = {k: v for k, v in result.items() if not k.startswith("_")}
+                    llm_result = {k: v for k, v in result.items() if k != "_approval_decision"}
                 else:
                     llm_result = result
                 messages.append(
