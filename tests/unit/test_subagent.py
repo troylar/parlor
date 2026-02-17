@@ -493,6 +493,59 @@ class TestSubagentConfigIsolation:
         assert captured_configs[0].model == "different-model"
 
 
+class TestSubagentNestedAgentId:
+    @pytest.mark.asyncio
+    async def test_nested_subagent_gets_unique_agent_id(self) -> None:
+        """Child tool executor should inject unique _agent_id for nested run_agent calls."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = [
+            {"function": {"name": "run_agent"}, "type": "function"}
+        ]
+
+        captured_agent_ids: list[str] = []
+
+        # The child_tool_executor is called when the child agent loop invokes tools.
+        # We mock call_tool to capture the _agent_id injected for nested run_agent calls.
+        async def mock_call_tool(name, args):
+            if name == "run_agent":
+                captured_agent_ids.append(args.get("_agent_id", ""))
+            return {"output": "ok"}
+
+        mock_registry.call_tool = mock_call_tool
+
+        async def mock_agent_loop(**kwargs):
+            # Simulate the child calling run_agent twice (nested sub-agents)
+            executor = kwargs["tool_executor"]
+            await executor("run_agent", {"prompt": "nested-1"})
+            await executor("run_agent", {"prompt": "nested-2"})
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="parent task",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _depth=0,
+                    _agent_id="agent-1",
+                    _limiter=_make_limiter(),
+                )
+
+        # Each nested call should get a unique agent_id derived from the parent
+        assert captured_agent_ids == ["agent-1.1", "agent-1.2"]
+
+
+class TestRendererSubagentState:
+    def test_clear_subagent_state(self) -> None:
+        """clear_subagent_state should empty the tracking dict."""
+        from anteroom.cli.renderer import _active_subagents, clear_subagent_state, render_subagent_start
+
+        render_subagent_start("test-agent", "do something", "gpt-4", 1)
+        assert "test-agent" in _active_subagents
+        clear_subagent_state()
+        assert len(_active_subagents) == 0
+
+
 class TestSubagentRegistration:
     def test_registered_in_default_tools(self) -> None:
         from anteroom.tools import ToolRegistry, register_default_tools

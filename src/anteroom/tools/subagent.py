@@ -172,13 +172,18 @@ async def _run_subagent(
         child_tools = [t for t in child_tools if t["function"]["name"] != "run_agent"]
 
     # Child tool executor wraps the registry, injecting depth and limiter for nested sub-agents
+    _child_counter = 0
+
     async def child_tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        nonlocal _child_counter
         if tool_name == "run_agent":
+            _child_counter += 1
             arguments = dict(arguments)
             arguments["_ai_service"] = _ai_service
             arguments["_tool_registry"] = _tool_registry
             arguments["_cancel_event"] = _cancel_event
             arguments["_depth"] = child_depth
+            arguments["_agent_id"] = f"{_agent_id}.{_child_counter}"
             arguments["_event_sink"] = _event_sink
             arguments["_limiter"] = _limiter
         return await _tool_registry.call_tool(tool_name, arguments)

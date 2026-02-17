@@ -699,6 +699,7 @@ async def _run_one_shot(
     _add_signal_handler(loop, signal.SIGINT, cancel_event.set)
     escape_task = asyncio.create_task(_watch_for_escape(cancel_event))
 
+    renderer.clear_subagent_state()
     thinking = False
     try:
         async for event in run_agent_loop(

@@ -822,6 +822,11 @@ def render_verbosity_change(v: Verbosity) -> None:
 _active_subagents: dict[str, dict[str, Any]] = {}
 
 
+def clear_subagent_state() -> None:
+    """Reset sub-agent tracking state between sessions."""
+    _active_subagents.clear()
+
+
 def render_subagent_start(agent_id: str, prompt: str, model: str, depth: int) -> None:
     """Show that a sub-agent has been launched."""
     _active_subagents[agent_id] = {
