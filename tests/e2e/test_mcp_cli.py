@@ -98,7 +98,7 @@ class TestMcpCliToolExecution:
             result = await manager.call_tool("echo", {"message": "hello from cli test"})
             assert "content" in result or "result" in result, f"Unexpected result shape: {result}"
             text = result.get("content", result.get("result", ""))
-            assert "hello from cli test" in text.lower() or len(text) > 0
+            assert "hello from cli test" in text.lower(), f"Expected echo content in result: {text}"
         finally:
             await manager.shutdown()
 

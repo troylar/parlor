@@ -199,3 +199,5 @@ class TestMcpErrorHandling:
         events = parse_sse_events(resp)
         end_events = [e for e in events if e["event"] == "tool_call_end"]
         assert len(end_events) >= 1
+        tool_result = end_events[0]["data"]
+        assert tool_result["status"] == "error", f"Expected error for invalid timezone, got: {tool_result}"

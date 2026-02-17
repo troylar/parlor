@@ -42,7 +42,7 @@ def _poll_pending_approval(
     while time.monotonic() < deadline:
         pending = getattr(app.state, "pending_approvals", {})
         if pending:
-            return next(iter(pending.keys()))
+            return list(pending.keys())[0]
         time.sleep(poll_interval)
     return None
 

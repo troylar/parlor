@@ -18,7 +18,6 @@ Tests all approval outcomes:
 
 from __future__ import annotations
 
-import uuid
 from typing import Any, AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,49 +28,9 @@ from anteroom.services.agent_loop import AgentEvent, run_agent_loop
 from anteroom.services.mcp_manager import McpManager
 from anteroom.tools import ToolRegistry
 from anteroom.tools.safety import SafetyVerdict
-from tests.e2e.conftest import MCP_TIME_SERVER, requires_mcp, requires_uvx
+from tests.e2e.conftest import MCP_TIME_SERVER, mock_tool_call_stream, requires_mcp, requires_uvx
 
 pytestmark = [pytest.mark.e2e, requires_mcp, requires_uvx]
-
-
-def _make_mock_stream(
-    tool_name: str,
-    arguments: dict[str, Any],
-    tool_call_id: str | None = None,
-    follow_up_text: str = "Here is the result.",
-) -> Any:
-    """Create an async generator that mimics AIService.stream_chat.
-
-    First call yields a tool_call, second call yields text tokens.
-    """
-    if tool_call_id is None:
-        tool_call_id = f"call_{uuid.uuid4().hex[:12]}"
-    call_count = 0
-
-    async def _stream(
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        cancel_event: Any = None,
-        extra_system_prompt: str | None = None,
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            yield {
-                "event": "tool_call",
-                "data": {
-                    "id": tool_call_id,
-                    "function_name": tool_name,
-                    "arguments": arguments,
-                },
-            }
-            yield {"event": "done", "data": {}}
-        else:
-            for token in follow_up_text.split():
-                yield {"event": "token", "data": {"content": token + " "}}
-            yield {"event": "done", "data": {}}
-
-    return _stream
 
 
 def _build_cli_tool_executor(
@@ -214,7 +173,7 @@ class TestCliSessionScope:
 
         result = await executor("get_current_time", {"timezone": "UTC"})
         assert "error" not in result
-        assert "get_current_time" in registry._session_allowed
+        assert registry.check_safety("get_current_time", {}) is None, "Expected session permission to bypass approval"
 
     @pytest.mark.asyncio
     async def test_session_scope_subsequent_auto_approved(self, mcp_manager_with_time: McpManager) -> None:
@@ -261,7 +220,7 @@ class TestCliAlwaysScope:
 
         result = await executor("get_current_time", {"timezone": "UTC"})
         assert "error" not in result
-        assert "get_current_time" in registry._session_allowed
+        assert registry.check_safety("get_current_time", {}) is None, "Expected session permission to bypass approval"
         persist_mock.assert_called_once_with("get_current_time")
 
     @pytest.mark.asyncio
@@ -338,7 +297,7 @@ class TestCliAgentLoopWithApproval:
         executor = _build_cli_tool_executor(registry, mcp_manager_with_time, confirm)
 
         ai_service = MagicMock()
-        ai_service.stream_chat = _make_mock_stream(
+        ai_service.stream_chat = mock_tool_call_stream(
             tool_name="get_current_time",
             arguments={"timezone": "UTC"},
         )
@@ -374,7 +333,7 @@ class TestCliAgentLoopWithApproval:
         executor = _build_cli_tool_executor(registry, mcp_manager_with_time, confirm)
 
         ai_service = MagicMock()
-        ai_service.stream_chat = _make_mock_stream(
+        ai_service.stream_chat = mock_tool_call_stream(
             tool_name="get_current_time",
             arguments={"timezone": "UTC"},
         )
@@ -417,7 +376,7 @@ class TestCliAgentLoopWithApproval:
 
         # First agent_loop run — requires approval
         ai_service = MagicMock()
-        ai_service.stream_chat = _make_mock_stream(
+        ai_service.stream_chat = mock_tool_call_stream(
             tool_name="get_current_time",
             arguments={"timezone": "UTC"},
         )
@@ -436,7 +395,7 @@ class TestCliAgentLoopWithApproval:
 
         # Second agent_loop run — should auto-approve
         ai_service2 = MagicMock()
-        ai_service2.stream_chat = _make_mock_stream(
+        ai_service2.stream_chat = mock_tool_call_stream(
             tool_name="get_current_time",
             arguments={"timezone": "America/Chicago"},
         )
