@@ -1,12 +1,19 @@
 """Security utilities for built-in tools.
 
 Implements path validation and input sanitization per OWASP ASVS V5.
+
+IMPORTANT: sanitize_command() is the LAST LINE OF DEFENSE. It hard-blocks
+catastrophic commands at the handler level, regardless of approval mode,
+allowed_tools, session permissions, or any other config. It cannot be
+bypassed by any user configuration. The safety.py pattern detection and
+tier-based approval system are the primary gates; this is the nuclear option.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -56,23 +63,71 @@ def validate_path(path: str, working_dir: str) -> tuple[str, str | None]:
     return resolved, None
 
 
+# Hard-block patterns: catastrophic commands that should NEVER execute
+# regardless of approval mode, allowed_tools, or session permissions.
+# These are the "CNN headline" commands — mass destruction, fork bombs,
+# disk wipes. Less catastrophic but still dangerous commands (git push --force,
+# drop table) are handled by the approval prompt in safety.py.
+_HARD_BLOCK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Mass recursive deletion
+    (
+        re.compile(
+            r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?-[a-zA-Z]*r|"
+            r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+)?-[a-zA-Z]*f",
+            re.IGNORECASE,
+        ),
+        "recursive forced deletion (rm -rf)",
+    ),
+    # Disk formatting / wiping
+    (re.compile(r"\bmkfs\b", re.IGNORECASE), "disk formatting (mkfs)"),
+    (re.compile(r"\bdd\b.*\bif=/dev/(zero|urandom|random)\b", re.IGNORECASE), "disk overwrite (dd)"),
+    # Fork bombs
+    (re.compile(r":\(\)\s*\{.*\|.*&\s*\}\s*;"), "fork bomb"),
+    (re.compile(r"\bfork\s*bomb\b", re.IGNORECASE), "fork bomb"),
+    # chmod 777 on root or home
+    (re.compile(r"\bchmod\s+(-[a-zA-Z]*R[a-zA-Z]*\s+)?777\s+/\s*$"), "recursive chmod 777 /"),
+    # Pipe to shell from network (curl | sh, wget | bash, etc.)
+    (re.compile(r"\b(curl|wget)\b.*\|\s*(ba)?sh\b"), "pipe from network to shell"),
+    (re.compile(r"\b(curl|wget)\b.*\|\s*sudo\b"), "pipe from network to sudo"),
+    # Direct eval/exec of base64 (common evasion technique)
+    (re.compile(r"\bbase64\b.*\|\s*(ba)?sh\b"), "base64 decode piped to shell"),
+    (re.compile(r"\bbase64\b.*\|\s*sudo\b"), "base64 decode piped to sudo"),
+    # Python/perl/ruby one-liner evasion
+    (
+        re.compile(r"\b(python|python3|perl|ruby)\s+-[a-zA-Z]*e\s+.*\bos\.(system|popen|exec)\b"),
+        "scripted shell escape",
+    ),
+    # sudo rm
+    (re.compile(r"\bsudo\s+rm\b"), "sudo rm"),
+]
+
+
+def _normalize_whitespace(text: str) -> str:
+    """Collapse all whitespace to single spaces for pattern matching."""
+    return re.sub(r"\s+", " ", text.strip())
+
+
 def sanitize_command(command: str) -> tuple[str, str | None]:
-    """Basic validation for shell commands.
+    """Hard-block validation for shell commands.
 
     Returns (command, error_message).
-    We don't heavily restrict commands since this is an agentic coding tool,
-    but we block the most dangerous patterns.
+    This is the last line of defense — it runs at the handler level AFTER
+    all approval checks. It cannot be bypassed by any configuration.
+    Only blocks catastrophic patterns; less dangerous commands are gated
+    by the approval system in safety.py/tiers.py.
     """
     # Reject null bytes
     if "\x00" in command:
         return "", "Command contains null bytes"
 
-    # Block destructive system-level commands
-    stripped = command.strip().split()[0] if command.strip() else ""
-    blocked_commands = {"rm -rf /", "mkfs", "dd if=/dev/zero", ":(){:|:&};:"}
-    for blocked in blocked_commands:
-        if command.strip().startswith(blocked):
-            logger.warning("Blocked dangerous command: %s", command[:50])
-            return "", f"Blocked: {stripped} is not allowed"
+    if not command.strip():
+        return command, None
+
+    normalized = _normalize_whitespace(command)
+
+    for pattern, description in _HARD_BLOCK_PATTERNS:
+        if pattern.search(normalized):
+            logger.warning("HARD BLOCKED dangerous command (%s): %s", description, command[:100])
+            return "", f"Blocked: {description}"
 
     return command, None

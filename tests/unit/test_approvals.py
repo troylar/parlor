@@ -160,6 +160,66 @@ class TestApprovalsRouter:
         )
         assert resp.status_code == 404
 
+    def test_scope_field_accepted(self) -> None:
+        app, pending = _create_test_app()
+        event = asyncio.Event()
+        entry = {"event": event, "approved": False, "scope": "once"}
+        pending["test-id"] = entry
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/approvals/test-id/respond",
+            json={"approved": True, "scope": "session"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["approved"] is True
+        assert data["scope"] == "session"
+        assert entry["scope"] == "session"
+
+    def test_scope_defaults_to_once(self) -> None:
+        app, pending = _create_test_app()
+        event = asyncio.Event()
+        entry = {"event": event, "approved": False, "scope": "once"}
+        pending["test-id"] = entry
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/approvals/test-id/respond",
+            json={"approved": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["scope"] == "once"
+
+    def test_invalid_scope_rejected(self) -> None:
+        app, pending = _create_test_app()
+        event = asyncio.Event()
+        entry = {"event": event, "approved": False, "scope": "once"}
+        pending["test-id"] = entry
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/approvals/test-id/respond",
+            json={"approved": True, "scope": "invalid_scope"},
+        )
+        # Pydantic rejects invalid Literal values with 422
+        assert resp.status_code == 422
+
+    def test_always_scope_accepted(self) -> None:
+        app, pending = _create_test_app()
+        event = asyncio.Event()
+        entry = {"event": event, "approved": False, "scope": "once"}
+        pending["test-id"] = entry
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/approvals/test-id/respond",
+            json={"approved": True, "scope": "always"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["scope"] == "always"
+        assert entry["scope"] == "always"
+
     @pytest.mark.asyncio
     async def test_timeout_returns_denied(self) -> None:
         """Simulate what happens when the approval times out."""

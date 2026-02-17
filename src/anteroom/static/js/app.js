@@ -498,6 +498,11 @@ const App = (() => {
             }
         });
 
+        _eventSource.addEventListener('approval_resolved', (e) => {
+            const data = JSON.parse(e.data);
+            Chat.resolveApprovalCard(data.approval_id, data.approved, data.reason);
+        });
+
         _eventSource.onerror = () => {
             // Reconnect after a delay
             setTimeout(() => {

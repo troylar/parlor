@@ -1514,14 +1514,26 @@ const Chat = (() => {
         const denyBtn = document.createElement('button');
         denyBtn.className = 'approval-btn approval-deny';
         denyBtn.textContent = 'Deny';
-        denyBtn.addEventListener('click', () => _respondApproval(data.approval_id, false, el));
+        denyBtn.addEventListener('click', () => _respondApproval(data.approval_id, false, 'once', el));
         actions.appendChild(denyBtn);
 
-        const allowBtn = document.createElement('button');
-        allowBtn.className = 'approval-btn approval-allow';
-        allowBtn.textContent = 'Allow';
-        allowBtn.addEventListener('click', () => _respondApproval(data.approval_id, true, el));
-        actions.appendChild(allowBtn);
+        const allowOnceBtn = document.createElement('button');
+        allowOnceBtn.className = 'approval-btn approval-allow';
+        allowOnceBtn.textContent = 'Allow Once';
+        allowOnceBtn.addEventListener('click', () => _respondApproval(data.approval_id, true, 'once', el));
+        actions.appendChild(allowOnceBtn);
+
+        const allowSessionBtn = document.createElement('button');
+        allowSessionBtn.className = 'approval-btn approval-session';
+        allowSessionBtn.textContent = 'Allow Session';
+        allowSessionBtn.addEventListener('click', () => _respondApproval(data.approval_id, true, 'session', el));
+        actions.appendChild(allowSessionBtn);
+
+        const allowAlwaysBtn = document.createElement('button');
+        allowAlwaysBtn.className = 'approval-btn approval-always';
+        allowAlwaysBtn.textContent = 'Allow Always';
+        allowAlwaysBtn.addEventListener('click', () => _respondApproval(data.approval_id, true, 'always', el));
+        actions.appendChild(allowAlwaysBtn);
 
         body.appendChild(actions);
         el.appendChild(icon);
@@ -1530,7 +1542,7 @@ const Chat = (() => {
         scrollToBottom();
     }
 
-    async function _respondApproval(approvalId, approved, el) {
+    async function _respondApproval(approvalId, approved, scope, el) {
         const buttons = el.querySelectorAll('.approval-btn');
         buttons.forEach(b => { b.disabled = true; });
 
@@ -1538,12 +1550,13 @@ const Chat = (() => {
             await App.api(`/api/approvals/${encodeURIComponent(approvalId)}/respond`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ approved }),
+                body: JSON.stringify({ approved, scope }),
             });
             el.classList.add(approved ? 'approval-allowed' : 'approval-denied');
             const status = document.createElement('div');
             status.className = 'approval-status';
-            status.textContent = approved ? 'Allowed' : 'Denied';
+            const scopeLabels = { once: 'Allowed', session: 'Allowed for Session', always: 'Always Allowed' };
+            status.textContent = approved ? (scopeLabels[scope] || 'Allowed') : 'Denied';
             const actionsEl = el.querySelector('.approval-actions');
             if (actionsEl) actionsEl.replaceWith(status);
         } catch (err) {
@@ -1552,10 +1565,21 @@ const Chat = (() => {
         }
     }
 
+    function resolveApprovalCard(approvalId, approved, reason) {
+        const el = document.querySelector(`[data-approval-id="${CSS.escape(approvalId)}"]`);
+        if (!el || el.classList.contains('approval-allowed') || el.classList.contains('approval-denied')) return;
+        el.classList.add('approval-denied');
+        const status = document.createElement('div');
+        status.className = 'approval-status';
+        status.textContent = reason === 'timed_out' ? 'Timed out' : 'Denied';
+        const actionsEl = el.querySelector('.approval-actions');
+        if (actionsEl) actionsEl.replaceWith(status);
+    }
+
     return {
         init, sendMessage, loadMessages, stopGeneration, setStreaming, escapeHtml,
         streamChatResponse, isRawMode, setRawMode, setConversationType,
         appendRemoteMessage, startRemoteStream, handleRemoteToken, finalizeRemoteStream,
-        showApprovalPrompt,
+        showApprovalPrompt, resolveApprovalCard,
     };
 })();

@@ -972,13 +972,14 @@ def create_tool_call(
     server_name: str,
     input_data: dict[str, Any],
     tool_call_id: str | None = None,
+    approval_decision: str | None = None,
 ) -> dict[str, Any]:
     tcid = tool_call_id or _uuid()
     now = _now()
     db.execute(
-        "INSERT INTO tool_calls (id, message_id, tool_name, server_name, input_json, status, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (tcid, message_id, tool_name, server_name, json.dumps(input_data), "pending", now),
+        "INSERT INTO tool_calls (id, message_id, tool_name, server_name, input_json, status, created_at,"
+        " approval_decision) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (tcid, message_id, tool_name, server_name, json.dumps(input_data), "pending", now, approval_decision),
     )
     db.commit()
     return {
@@ -990,6 +991,7 @@ def create_tool_call(
         "output": None,
         "status": "pending",
         "created_at": now,
+        "approval_decision": approval_decision,
     }
 
 

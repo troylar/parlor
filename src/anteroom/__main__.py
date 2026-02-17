@@ -305,7 +305,6 @@ def main() -> None:
         default=None,
         help="Override AI model (e.g., gpt-4o, claude-3-opus)",
     )
-
     # `aroom db` subcommand
     db_parser = subparsers.add_parser("db", help="Manage shared databases")
     db_parser.add_argument("db_action", choices=["create", "list", "connect"], help="Database action")
@@ -315,6 +314,19 @@ def main() -> None:
     # Global flags
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--test", action="store_true", help="Test connection settings and exit")
+    parser.add_argument(
+        "--allowed-tools",
+        dest="allowed_tools",
+        default=None,
+        help="Comma-separated list of pre-allowed tools (e.g., bash,write_file)",
+    )
+    parser.add_argument(
+        "--approval-mode",
+        dest="approval_mode",
+        default=None,
+        choices=["auto", "ask_for_dangerous", "ask_for_writes", "ask"],
+        help="Override approval mode for this session",
+    )
 
     args = parser.parse_args()
 
@@ -333,6 +345,25 @@ def main() -> None:
         return
 
     config_path, config = _load_config_or_exit()
+
+    # Apply global safety flag overrides (work for both web UI and CLI modes)
+    _approval_mode = getattr(args, "approval_mode", None)
+    _allowed_tools = getattr(args, "allowed_tools", None)
+    if _approval_mode:
+        config.safety.approval_mode = _approval_mode
+        if _approval_mode == "auto":
+            print(
+                "WARNING: Auto-approval mode active. ALL tool calls will execute without confirmation,",
+                file=sys.stderr,
+            )
+            print(
+                "  including destructive commands (rm, git push --force, etc.).",
+                file=sys.stderr,
+            )
+    if _allowed_tools:
+        extra = [t.strip() for t in _allowed_tools.split(",") if t.strip()]
+        existing = set(config.safety.allowed_tools)
+        config.safety.allowed_tools.extend(t for t in extra if t not in existing)
 
     if args.test:
         asyncio.run(_test_connection(config))

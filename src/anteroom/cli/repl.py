@@ -461,12 +461,35 @@ async def run_cli(
 
     async def _confirm_destructive(verdict: SafetyVerdict) -> bool:
         renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
+        if verdict.details.get("command"):
+            renderer.console.print(f"  Command: [dim]{verdict.details['command']}[/dim]")
+        elif verdict.details.get("path"):
+            renderer.console.print(f"  Path: [dim]{verdict.details['path']}[/dim]")
         try:
             loop = asyncio.get_event_loop()
-            answer = await loop.run_in_executor(None, input, "  Proceed? [y/N] ")
-            return answer.strip().lower() in ("y", "yes")
+            answer = await loop.run_in_executor(
+                None, input, "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
+            )
+            choice = answer.strip().lower()
+            if choice in ("a", "always"):
+                tool_registry.grant_session_permission(verdict.tool_name)
+                _persist_allowed_tool(verdict.tool_name)
+                return True
+            if choice in ("s", "session"):
+                tool_registry.grant_session_permission(verdict.tool_name)
+                return True
+            return choice in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
             return False
+
+    def _persist_allowed_tool(tool_name: str) -> None:
+        """Append a tool to safety.allowed_tools in the config file."""
+        try:
+            from ..config import write_allowed_tool
+
+            write_allowed_tool(tool_name)
+        except Exception as e:
+            renderer.console.print(f"[dim]Could not persist preference: {e}[/dim]")
 
     tool_registry.set_safety_config(config.safety, working_dir=working_dir)
     tool_registry.set_confirm_callback(_confirm_destructive)
@@ -476,6 +499,14 @@ async def run_cli(
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
         if mcp_manager:
+            # MCP tools bypass ToolRegistry — apply safety gate here
+            verdict = tool_registry.check_safety(tool_name, arguments)
+            if verdict and verdict.needs_approval:
+                if verdict.hard_denied:
+                    return {"error": f"Tool '{tool_name}' is blocked by configuration", "safety_blocked": True}
+                confirmed = await _confirm_destructive(verdict)
+                if not confirmed:
+                    return {"error": "Operation denied by user", "exit_code": -1}
             return await mcp_manager.call_tool(tool_name, arguments)
         raise ValueError(f"Unknown tool: {tool_name}")
 

@@ -7,6 +7,8 @@ from typing import Any, Callable, Coroutine
 
 from ..config import SafetyConfig
 from .safety import SafetyVerdict, check_bash_command, check_write_path
+from .tiers import ToolTier as ToolTier
+from .tiers import get_tool_tier, parse_approval_mode, should_require_approval
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ class ToolRegistry:
         self._confirm_callback: ConfirmCallback | None = None
         self._safety_config: SafetyConfig | None = None
         self._working_dir: str | None = None
+        self._session_allowed: set[str] = set()
 
     def set_confirm_callback(self, callback: ConfirmCallback | None) -> None:
         self._confirm_callback = callback
@@ -30,6 +33,17 @@ class ToolRegistry:
     def set_safety_config(self, config: SafetyConfig, working_dir: str | None = None) -> None:
         self._safety_config = config
         self._working_dir = working_dir
+
+    def grant_session_permission(self, tool_name: str) -> None:
+        import re
+
+        if not re.match(r"^[a-zA-Z0-9_\-]{1,128}$", tool_name):
+            logger.warning("Rejected invalid tool name for session permission: %r", tool_name)
+            return
+        self._session_allowed.add(tool_name)
+
+    def clear_session_permissions(self) -> None:
+        self._session_allowed.clear()
 
     def register(self, name: str, handler: ToolHandler, definition: dict[str, Any]) -> None:
         self._handlers[name] = handler
@@ -51,21 +65,97 @@ class ToolRegistry:
             for name, defn in self._definitions.items()
         ]
 
-    def _check_safety(self, tool_name: str, arguments: dict[str, Any]) -> SafetyVerdict | None:
+    def check_safety(self, tool_name: str, arguments: dict[str, Any]) -> SafetyVerdict | None:
+        """Check whether a tool call requires approval.
+
+        Returns a SafetyVerdict if approval is needed/denied, or None if auto-allowed.
+        A verdict with hard_denied=True means the tool is blocked by config (denied_tools
+        or per-tool enabled=false) and must be blocked without prompting.
+        """
         config = self._safety_config
         if not config or not config.enabled:
             return None
 
-        if tool_name == "bash" and config.bash.enabled:
-            command = arguments.get("command", "")
-            return check_bash_command(command, custom_patterns=config.custom_patterns)
+        # Per-tool enabled toggle: when false, hard-deny the tool entirely.
+        if tool_name == "bash" and not config.bash.enabled:
+            return SafetyVerdict(
+                needs_approval=True,
+                reason=f"Tool '{tool_name}' is disabled in safety config",
+                tool_name=tool_name,
+                hard_denied=True,
+            )
+        if tool_name == "write_file" and not config.write_file.enabled:
+            return SafetyVerdict(
+                needs_approval=True,
+                reason=f"Tool '{tool_name}' is disabled in safety config",
+                tool_name=tool_name,
+                hard_denied=True,
+            )
 
-        if tool_name == "write_file" and config.write_file.enabled:
-            path = arguments.get("path", "")
-            working_dir = self._working_dir or "."
-            return check_write_path(path, working_dir, sensitive_paths=config.sensitive_paths)
+        tier = get_tool_tier(tool_name, tier_overrides=config.tool_tiers)
+        mode = parse_approval_mode(config.approval_mode)
 
-        return None
+        result = should_require_approval(
+            tool_name=tool_name,
+            tool_tier=tier,
+            mode=mode,
+            allowed_tools=set(config.allowed_tools) if config.allowed_tools else None,
+            denied_tools=set(config.denied_tools) if config.denied_tools else None,
+            session_allowed=self._session_allowed or None,
+        )
+
+        if result is None:
+            return SafetyVerdict(
+                needs_approval=True,
+                reason=f"Tool '{tool_name}' is in the denied tools list",
+                tool_name=tool_name,
+                hard_denied=True,
+            )
+
+        # Check tool-specific destructive patterns even when tier says auto-allow,
+        # but NOT in auto mode (auto mode bypasses everything).
+        from .tiers import ApprovalMode
+
+        if result is False and mode != ApprovalMode.AUTO:
+            if tool_name == "bash":
+                verdict = check_bash_command(arguments.get("command", ""), custom_patterns=config.custom_patterns)
+                if verdict.needs_approval:
+                    return verdict
+            if tool_name == "write_file":
+                verdict = check_write_path(
+                    arguments.get("path", ""), self._working_dir or ".", sensitive_paths=config.sensitive_paths
+                )
+                if verdict.needs_approval:
+                    return verdict
+            return None
+
+        if result is False:
+            return None
+
+        # Tier-based approval required — return generic verdict for the tool
+        if tool_name == "bash":
+            return SafetyVerdict(
+                needs_approval=True,
+                reason=f"Tool '{tool_name}' requires approval (mode: {config.approval_mode})",
+                tool_name=tool_name,
+                details={"command": arguments.get("command", "")},
+            )
+
+        if tool_name == "write_file":
+            return SafetyVerdict(
+                needs_approval=True,
+                reason=f"Tool '{tool_name}' requires approval (mode: {config.approval_mode})",
+                tool_name=tool_name,
+                details={"path": arguments.get("path", "")},
+            )
+
+        # Generic approval for other tools (edit_file, MCP tools, etc.)
+        return SafetyVerdict(
+            needs_approval=True,
+            reason=f"Tool '{tool_name}' requires approval (mode: {config.approval_mode})",
+            tool_name=tool_name,
+            details={},
+        )
 
     async def call_tool(
         self,
@@ -77,17 +167,32 @@ class ToolRegistry:
         if not handler:
             raise ValueError(f"Unknown built-in tool: {name}")
 
-        verdict = self._check_safety(name, arguments)
+        verdict = self.check_safety(name, arguments)
+        approval_decision = "auto"
         if verdict and verdict.needs_approval:
+            if verdict.hard_denied:
+                logger.warning("Tool hard-denied by config: %s", name)
+                return {
+                    "error": f"Tool '{name}' is blocked by configuration",
+                    "safety_blocked": True,
+                    "_approval_decision": "hard_denied",
+                }
             callback = confirm_callback or self._confirm_callback
             if callback is None:
                 logger.warning("Safety gate blocked (no approval channel): %s", verdict.reason)
-                return {"error": "Operation blocked: no approval channel available", "safety_blocked": True}
+                return {
+                    "error": "Operation blocked: no approval channel available",
+                    "safety_blocked": True,
+                    "_approval_decision": "denied",
+                }
             confirmed = await callback(verdict)
             if not confirmed:
-                return {"error": "Operation denied by user", "exit_code": -1}
+                return {"error": "Operation denied by user", "exit_code": -1, "_approval_decision": "denied"}
+            approval_decision = "allowed_once"
 
-        return await handler(**arguments)
+        result = await handler(**arguments)
+        result["_approval_decision"] = approval_decision
+        return result
 
     def list_tools(self) -> list[str]:
         return list(self._handlers.keys())

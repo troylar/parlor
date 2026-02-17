@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     output_json TEXT,
     status TEXT NOT NULL CHECK(status IN ('pending', 'success', 'error')),
     created_at TEXT NOT NULL,
+    approval_decision TEXT DEFAULT NULL,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
@@ -431,6 +432,13 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )"""
     )
+
+    # Add approval_decision column to tool_calls (table may not exist in very old schemas)
+    tc_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "tool_calls" in tc_tables:
+        tc_cols = {row[1] for row in conn.execute("PRAGMA table_info(tool_calls)").fetchall()}
+        if "approval_decision" not in tc_cols:
+            conn.execute("ALTER TABLE tool_calls ADD COLUMN approval_decision TEXT DEFAULT NULL")
 
     # Ensure message_embeddings metadata table exists
     try:
