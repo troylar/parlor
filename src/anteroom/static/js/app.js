@@ -365,11 +365,11 @@ const App = (() => {
     async function newConversation() {
         const payload = {};
         if (state.currentProjectId) payload.project_id = state.currentProjectId;
-        const opts = { method: 'POST' };
-        if (Object.keys(payload).length > 0) {
-            opts.headers = { 'Content-Type': 'application/json' };
-            opts.body = JSON.stringify(payload);
-        }
+        const opts = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        };
         const conv = await api('/api/conversations', opts);
         state.currentConversationId = conv.id;
         state.currentConversationType = 'chat';

@@ -163,7 +163,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'sha256-XOZ/E5zGhh3+pD1xPPme298VAabSp0Pt7SmU0EdZqKY='; "
+            "script-src 'self' 'sha256-os8eBqepmojbV7o9EA/H5axJe8VOx1ngDoptqveTNpA='; "
             "style-src 'self' 'unsafe-inline'; "
             "font-src 'self'; "
             "img-src 'self' data: blob:; "
