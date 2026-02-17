@@ -562,7 +562,25 @@ async def chat(conversation_id: str, request: Request):
 
         return approved
 
+    _subagent_counter = 0
+    _subagent_events: dict[str, list[dict[str, Any]]] = {}
+    _max_subagent_events = 500
+
+    async def _web_event_sink(agent_id: str, event: Any) -> None:
+        """Buffer sub-agent events for SSE emission, partitioned by agent_id."""
+        kind = event.kind
+        data = event.data
+        if kind in ("subagent_start", "subagent_end", "tool_call_start"):
+            buf = _subagent_events.setdefault(agent_id, [])
+            if len(buf) < _max_subagent_events:
+                buf.append({"kind": kind, "agent_id": agent_id, **data})
+
+    from ..tools.subagent import SubagentLimiter
+
+    _subagent_limiter = SubagentLimiter()
+
     async def _tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        nonlocal _subagent_counter
         if tool_name in ("create_canvas", "update_canvas", "patch_canvas"):
             arguments = {
                 **arguments,
@@ -570,6 +588,18 @@ async def chat(conversation_id: str, request: Request):
                 "_db": db,
                 "_user_id": uid,
                 "_user_display_name": uname,
+            }
+        elif tool_name == "run_agent":
+            _subagent_counter += 1
+            arguments = {
+                **arguments,
+                "_ai_service": ai_service,
+                "_tool_registry": tool_registry,
+                "_cancel_event": cancel_event,
+                "_depth": 0,
+                "_agent_id": f"agent-{_subagent_counter}",
+                "_event_sink": _web_event_sink,
+                "_limiter": _subagent_limiter,
             }
 
         def _scope_to_decision() -> str:
@@ -579,7 +609,6 @@ async def chat(conversation_id: str, request: Request):
             return {"once": "allowed_once", "session": "allowed_session", "always": "allowed_always"}.get(
                 scope, "allowed_once"
             )
-
         if tool_registry.has_tool(tool_name):
             result = await tool_registry.call_tool(tool_name, arguments, confirm_callback=_web_confirm)
             # Upgrade generic "allowed_once" with actual scope if user chose session/always
@@ -827,6 +856,17 @@ async def chat(conversation_id: str, request: Request):
                                         }
                                     ),
                                 }
+
+                    # Emit buffered sub-agent events when a run_agent tool completes.
+                    # Drain all completed agent partitions (each event carries its agent_id).
+                    if data["tool_name"] == "run_agent":
+                        for sa_agent_id in list(_subagent_events.keys()):
+                            for sa_event in _subagent_events[sa_agent_id]:
+                                yield {
+                                    "event": "subagent_event",
+                                    "data": json.dumps(sa_event),
+                                }
+                        _subagent_events.clear()
 
                 elif kind == "error":
                     yield {"event": "error", "data": json.dumps(data)}

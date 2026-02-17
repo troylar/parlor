@@ -200,7 +200,7 @@ class ToolRegistry:
 
 def register_default_tools(registry: ToolRegistry, working_dir: str | None = None) -> None:
     """Register all built-in tools."""
-    from . import bash, edit, glob_tool, grep, read, write
+    from . import bash, edit, glob_tool, grep, read, subagent, write
     from .canvas import (
         CANVAS_CREATE_DEFINITION,
         CANVAS_PATCH_DEFINITION,
@@ -220,3 +220,4 @@ def register_default_tools(registry: ToolRegistry, working_dir: str | None = Non
     registry.register(CANVAS_CREATE_DEFINITION["name"], handle_create_canvas, CANVAS_CREATE_DEFINITION)
     registry.register(CANVAS_UPDATE_DEFINITION["name"], handle_update_canvas, CANVAS_UPDATE_DEFINITION)
     registry.register(CANVAS_PATCH_DEFINITION["name"], handle_patch_canvas, CANVAS_PATCH_DEFINITION)
+    registry.register(subagent.DEFINITION["name"], subagent.handle, subagent.DEFINITION)

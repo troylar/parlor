@@ -140,6 +140,11 @@ def _humanize_tool(tool_name: str, arguments: dict[str, Any]) -> str:
     elif name_lower in ("glob", "find_files"):
         pattern = arguments.get("pattern", "")
         return f"Finding {pattern}"
+    elif name_lower == "run_agent":
+        prompt = arguments.get("prompt", "")
+        if len(prompt) > 60:
+            prompt = prompt[:57] + "..."
+        return f"Sub-agent: {prompt}"
     elif name_lower == "list_directory":
         path = arguments.get("path", ".")
         return f"Listing {_short_path(path)}"
@@ -808,6 +813,56 @@ def render_verbosity_change(v: Verbosity) -> None:
 # ---------------------------------------------------------------------------
 # Context footer (compact)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Sub-agent rendering
+# ---------------------------------------------------------------------------
+
+_active_subagents: dict[str, dict[str, Any]] = {}
+
+
+def render_subagent_start(agent_id: str, prompt: str, model: str, depth: int) -> None:
+    """Show that a sub-agent has been launched."""
+    _active_subagents[agent_id] = {
+        "prompt": prompt,
+        "model": model,
+        "depth": depth,
+        "tools": [],
+        "start_time": time.monotonic(),
+    }
+    indent = "  " * depth
+    truncated_prompt = prompt[:80] + "..." if len(prompt) > 80 else prompt
+    console.print(f"{indent}[#C5A059]▶ Agent[/] [bold]{escape(agent_id)}[/bold] [dim]({model})[/dim]")
+    console.print(f"{indent}  [grey62]{escape(truncated_prompt)}[/grey62]")
+
+
+def render_subagent_tool(agent_id: str, tool_name: str) -> None:
+    """Show a tool being used by a sub-agent (compact breadcrumb)."""
+    info = _active_subagents.get(agent_id)
+    if not info:
+        return
+    info["tools"].append(tool_name)
+    depth = info.get("depth", 1)
+    indent = "  " * depth
+    summary = _humanize_tool(tool_name, {})
+    console.print(f"{indent}  [grey62]  ✓ {escape(summary)}[/grey62]")
+
+
+def render_subagent_end(agent_id: str, elapsed: float, tool_calls: list[str], error: str | None = None) -> None:
+    """Show sub-agent completion."""
+    info = _active_subagents.pop(agent_id, None)
+    depth = info.get("depth", 1) if info else 1
+    indent = "  " * depth
+    tool_count = len(tool_calls)
+
+    if error:
+        console.print(f"{indent}[red]■ Agent {escape(agent_id)} failed ({elapsed:.1f}s): {escape(error)}[/red]")
+    else:
+        console.print(
+            f"{indent}[green]■ Agent {escape(agent_id)}[/green] "
+            f"[dim]done in {elapsed:.1f}s · {tool_count} tool call{'s' if tool_count != 1 else ''}[/dim]"
+        )
 
 
 def render_context_footer(

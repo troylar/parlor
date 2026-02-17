@@ -300,6 +300,9 @@ const Chat = (() => {
                 currentAssistantEl = appendMessage('assistant', '');
                 document.querySelectorAll('.queued-badge').forEach(b => b.remove());
                 break;
+            case 'subagent_event':
+                renderSubagentEvent(data);
+                break;
             case 'done':
                 hideThinking();
                 finalizeAssistant();
@@ -1278,6 +1281,65 @@ const Chat = (() => {
         outputPre.appendChild(outputCode);
         hljs.highlightElement(outputCode);
         toolContent.appendChild(outputPre);
+    }
+
+    function renderSubagentEvent(data) {
+        if (!currentAssistantEl) return;
+        const contentEl = currentAssistantEl.querySelector('.message-content');
+        const kind = data.kind;
+        const agentId = data.agent_id;
+
+        if (kind === 'subagent_start') {
+            const card = document.createElement('div');
+            card.className = 'subagent-card';
+            card.id = `subagent-${_sanitizeId(agentId)}`;
+
+            const header = document.createElement('div');
+            header.className = 'subagent-header';
+            const label = document.createElement('span');
+            label.className = 'subagent-label';
+            label.textContent = agentId;
+            const model = document.createElement('span');
+            model.className = 'subagent-model';
+            model.textContent = data.model || '';
+            header.appendChild(label);
+            header.appendChild(model);
+
+            const prompt = document.createElement('div');
+            prompt.className = 'subagent-prompt';
+            prompt.textContent = data.prompt || '';
+
+            const tools = document.createElement('div');
+            tools.className = 'subagent-tools';
+
+            card.appendChild(header);
+            card.appendChild(prompt);
+            card.appendChild(tools);
+            contentEl.appendChild(card);
+            scrollToBottom();
+        } else if (kind === 'tool_call_start' && agentId) {
+            const card = document.getElementById(`subagent-${_sanitizeId(agentId)}`);
+            if (card) {
+                const tools = card.querySelector('.subagent-tools');
+                const chip = document.createElement('span');
+                chip.className = 'subagent-tool-chip';
+                chip.textContent = data.tool_name || 'tool';
+                tools.appendChild(chip);
+            }
+        } else if (kind === 'subagent_end') {
+            const card = document.getElementById(`subagent-${_sanitizeId(agentId)}`);
+            if (card) {
+                card.classList.add(data.error ? 'subagent-error' : 'subagent-done');
+                const footer = document.createElement('div');
+                footer.className = 'subagent-footer';
+                const elapsed = data.elapsed_seconds != null ? `${data.elapsed_seconds.toFixed(1)}s` : '';
+                const toolCount = (data.tool_calls || []).length;
+                footer.textContent = data.error
+                    ? `Failed: ${data.error}`
+                    : `Done in ${elapsed} · ${toolCount} tool call${toolCount !== 1 ? 's' : ''}`;
+                card.appendChild(footer);
+            }
+        }
     }
 
     function setStreaming(streaming) {

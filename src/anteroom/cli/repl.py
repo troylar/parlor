@@ -509,7 +509,41 @@ async def run_cli(
     tool_registry.set_confirm_callback(_confirm_destructive)
 
     # Build unified tool executor
+    _subagent_counter = 0
+
+    from ..tools.subagent import SubagentLimiter
+
+    _subagent_limiter = SubagentLimiter()
+
+    async def _cli_event_sink(agent_id: str, event: Any) -> None:
+        """Render sub-agent progress events in the CLI."""
+        kind = event.kind
+        data = event.data
+        if kind == "subagent_start":
+            renderer.render_subagent_start(
+                agent_id, data.get("prompt", ""), data.get("model", ""), data.get("depth", 1)
+            )
+        elif kind == "tool_call_start":
+            renderer.render_subagent_tool(agent_id, data.get("tool_name", ""))
+        elif kind == "subagent_end":
+            renderer.render_subagent_end(
+                agent_id, data.get("elapsed_seconds", 0), data.get("tool_calls", []), data.get("error")
+            )
+
     async def tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        nonlocal _subagent_counter
+        if tool_name == "run_agent":
+            _subagent_counter += 1
+            arguments = {
+                **arguments,
+                "_ai_service": ai_service,
+                "_tool_registry": tool_registry,
+                "_cancel_event": None,
+                "_depth": 0,
+                "_agent_id": f"agent-{_subagent_counter}",
+                "_event_sink": _cli_event_sink,
+                "_limiter": _subagent_limiter,
+            }
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
         if mcp_manager:
