@@ -609,6 +609,7 @@ async def chat(conversation_id: str, request: Request):
             return {"once": "allowed_once", "session": "allowed_session", "always": "allowed_always"}.get(
                 scope, "allowed_once"
             )
+
         if tool_registry.has_tool(tool_name):
             result = await tool_registry.call_tool(tool_name, arguments, confirm_callback=_web_confirm)
             # Upgrade generic "allowed_once" with actual scope if user chose session/always
@@ -858,15 +859,18 @@ async def chat(conversation_id: str, request: Request):
                                 }
 
                     # Emit buffered sub-agent events when a run_agent tool completes.
-                    # Drain all completed agent partitions (each event carries its agent_id).
+                    # Only drain partitions whose subagent_end has been received,
+                    # preserving events for still-running concurrent sub-agents.
                     if data["tool_name"] == "run_agent":
                         for sa_agent_id in list(_subagent_events.keys()):
-                            for sa_event in _subagent_events[sa_agent_id]:
-                                yield {
-                                    "event": "subagent_event",
-                                    "data": json.dumps(sa_event),
-                                }
-                        _subagent_events.clear()
+                            events = _subagent_events[sa_agent_id]
+                            if any(e["kind"] == "subagent_end" for e in events):
+                                for sa_event in events:
+                                    yield {
+                                        "event": "subagent_event",
+                                        "data": json.dumps(sa_event),
+                                    }
+                                del _subagent_events[sa_agent_id]
 
                 elif kind == "error":
                     yield {"event": "error", "data": json.dumps(data)}

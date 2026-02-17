@@ -189,7 +189,7 @@ async def _run_subagent(
         if tool_name == "run_agent":
             _child_counter += 1
             arguments = dict(arguments)
-            arguments["_ai_service"] = _ai_service
+            arguments["_ai_service"] = child_ai
             arguments["_tool_registry"] = _tool_registry
             arguments["_cancel_event"] = _cancel_event
             arguments["_depth"] = child_depth
