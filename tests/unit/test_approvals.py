@@ -191,7 +191,7 @@ class TestApprovalsRouter:
         assert resp.status_code == 200
         assert resp.json()["scope"] == "once"
 
-    def test_invalid_scope_defaults_to_once(self) -> None:
+    def test_invalid_scope_rejected(self) -> None:
         app, pending = _create_test_app()
         event = asyncio.Event()
         entry = {"event": event, "approved": False, "scope": "once"}
@@ -202,8 +202,8 @@ class TestApprovalsRouter:
             "/api/approvals/test-id/respond",
             json={"approved": True, "scope": "invalid_scope"},
         )
-        assert resp.status_code == 200
-        assert resp.json()["scope"] == "once"
+        # Pydantic rejects invalid Literal values with 422
+        assert resp.status_code == 422
 
     def test_always_scope_accepted(self) -> None:
         app, pending = _create_test_app()

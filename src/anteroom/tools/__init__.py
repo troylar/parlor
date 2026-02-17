@@ -69,19 +69,28 @@ class ToolRegistry:
         """Check whether a tool call requires approval.
 
         Returns a SafetyVerdict if approval is needed/denied, or None if auto-allowed.
-        A verdict with needs_approval=True and details["hard_denied"]=True means the
-        tool is in denied_tools and must be blocked without prompting.
+        A verdict with hard_denied=True means the tool is blocked by config (denied_tools
+        or per-tool enabled=false) and must be blocked without prompting.
         """
         config = self._safety_config
         if not config or not config.enabled:
             return None
 
-        # Legacy per-tool safety toggle: when disabled, skip safety checks for this tool.
-        # NOTE: this disables *safety checks*, not the tool itself. The tool still executes.
+        # Per-tool enabled toggle: when false, hard-deny the tool entirely.
         if tool_name == "bash" and not config.bash.enabled:
-            return None
+            return SafetyVerdict(
+                needs_approval=True,
+                reason=f"Tool '{tool_name}' is disabled in safety config",
+                tool_name=tool_name,
+                hard_denied=True,
+            )
         if tool_name == "write_file" and not config.write_file.enabled:
-            return None
+            return SafetyVerdict(
+                needs_approval=True,
+                reason=f"Tool '{tool_name}' is disabled in safety config",
+                tool_name=tool_name,
+                hard_denied=True,
+            )
 
         tier = get_tool_tier(tool_name, tier_overrides=config.tool_tiers)
         mode = parse_approval_mode(config.approval_mode)

@@ -149,7 +149,7 @@ class TestToolRegistry:
         assert result.get("safety_blocked") is not True
 
     @pytest.mark.asyncio
-    async def test_bash_subgate_disabled_skips_check(self) -> None:
+    async def test_bash_subgate_disabled_hard_denies(self) -> None:
         from anteroom.config import SafetyConfig, SafetyToolConfig
 
         reg = ToolRegistry()
@@ -158,10 +158,10 @@ class TestToolRegistry:
             SafetyConfig(bash=SafetyToolConfig(enabled=False)),
             working_dir="/tmp",
         )
-        # No callback set — if safety checked, this would fail closed.
-        # With bash sub-gate disabled, it should pass through to the tool.
-        result = await reg.call_tool("bash", {"command": "rm nonexistent_file_xyz"})
-        assert result.get("safety_blocked") is not True
+        # With bash disabled, the tool should be hard-denied (not bypassed).
+        result = await reg.call_tool("bash", {"command": "echo hello"})
+        assert result.get("safety_blocked") is True
+        assert result["_approval_decision"] == "hard_denied"
 
     @pytest.mark.asyncio
     async def test_per_call_callback_overrides_registry(self) -> None:
@@ -184,7 +184,7 @@ class TestToolRegistry:
         assert "denied" not in result.get("error", "").lower()
 
     @pytest.mark.asyncio
-    async def test_write_file_subgate_disabled_skips_check(self) -> None:
+    async def test_write_file_subgate_disabled_hard_denies(self) -> None:
         from anteroom.config import SafetyConfig, SafetyToolConfig
 
         reg = ToolRegistry()
@@ -193,8 +193,9 @@ class TestToolRegistry:
             SafetyConfig(write_file=SafetyToolConfig(enabled=False)),
             working_dir="/tmp",
         )
-        result = await reg.call_tool("write_file", {"path": ".env", "content": "SECRET=foo"})
-        assert result.get("safety_blocked") is not True
+        result = await reg.call_tool("write_file", {"path": "safe.txt", "content": "hello"})
+        assert result.get("safety_blocked") is True
+        assert result["_approval_decision"] == "hard_denied"
 
     @pytest.mark.asyncio
     async def test_no_safety_config_set_passes_through(self) -> None:
@@ -357,6 +358,17 @@ class TestToolTierSafety:
         verdict = reg.check_safety("bash", {"command": "echo hello"})
         assert verdict is not None
         assert verdict.hard_denied is True
+
+    def test_check_safety_disabled_tool_hard_denies(self) -> None:
+        from anteroom.config import SafetyConfig, SafetyToolConfig
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(bash=SafetyToolConfig(enabled=False)), working_dir="/tmp")
+        verdict = reg.check_safety("bash", {"command": "echo hello"})
+        assert verdict is not None
+        assert verdict.hard_denied is True
+        assert "disabled" in verdict.reason
 
 
 class TestApprovalDecisionAudit:

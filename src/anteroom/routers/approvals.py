@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -21,7 +22,7 @@ _VALID_SCOPES = {"once", "session", "always"}
 
 class ApprovalRequest(BaseModel):
     approved: bool = False
-    scope: str = "once"
+    scope: Literal["once", "session", "always"] = "once"
 
 
 @router.post("/approvals/{approval_id}/respond")
@@ -34,7 +35,7 @@ async def respond_approval(approval_id: str, body: ApprovalRequest, request: Req
         logger.warning("Invalid approval ID format: %r", approval_id[:80])
         raise HTTPException(status_code=400, detail="Invalid approval ID format")
 
-    scope = body.scope if body.scope in _VALID_SCOPES else "once"
+    scope = body.scope
 
     pending = getattr(request.app.state, "pending_approvals", {})
     # Atomic pop to prevent TOCTOU: only the first responder gets the entry
