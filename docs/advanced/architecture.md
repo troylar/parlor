@@ -24,7 +24,8 @@ src/anteroom/
 │   ├── __init__.py           # ToolRegistry pattern
 │   ├── security.py           # Path blocking, command confirmation (hard blocks)
 │   ├── safety.py             # Configurable approval gate: check_bash_command(), check_write_path()
-│   └── canvas.py             # Canvas tools: create_canvas, update_canvas, patch_canvas
+│   ├── canvas.py             # Canvas tools: create_canvas, update_canvas, patch_canvas
+│   └── subagent.py           # Sub-agent tool: isolated child AI sessions for parallel execution
 ├── cli/
 │   ├── repl.py               # REPL with prompt_toolkit
 │   └── default_skills/       # Built-in skill YAML files
@@ -61,6 +62,7 @@ Key behaviors:
 - **Auto-compact**: Triggers at 100K tokens
 - **Thinking events**: Emitted between tool execution and next API call
 - **Prompt queue**: Accepts optional `message_queue` param; checks queue after each `done` event
+- **Sub-agents**: `run_agent` tool spawns isolated child loops with depth limiting (max 3), concurrency control (max 5 concurrent, 20 total), and defensive system prompts
 
 ## Storage Layer
 

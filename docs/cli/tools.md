@@ -1,6 +1,6 @@
 # Built-in Tools
 
-Nine tools ship out of the box with no MCP server required.
+Ten tools ship out of the box with no MCP server required.
 
 ## Tool Reference
 
@@ -116,6 +116,17 @@ Apply incremental search-and-replace edits to an existing canvas. More token-eff
 
 Each edit must match exactly once. Emits a `canvas_patched` SSE event.
 
+### run_agent
+
+Launch an autonomous sub-agent to handle a complex or independent task in parallel. The sub-agent runs its own AI session with access to all built-in tools and returns a summary of its work.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `prompt` | string | Detailed, self-contained instruction for the sub-agent |
+| `model` | string | Optional model override (e.g. `gpt-4o-mini` for fast tasks) |
+
+Sub-agents run in isolated conversation contexts — they cannot see the parent's history. Multiple `run_agent` calls execute concurrently. Guarded by concurrency limits (max 5 concurrent, 20 total per request) and depth limits (max 3 levels of nesting).
+
 ## How Tools Work
 
 All file tools resolve paths relative to the working directory (or accept absolute paths). Every tool returns structured JSON that the AI uses to inform its next action.
@@ -135,4 +146,4 @@ cli:
   builtin_tools: false
 ```
 
-This disables all nine built-in tools. MCP tools (if configured) still work.
+This disables all ten built-in tools. MCP tools (if configured) still work.
