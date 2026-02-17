@@ -33,19 +33,48 @@ Deploy the current branch to PyPI after merging, CI verification, and version bu
 
 ### Step 2: Verify Documentation
 
-Before merging, ensure `CLAUDE.md` is accurate and up to date:
+Before merging, audit **all documentation surfaces** for accuracy. Extract the primary issue number from the branch name or PR body for any doc-fix commits.
 
-1. **Test count** — run `grep -r "def test_" tests/ | wc -l` and compare to the count in CLAUDE.md. Update if stale.
-2. **New modules** — check for any new `.py` files under `src/anteroom/` not mentioned in the "Key Modules" section. Add them.
+#### 2a. CLAUDE.md
+
+1. **New modules** — check for any new `.py` files under `src/anteroom/` not mentioned in the "Key Modules" section. Add them.
+2. **Stale descriptions** — for modified modules, verify the CLAUDE.md description still matches the actual code behavior.
 3. **New config fields** — check `config.py` dataclasses for fields not documented in the "Configuration" section. Add them.
 4. **New agent events** — check `agent_loop.py` for any `AgentEvent(kind=...)` values not mentioned. Document them.
 5. **Architecture changes** — if the PR added middleware, new routers, or changed the security model, update those sections.
-6. **Version in pyproject.toml** — note the pre-bump version for reference.
+6. **Database changes** — check `db.py` for new tables or columns not in the "Database" section. Add them.
+7. **Architecture diagram** — if new services or routers were added, update the ASCII diagram.
+8. **Version in pyproject.toml** — note the pre-bump version for reference.
 
-If any updates are needed, commit them as part of the PR before merging:
+#### 2b. README.md
+
+1. **New CLI commands or flags** not mentioned in README? Add them.
+2. **Feature descriptions** that no longer match current behavior? Update them.
+3. **Installation or quickstart instructions** still accurate? Verify.
+
+#### 2c. VISION.md
+
+1. **Current Direction** — does the PR add capabilities that should be reflected? Update if so.
+2. **Scope boundaries** — any changes that affect what's in/out of scope? Flag for review.
+
+#### 2d. MkDocs docs/ pages
+
+For each changed source file, check the corresponding docs page(s):
+- `src/anteroom/cli/` changes → `docs/cli/`
+- `src/anteroom/routers/` changes → `docs/api/` and `docs/web-ui/`
+- `src/anteroom/tools/` changes → `docs/cli/tools.md`
+- `src/anteroom/config.py` changes → `docs/configuration/`
+- Security changes → `docs/security/`
+- `app.py` middleware changes → `docs/security/` and `docs/advanced/architecture.md`
+
+Flag pages that reference behavior the PR changed but weren't updated. Flag new features with no corresponding docs page.
+
+#### 2e. Commit doc fixes
+
+If any updates are needed, commit them before merging. Use the PR's primary issue number:
 ```bash
-git add CLAUDE.md
-git commit -m "docs: update CLAUDE.md for vX.Y.Z release (#NN)"
+git add CLAUDE.md README.md VISION.md docs/
+git commit -m "docs: update documentation for vX.Y.Z release (#<primary issue>)"
 git push
 ```
 
@@ -203,9 +232,33 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "<generated notes>"
 
 On success:
 ```
-Deployed anteroom vX.Y.Z to PyPI
-  PR: #NN (merged)
-  CI: passed
-  PyPI: https://pypi.org/project/anteroom/X.Y.Z/
-  Release: https://github.com/troylar/anteroom/releases/tag/vX.Y.Z
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 Deployed anteroom vX.Y.Z
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🔗 PR:       #NN (merged)
+  🧪 CI:       ✅ passed
+  📖 Docs:     ✅ up to date / ⚠️ N updates committed
+  📦 PyPI:     https://pypi.org/project/anteroom/X.Y.Z/
+  🏷️ Tag:      vX.Y.Z
+  🏷️ Release:  https://github.com/troylar/anteroom/releases/tag/vX.Y.Z
+  📊 Version:  X.Y.Z-1 → X.Y.Z (<type> bump)
+
+────────────────────────────────────────────
+  ✅ Deploy complete
+────────────────────────────────────────────
+```
+
+On failure:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ❌ Deploy Failed
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Step:    <which step failed>
+  Error:   <error message>
+
+────────────────────────────────────────────
+  👉 Next: <what to do to fix it>
+────────────────────────────────────────────
 ```
