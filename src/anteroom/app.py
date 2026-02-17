@@ -99,7 +99,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             await mcp_manager.startup()
             tools = mcp_manager.get_all_tools()
-            logger.info(f"MCP: {len(tools)} tools available from {len(config.mcp_servers)} server(s)")
+            logger.info(
+                f"MCP: {len(tools)} tools available from {len(config.mcp_servers)} server(s)"
+            )
         except Exception as e:
             logger.warning(f"MCP startup error: {e}")
     app.state.mcp_manager = mcp_manager
@@ -108,7 +110,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     working_dir = os.getcwd()
     register_default_tools(tool_registry, working_dir=working_dir)
     app.state.tool_registry = tool_registry
-    logger.info(f"Built-in tools: {len(tool_registry.list_tools())} registered (cwd: {working_dir})")
+    logger.info(
+        f"Built-in tools: {len(tool_registry.list_tools())} registered (cwd: {working_dir})"
+    )
 
     # Destructive tool approvals (Web UI)
     from .services.approvals import ApprovalManager
@@ -152,7 +156,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app.state.embedding_worker = worker
             logger.info("Embedding worker started")
         else:
-            logger.info("Embedding service available but sqlite-vec not loaded; vector search disabled")
+            logger.info(
+                "Embedding service available but sqlite-vec not loaded; vector search disabled"
+            )
     else:
         logger.info("Embedding service not configured; vector search disabled")
 
@@ -182,9 +188,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), payment=()"
+        )
         if self.tls_enabled:
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self'; "
@@ -207,7 +217,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class MaxBodySizeMiddleware(BaseHTTPMiddleware):
     """Reject requests with Content-Length exceeding the limit."""
 
-    def __init__(self, app: FastAPI, max_body_size: int = MAX_REQUEST_BODY_BYTES) -> None:
+    def __init__(
+        self, app: FastAPI, max_body_size: int = MAX_REQUEST_BODY_BYTES
+    ) -> None:
         super().__init__(app)
         self.max_body_size = max_body_size
 
@@ -219,7 +231,9 @@ class MaxBodySizeMiddleware(BaseHTTPMiddleware):
                 request.client.host if request.client else "unknown",
                 content_length,
             )
-            return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+            return JSONResponse(
+                status_code=413, content={"detail": "Request body too large"}
+            )
         return await call_next(request)
 
 
@@ -228,7 +242,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     MAX_TRACKED_IPS = 10000
 
-    def __init__(self, app: FastAPI, max_requests: int = 60, window_seconds: int = 60) -> None:
+    def __init__(
+        self, app: FastAPI, max_requests: int = 60, window_seconds: int = 60
+    ) -> None:
         super().__init__(app)
         self.max_requests = max_requests
         self.window = window_seconds
@@ -255,7 +271,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if len(hits) >= self.max_requests:
             security_logger.warning("Rate limit exceeded for IP %s", client_ip)
-            return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+            return JSONResponse(
+                status_code=429, content={"detail": "Too many requests"}
+            )
         hits.append(now)
         return await call_next(request)
 
@@ -291,7 +309,9 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
 
         if not self._is_session_valid():
-            security_logger.warning("Expired session access attempt from %s: %s", client_ip, path)
+            security_logger.warning(
+                "Expired session access attempt from %s: %s", client_ip, path
+            )
             return JSONResponse(status_code=401, content={"detail": "Session expired"})
 
         # Check Authorization header
@@ -307,13 +327,26 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             if request.method in ("POST", "PATCH", "PUT", "DELETE"):
                 csrf_cookie = request.cookies.get("anteroom_csrf", "")
                 csrf_header = request.headers.get("x-csrf-token", "")
-                if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
-                    security_logger.warning("CSRF validation failed from %s: %s %s", client_ip, request.method, path)
-                    return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+                if (
+                    not csrf_cookie
+                    or not csrf_header
+                    or not hmac.compare_digest(csrf_cookie, csrf_header)
+                ):
+                    security_logger.warning(
+                        "CSRF validation failed from %s: %s %s",
+                        client_ip,
+                        request.method,
+                        path,
+                    )
+                    return JSONResponse(
+                        status_code=403, content={"detail": "CSRF validation failed"}
+                    )
             self._last_activity = time.time()
             return await call_next(request)
 
-        security_logger.warning("Authentication failed from %s: %s %s", client_ip, request.method, path)
+        security_logger.warning(
+            "Authentication failed from %s: %s %s", client_ip, request.method, path
+        )
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
 
@@ -339,8 +372,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        security_logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
-        return JSONResponse(status_code=500, content={"detail": "An internal error occurred"})
+        security_logger.exception(
+            "Unhandled exception on %s %s", request.method, request.url.path
+        )
+        return JSONResponse(
+            status_code=500, content={"detail": "An internal error occurred"}
+        )
 
     scheme = "https" if config.app.tls else "http"
     origin = f"{scheme}://{config.app.host}:{config.app.port}"
@@ -369,7 +406,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.state.csrf_token = csrf_token
     cache_bust = str(int(time.time()))
 
-    from .routers import approvals, chat, config_api, conversations, databases, events, projects, search
+    from .routers import (
+        approvals,
+        chat,
+        config_api,
+        conversations,
+        databases,
+        events,
+        projects,
+        search,
+    )
 
     app.include_router(conversations.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")

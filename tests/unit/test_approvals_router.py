@@ -26,14 +26,18 @@ def test_respond_approval_ok_and_resolved_flag() -> None:
 
     aid = anyio.run(_req_id)
 
-    resp = client.post("/api/approvals/respond", json={"approval_id": aid, "approved": True})
+    resp = client.post(
+        "/api/approvals/respond", json={"approval_id": aid, "approved": True}
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
     assert body["resolved"] is True
 
     # Second time is still ok but not resolved
-    resp2 = client.post("/api/approvals/respond", json={"approval_id": aid, "approved": True})
+    resp2 = client.post(
+        "/api/approvals/respond", json={"approval_id": aid, "approved": True}
+    )
     assert resp2.status_code == 200
     body2 = resp2.json()
     assert body2["ok"] is True
@@ -45,6 +49,8 @@ def test_respond_approval_without_manager() -> None:
     app.include_router(router, prefix="/api")
     client = TestClient(app)
 
-    resp = client.post("/api/approvals/respond", json={"approval_id": "x", "approved": True})
+    resp = client.post(
+        "/api/approvals/respond", json={"approval_id": "x", "approved": True}
+    )
     assert resp.status_code == 200
     assert resp.json()["ok"] is False

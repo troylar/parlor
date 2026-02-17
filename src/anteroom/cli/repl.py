@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 _IS_WINDOWS = platform.system() == "Windows"
 
 
-def _add_signal_handler(loop: asyncio.AbstractEventLoop, sig: int, callback: Any) -> bool:
+def _add_signal_handler(
+    loop: asyncio.AbstractEventLoop, sig: int, callback: Any
+) -> bool:
     """Add a signal handler, returning False on Windows where it's unsupported."""
     if _IS_WINDOWS:
         return False
@@ -76,6 +78,7 @@ async def _watch_for_escape(cancel_event: asyncio.Event) -> None:
                         while msvcrt.kbhit():
                             msvcrt.getch()
                 time.sleep(0.05)
+
     else:
         import select
         import termios
@@ -141,7 +144,9 @@ def _collapse_long_input(user_input: str) -> None:
     usable = max(term_cols - 2, 10)  # 2 = "❯ " prompt width
 
     # Estimate terminal rows the prompt_toolkit input occupied
-    total_rows = sum(max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines)
+    total_rows = sum(
+        max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines
+    )
 
     show = 3
     hidden = len(lines) - show
@@ -300,10 +305,14 @@ async def _check_for_update(current: str) -> str | None:
     return None
 
 
-def _show_resume_info(db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]) -> None:
+def _show_resume_info(
+    db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]
+) -> None:
     """Display resume header with last exchange context."""
     stored = storage.list_messages(db, conv["id"])
-    renderer.console.print(f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]")
+    renderer.console.print(
+        f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]"
+    )
     renderer.render_conversation_recap(stored)
 
 
@@ -340,7 +349,9 @@ async def _drain_input_to_msg_queue(
                     warn_callback(cmd)
                 continue
             q_expanded = _expand_file_references(queued_text, working_dir)
-            storage.create_message(db, conversation_id, "user", q_expanded, **(identity_kwargs or {}))
+            storage.create_message(
+                db, conversation_id, "user", q_expanded, **(identity_kwargs or {})
+            )
             await msg_queue.put({"role": "user", "content": q_expanded})
         except asyncio.QueueEmpty:
             break
@@ -356,7 +367,11 @@ def _expand_file_references(text: str, working_dir: str) -> str:
 
     def _replace(match: re.Match[str]) -> str:
         raw_path = match.group(1).strip("\"'")
-        full_path = Path(working_dir) / raw_path if not os.path.isabs(raw_path) else Path(raw_path)
+        full_path = (
+            Path(working_dir) / raw_path
+            if not os.path.isabs(raw_path)
+            else Path(raw_path)
+        )
         resolved = full_path.resolve()
 
         if resolved.is_file():
@@ -412,7 +427,10 @@ def _build_system_prompt(
 def _identity_kwargs(config: AppConfig) -> dict[str, str | None]:
     """Extract user_id/user_display_name from config identity, or empty dict."""
     if config.identity:
-        return {"user_id": config.identity.user_id, "user_display_name": config.identity.display_name}
+        return {
+            "user_id": config.identity.user_id,
+            "user_display_name": config.identity.display_name,
+        }
     return {"user_id": None, "user_display_name": None}
 
 
@@ -461,7 +479,9 @@ async def run_cli(
         session = PromptSession()
         while True:
             try:
-                answer = (await session.prompt_async("  Proceed? [y/N] ")).strip().lower()
+                answer = (
+                    (await session.prompt_async("  Proceed? [y/N] ")).strip().lower()
+                )
             except (EOFError, KeyboardInterrupt):
                 return False
             if answer in ("", "n", "no"):
@@ -473,7 +493,9 @@ async def run_cli(
     tool_registry.set_confirm_callback(_confirm_destructive)
 
     # Build unified tool executor
-    async def tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def tool_executor(
+        tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
         if mcp_manager:
@@ -641,12 +663,18 @@ async def _run_one_shot(
                 if thinking:
                     renderer.stop_thinking()
                     thinking = False
-                renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
+                renderer.render_tool_call_start(
+                    event.data["tool_name"], event.data["arguments"]
+                )
             elif event.kind == "tool_call_end":
-                renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
+                renderer.render_tool_call_end(
+                    event.data["tool_name"], event.data["status"], event.data["output"]
+                )
             elif event.kind == "assistant_message":
                 if event.data["content"]:
-                    storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
+                    storage.create_message(
+                        db, conv["id"], "assistant", event.data["content"], **id_kw
+                    )
             elif event.kind == "error":
                 if thinking:
                     renderer.stop_thinking()
@@ -703,7 +731,9 @@ async def _run_repl(
     class ParlorCompleter(Completer):
         """Tab completer for / commands and @ file paths."""
 
-        def __init__(self, commands: list[str], skill_names: list[str], wd: str) -> None:
+        def __init__(
+            self, commands: list[str], skill_names: list[str], wd: str
+        ) -> None:
             self._commands = commands
             self._skill_names = skill_names
             self._wd = wd
@@ -768,7 +798,9 @@ async def _run_repl(
         "quit",
         "exit",
     ]
-    skill_names = [s.name for s in skill_registry.list_skills()] if skill_registry else []
+    skill_names = (
+        [s.name for s in skill_registry.list_skills()] if skill_registry else []
+    )
     completer = ParlorCompleter(commands, skill_names, working_dir)
 
     def _rebuild_tools() -> None:
@@ -865,7 +897,9 @@ async def _run_repl(
             is_first_message = False
             _show_resume_info(db, conv, ai_messages)
         else:
-            renderer.render_error(f"Conversation {resume_conversation_id} not found, starting new")
+            renderer.render_error(
+                f"Conversation {resume_conversation_id} not found, starting new"
+            )
             conv = storage.create_conversation(db, **id_kw)
             ai_messages = []
             is_first_message = True
@@ -989,7 +1023,9 @@ async def _run_repl(
 
             if agent_busy.is_set():
                 if input_queue.full():
-                    renderer.console.print("[yellow]Queue full (max 10 messages)[/yellow]")
+                    renderer.console.print(
+                        "[yellow]Queue full (max 10 messages)[/yellow]"
+                    )
                     continue
                 renderer.console.print("[grey62]Message queued[/grey62]")
 
@@ -1027,7 +1063,9 @@ async def _run_repl(
                     conv = storage.create_conversation(db, **id_kw)
                     ai_messages = []
                     is_first_message = True
-                    renderer.console.print("[grey62]New conversation started[/grey62]\n")
+                    renderer.console.print(
+                        "[grey62]New conversation started[/grey62]\n"
+                    )
                     continue
                 elif cmd == "/tools":
                     renderer.render_tools(all_tool_names)
@@ -1046,7 +1084,9 @@ async def _run_repl(
                         is_first_message = False
                         _show_resume_info(db, conv, ai_messages)
                     else:
-                        renderer.console.print("[grey62]No previous conversations[/grey62]\n")
+                        renderer.console.print(
+                            "[grey62]No previous conversations[/grey62]\n"
+                        )
                     continue
                 elif cmd == "/list":
                     parts = user_input.split()
@@ -1065,8 +1105,12 @@ async def _run_repl(
                             )
                         if has_more:
                             more_n = list_limit + 20
-                            renderer.console.print(f"  [dim]... more available. Use /list {more_n} to show more.[/dim]")
-                        renderer.console.print("  Use [bold]/resume <number>[/bold] or [bold]/resume <id>[/bold]\n")
+                            renderer.console.print(
+                                f"  [dim]... more available. Use /list {more_n} to show more.[/dim]"
+                            )
+                        renderer.console.print(
+                            "  Use [bold]/resume <number>[/bold] or [bold]/resume <id>[/bold]\n"
+                        )
                     else:
                         renderer.console.print("[grey62]No conversations[/grey62]\n")
                     continue
@@ -1085,7 +1129,9 @@ async def _run_repl(
                         if 0 <= idx < len(convs):
                             resolved_id = convs[idx]["id"]
                         else:
-                            renderer.render_error(f"Invalid number: {target}. Use /list to see conversations.")
+                            renderer.render_error(
+                                f"Invalid number: {target}. Use /list to see conversations."
+                            )
                             continue
                     else:
                         resolved_id = target
@@ -1112,7 +1158,9 @@ async def _run_repl(
                 elif cmd == "/search":
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2 or not parts[1].strip():
-                        renderer.console.print("[grey62]Usage: /search <query> | /search --keyword <query>[/grey62]\n")
+                        renderer.console.print(
+                            "[grey62]Usage: /search <query> | /search --keyword <query>[/grey62]\n"
+                        )
                         continue
                     search_arg = parts[1].strip()
 
@@ -1122,7 +1170,9 @@ async def _run_repl(
                         force_keyword = True
                         search_arg = search_arg[len("--keyword ") :].strip()
                         if not search_arg:
-                            renderer.console.print("[grey62]Usage: /search --keyword <query>[/grey62]\n")
+                            renderer.console.print(
+                                "[grey62]Usage: /search --keyword <query>[/grey62]\n"
+                            )
                             continue
 
                     query = search_arg
@@ -1132,7 +1182,9 @@ async def _run_repl(
                     if not force_keyword:
                         try:
                             from ..db import has_vec_support as _has_vec
-                            from ..services.embeddings import create_embedding_service as _create_emb
+                            from ..services.embeddings import (
+                                create_embedding_service as _create_emb,
+                            )
 
                             raw_conn = db._conn if hasattr(db, "_conn") else None
                             if raw_conn and _has_vec(raw_conn):
@@ -1146,9 +1198,13 @@ async def _run_repl(
                         try:
                             query_emb = await _emb_svc.embed(query)
                             if query_emb:
-                                sem_results = storage.search_similar_messages(db, query_emb, limit=20)
+                                sem_results = storage.search_similar_messages(
+                                    db, query_emb, limit=20
+                                )
                                 if sem_results:
-                                    renderer.console.print(f"\n[bold]Semantic search results for '{query}':[/bold]")
+                                    renderer.console.print(
+                                        f"\n[bold]Semantic search results for '{query}':[/bold]"
+                                    )
                                     for i, r in enumerate(sem_results):
                                         snippet = r["content"][:80].replace("\n", " ")
                                         dist = r.get("distance", 0)
@@ -1164,15 +1220,21 @@ async def _run_repl(
 
                     results = storage.list_conversations(db, search=query, limit=20)
                     if results:
-                        renderer.console.print(f"\n[bold]Search results for '{query}':[/bold]")
+                        renderer.console.print(
+                            f"\n[bold]Search results for '{query}':[/bold]"
+                        )
                         for i, c in enumerate(results):
                             msg_count = c.get("message_count", 0)
                             renderer.console.print(
                                 f"  {i + 1}. {c['title']} ({msg_count} msgs) [grey62]{c['id'][:8]}...[/grey62]"
                             )
-                        renderer.console.print("  Use [bold]/resume <number>[/bold] to open\n")
+                        renderer.console.print(
+                            "  Use [bold]/resume <number>[/bold] to open\n"
+                        )
                     else:
-                        renderer.console.print(f"[grey62]No conversations matching '{query}'[/grey62]\n")
+                        renderer.console.print(
+                            f"[grey62]No conversations matching '{query}'[/grey62]\n"
+                        )
                     continue
                 elif cmd == "/skills":
                     if skill_registry:
@@ -1180,7 +1242,9 @@ async def _run_repl(
                         if skills:
                             renderer.console.print("\n[bold]Available skills:[/bold]")
                             for s in skills:
-                                renderer.console.print(f"  /{s.name} - {s.description} [grey62]({s.source})[/grey62]")
+                                renderer.console.print(
+                                    f"  /{s.name} - {s.description} [grey62]({s.source})[/grey62]"
+                                )
                             renderer.console.print()
                         else:
                             renderer.console.print(
@@ -1192,17 +1256,25 @@ async def _run_repl(
                     parts = user_input.split()
                     if len(parts) == 1:
                         if mcp_manager:
-                            renderer.render_mcp_status(mcp_manager.get_server_statuses())
+                            renderer.render_mcp_status(
+                                mcp_manager.get_server_statuses()
+                            )
                         else:
-                            renderer.console.print("[grey62]No MCP servers configured.[/grey62]\n")
+                            renderer.console.print(
+                                "[grey62]No MCP servers configured.[/grey62]\n"
+                            )
                     elif len(parts) >= 2 and parts[1].lower() == "status":
                         if not mcp_manager:
                             renderer.render_error("No MCP servers configured")
                             continue
                         if len(parts) >= 3:
-                            renderer.render_mcp_server_detail(parts[2], mcp_manager.get_server_statuses(), mcp_manager)
+                            renderer.render_mcp_server_detail(
+                                parts[2], mcp_manager.get_server_statuses(), mcp_manager
+                            )
                         else:
-                            renderer.render_mcp_status(mcp_manager.get_server_statuses())
+                            renderer.render_mcp_status(
+                                mcp_manager.get_server_statuses()
+                            )
                     elif len(parts) >= 3:
                         action = parts[1].lower()
                         server_name = parts[2]
@@ -1212,23 +1284,37 @@ async def _run_repl(
                         try:
                             if action == "connect":
                                 await mcp_manager.connect_server(server_name)
-                                status = mcp_manager.get_server_statuses().get(server_name, {})
+                                status = mcp_manager.get_server_statuses().get(
+                                    server_name, {}
+                                )
                                 if status.get("status") == "connected":
-                                    renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
+                                    renderer.console.print(
+                                        f"[green]Connected: {server_name}[/green]\n"
+                                    )
                                 else:
                                     err = status.get("error_message", "unknown error")
-                                    renderer.render_error(f"Failed to connect '{server_name}': {err}")
+                                    renderer.render_error(
+                                        f"Failed to connect '{server_name}': {err}"
+                                    )
                             elif action == "disconnect":
                                 await mcp_manager.disconnect_server(server_name)
-                                renderer.console.print(f"[grey62]Disconnected: {server_name}[/grey62]\n")
+                                renderer.console.print(
+                                    f"[grey62]Disconnected: {server_name}[/grey62]\n"
+                                )
                             elif action == "reconnect":
                                 await mcp_manager.reconnect_server(server_name)
-                                status = mcp_manager.get_server_statuses().get(server_name, {})
+                                status = mcp_manager.get_server_statuses().get(
+                                    server_name, {}
+                                )
                                 if status.get("status") == "connected":
-                                    renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
+                                    renderer.console.print(
+                                        f"[green]Reconnected: {server_name}[/green]\n"
+                                    )
                                 else:
                                     err = status.get("error_message", "unknown error")
-                                    renderer.render_error(f"Failed to reconnect '{server_name}': {err}")
+                                    renderer.render_error(
+                                        f"Failed to reconnect '{server_name}': {err}"
+                                    )
                             else:
                                 renderer.render_error(
                                     f"Unknown action: {action}. Use connect, disconnect, reconnect, or status."
@@ -1245,14 +1331,20 @@ async def _run_repl(
                 elif cmd == "/model":
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2:
-                        renderer.console.print(f"[grey62]Current model: {current_model}[/grey62]")
-                        renderer.console.print("[grey62]Usage: /model <model_name>[/grey62]\n")
+                        renderer.console.print(
+                            f"[grey62]Current model: {current_model}[/grey62]"
+                        )
+                        renderer.console.print(
+                            "[grey62]Usage: /model <model_name>[/grey62]\n"
+                        )
                         continue
                     new_model = parts[1].strip()
                     current_model = new_model
                     ai_service = create_ai_service(config.ai)
                     ai_service.config.model = new_model
-                    renderer.console.print(f"[grey62]Switched to model: {new_model}[/grey62]\n")
+                    renderer.console.print(
+                        f"[grey62]Switched to model: {new_model}[/grey62]\n"
+                    )
                     continue
                 elif cmd == "/verbose":
                     new_v = renderer.cycle_verbosity()
@@ -1276,7 +1368,9 @@ async def _run_repl(
                         if 0 <= idx < len(convs):
                             resolved_id = convs[idx]["id"]
                         else:
-                            renderer.render_error(f"Invalid number: {target}. Use /list to see conversations.")
+                            renderer.render_error(
+                                f"Invalid number: {target}. Use /list to see conversations."
+                            )
                             continue
                     else:
                         resolved_id = target
@@ -1292,7 +1386,9 @@ async def _run_repl(
                 elif cmd == "/rewind":
                     stored = storage.list_messages(db, conv["id"])
                     if len(stored) < 2:
-                        renderer.console.print("[grey62]Not enough messages to rewind[/grey62]\n")
+                        renderer.console.print(
+                            "[grey62]Not enough messages to rewind[/grey62]\n"
+                        )
                         continue
 
                     renderer.console.print("\n[bold]Messages:[/bold]")
@@ -1301,7 +1397,9 @@ async def _run_repl(
                         preview = msg["content"][:80].replace("\n", " ")
                         if len(msg["content"]) > 80:
                             preview += "..."
-                        renderer.console.print(f"  {msg['position']}. [{role_label}] {preview}")
+                        renderer.console.print(
+                            f"  {msg['position']}. [{role_label}] {preview}"
+                        )
 
                     renderer.console.print(
                         "\n[grey62]Enter position to rewind to (keep that message, delete after):[/grey62]"
@@ -1334,7 +1432,9 @@ async def _run_repl(
                         for fp in sorted(file_paths):
                             renderer.console.print(f"  - {fp}")
                         try:
-                            answer = input("  Undo file changes? [y/N] ").strip().lower()
+                            answer = (
+                                input("  Undo file changes? [y/N] ").strip().lower()
+                            )
                             undo_files = answer in ("y", "yes")
                         except (EOFError, KeyboardInterrupt):
                             renderer.console.print("[grey62]Cancelled[/grey62]\n")
@@ -1462,21 +1562,35 @@ async def _run_repl(
                         renderer.update_thinking()
                         enc = _get_tiktoken_encoding()
                         if enc:
-                            response_token_count += len(enc.encode(event.data["content"]))
+                            response_token_count += len(
+                                enc.encode(event.data["content"])
+                            )
                         else:
-                            response_token_count += max(1, len(event.data["content"]) // 4)
+                            response_token_count += max(
+                                1, len(event.data["content"]) // 4
+                            )
                     elif event.kind == "tool_call_start":
                         if thinking:
                             total_elapsed += renderer.stop_thinking()
                             thinking = False
-                        renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
+                        renderer.render_tool_call_start(
+                            event.data["tool_name"], event.data["arguments"]
+                        )
                     elif event.kind == "tool_call_end":
                         renderer.render_tool_call_end(
-                            event.data["tool_name"], event.data["status"], event.data["output"]
+                            event.data["tool_name"],
+                            event.data["status"],
+                            event.data["output"],
                         )
                     elif event.kind == "assistant_message":
                         if event.data["content"]:
-                            storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
+                            storage.create_message(
+                                db,
+                                conv["id"],
+                                "assistant",
+                                event.data["content"],
+                                **id_kw,
+                            )
                     elif event.kind == "queued_message":
                         if thinking:
                             total_elapsed += renderer.stop_thinking()
@@ -1485,7 +1599,9 @@ async def _run_repl(
                         renderer.render_newline()
                         renderer.render_response_end()
                         renderer.render_newline()
-                        renderer.console.print("[grey62]Processing queued message...[/grey62]")
+                        renderer.console.print(
+                            "[grey62]Processing queued message...[/grey62]"
+                        )
                         renderer.render_newline()
                         renderer.clear_turn_history()
                         response_token_count = 0
@@ -1493,7 +1609,9 @@ async def _run_repl(
                         if thinking:
                             total_elapsed += renderer.stop_thinking()
                             thinking = False
-                        renderer.render_error(event.data.get("message", "Unknown error"))
+                        renderer.render_error(
+                            event.data.get("message", "Unknown error")
+                        )
                     elif event.kind == "done":
                         if thinking:
                             total_elapsed += renderer.stop_thinking()
@@ -1541,7 +1659,9 @@ async def _run_repl(
         runner_task = asyncio.create_task(_agent_runner())
 
         # Wait for either task to signal exit
-        done_tasks, pending_tasks = await asyncio.wait({input_task, runner_task}, return_when=asyncio.FIRST_COMPLETED)
+        done_tasks, pending_tasks = await asyncio.wait(
+            {input_task, runner_task}, return_when=asyncio.FIRST_COMPLETED
+        )
         exit_flag.set()
         for t in pending_tasks:
             t.cancel()
@@ -1584,7 +1704,8 @@ async def _compact_messages(
         "- File paths that were read, written, or edited\n"
         "- Important code changes and their purpose\n"
         "- Current state of the task\n"
-        "- Any errors encountered and how they were resolved\n\n" + "\n".join(history_text)
+        "- Any errors encountered and how they were resolved\n\n"
+        + "\n".join(history_text)
     )
 
     try:
@@ -1594,7 +1715,9 @@ async def _compact_messages(
             messages=[{"role": "user", "content": summary_prompt}],
             max_completion_tokens=1000,
         )
-        summary = response.choices[0].message.content or "Conversation summary unavailable."
+        summary = (
+            response.choices[0].message.content or "Conversation summary unavailable."
+        )
     except Exception:
         renderer.render_error("Failed to generate summary")
         return
@@ -1609,4 +1732,6 @@ async def _compact_messages(
 
     new_tokens = _estimate_tokens(ai_messages)
     renderer.render_compact_done(original_count, 1)
-    renderer.console.print(f"  [grey62]~{original_tokens:,} -> ~{new_tokens:,} tokens[/grey62]\n")
+    renderer.console.print(
+        f"  [grey62]~{original_tokens:,} -> ~{new_tokens:,} tokens[/grey62]\n"
+    )

@@ -28,7 +28,9 @@ class ApprovalManager:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[bool] = loop.create_future()
         async with self._lock:
-            self._pending[approval_id] = PendingApproval(fut=fut, message=message, created_at=time.time())
+            self._pending[approval_id] = PendingApproval(
+                fut=fut, message=message, created_at=time.time()
+            )
         return approval_id
 
     async def wait(self, approval_id: str, timeout_s: float = 300.0) -> bool:

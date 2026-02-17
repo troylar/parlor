@@ -29,7 +29,10 @@ async def test_confirm_destructive_publishes_and_waits(monkeypatch) -> None:
 
     async def confirm(message: str) -> bool:
         approval_id = await mgr.request(message)
-        event = {"type": "destructive_approval_requested", "data": {"approval_id": approval_id, "message": message}}
+        event = {
+            "type": "destructive_approval_requested",
+            "data": {"approval_id": approval_id, "message": message},
+        }
         await bus.publish("global:personal", event)
         for sdb in getattr(config, "shared_databases", []) or []:
             if getattr(sdb, "name", None):

@@ -45,7 +45,9 @@ class _FakeConfig:
 
 
 @pytest.mark.asyncio
-async def test_lifespan_wires_confirm_callback_and_publishes(monkeypatch, tmp_path: Path) -> None:
+async def test_lifespan_wires_confirm_callback_and_publishes(
+    monkeypatch, tmp_path: Path
+) -> None:
     # Import inside test to avoid side effects during collection.
     import anteroom.app as app_mod
 
@@ -90,7 +92,10 @@ async def test_lifespan_wires_confirm_callback_and_publishes(monkeypatch, tmp_pa
 
     monkeypatch.setattr(app_mod, "ToolRegistry", FakeToolRegistry)
 
-    cfg = _FakeConfig(app=_FakeApp(data_dir=tmp_path), shared_databases=[_FakeSharedDb(name="team", path=str(tmp_path / "team.db"))])
+    cfg = _FakeConfig(
+        app=_FakeApp(data_dir=tmp_path),
+        shared_databases=[_FakeSharedDb(name="team", path=str(tmp_path / "team.db"))],
+    )
 
     # Build a minimal FastAPI-like object with state.
     class _State:  # simple object
@@ -107,7 +112,9 @@ async def test_lifespan_wires_confirm_callback_and_publishes(monkeypatch, tmp_pa
     cm = app_mod.lifespan(app)  # async context manager
     await cm.__aenter__()
     try:
-        assert confirm_callbacks, "Expected ToolRegistry.set_confirm_callback to be called"
+        assert (
+            confirm_callbacks
+        ), "Expected ToolRegistry.set_confirm_callback to be called"
         confirm = confirm_callbacks[0]
 
         # Start confirm flow and resolve it.
