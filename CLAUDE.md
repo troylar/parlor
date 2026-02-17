@@ -76,6 +76,14 @@ SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Schema defin
 
 Config file at `~/.anteroom/config.yaml` (falls back to `~/.parlor/config.yaml` for backward compat). Environment variables override config values with `AI_CHAT_` prefix (e.g., `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_MODEL`, `AI_CHAT_USER_ID`, `AI_CHAT_DISPLAY_NAME`). Token provider pattern (`api_key_command`) enables dynamic API key refresh via external commands. TLS is disabled by default (`app.tls: false`); set to `true` to enable HTTPS with a self-signed certificate. User identity (Ed25519 keypair + UUID) is auto-generated on first run and stored in the `identity` config section. `EmbeddingsConfig` controls vector embeddings: `enabled`, `model`, `dimensions`, `base_url`, `api_key`, `api_key_command`.
 
+### Developer Workflow
+
+This project uses Claude Code skills (`.claude/commands/`) and auto-loaded rules (`.claude/rules/`) to enforce development standards. See `VISION.md` for product identity and scope guardrails.
+
+**Skills** (invoke with `/command`): `/ideate`, `/new-issue`, `/start-work`, `/commit`, `/submit-pr`, `/pr-check`, `/code-review`, `/deploy`, `/write-docs`, `/dev-help`. Run `/dev-help` for a full guide.
+
+**Rules** (auto-loaded every session): commit format, issue requirement, output formatting, product vision alignment, security patterns, test requirements.
+
 ### Deployment
 
 PyPI package: `anteroom`. Deploy via `/deploy` Claude Code skill which handles: merge PR, wait for CI, version bump, build, and `twine upload`. Requires `build` and `twine` installed. Credentials via `~/.pypirc` or `TWINE_USERNAME`/`TWINE_PASSWORD` env vars.

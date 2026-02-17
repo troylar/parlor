@@ -37,7 +37,8 @@ Before merging, audit **all documentation surfaces** for accuracy. Extract the p
 
 #### 2a. CLAUDE.md
 
-1. **New modules** — check for any new `.py` files under `src/anteroom/` not mentioned in the "Key Modules" section. Add them.
+1. **Test count** — run `grep -r "def test_" tests/ | wc -l` and compare to the count in CLAUDE.md. Update if stale.
+2. **New modules** — check for any new `.py` files under `src/anteroom/` not mentioned in the "Key Modules" section. Add them.
 2. **Stale descriptions** — for modified modules, verify the CLAUDE.md description still matches the actual code behavior.
 3. **New config fields** — check `config.py` dataclasses for fields not documented in the "Configuration" section. Add them.
 4. **New agent events** — check `agent_loop.py` for any `AgentEvent(kind=...)` values not mentioned. Document them.

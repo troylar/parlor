@@ -44,6 +44,7 @@ Follow these style conventions strictly:
 - **Admonitions**: Use `!!! tip`, `!!! warning`, `!!! info`, `!!! example` from MkDocs Material
 - **Cross-references**: Link between pages liberally. Use relative paths like `../cli/tools.md`
 - **Tables**: Use for reference material, feature comparisons, parameter lists
+- **Visually delightful**: Use emoji, admonitions, and formatting to make documentation enjoyable to read — not a wall of text
 
 ### 4. Verify
 
