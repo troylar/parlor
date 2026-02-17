@@ -35,17 +35,16 @@ Deploy the current branch to PyPI after merging, CI verification, and version bu
 
 Before merging, ensure `CLAUDE.md` is accurate and up to date:
 
-1. **Test count** — run `grep -r "def test_" tests/ | wc -l` and compare to the count in CLAUDE.md. Update if stale.
-2. **New modules** — check for any new `.py` files under `src/anteroom/` not mentioned in the "Key Modules" section. Add them.
+1. **New modules** — check for any new `.py` files under `src/anteroom/` not mentioned in the "Key Modules" section. Add them.
 3. **New config fields** — check `config.py` dataclasses for fields not documented in the "Configuration" section. Add them.
 4. **New agent events** — check `agent_loop.py` for any `AgentEvent(kind=...)` values not mentioned. Document them.
 5. **Architecture changes** — if the PR added middleware, new routers, or changed the security model, update those sections.
 6. **Version in pyproject.toml** — note the pre-bump version for reference.
 
-If any updates are needed, commit them as part of the PR before merging:
+If any updates are needed, commit them as part of the PR before merging. Use the PR's primary issue number (extracted from the branch name or PR body):
 ```bash
 git add CLAUDE.md
-git commit -m "docs: update CLAUDE.md for vX.Y.Z release (#NN)"
+git commit -m "docs: update CLAUDE.md for vX.Y.Z release (#<primary issue>)"
 git push
 ```
 
@@ -203,9 +202,31 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "<generated notes>"
 
 On success:
 ```
-Deployed anteroom vX.Y.Z to PyPI
-  PR: #NN (merged)
-  CI: passed
-  PyPI: https://pypi.org/project/anteroom/X.Y.Z/
-  Release: https://github.com/troylar/anteroom/releases/tag/vX.Y.Z
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 Deployed anteroom vX.Y.Z
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🔗 PR:       #NN (merged)
+  🧪 CI:       ✅ passed
+  📦 PyPI:     https://pypi.org/project/anteroom/X.Y.Z/
+  🏷️ Release:  https://github.com/troylar/parlor/releases/tag/vX.Y.Z
+  📊 Version:  X.Y.Z-1 → X.Y.Z (<type> bump)
+
+────────────────────────────────────────────
+  ✅ Deploy complete
+────────────────────────────────────────────
+```
+
+On failure:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ❌ Deploy Failed
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Step:    <which step failed>
+  Error:   <error message>
+
+────────────────────────────────────────────
+
+👉 Next: <what to do to fix it>
 ```
