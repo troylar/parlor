@@ -126,7 +126,7 @@ async def create_conversation(request: Request):
 
     event_bus = _get_event_bus(request)
     if event_bus:
-        asyncio.ensure_future(
+        asyncio.create_task(
             event_bus.publish(
                 f"global:{_get_db_name(request)}",
                 {
@@ -166,7 +166,7 @@ async def update_conversation(conversation_id: str, body: ConversationUpdate, re
 
         event_bus = _get_event_bus(request)
         if event_bus:
-            asyncio.ensure_future(
+            asyncio.create_task(
                 event_bus.publish(
                     f"global:{_get_db_name(request)}",
                     {
@@ -209,7 +209,7 @@ async def delete_conversation(conversation_id: str, request: Request):
 
     event_bus = _get_event_bus(request)
     if event_bus:
-        asyncio.ensure_future(
+        asyncio.create_task(
             event_bus.publish(
                 f"global:{_get_db_name(request)}",
                 {
@@ -240,11 +240,11 @@ async def create_entry(conversation_id: str, body: EntryCreate, request: Request
 
     _embedding_worker = getattr(request.app.state, "embedding_worker", None)
     if _embedding_worker:
-        asyncio.ensure_future(_embedding_worker.embed_message(msg["id"], body.content, conversation_id))
+        asyncio.create_task(_embedding_worker.embed_message(msg["id"], body.content, conversation_id))
 
     event_bus = _get_event_bus(request)
     if event_bus:
-        asyncio.ensure_future(
+        asyncio.create_task(
             event_bus.publish(
                 f"conversation:{conversation_id}",
                 {
