@@ -20,6 +20,7 @@ from anteroom.cli.renderer import (
     render_tool_call_start,
     save_turn_history,
     set_verbosity,
+    start_thinking,
     startup_step,
 )
 
@@ -233,6 +234,71 @@ class TestDedup:
 
     def test_flush_dedup_noop_when_empty(self) -> None:
         _flush_dedup()  # Should not crash
+
+
+class TestStartThinkingFlushesDedup:
+    """start_thinking() should flush dedup state so repeated tools across iterations are visible."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._dedup_summary = ""
+        r._dedup_count = 0
+        r._tool_batch_active = False
+
+    def test_start_thinking_flushes_dedup(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._dedup_summary = "bash git status"
+        r._dedup_count = 3
+        with patch("anteroom.cli.renderer._write_thinking_line"):
+            r._repl_mode = True
+            start_thinking()
+            r._repl_mode = False
+        assert r._dedup_summary == ""
+        assert r._dedup_count == 0
+
+    def test_start_thinking_resets_tool_batch(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        with patch("anteroom.cli.renderer._write_thinking_line"):
+            r._repl_mode = True
+            start_thinking()
+            r._repl_mode = False
+        assert r._tool_batch_active is False
+
+    def test_repeated_tool_across_thinking_boundary_not_deduped(self) -> None:
+        """Same tool before and after start_thinking() should both produce output."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.COMPACT)
+        r._dedup_summary = ""
+        r._dedup_count = 0
+        r._tool_batch_active = False
+        r._current_turn_tools.clear()
+
+        # First tool call
+        render_tool_call_start("bash", {"command": "git status"})
+        render_tool_call_end("bash", "success", {"stdout": "clean"})
+        assert r._dedup_summary == "bash git status"
+        assert r._dedup_count == 1
+
+        # Thinking boundary (new iteration)
+        with patch("anteroom.cli.renderer._write_thinking_line"):
+            r._repl_mode = True
+            start_thinking()
+            r._repl_mode = False
+
+        # Dedup state should be flushed
+        assert r._dedup_summary == ""
+        assert r._dedup_count == 0
+
+        # Same tool again — should NOT be deduped
+        render_tool_call_start("bash", {"command": "git status"})
+        render_tool_call_end("bash", "success", {"stdout": "clean"})
+        assert r._dedup_summary == "bash git status"
+        assert r._dedup_count == 1  # Fresh count, not accumulated
 
 
 class TestFlushBufferedText:

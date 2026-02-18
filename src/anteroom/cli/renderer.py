@@ -258,7 +258,9 @@ _repl_mode: bool = False
 
 def start_thinking() -> None:
     """Show a spinner with timer while AI is generating."""
-    global _thinking_start, _spinner, _last_spinner_update
+    global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active
+    _flush_dedup()
+    _tool_batch_active = False
     _thinking_start = time.monotonic()
     _last_spinner_update = _thinking_start
     if _repl_mode:

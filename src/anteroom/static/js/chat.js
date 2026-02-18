@@ -1227,7 +1227,9 @@ const Chat = (() => {
     }
 
     function renderToolCallStart(data) {
-        if (!currentAssistantEl) return;
+        if (!currentAssistantEl) {
+            currentAssistantEl = appendMessage('assistant', '');
+        }
         const contentEl = currentAssistantEl.querySelector('.message-content');
         const isSubagent = data.tool_name === 'run_agent';
         const details = document.createElement('details');
