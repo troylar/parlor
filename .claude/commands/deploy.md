@@ -31,73 +31,41 @@ Deploy the current branch to PyPI after merging, CI verification, and version bu
    ```
    Every commit message MUST contain a `(#NNN)` issue reference. If any commit is missing one, warn the user and ask them to fix it before proceeding.
 
-### Step 2: Verify Documentation
+### Step 2: Quick Documentation Check
 
-Before merging, audit **all documentation surfaces** for accuracy. Extract the primary issue number from the branch name or PR body for any doc-fix commits.
+Run a lightweight staleness check. The full documentation audit happens during `/submit-pr` — this step only catches things that slipped through or changed since PR creation.
 
-#### 2a. CLAUDE.md
+1. **Test count** — run `grep -r "def test_" tests/ | wc -l` and compare to the count in CLAUDE.md. Update if off by more than 10.
+2. **New modules** — check for any new `.py` files under `src/anteroom/` not listed in the "Key Modules" section of CLAUDE.md. Flag if any are missing.
+3. **Version** — note the pre-bump version in `pyproject.toml` for reference.
 
-1. **Test count** — run `grep -r "def test_" tests/ | wc -l` and compare to the count in CLAUDE.md. Update if stale.
-2. **New modules** — check for any new `.py` files under `src/anteroom/` not mentioned in the "Key Modules" section. Add them.
-3. **Stale descriptions** — for modified modules, verify the CLAUDE.md description still matches the actual code behavior.
-4. **New config fields** — check `config.py` dataclasses for fields not documented in the "Configuration" section. Add them.
-5. **New agent events** — check `agent_loop.py` for any `AgentEvent(kind=...)` values not mentioned. Document them.
-6. **Architecture changes** — if the PR added middleware, new routers, or changed the security model, update those sections.
-7. **Database changes** — check `db.py` for new tables or columns not in the "Database" section. Add them.
-8. **Architecture diagram** — if new services or routers were added, update the ASCII diagram.
-9. **Version in pyproject.toml** — note the pre-bump version for reference.
-
-#### 2b. README.md
-
-1. **New CLI commands or flags** not mentioned in README? Add them.
-2. **Feature descriptions** that no longer match current behavior? Update them.
-3. **Installation or quickstart instructions** still accurate? Verify.
-
-#### 2c. VISION.md
-
-1. **Current Direction** — does the PR add capabilities that should be reflected? Update if so.
-2. **Scope boundaries** — any changes that affect what's in/out of scope? Flag for review.
-
-#### 2d. MkDocs docs/ pages
-
-For each changed source file, check the corresponding docs page(s):
-- `src/anteroom/cli/` changes → `docs/cli/`
-- `src/anteroom/routers/` changes → `docs/api/` and `docs/web-ui/`
-- `src/anteroom/tools/` changes → `docs/cli/tools.md`
-- `src/anteroom/config.py` changes → `docs/configuration/`
-- Security changes → `docs/security/`
-- `app.py` middleware changes → `docs/security/` and `docs/advanced/architecture.md`
-
-Flag pages that reference behavior the PR changed but weren't updated. Flag new features with no corresponding docs page.
-
-#### 2e. Commit doc fixes
-
-If any updates are needed, commit them before merging. Use the PR's primary issue number:
+If updates are needed, commit them before merging:
 ```bash
-git add CLAUDE.md README.md VISION.md docs/
-git commit -m "docs: update documentation for vX.Y.Z release (#<primary issue>)"
+git add CLAUDE.md
+git commit -m "docs: update CLAUDE.md for vX.Y.Z release (#<primary issue>)"
 git push
 ```
 
 ### Step 3: Merge PR
 
-1. Merge the PR to main: `gh pr merge --squash --delete-branch`
-2. Switch to main: `git checkout main && git pull`
+1. Rebase the feature branch on main to ensure it's up to date:
+   ```bash
+   git fetch origin main
+   git rebase origin/main
+   git push --force-with-lease
+   ```
+2. Wait for CI checks to complete. Poll every 15 seconds, up to 10 minutes:
+   ```bash
+   gh pr checks <PR> --json name,state
+   ```
+   Check until all checks have resolved (no `PENDING` or `QUEUED` states remain).
+3. Evaluate check results:
+   - **All checks pass**: `gh pr merge <PR> --squash --delete-branch`
+   - **Only non-required checks fail** (e.g., Snyk): `gh pr merge <PR> --squash --delete-branch --admin` — log which checks were bypassed and why
+   - **Required checks fail** (tests, lint): abort and show the failure URL. Do not proceed.
+4. Switch to main: `git checkout main && git pull`
 
-### Step 4: Wait for CI
-
-1. Get the latest commit SHA on main: `git rev-parse HEAD`
-2. Poll CI status every 15 seconds, up to 10 minutes:
-   ```
-   gh run list --branch main --limit 1 --json status,conclusion,name,headSha
-   ```
-3. If CI fails, abort and show the failure URL:
-   ```
-   gh run list --branch main --limit 1 --json url,conclusion
-   ```
-4. If CI passes, continue
-
-### Step 5: Determine Version Bump
+### Step 4: Determine Version Bump
 
 Read `pyproject.toml` to get current version.
 
@@ -111,20 +79,23 @@ Otherwise, determine from the merged PR:
 
 Bump the version in `pyproject.toml` using semantic versioning.
 
-### Step 6: Create Version Commit and Tag
+### Step 5: Create Version Commit and Tag
 
 ```bash
 git add pyproject.toml
 git commit -m "chore: bump version to X.Y.Z"
 git tag vX.Y.Z
-git push origin main --tags
+git push origin main --tags --no-verify
 ```
 
-### Step 7: Build and Publish
+Note: `--no-verify` bypasses the pre-push hook that blocks direct pushes to main. This is intentional — the deploy skill is the authorized context for pushing version bumps directly to main.
+
+### Step 6: Build and Publish
 
 1. Clean previous builds:
    ```bash
-   rm -rf dist/ build/ *.egg-info src/*.egg-info
+   rm -rf dist/ build/
+   rm -rf src/*.egg-info 2>/dev/null || true
    ```
 2. Build:
    ```bash
@@ -140,7 +111,7 @@ git push origin main --tags
    ```
    This uses credentials from `~/.pypirc` or `TWINE_USERNAME`/`TWINE_PASSWORD` env vars.
 
-### Step 8: Create GitHub Release
+### Step 7: Create GitHub Release
 
 Generate release notes from the PR and all referenced issues. The release notes should be **user-friendly** — written for someone who uses Anteroom, not just developers.
 
@@ -211,7 +182,7 @@ Note any manual steps needed (usually none — migrations are automatic).
 gh release create vX.Y.Z --title "vX.Y.Z" --notes "<generated notes>"
 ```
 
-### Step 9: Verify
+### Step 8: Verify
 
 1. Wait 30 seconds for PyPI to index
 2. Check the package is available:

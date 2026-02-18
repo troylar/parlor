@@ -121,5 +121,6 @@ nav:
     - tutorials/build-custom-skills.md
   - Advanced:
     - advanced/architecture.md
+    - advanced/developer-workflow.md
     - advanced/contributing.md
     - advanced/changelog.md

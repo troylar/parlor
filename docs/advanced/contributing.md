@@ -2,6 +2,9 @@
 
 How to set up a development environment and contribute to Anteroom.
 
+!!! tip
+    See [Developer Workflow](developer-workflow.md) for the full Claude Code skills guide, commit conventions, and best practices.
+
 ## Development Setup
 
 ```bash
@@ -13,10 +16,11 @@ $ pip install -e ".[dev]"
 ## Running Tests
 
 ```bash
-$ pytest tests/ -v              # All tests (~343 tests)
-$ pytest tests/unit/ -v         # Unit tests only
-$ pytest tests/integration/ -v  # Integration tests
-$ pytest --cov=aroom --cov-report=html  # With coverage
+$ pytest tests/ -v                           # All tests
+$ pytest tests/unit/ -v                      # Unit tests only (~1080 tests)
+$ pytest tests/integration/ -v               # Integration tests
+$ pytest tests/e2e/ -v                       # E2e tests (requires uvx/npx)
+$ pytest --cov=anteroom --cov-report=html    # With coverage
 ```
 
 ## Linting and Formatting

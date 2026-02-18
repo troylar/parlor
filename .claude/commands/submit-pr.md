@@ -69,7 +69,7 @@ If NO issue references are found, abort: "Every PR must reference at least one G
 
 ### Step 3: Code Quality (parallel, unless --skip-checks)
 
-If `--skip-checks` is passed, warn that this is not recommended and skip to Step 8.
+If `--skip-checks` is passed, warn that this is not recommended and skip to Step 9.
 
 Run all checks in parallel:
 
@@ -153,13 +153,16 @@ Rate overall thoroughness: GOOD (>80% of paths covered), WEAK (50-80%), POOR (<5
    - Security patterns are followed (parameterized queries, input validation, no hardcoded secrets)
    - New endpoints have appropriate auth/CSRF protection
 
-**Agent C — Documentation Freshness:**
+**Agent C — Documentation Freshness (Authoritative):**
+
+This is the authoritative documentation review — it identifies stale or missing docs AND applies fixes. The `/deploy` skill only does a lightweight sanity check, so this is the primary gate.
 
 1. Get the list of changed files: `git diff --name-only $BASE..HEAD`
-2. Read `CLAUDE.md`, `README.md`, and `VISION.md`
+2. Read `CLAUDE.md`, `README.md`, `VISION.md`, and relevant `docs/` pages
 3. Check each documentation surface:
 
-**CLAUDE.md — Key Modules & Architecture:**
+**CLAUDE.md:**
+- **Test count** — run `grep -r "def test_" tests/ | wc -l` and compare to CLAUDE.md. Update if stale.
 - New Python modules under `src/anteroom/` not listed in the "Key Modules" section? Flag as MISSING.
 - Modified modules whose CLAUDE.md description no longer matches reality? Flag as STALE.
 - New routers, tools, or services that change the architecture diagram? Flag as STALE.
@@ -171,6 +174,7 @@ Rate overall thoroughness: GOOD (>80% of paths covered), WEAK (50-80%), POOR (<5
 **README.md:**
 - New CLI commands or flags not mentioned in README? Flag as MISSING.
 - Feature descriptions that no longer match current behavior? Flag as STALE.
+- Installation or quickstart instructions still accurate? Verify.
 
 **VISION.md:**
 - New capabilities that should be reflected in "Current Direction"? Flag as MISSING.
@@ -187,7 +191,8 @@ Rate overall thoroughness: GOOD (>80% of paths covered), WEAK (50-80%), POOR (<5
 - Flag docs pages that reference behavior the PR changed but weren't updated.
 - Flag new features with no corresponding docs page.
 
-Rate overall documentation: UP TO DATE / NEEDS UPDATE (list specific files).
+4. **Apply fixes**: For any MISSING or STALE items, update the documentation files directly.
+5. Rate overall documentation: UP TO DATE / FIXED (list files updated) / NEEDS MANUAL REVIEW (items too complex to auto-fix).
 
 **Agent D — Vision Alignment:**
 
@@ -257,7 +262,20 @@ Rate overall documentation: UP TO DATE / NEEDS UPDATE (list specific files).
    - XSS in HTML/JS output
    - Insecure defaults
 
-### Step 6: GitHub Issue Check
+### Step 6: Commit Documentation Fixes
+
+If Agent C in Step 5 flagged documentation as FIXED (it applied updates to CLAUDE.md, README.md, VISION.md, or docs/ pages):
+
+1. Stage and commit the doc fixes. Extract the primary issue number from the branch name:
+   ```bash
+   git add CLAUDE.md README.md VISION.md docs/
+   git commit -m "docs: update documentation for current changes (#<primary issue>)"
+   ```
+2. Update the validation report to show docs as fixed rather than stale.
+
+If Agent C rated docs as UP TO DATE, skip this step. If NEEDS MANUAL REVIEW, flag in the report but do not block PR creation.
+
+### Step 7: GitHub Issue Check
 
 Verify all commits reference a GitHub issue:
 ```bash
@@ -269,7 +287,7 @@ For each commit, check that it contains `(#N)` where N is a valid issue number. 
 gh issue view <N> --json state,title --jq '"\(.state): \(.title)"'
 ```
 
-### Step 7: Display Validation Report
+### Step 8: Display Validation Report
 
 Display the full validation results locally in the chat:
 
@@ -303,10 +321,10 @@ Display the full validation results locally in the chat:
   OWASP ASVS:    ✅ / ⚠️ N issues
 
 📖 Documentation
-  CLAUDE.md:      ✅ / ⚠️ N sections stale or missing
-  README.md:      ✅ / ⚠️ <details>
-  VISION.md:      ✅ / ⚠️ <details>
-  docs/ pages:    ✅ / ⚠️ N pages need updates
+  CLAUDE.md:      ✅ / ✅ fixed / ⚠️ needs manual review
+  README.md:      ✅ / ✅ fixed / ⚠️ <details>
+  VISION.md:      ✅ / ✅ fixed / ⚠️ <details>
+  docs/ pages:    ✅ / ✅ fixed / ⚠️ N pages need review
 
 🎯 Vision Alignment
   Guardrails:     ✅ / ⚠️ <details>
@@ -339,7 +357,7 @@ If `--checks-only` was passed, stop here. Do not create the PR.
 
 If Result is NOT READY, abort and show what to fix. Do not create the PR.
 
-### Step 8: Generate PR Description
+### Step 9: Generate PR Description
 
 Analyze all commits and changed files to generate the PR body:
 
@@ -391,7 +409,7 @@ Addresses #<secondary issue>
 Generated with [Claude Code](https://claude.ai/code)
 ```
 
-### Step 9: Push and Create PR
+### Step 10: Push and Create PR
 
 ```bash
 git push -u origin $(git branch --show-current)
@@ -412,7 +430,7 @@ EOF
 - Derived from the primary issue title or the commit summary
 - Examples: `feat: add semantic search to CLI (#83)`, `fix: handle empty query in search endpoint (#91)`
 
-### Step 10: Post-creation Report
+### Step 11: Post-creation Report
 
 ```bash
 gh pr view --json number,url,title
@@ -430,7 +448,7 @@ gh pr view --json number,url,title
   📌 Status:   <ready | draft>
   🧪 Checks:   ✅ lint, format, tests, types
   🔒 Security: ✅ / ⚠️ N issues
-  📖 Docs:     ✅ up to date / ⚠️ N updates needed
+  📖 Docs:     ✅ up to date / ✅ N fixes committed / ⚠️ N need manual review
   🎯 Vision:   ✅ supports <principles>
 
 ────────────────────────────────────────────
@@ -438,15 +456,15 @@ gh pr view --json number,url,title
 ────────────────────────────────────────────
 ```
 
-### Step 11: Automatic Code Review
+### Step 12: Automatic Code Review
 
-Immediately after PR creation, run the full `/code-review` workflow on the new PR (Steps 1–10 of the code-review skill). Display the local review report in chat and post the condensed comment to the PR.
+Immediately after PR creation, run the full `/code-review` workflow on the new PR. Display the local review report in chat and post the condensed comment to the PR.
 
-### Step 12: Fix Loop (if issues found)
+### Step 13: Fix Loop (if issues found)
 
 If the code review finds issues (score 80+):
 
-1. Display all issues with full context (as per code-review Step 8)
+1. Display all issues with full context
 2. Ask the user:
 
 ```
@@ -465,14 +483,14 @@ If the code review finds issues (score 80+):
    - Run lint + format + tests to verify fixes don't break anything
    - Stage and commit: `fix(scope): address code review feedback (#<issue>)`
    - Push: `git push`
-   - Re-run the code review (Steps 1–10 of code-review skill)
+   - Re-run the code review
    - If new issues are found, repeat (max 2 fix rounds to avoid infinite loops)
    - Post an updated review comment to the PR
 
 4. **If "Skip":**
    - Proceed without fixing. The review comment is already posted.
 
-### Step 13: Final Summary
+### Step 14: Final Summary
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -497,4 +515,5 @@ If the code review finds issues (score 80+):
 - Group changes logically in the description
 - If the PR is large (>500 lines changed), suggest breaking it up
 - Security section only when relevant — don't add boilerplate
-- Documentation warnings don't block PR creation, but flag them in the PR body
+- Documentation issues are auto-fixed and committed before PR creation when possible
+- Documentation items that need manual review don't block PR creation, but are flagged in the PR body
