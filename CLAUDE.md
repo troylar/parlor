@@ -25,7 +25,7 @@ aroom --approval-mode auto chat     # Works with subcommands too
 
 # Testing
 pytest tests/ -v                    # All tests
-pytest tests/unit/ -v               # Unit tests only (~1090 tests)
+pytest tests/unit/ -v               # Unit tests only (~1080 tests)
 pytest tests/e2e/ -v                # E2e tests (requires uvx/npx)
 pytest -m e2e -v                    # Run only e2e-marked tests
 pytest tests/unit/test_tools.py -v  # Single test file
@@ -71,7 +71,7 @@ CLI (cli/repl.py) ──┘         │
 - **`tools/canvas.py`** — Canvas tools for AI to create/update rich content panels alongside chat. Supports streaming content updates during generation via SSE events (`canvas_stream_start`, `canvas_streaming`). `patch_canvas` applies incremental search/replace edits for token efficiency
 - **`routers/approvals.py`** — `POST /api/approvals/{approval_id}/respond` endpoint for Web UI safety gate approval flow. Uses Pydantic request model with `scope` field (once/session/always), explicit `Content-Type: application/json` enforcement, regex-validated approval IDs, atomic dict pop to prevent TOCTOU races
 - **`routers/events.py`** — `GET /events` SSE endpoint for real-time UI updates (canvas streaming, approval notifications) backed by `services/event_bus.py`
-- **`cli/repl.py`** — REPL with prompt_toolkit, skills system, @file references, /commands. Uses concurrent input/output architecture with `patch_stdout()` — input prompt stays active while agent streams responses, with messages queued and processed in FIFO order
+- **`cli/repl.py`** — REPL with prompt_toolkit, skills system, @file references, /commands. Uses concurrent input/output architecture with `patch_stdout()` — input prompt stays active while agent streams responses, with messages queued and processed in FIFO order. `_confirm_destructive` approval callback prints a dim collapsed summary after user responds; EOFError/KeyboardInterrupt (Escape or Ctrl+C) treated as denial — fails closed
 - **`tls.py`** — Self-signed certificate generation for localhost HTTPS using `cryptography` package
 - **`routers/`** — FastAPI endpoints: conversations CRUD, SSE chat streaming, config, projects, canvas CRUD, document/note entry management. Chat endpoint supports prompt queuing: if a stream is active for a conversation, new messages are queued (max 10) and return `{"status": "queued"}` JSON instead of opening a new SSE stream. Stale stream detection checks `request.is_disconnected()` and stream age (approval_timeout + 30s); stale streams are cancelled and replaced rather than queued to. `_active_streams` stores `{started_at, request, cancel_event}` dicts. State-changing endpoints with JSON bodies enforce Content-Type validation
 
