@@ -135,12 +135,15 @@ The `run_agent` tool spawns isolated child AI sessions for parallel task executi
 `SubagentLimiter` enforces per-request caps:
 
 - **Max concurrent**: 5 sub-agents running at the same time
-- **Max total**: 20 sub-agents per root request
+- **Max total**: 10 sub-agents per root request
 - **Semaphore timeout**: 30 seconds waiting for a slot before failing
 - **Max nesting depth**: 3 levels (sub-agents can spawn sub-agents, up to 3 deep)
 - **Prompt size cap**: 32,000 characters per sub-agent prompt
 - **Output truncation**: 4,000 characters max per sub-agent response
-- **Max iterations**: 25 per sub-agent turn (parent loop allows 50)
+- **Max iterations**: 15 per sub-agent turn (parent loop allows 50)
+- **Wall-clock timeout**: 120 seconds per sub-agent (clamped 10–600)
+
+All limits are configurable via `safety.subagent` in `config.yaml`. See [Config File Reference](../configuration/config-file.md#safetysubagent).
 
 ### Input Validation
 

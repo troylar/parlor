@@ -578,6 +578,10 @@ async def chat(conversation_id: str, request: Request):
     from ..tools.subagent import SubagentLimiter
 
     _sa_config = getattr(request.app.state.config.safety, "subagent", None)
+    # SECURITY-REVIEW: Limiter is per-request, not global. A single user with
+    # multiple browser tabs can spawn up to max_total * concurrent_requests
+    # sub-agents. Acceptable for a single-user local app; revisit if
+    # multi-user support is added.
     _subagent_limiter = SubagentLimiter(
         max_concurrent=_sa_config.max_concurrent if _sa_config else 5,
         max_total=_sa_config.max_total if _sa_config else 10,

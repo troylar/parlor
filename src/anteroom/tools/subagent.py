@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 # Module-level constants serve as absolute maximums / fallback defaults
 MAX_SUBAGENT_DEPTH = 3
 MAX_CONCURRENT_SUBAGENTS = 5
-MAX_TOTAL_SUBAGENTS = 20
+MAX_TOTAL_SUBAGENTS = 10
 MAX_OUTPUT_CHARS = 4000
 MAX_PROMPT_CHARS = 32_000
-SUBAGENT_MAX_ITERATIONS = 25
+SUBAGENT_MAX_ITERATIONS = 15
 SUBAGENT_TIMEOUT = 120
 
 _MODEL_PATTERN = re.compile(r"^[a-zA-Z0-9._:/-]{1,128}$")
@@ -276,7 +276,9 @@ async def _run_subagent(
             elif event.kind == "tool_call_start":
                 tool_calls_made.append(event.data.get("tool_name", "unknown"))
             elif event.kind == "error":
-                error_message = event.data.get("message", "Unknown error")
+                # Cap error message to avoid leaking internal details to parent AI
+                raw_err = event.data.get("message", "Unknown error")
+                error_message = raw_err[:200] if raw_err else "Unknown error"
 
     try:
         await asyncio.wait_for(_run_loop(), timeout=timeout)

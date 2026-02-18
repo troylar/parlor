@@ -58,6 +58,14 @@ safety:
   tool_tiers: {}                     # Per-tool tier overrides, e.g. {my_mcp_tool: "read"}
   custom_patterns: []
   sensitive_paths: []
+  subagent:
+    max_concurrent: 5
+    max_total: 10
+    max_depth: 3
+    max_iterations: 15
+    timeout: 120
+    max_output_chars: 4000
+    max_prompt_chars: 32000
 
 embeddings:
   enabled: true
@@ -140,6 +148,21 @@ Controls the tool safety approval gate. Tools are assigned risk tiers (read, wri
 | `tool_tiers` | dict | `{}` | Per-tool tier overrides, e.g. `{my_mcp_tool: "read"}`. Valid tiers: `read`, `write`, `execute`, `destructive` |
 | `custom_patterns` | list | `[]` | Additional regex patterns that trigger confirmation for bash commands |
 | `sensitive_paths` | list | `[]` | Additional path prefixes that trigger confirmation for file writes |
+| `subagent.*` | object | see below | Sub-agent execution limits (nested under `safety.subagent`) |
+
+#### safety.subagent
+
+Controls limits for the `run_agent` sub-agent tool. All fields are optional — sensible defaults apply when omitted.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_concurrent` | integer | `5` | Maximum sub-agents running simultaneously |
+| `max_total` | integer | `10` | Maximum sub-agents spawned per root request |
+| `max_depth` | integer | `3` | Maximum nesting depth (sub-agents spawning sub-agents) |
+| `max_iterations` | integer | `15` | Maximum agentic loop iterations per sub-agent |
+| `timeout` | integer | `120` | Wall-clock timeout in seconds per sub-agent (clamped 10–600) |
+| `max_output_chars` | integer | `4000` | Maximum output characters returned to parent |
+| `max_prompt_chars` | integer | `32000` | Maximum prompt characters accepted |
 
 See [Tool Safety](../security/tool-safety.md) for the full list of built-in patterns and the approval flow.
 
