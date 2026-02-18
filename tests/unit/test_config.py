@@ -303,6 +303,65 @@ class TestLoadConfig:
         assert config.ai.narration_cadence == 3
         assert "every 3 tool calls" in config.ai.system_prompt
 
+    def test_narration_cadence_negative_clamped_to_zero(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                    "narration_cadence": -1,
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.ai.narration_cadence == 0
+        assert "<narration>" not in config.ai.system_prompt
+
+    def test_narration_cadence_invalid_type_falls_back_to_default(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                    "narration_cadence": "bad",
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.ai.narration_cadence == 5
+        assert "<narration>" in config.ai.system_prompt
+
+    def test_narration_cadence_env_var_disabled(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_BASE_URL", "https://env.example.com")
+        monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
+        monkeypatch.setenv("AI_CHAT_NARRATION_CADENCE", "0")
+        cfg_file = _write_config(tmp_path, {})
+        config = load_config(cfg_file)
+        assert config.ai.narration_cadence == 0
+        assert "<narration>" not in config.ai.system_prompt
+
+    def test_narration_cadence_yaml_takes_precedence_over_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AI_CHAT_BASE_URL", "https://env.example.com")
+        monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
+        monkeypatch.setenv("AI_CHAT_NARRATION_CADENCE", "99")
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                    "narration_cadence": 7,
+                },
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.ai.narration_cadence == 7
+        assert "every 7 tool calls" in config.ai.system_prompt
+
 
 class TestEmbeddingsConfig:
     def test_default_embeddings_config(self, tmp_path: Path) -> None:
