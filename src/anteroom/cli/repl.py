@@ -27,7 +27,7 @@ from ..services.rewind import rewind_conversation as rewind_service
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
 from .instructions import load_instructions
-from .renderer import CHROME, MUTED
+from .renderer import CHROME, GOLD, MUTED
 from .skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -775,6 +775,81 @@ async def _run_one_shot(
         _remove_signal_handler(loop, signal.SIGINT)
 
 
+def _patch_completion_menu_position() -> None:
+    """Patch FloatContainer so the completion menu renders above the cursor.
+
+    prompt_toolkit positions the completion menu below the cursor by default and
+    only flips above when there is more vertical space above than below.  This
+    patches ``FloatContainer._draw_float`` at the **class** level so completion
+    menus are always placed above the cursor line — eliminating clipping when the
+    prompt is near the terminal bottom.
+    """
+    from prompt_toolkit.data_structures import Point
+    from prompt_toolkit.layout.containers import Float, FloatContainer
+    from prompt_toolkit.layout.menus import CompletionsMenu, MultiColumnCompletionsMenu
+    from prompt_toolkit.layout.screen import WritePosition
+
+    _orig = FloatContainer._draw_float
+
+    def _draw_float_patched(
+        self: Any,
+        fl: Float,
+        screen: Any,
+        mouse_handlers: Any,
+        write_position: WritePosition,
+        style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        if not isinstance(fl.content, (CompletionsMenu, MultiColumnCompletionsMenu)):
+            return _orig(self, fl, screen, mouse_handlers, write_position, style, erase_bg, z_index)
+
+        try:
+            from prompt_toolkit.application.current import get_app
+
+            cpos = screen.get_menu_position(fl.attach_to_window or get_app().layout.current_window)
+            cursor = Point(x=cpos.x - write_position.xpos, y=cpos.y - write_position.ypos)
+
+            fl_w = fl.get_width()
+            width = (
+                fl_w
+                if fl_w is not None
+                else min(write_position.width, fl.content.preferred_width(write_position.width).preferred)
+            )
+            xpos = cursor.x
+            if xpos + width > write_position.width:
+                xpos = max(0, write_position.width - width)
+
+            fl_h = fl.get_height()
+            height = fl_h if fl_h is not None else fl.content.preferred_height(width, write_position.height).preferred
+
+            if cursor.y >= height:
+                height = min(height, cursor.y)
+                ypos = cursor.y - height
+            else:
+                ypos = cursor.y + 1
+                height = min(height, write_position.height - ypos)
+
+            if height > 0 and width > 0:
+                fl.content.write_to_screen(
+                    screen,
+                    mouse_handlers,
+                    WritePosition(
+                        xpos=xpos + write_position.xpos,
+                        ypos=ypos + write_position.ypos,
+                        width=width,
+                        height=height,
+                    ),
+                    style,
+                    erase_bg=not fl.transparent(),
+                    z_index=z_index,
+                )
+        except Exception:
+            return _orig(self, fl, screen, mouse_handlers, write_position, style, erase_bg, z_index)
+
+    FloatContainer._draw_float = _draw_float_patched  # type: ignore[assignment]
+
+
 async def _run_repl(
     config: AppConfig,
     db: Any,
@@ -801,6 +876,7 @@ async def _run_repl(
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.styles import Style as PtStyle
 
     class ParlorCompleter(Completer):
         """Tab completer for / commands and @ file paths."""
@@ -943,6 +1019,16 @@ async def _run_repl(
     def _prompt() -> HTML:
         return _prompt_dim if agent_busy.is_set() else _prompt_text
 
+    _repl_style = PtStyle.from_dict(
+        {
+            "completion-menu": f"bg:#1a1a2e {CHROME}",
+            "completion-menu.completion": f"bg:#1a1a2e {CHROME}",
+            "completion-menu.completion.current": f"bg:{GOLD} #1a1a2e",
+            "completion-menu.meta.completion": f"bg:#1a1a2e {MUTED}",
+            "completion-menu.meta.completion.current": f"bg:{GOLD} #1a1a2e",
+        }
+    )
+
     session: PromptSession[str] = PromptSession(
         history=FileHistory(str(history_path)),
         key_bindings=kb,
@@ -950,7 +1036,10 @@ async def _run_repl(
         prompt_continuation=_continuation,
         completer=completer,
         reserve_space_for_menu=4,
+        style=_repl_style,
     )
+
+    _patch_completion_menu_position()
 
     # Hook buffer changes for paste detection timing
     def _on_buffer_change(_buf: Any) -> None:
