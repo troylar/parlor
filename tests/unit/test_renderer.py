@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from anteroom.cli.renderer import (
     Verbosity,
     _flush_dedup,
@@ -13,6 +15,9 @@ from anteroom.cli.renderer import (
     cycle_verbosity,
     flush_buffered_text,
     get_verbosity,
+    render_response_end,
+    render_tool_call_end,
+    render_tool_call_start,
     save_turn_history,
     set_verbosity,
 )
@@ -252,3 +257,169 @@ class TestFlushBufferedText:
         r._streaming_buffer.append("   \n  ")
         flush_buffered_text()
         assert len(r._streaming_buffer) == 0
+
+
+class TestToolCallDimming:
+    """Tests for #111: dim intermediate CLI output."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.COMPACT)
+        r._dedup_summary = ""
+        r._dedup_count = 0
+        r._tool_batch_active = False
+        r._current_turn_tools.clear()
+
+    def _set_tool_start(self) -> None:
+        """Set _tool_start to a recent time so elapsed is small."""
+        import time
+
+        import anteroom.cli.renderer as r
+
+        r._tool_start = time.monotonic()
+
+    def test_successful_tool_call_compact_is_dimmed(self) -> None:
+        import anteroom.cli.renderer as r
+
+        self._set_tool_start()
+        r._current_turn_tools.append(
+            {
+                "tool_name": "bash",
+                "arguments": {"command": "ls"},
+                "summary": "bash ls",
+                "status": "running",
+                "output": None,
+            }
+        )
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_tool_call_end("bash", "success", {"stdout": "file.txt"})
+            printed = str(mock_console.print.call_args_list)
+            assert "[dim]" in printed
+
+    def test_successful_tool_call_detailed_is_dimmed(self) -> None:
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.DETAILED)
+        self._set_tool_start()
+        r._current_turn_tools.append(
+            {
+                "tool_name": "bash",
+                "arguments": {"command": "ls"},
+                "summary": "bash ls",
+                "status": "running",
+                "output": None,
+            }
+        )
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_tool_call_end("bash", "success", {"stdout": "file.txt"})
+            first_call = str(mock_console.print.call_args_list[0])
+            assert "[dim]" in first_call
+
+    def test_error_tool_call_not_dimmed(self) -> None:
+        import anteroom.cli.renderer as r
+
+        self._set_tool_start()
+        r._current_turn_tools.append(
+            {
+                "tool_name": "bash",
+                "arguments": {"command": "bad"},
+                "summary": "bash bad",
+                "status": "running",
+                "output": None,
+            }
+        )
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_tool_call_end("bash", "error", {"error": "command failed"})
+            first_call = str(mock_console.print.call_args_list[0])
+            assert "[dim]" not in first_call
+            assert "[red]" in first_call
+
+    def test_verbose_mode_unchanged(self) -> None:
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.VERBOSE)
+        self._set_tool_start()
+        r._current_turn_tools.append(
+            {
+                "tool_name": "bash",
+                "arguments": {"command": "ls"},
+                "summary": "bash ls",
+                "status": "running",
+                "output": None,
+            }
+        )
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_tool_call_end("bash", "success", {"stdout": "file.txt"})
+            printed = str(mock_console.print.call_args_list)
+            assert "[dim]" not in printed
+
+
+class TestToolBatchSpacing:
+    """Tests for #111: spacing around tool call blocks."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.COMPACT)
+        r._tool_batch_active = False
+        r._current_turn_tools.clear()
+        r._streaming_buffer.clear()
+        r._dedup_summary = ""
+        r._dedup_count = 0
+
+    def test_first_tool_call_adds_blank_line(self) -> None:
+        import anteroom.cli.renderer as r
+
+        assert r._tool_batch_active is False
+        with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
+            render_tool_call_start("bash", {"command": "ls"})
+            # First call should be a blank line (no args = blank)
+            assert mock_console.print.call_count >= 1
+            first_print = mock_console.print.call_args_list[0]
+            assert first_print == ((),) or first_print[0] == ()
+            assert r._tool_batch_active is True
+
+    def test_second_tool_call_no_extra_blank_line(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
+            render_tool_call_start("bash", {"command": "ls"})
+            # In compact mode, render_tool_call_start prints nothing for non-verbose
+            # The key assertion is that no blank line was printed
+            for call in mock_console.print.call_args_list:
+                if call == ((),) or (call[0] == () and call[1] == {}):
+                    raise AssertionError("Should not print blank line for second tool call")
+
+    def test_save_turn_history_resets_batch_flag(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        with patch("anteroom.cli.renderer.console"):
+            save_turn_history()
+        assert r._tool_batch_active is False
+
+    def test_response_end_adds_spacing_after_tools(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        r._streaming_buffer.extend(["hello ", "world"])
+        with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
+            render_response_end()
+            # Should print a blank line (spacing after tool block)
+            assert mock_console.print.call_count >= 1
+            first_print = mock_console.print.call_args_list[0]
+            assert first_print == ((),) or first_print[0] == ()
+            assert r._tool_batch_active is False
+
+    def test_response_end_no_extra_spacing_without_tools(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = False
+        r._streaming_buffer.extend(["hello ", "world"])
+        with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
+            render_response_end()
+            # No blank line should be printed on console (only _stdout_console gets the markdown)
+            blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
+            assert len(blank_calls) == 0

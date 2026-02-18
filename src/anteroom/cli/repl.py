@@ -460,6 +460,8 @@ async def run_cli(
     from ..tools.safety import SafetyVerdict
 
     async def _confirm_destructive(verdict: SafetyVerdict) -> bool:
+        from rich.markup import escape
+
         renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
         if verdict.details.get("command"):
             renderer.console.print(f"  Command: [dim]{verdict.details['command']}[/dim]")
@@ -476,12 +478,19 @@ async def run_cli(
             if choice in ("a", "always"):
                 tool_registry.grant_session_permission(verdict.tool_name)
                 _persist_allowed_tool(verdict.tool_name)
+                renderer.console.print(f"  [dim]✓ Allowed: {escape(verdict.tool_name)} (always)[/dim]\n")
                 return True
             if choice in ("s", "session"):
                 tool_registry.grant_session_permission(verdict.tool_name)
+                renderer.console.print(f"  [dim]✓ Allowed: {escape(verdict.tool_name)} (session)[/dim]\n")
                 return True
-            return choice in ("y", "yes")
+            if choice in ("y", "yes"):
+                renderer.console.print(f"  [dim]✓ Allowed: {escape(verdict.tool_name)} (once)[/dim]\n")
+                return True
+            renderer.console.print(f"  [dim]✗ Denied: {escape(verdict.tool_name)}[/dim]\n")
+            return False
         except (EOFError, KeyboardInterrupt):
+            renderer.console.print(f"  [dim]✗ Denied: {escape(verdict.tool_name)}[/dim]\n")
             return False
 
     def _persist_allowed_tool(tool_name: str) -> None:
