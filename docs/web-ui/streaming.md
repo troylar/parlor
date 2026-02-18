@@ -31,6 +31,24 @@ Tool calls render as expandable detail panels:
 - Output and status shown when complete
 - Spinner animation while tools execute
 
+## Sub-Agent Loading Indicator
+
+When the AI calls `run_agent` to spawn a sub-agent, the tool call panel renders with a distinctive loading state instead of the standard collapsed detail element:
+
+- **Expanded by default** with a pulsing left-border accent animation
+- **Loading prompt** shows the first 200 characters of the sub-agent's task
+- **Spinner** indicates the sub-agent is actively running
+
+As sub-agent events arrive, the loading prompt is replaced by per-agent progress cards:
+
+| SSE Event | `kind` field | Payload fields |
+|---|---|---|
+| `subagent_event` | `subagent_start` | `agent_id`, `model`, `prompt` |
+| `subagent_event` | `tool_call_start` | `agent_id`, `tool_name` |
+| `subagent_event` | `subagent_end` | `agent_id`, `elapsed_seconds`, `tool_calls`, `error` |
+
+On completion, the panel summary updates to "Sub-agent complete" (success) or "Sub-agent failed" (error), and the pulsing animation stops. Non-sub-agent tool calls are unaffected by these styles.
+
 ## Thinking Indicator
 
 Between tool execution and the next API call, Anteroom emits a `"thinking"` event that triggers a pulsing dots animation in the UI. This provides visual feedback that the AI is processing tool results before continuing.
