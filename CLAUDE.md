@@ -110,4 +110,4 @@ PyPI package: `anteroom`. Deploy via `/deploy` Claude Code skill which handles: 
 
 ## CI
 
-GitHub Actions (`.github/workflows/test.yml`): test matrix across Python 3.10-3.14, ruff lint+format check, pytest with coverage, pip-audit, Snyk SCA+SAST.
+GitHub Actions (`.github/workflows/test.yml`): test matrix across Python 3.10-3.14, ruff lint+format check, pytest with coverage, pip-audit, Snyk SCA (enforced, production deps only) + SAST (informational, SARIF uploaded for visibility but non-blocking due to false positives in taint analysis).

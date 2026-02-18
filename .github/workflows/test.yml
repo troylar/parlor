@@ -111,7 +111,6 @@ jobs:
             --severity-threshold=medium \
             --json-file-output=snyk-sca.json \
             --sarif-file-output=snyk-sca.sarif
-          echo "sca_exit=$?" >> "$GITHUB_ENV"
 
       - name: Run Snyk Code (SAST)
         id: snyk-code
@@ -126,8 +125,7 @@ jobs:
           snyk code test \
             --severity-threshold=high \
             --json-file-output=snyk-code.json \
-            --sarif-file-output=snyk-code.sarif || true
-          echo "sast_exit=$?" >> "$GITHUB_ENV"
+            --sarif-file-output=snyk-code.sarif
 
       - name: Upload SCA SARIF to GitHub
         if: always()
