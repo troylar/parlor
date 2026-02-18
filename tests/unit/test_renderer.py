@@ -261,7 +261,7 @@ class TestFlushBufferedText:
 
 
 class TestToolCallDimming:
-    """Tests for #111: dim intermediate CLI output."""
+    """Tests for #111/#140: muted intermediate CLI output."""
 
     def setup_method(self) -> None:
         import anteroom.cli.renderer as r
@@ -280,7 +280,7 @@ class TestToolCallDimming:
 
         r._tool_start = time.monotonic()
 
-    def test_successful_tool_call_compact_is_dimmed(self) -> None:
+    def test_successful_tool_call_compact_uses_muted(self) -> None:
         import anteroom.cli.renderer as r
 
         self._set_tool_start()
@@ -296,9 +296,9 @@ class TestToolCallDimming:
         with patch("anteroom.cli.renderer.console") as mock_console:
             render_tool_call_end("bash", "success", {"stdout": "file.txt"})
             printed = str(mock_console.print.call_args_list)
-            assert "[dim]" in printed
+            assert r.MUTED in printed
 
-    def test_successful_tool_call_detailed_is_dimmed(self) -> None:
+    def test_successful_tool_call_detailed_uses_muted(self) -> None:
         import anteroom.cli.renderer as r
 
         set_verbosity(Verbosity.DETAILED)
@@ -315,9 +315,9 @@ class TestToolCallDimming:
         with patch("anteroom.cli.renderer.console") as mock_console:
             render_tool_call_end("bash", "success", {"stdout": "file.txt"})
             first_call = str(mock_console.print.call_args_list[0])
-            assert "[dim]" in first_call
+            assert r.MUTED in first_call
 
-    def test_error_tool_call_not_dimmed(self) -> None:
+    def test_error_tool_call_not_muted(self) -> None:
         import anteroom.cli.renderer as r
 
         self._set_tool_start()
@@ -333,7 +333,7 @@ class TestToolCallDimming:
         with patch("anteroom.cli.renderer.console") as mock_console:
             render_tool_call_end("bash", "error", {"error": "command failed"})
             first_call = str(mock_console.print.call_args_list[0])
-            assert "[dim]" not in first_call
+            assert r.MUTED not in first_call
             assert "[red]" in first_call
 
     def test_verbose_mode_unchanged(self) -> None:
@@ -353,7 +353,7 @@ class TestToolCallDimming:
         with patch("anteroom.cli.renderer.console") as mock_console:
             render_tool_call_end("bash", "success", {"stdout": "file.txt"})
             printed = str(mock_console.print.call_args_list)
-            assert "[dim]" not in printed
+            assert r.MUTED not in printed
 
 
 class TestToolBatchSpacing:
@@ -436,24 +436,28 @@ class TestStartupStep:
             result = startup_step("Loading...")
             assert result is mock_console.status.return_value
 
-    def test_uses_dim_styling(self) -> None:
+    def test_uses_muted_styling(self) -> None:
+        import anteroom.cli.renderer as r
+
         with patch("anteroom.cli.renderer.console") as mock_console:
             mock_console.status.return_value.__enter__ = lambda s: s
             mock_console.status.return_value.__exit__ = lambda s, *a: None
             startup_step("Loading...")
             call_args = mock_console.status.call_args
             message_arg = call_args[0][0]
-            assert "[dim]" in message_arg
+            assert r.MUTED in message_arg
             assert "Loading..." in message_arg
 
     def test_uses_dots12_spinner(self) -> None:
+        import anteroom.cli.renderer as r
+
         with patch("anteroom.cli.renderer.console") as mock_console:
             mock_console.status.return_value.__enter__ = lambda s: s
             mock_console.status.return_value.__exit__ = lambda s, *a: None
             startup_step("Connecting...")
             call_kwargs = mock_console.status.call_args[1]
             assert call_kwargs["spinner"] == "dots12"
-            assert call_kwargs["spinner_style"] == "dim"
+            assert call_kwargs["spinner_style"] == r.MUTED
 
     def test_message_indented(self) -> None:
         with patch("anteroom.cli.renderer.console") as mock_console:

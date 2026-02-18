@@ -27,6 +27,7 @@ from ..services.rewind import rewind_conversation as rewind_service
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
 from .instructions import load_instructions
+from .renderer import CHROME, MUTED
 from .skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -303,7 +304,8 @@ async def _check_for_update(current: str) -> str | None:
 def _show_resume_info(db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]) -> None:
     """Display resume header with last exchange context."""
     stored = storage.list_messages(db, conv["id"])
-    renderer.console.print(f"[grey62]Resumed: {conv.get('title', 'Untitled')} ({len(ai_messages)} messages)[/grey62]")
+    title = conv.get("title", "Untitled")
+    renderer.console.print(f"[{CHROME}]Resumed: {title} ({len(ai_messages)} messages)[/{CHROME}]")
     renderer.render_conversation_recap(stored)
 
 
@@ -467,9 +469,9 @@ async def run_cli(
 
         renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
         if verdict.details.get("command"):
-            renderer.console.print(f"  Command: [dim]{verdict.details['command']}[/dim]")
+            renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
         elif verdict.details.get("path"):
-            renderer.console.print(f"  Path: [dim]{verdict.details['path']}[/dim]")
+            renderer.console.print(f"  Path: [{MUTED}]{verdict.details['path']}[/{MUTED}]")
         try:
             from prompt_toolkit import PromptSession as _ConfirmSession
 
@@ -481,19 +483,19 @@ async def run_cli(
             if choice in ("a", "always"):
                 tool_registry.grant_session_permission(verdict.tool_name)
                 _persist_allowed_tool(verdict.tool_name)
-                renderer.console.print(f"  [dim]✓ Allowed: {escape(verdict.tool_name)} (always)[/dim]\n")
+                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (always)[/{MUTED}]\n")
                 return True
             if choice in ("s", "session"):
                 tool_registry.grant_session_permission(verdict.tool_name)
-                renderer.console.print(f"  [dim]✓ Allowed: {escape(verdict.tool_name)} (session)[/dim]\n")
+                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (session)[/{MUTED}]\n")
                 return True
             if choice in ("y", "yes"):
-                renderer.console.print(f"  [dim]✓ Allowed: {escape(verdict.tool_name)} (once)[/dim]\n")
+                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (once)[/{MUTED}]\n")
                 return True
-            renderer.console.print(f"  [dim]✗ Denied: {escape(verdict.tool_name)}[/dim]\n")
+            renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
             return False
         except (EOFError, KeyboardInterrupt):
-            renderer.console.print(f"  [dim]✗ Denied: {escape(verdict.tool_name)}[/dim]\n")
+            renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
             return False
 
     def _persist_allowed_tool(tool_name: str) -> None:
@@ -503,7 +505,7 @@ async def run_cli(
 
             write_allowed_tool(tool_name)
         except Exception as e:
-            renderer.console.print(f"[dim]Could not persist preference: {e}[/dim]")
+            renderer.console.print(f"[{MUTED}]Could not persist preference: {e}[/{MUTED}]")
 
     tool_registry.set_safety_config(config.safety, working_dir=working_dir)
     tool_registry.set_confirm_callback(_confirm_destructive)
@@ -596,9 +598,9 @@ async def run_cli(
         valid, message, _ = await ai_service.validate_connection()
     if not valid:
         renderer.render_error(f"Cannot connect to AI service: {message}")
-        renderer.console.print(f"  [dim]base_url: {config.ai.base_url}[/dim]")
-        renderer.console.print(f"  [dim]model: {config.ai.model}[/dim]")
-        renderer.console.print("  [dim]Check ~/.anteroom/config.yaml[/dim]\n")
+        renderer.console.print(f"  [{MUTED}]base_url: {config.ai.base_url}[/{MUTED}]")
+        renderer.console.print(f"  [{MUTED}]model: {config.ai.model}[/{MUTED}]")
+        renderer.console.print(f"  [{MUTED}]Check ~/.anteroom/config.yaml[/{MUTED}]\n")
         if mcp_manager:
             await mcp_manager.shutdown()
         db.close()
@@ -934,7 +936,7 @@ async def _run_repl(
 
     # Styled prompt — dim while agent is working to signal "you can type to queue"
     _prompt_text = HTML("<style fg='#C5A059'>❯</style> ")
-    _prompt_dim = HTML("<style fg='#475569'>❯</style> ")
+    _prompt_dim = HTML(f"<style fg='{CHROME}'>❯</style> ")
     _continuation = "  "  # align with "❯ "
 
     def _prompt() -> HTML:
@@ -1070,7 +1072,7 @@ async def _run_repl(
         ce = _current_cancel_event[0]
         if ce is not None:
             ce.set()
-            renderer.console.print("[grey62]Cancelled[/grey62]")
+            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]")
 
     async def _collect_input() -> None:
         """Continuously collect user input and put on queue."""
@@ -1097,7 +1099,7 @@ async def _run_repl(
                 if input_queue.full():
                     renderer.console.print("[yellow]Queue full (max 10 messages)[/yellow]")
                     continue
-                renderer.console.print("[grey62]Message queued[/grey62]")
+                renderer.console.print(f"[{CHROME}]Message queued[/{CHROME}]")
 
             await input_queue.put(text)
             agent_busy.set()
@@ -1140,12 +1142,12 @@ async def _run_repl(
                     ai_messages = []
                     is_first_message = conv_type == "chat"
                     type_label = f" ({conv_type})" if conv_type != "chat" else ""
-                    renderer.console.print(f"[grey62]New conversation started{type_label}[/grey62]\n")
+                    renderer.console.print(f"[{CHROME}]New conversation started{type_label}[/{CHROME}]\n")
                     continue
                 elif cmd == "/append":
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2 or not parts[1].strip():
-                        renderer.console.print("[grey62]Usage: /append <text>[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]Usage: /append <text>[/{CHROME}]\n")
                         continue
                     current_type = conv.get("type", "chat")
                     if current_type != "note":
@@ -1153,7 +1155,7 @@ async def _run_repl(
                         continue
                     entry_text = parts[1].strip()
                     storage.create_message(db, conv["id"], "user", entry_text, **id_kw)
-                    renderer.console.print(f"[grey62]Entry added to '{conv.get('title', 'Untitled')}'[/grey62]\n")
+                    renderer.console.print(f"[{CHROME}]Entry added to '{conv.get('title', 'Untitled')}'[/{CHROME}]\n")
                     continue
                 elif cmd == "/tools":
                     renderer.render_tools(all_tool_names)
@@ -1172,7 +1174,7 @@ async def _run_repl(
                         is_first_message = False
                         _show_resume_info(db, conv, ai_messages)
                     else:
-                        renderer.console.print("[grey62]No previous conversations[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]No previous conversations[/{CHROME}]\n")
                     continue
                 elif cmd == "/list":
                     parts = user_input.split()
@@ -1190,20 +1192,21 @@ async def _run_repl(
                             type_badge = f" [cyan]\\[{ctype}][/cyan]" if ctype != "chat" else ""
                             renderer.console.print(
                                 f"  {i + 1}. {c['title']}{type_badge}"
-                                f" ({msg_count} msgs) [grey62]{c['id'][:8]}...[/grey62]"
+                                f" ({msg_count} msgs) [{CHROME}]{c['id'][:8]}...[/{CHROME}]"
                             )
                         if has_more:
                             more_n = list_limit + 20
-                            renderer.console.print(f"  [dim]... more available. Use /list {more_n} to show more.[/dim]")
+                            msg = f"... more available. Use /list {more_n} to show more."
+                            renderer.console.print(f"  [{MUTED}]{msg}[/{MUTED}]")
                         renderer.console.print("  Use [bold]/resume <number>[/bold] or [bold]/resume <id>[/bold]\n")
                     else:
-                        renderer.console.print("[grey62]No conversations[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]No conversations[/{CHROME}]\n")
                     continue
                 elif cmd == "/delete":
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2:
                         renderer.console.print(
-                            "[grey62]Usage: /delete <number> or /delete <conversation_id>[/grey62]\n"
+                            f"[{CHROME}]Usage: /delete <number> or /delete <conversation_id>[/{CHROME}]\n"
                         )
                         continue
                     target = parts[1].strip()
@@ -1226,13 +1229,13 @@ async def _run_repl(
                     try:
                         answer = input(f'  Delete "{title}"? [y/N] ').strip().lower()
                     except (EOFError, KeyboardInterrupt):
-                        renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                         continue
                     if answer not in ("y", "yes"):
-                        renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                         continue
                     storage.delete_conversation(db, resolved_id, config.app.data_dir)
-                    renderer.console.print(f"[grey62]Deleted: {title}[/grey62]\n")
+                    renderer.console.print(f"[{CHROME}]Deleted: {title}[/{CHROME}]\n")
                     if conv.get("id") == resolved_id:
                         conv = storage.create_conversation(db, **id_kw)
                         ai_messages = []
@@ -1241,7 +1244,9 @@ async def _run_repl(
                 elif cmd == "/search":
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2 or not parts[1].strip():
-                        renderer.console.print("[grey62]Usage: /search <query> | /search --keyword <query>[/grey62]\n")
+                        renderer.console.print(
+                            f"[{CHROME}]Usage: /search <query> | /search --keyword <query>[/{CHROME}]\n"
+                        )
                         continue
                     search_arg = parts[1].strip()
 
@@ -1252,7 +1257,7 @@ async def _run_repl(
                         force_keyword = True
                         search_arg = search_arg[len("--keyword ") :].strip()
                         if not search_arg:
-                            renderer.console.print("[grey62]Usage: /search --keyword <query>[/grey62]\n")
+                            renderer.console.print(f"[{CHROME}]Usage: /search --keyword <query>[/{CHROME}]\n")
                             continue
                     elif search_arg.startswith("--type "):
                         rest = search_arg[len("--type ") :].strip()
@@ -1264,7 +1269,7 @@ async def _run_repl(
                             renderer.render_error("Invalid type. Use: chat, note, or document")
                             continue
                         if not search_arg:
-                            renderer.console.print("[grey62]Usage: /search --type <type> <query>[/grey62]\n")
+                            renderer.console.print(f"[{CHROME}]Usage: /search --type <type> <query>[/{CHROME}]\n")
                             continue
 
                     query = search_arg
@@ -1297,7 +1302,7 @@ async def _run_repl(
                                         relevance = max(0, 100 - int(dist * 100))
                                         renderer.console.print(
                                             f"  {i + 1}. [{r['role']}] {snippet}... "
-                                            f"[grey62]({relevance}% match, {r['conversation_id'][:8]}...)[/grey62]"
+                                            f"[{CHROME}]({relevance}% match, {r['conversation_id'][:8]}...)[/{CHROME}]"
                                         )
                                     renderer.console.print()
                                     continue
@@ -1310,11 +1315,11 @@ async def _run_repl(
                         for i, c in enumerate(results):
                             msg_count = c.get("message_count", 0)
                             renderer.console.print(
-                                f"  {i + 1}. {c['title']} ({msg_count} msgs) [grey62]{c['id'][:8]}...[/grey62]"
+                                f"  {i + 1}. {c['title']} ({msg_count} msgs) [{CHROME}]{c['id'][:8]}...[/{CHROME}]"
                             )
                         renderer.console.print("  Use [bold]/resume <number>[/bold] to open\n")
                     else:
-                        renderer.console.print(f"[grey62]No conversations matching '{query}'[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]No conversations matching '{query}'[/{CHROME}]\n")
                     continue
                 elif cmd == "/skills":
                     if skill_registry:
@@ -1322,12 +1327,13 @@ async def _run_repl(
                         if skills:
                             renderer.console.print("\n[bold]Available skills:[/bold]")
                             for s in skills:
-                                renderer.console.print(f"  /{s.name} - {s.description} [grey62]({s.source})[/grey62]")
+                                src = s.source
+                                renderer.console.print(f"  /{s.name} - {s.description} [{CHROME}]({src})[/{CHROME}]")
                             renderer.console.print()
                         else:
                             renderer.console.print(
-                                "[grey62]No skills loaded. Add .yaml files to"
-                                " ~/.anteroom/skills/ or .anteroom/skills/[/grey62]\n"
+                                f"[{CHROME}]No skills loaded. Add .yaml files to"
+                                f" ~/.anteroom/skills/ or .anteroom/skills/[/{CHROME}]\n"
                             )
                     continue
                 elif cmd == "/mcp":
@@ -1336,7 +1342,7 @@ async def _run_repl(
                         if mcp_manager:
                             renderer.render_mcp_status(mcp_manager.get_server_statuses())
                         else:
-                            renderer.console.print("[grey62]No MCP servers configured.[/grey62]\n")
+                            renderer.console.print(f"[{CHROME}]No MCP servers configured.[/{CHROME}]\n")
                     elif len(parts) >= 2 and parts[1].lower() == "status":
                         if not mcp_manager:
                             renderer.render_error("No MCP servers configured")
@@ -1362,7 +1368,7 @@ async def _run_repl(
                                     renderer.render_error(f"Failed to connect '{server_name}': {err}")
                             elif action == "disconnect":
                                 await mcp_manager.disconnect_server(server_name)
-                                renderer.console.print(f"[grey62]Disconnected: {server_name}[/grey62]\n")
+                                renderer.console.print(f"[{CHROME}]Disconnected: {server_name}[/{CHROME}]\n")
                             elif action == "reconnect":
                                 await mcp_manager.reconnect_server(server_name)
                                 status = mcp_manager.get_server_statuses().get(server_name, {})
@@ -1381,20 +1387,20 @@ async def _run_repl(
                             renderer.render_error(str(e))
                     else:
                         renderer.console.print(
-                            "[grey62]Usage: /mcp [status [name]|connect|disconnect|reconnect <name>][/grey62]\n"
+                            f"[{CHROME}]Usage: /mcp [status [name]|connect|disconnect|reconnect <name>][/{CHROME}]\n"
                         )
                     continue
                 elif cmd == "/model":
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2:
-                        renderer.console.print(f"[grey62]Current model: {current_model}[/grey62]")
-                        renderer.console.print("[grey62]Usage: /model <model_name>[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]Current model: {current_model}[/{CHROME}]")
+                        renderer.console.print(f"[{CHROME}]Usage: /model <model_name>[/{CHROME}]\n")
                         continue
                     new_model = parts[1].strip()
                     current_model = new_model
                     ai_service = create_ai_service(config.ai)
                     ai_service.config.model = new_model
-                    renderer.console.print(f"[grey62]Switched to model: {new_model}[/grey62]\n")
+                    renderer.console.print(f"[{CHROME}]Switched to model: {new_model}[/{CHROME}]\n")
                     continue
                 elif cmd == "/verbose":
                     new_v = renderer.cycle_verbosity()
@@ -1407,7 +1413,7 @@ async def _run_repl(
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2:
                         renderer.console.print(
-                            "[grey62]Usage: /resume <number> (from /list) or /resume <conversation_id>[/grey62]\n"
+                            f"[{CHROME}]Usage: /resume <number> (from /list) or /resume <conversation_id>[/{CHROME}]\n"
                         )
                         continue
                     target = parts[1].strip()
@@ -1434,7 +1440,7 @@ async def _run_repl(
                 elif cmd == "/rewind":
                     stored = storage.list_messages(db, conv["id"])
                     if len(stored) < 2:
-                        renderer.console.print("[grey62]Not enough messages to rewind[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]Not enough messages to rewind[/{CHROME}]\n")
                         continue
 
                     renderer.console.print("\n[bold]Messages:[/bold]")
@@ -1446,12 +1452,12 @@ async def _run_repl(
                         renderer.console.print(f"  {msg['position']}. [{role_label}] {preview}")
 
                     renderer.console.print(
-                        "\n[grey62]Enter position to rewind to (keep that message, delete after):[/grey62]"
+                        f"\n[{CHROME}]Enter position to rewind to (keep that message, delete after):[/{CHROME}]"
                     )
                     try:
                         pos_input = input("  Position: ").strip()
                     except (EOFError, KeyboardInterrupt):
-                        renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                         continue
 
                     if not pos_input.isdigit():
@@ -1479,7 +1485,7 @@ async def _run_repl(
                             answer = input("  Undo file changes? [y/N] ").strip().lower()
                             undo_files = answer in ("y", "yes")
                         except (EOFError, KeyboardInterrupt):
-                            renderer.console.print("[grey62]Cancelled[/grey62]\n")
+                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                             continue
 
                     result = await rewind_service(
@@ -1497,7 +1503,7 @@ async def _run_repl(
                         summary += f", reverted {len(result.reverted_files)} file(s)"
                     if result.skipped_files:
                         summary += f", {len(result.skipped_files)} skipped"
-                    renderer.console.print(f"[grey62]{summary}[/grey62]\n")
+                    renderer.console.print(f"[{CHROME}]{summary}[/{CHROME}]\n")
 
                     if result.skipped_files:
                         for sf in result.skipped_files:
@@ -1516,7 +1522,7 @@ async def _run_repl(
             if current_conv_type in ("note", "document"):
                 expanded = _expand_file_references(user_input, working_dir)
                 storage.create_message(db, conv["id"], "user", expanded, **id_kw)
-                renderer.console.print(f"[grey62]Entry added to '{conv.get('title', 'Untitled')}'[/grey62]\n")
+                renderer.console.print(f"[{CHROME}]Entry added to '{conv.get('title', 'Untitled')}'[/{CHROME}]\n")
                 if is_first_message:
                     is_first_message = False
                 continue
@@ -1642,7 +1648,7 @@ async def _run_repl(
                         renderer.render_newline()
                         renderer.render_response_end()
                         renderer.render_newline()
-                        renderer.console.print("[grey62]Processing queued message...[/grey62]")
+                        renderer.console.print(f"[{CHROME}]Processing queued message...[/{CHROME}]")
                         renderer.render_newline()
                         renderer.clear_turn_history()
                         response_token_count = 0
@@ -1718,7 +1724,7 @@ async def _compact_messages(
 ) -> None:
     """Summarize conversation history to reduce context size."""
     if len(ai_messages) < 4:
-        renderer.console.print("[grey62]Not enough messages to compact[/grey62]\n")
+        renderer.console.print(f"[{CHROME}]Not enough messages to compact[/{CHROME}]\n")
         return
 
     original_count = len(ai_messages)
@@ -1747,7 +1753,7 @@ async def _compact_messages(
     )
 
     try:
-        renderer.console.print("[grey62]Generating summary...[/grey62]")
+        renderer.console.print(f"[{CHROME}]Generating summary...[/{CHROME}]")
         response = await ai_service.client.chat.completions.create(
             model=ai_service.config.model,
             messages=[{"role": "user", "content": summary_prompt}],
@@ -1768,4 +1774,4 @@ async def _compact_messages(
 
     new_tokens = _estimate_tokens(ai_messages)
     renderer.render_compact_done(original_count, 1)
-    renderer.console.print(f"  [grey62]~{original_tokens:,} -> ~{new_tokens:,} tokens[/grey62]\n")
+    renderer.console.print(f"  [{CHROME}]~{original_tokens:,} -> ~{new_tokens:,} tokens[/{CHROME}]\n")

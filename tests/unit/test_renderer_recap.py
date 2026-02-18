@@ -118,4 +118,4 @@ class TestRenderHelp:
             output = " ".join(str(c) for c in mock_console.print.call_args_list)
             assert "@<path>" in output
             assert "Alt+Enter" in output
-            assert "Escape" in output
+            assert "Esc" in output

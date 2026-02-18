@@ -20,6 +20,16 @@ console = Console(stderr=True)
 _stdout_console = Console()
 _stdout = sys.stdout
 
+# ---------------------------------------------------------------------------
+# Color palette — explicit values for readability on dark terminals.
+# Avoids Rich's [dim] (SGR 2 faint) which is nearly invisible on dark bg.
+# ---------------------------------------------------------------------------
+
+GOLD = "#C5A059"  # accents, "Thinking..." text
+SLATE = "#94A3B8"  # labels ("You:", "AI:"), directory display
+MUTED = "#8b8b8b"  # secondary text (tool results, approval feedback, version info)
+CHROME = "#6b7280"  # UI chrome (status messages, hints, MCP info)
+
 
 def use_stdout_console() -> None:
     """Switch renderer to REPL-compatible mode.
@@ -258,7 +268,7 @@ def start_thinking() -> None:
         _write_thinking_line(0.0)
         _spinner = None
     else:
-        _spinner = Status("[#C5A059]Thinking...[/]", console=console, spinner="dots12")
+        _spinner = Status(f"[{GOLD}]Thinking...[/]", console=console, spinner="dots12")
         _spinner.start()
 
 
@@ -267,7 +277,7 @@ def _write_thinking_line(elapsed: float) -> None:
     if elapsed < 0.5:
         text = "\r\033[2K\033[38;2;197;160;89mThinking...\033[0m"
     else:
-        text = f"\r\033[2K\033[38;2;197;160;89mThinking...\033[0m \033[38;2;71;85;105m{elapsed:.0f}s\033[0m"
+        text = f"\r\033[2K\033[38;2;197;160;89mThinking...\033[0m \033[38;2;107;114;128m{elapsed:.0f}s\033[0m"
     if _stdout:
         _stdout.write(text)
         _stdout.flush()
@@ -280,7 +290,7 @@ def update_thinking() -> None:
         now = time.monotonic()
         if now - _last_spinner_update >= 1.0:
             elapsed = now - _thinking_start
-            _spinner.update(f"[#C5A059]Thinking...[/] [grey62]{elapsed:.0f}s[/grey62]")
+            _spinner.update(f"[{GOLD}]Thinking...[/] [{CHROME}]{elapsed:.0f}s[/{CHROME}]")
             _last_spinner_update = now
     elif _repl_mode:
         now = time.monotonic()
@@ -357,7 +367,7 @@ def _flush_dedup() -> None:
     """Flush accumulated dedup counter if needed."""
     global _dedup_summary, _dedup_count
     if _dedup_count > 1:
-        console.print(f"    [dim]... repeated {_dedup_count} times total[/dim]")
+        console.print(f"    [{MUTED}]... repeated {_dedup_count} times total[/{MUTED}]")
     _dedup_summary = ""
     _dedup_count = 0
 
@@ -430,7 +440,7 @@ def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
         args_str = json.dumps(arguments, indent=None, default=str)
         if len(args_str) > 200:
             args_str = args_str[:200] + "..."
-        console.print(f"  [grey62]> {escape(tool_name)}({escape(args_str)})[/grey62]")
+        console.print(f"  [{CHROME}]> {escape(tool_name)}({escape(args_str)})[/{CHROME}]")
 
 
 def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
@@ -491,14 +501,14 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
         _dedup_count = 0
     elif _verbosity == Verbosity.DETAILED:
         detail = _output_summary(output)
-        console.print(f"{status_icon} [dim]{escape(summary)}{elapsed_str}[/dim]")
+        console.print(f"{status_icon} [{MUTED}]{escape(summary)}{elapsed_str}[/{MUTED}]")
         if detail:
-            console.print(f"    [grey62]{escape(detail)}[/grey62]")
+            console.print(f"    [{CHROME}]{escape(detail)}[/{CHROME}]")
         _dedup_summary = summary
         _dedup_count = 1
     else:
         # Compact: just result line
-        console.print(f"{status_icon} [dim]{escape(summary)}{elapsed_str}[/dim]")
+        console.print(f"{status_icon} [{MUTED}]{escape(summary)}{elapsed_str}[/{MUTED}]")
         _dedup_summary = summary
         _dedup_count = 1
 
@@ -522,7 +532,7 @@ def startup_step(message: str) -> Status:
         with renderer.startup_step("Connecting to servers..."):
             await slow_operation()
     """
-    return console.status(f"  [dim]{message}[/dim]", spinner="dots12", spinner_style="dim")
+    return console.status(f"  [{MUTED}]{message}[/{MUTED}]", spinner="dots12", spinner_style=MUTED)
 
 
 # ---------------------------------------------------------------------------
@@ -560,10 +570,10 @@ def render_welcome(
     branch = f" ({git_branch})" if git_branch else ""
 
     console.print()
-    console.print(f"[#C5A059]  {_BOX_TOP}[/]")
-    console.print("[#C5A059]  \u2502       [bold]A N T E R O O M[/bold]       \u2502[/]")
-    console.print("[#C5A059]  \u2502    [#94A3B8]the secure AI gateway[/]    \u2502[/]")
-    console.print(f"[#C5A059]  {_BOX_BOT}[/]")
+    console.print(f"[{GOLD}]  {_BOX_TOP}[/]")
+    console.print(f"[{GOLD}]  \u2502       [bold]A N T E R O O M[/bold]       \u2502[/]")
+    console.print(f"[{GOLD}]  \u2502    [{SLATE}]the secure AI gateway[/]    \u2502[/]")
+    console.print(f"[{GOLD}]  {_BOX_BOT}[/]")
     console.print()
 
     version_parts = []
@@ -572,23 +582,23 @@ def render_welcome(
     if build_date:
         version_parts.append(f"Built {build_date}")
     if version_parts:
-        console.print(f"  [dim]{_SEP.join(version_parts)}[/dim]")
-    console.print("  [dim]github.com/troylar/anteroom[/dim]")
+        console.print(f"  [{MUTED}]{_SEP.join(version_parts)}[/{MUTED}]")
+    console.print(f"  [{MUTED}]github.com/troylar/anteroom[/{MUTED}]")
     console.print()
 
-    console.print(f"  [#94A3B8]{escape(display_dir)}{branch}[/]")
+    console.print(f"  [{SLATE}]{escape(display_dir)}{branch}[/]")
     parts = [escape(model), f"{tool_count} tools"]
     if instructions_loaded:
         parts.append("instructions")
-    console.print(f"  [dim]{_SEP.join(parts)}[/dim]")
+    console.print(f"  [{MUTED}]{_SEP.join(parts)}[/{MUTED}]")
     console.print()
-    console.print("  [dim]Type /help for commands[/dim]\n")
+    console.print(f"  [{MUTED}]Type /help for commands[/{MUTED}]\n")
 
 
 def render_update_available(current: str, latest: str) -> None:
     console.print(
-        f"  [#C5A059]Update available:[/] [dim]{current} \u2192 {latest}[/dim]"
-        " [dim]\u2014 pip install --upgrade anteroom[/dim]\n"
+        f"  [{GOLD}]Update available:[/] [{MUTED}]{current} \u2192 {latest}[/{MUTED}]"
+        f" [{MUTED}]\u2014 pip install --upgrade anteroom[/{MUTED}]\n"
     )
 
 
@@ -596,7 +606,8 @@ def render_help() -> None:
     console.print()
     console.print("  /new  /last  /list [N]  /resume <N|id>  /search <query>  /delete <N|id>  /rewind")
     console.print("  /compact  /model <name>  /tools  /skills  /mcp  /verbose  /detail")
-    console.print("  @<path> [dim]include file[/]  Alt+Enter [dim]newline[/]  Escape [dim]cancel[/]  /quit · Ctrl+D")
+    m = MUTED
+    console.print(f"  @<path> [{m}]include file[/]  Alt+Enter [{m}]newline[/]  Esc [{m}]cancel[/]  /quit \u00b7 Ctrl+D")
     console.print()
 
 
@@ -626,22 +637,22 @@ def render_conversation_recap(messages: list[dict[str, Any]]) -> None:
     if not last_user and not last_assistant:
         return
 
-    console.print("  [dim]Last exchange:[/dim]")
+    console.print(f"  [{MUTED}]Last exchange:[/{MUTED}]")
     if last_user:
         truncated = last_user[:200].replace("\n", " ")
         if len(last_user) > 200:
             truncated += "..."
-        console.print(f"  [#94A3B8]You:[/] [dim]{escape(truncated)}[/dim]")
+        console.print(f"  [{SLATE}]You:[/] [{MUTED}]{escape(truncated)}[/{MUTED}]")
     if last_assistant:
         truncated = last_assistant[:300].replace("\n", " ")
         if len(last_assistant) > 300:
             truncated += "..."
-        console.print(f"  [#94A3B8]AI:[/]  [dim]{escape(truncated)}[/dim]")
+        console.print(f"  [{SLATE}]AI:[/]  [{MUTED}]{escape(truncated)}[/{MUTED}]")
     console.print()
 
 
 def render_compact_done(original: int, compacted: int) -> None:
-    console.print(f"\n[grey62]Compacted {original} messages -> {compacted} messages[/grey62]")
+    console.print(f"\n[{CHROME}]Compacted {original} messages -> {compacted} messages[/{CHROME}]")
 
 
 # ---------------------------------------------------------------------------
@@ -654,7 +665,7 @@ def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
     from rich.table import Table
 
     if not statuses:
-        console.print("\n[grey62]No MCP servers configured.[/grey62]\n")
+        console.print(f"\n[{CHROME}]No MCP servers configured.[/{CHROME}]\n")
         return
 
     table = Table(title="MCP Servers", show_header=True, header_style="bold")
@@ -674,11 +685,11 @@ def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
                 # Truncate long error messages in table
                 if len(err) > 40:
                     err = err[:37] + "..."
-                status_text += f" [grey62]({err})[/grey62]"
+                status_text += f" [{CHROME}]({err})[/{CHROME}]"
         elif status == "disconnected":
-            status_text = "[grey62]○ disconnected[/grey62]"
+            status_text = f"[{CHROME}]○ disconnected[/{CHROME}]"
         else:
-            status_text = f"[grey62]○ {status}[/grey62]"
+            status_text = f"[{CHROME}]○ {status}[/{CHROME}]"
 
         table.add_row(
             name,
@@ -689,7 +700,7 @@ def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
 
     console.print()
     console.print(table)
-    console.print("  [grey62]Usage: /mcp [status <name>|connect|disconnect|reconnect <name>][/grey62]\n")
+    console.print(f"  [{CHROME}]Usage: /mcp [status <name>|connect|disconnect|reconnect <name>][/{CHROME}]\n")
 
 
 def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp_manager: Any) -> None:
@@ -697,7 +708,7 @@ def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp
     if name not in statuses:
         console.print(f"\n[red]Unknown server: {escape(name)}[/red]")
         known = ", ".join(statuses.keys())
-        console.print(f"  [grey62]Available: {known}[/grey62]\n")
+        console.print(f"  [{CHROME}]Available: {known}[/{CHROME}]\n")
         return
 
     info = statuses[name]
@@ -708,7 +719,7 @@ def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp
     elif status == "error":
         status_styled = "[red]● error[/red]"
     else:
-        status_styled = f"[grey62]○ {status}[/grey62]"
+        status_styled = f"[{CHROME}]○ {status}[/{CHROME}]"
 
     console.print(f"\n[bold]MCP Server: {escape(name)}[/bold]")
     console.print(f"  Status:    {status_styled}")
@@ -738,7 +749,7 @@ def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp
             if desc and len(desc) > 60:
                 desc = desc[:60] + "..."
             if desc:
-                console.print(f"    - {t['name']} [grey62]({desc})[/grey62]")
+                console.print(f"    - {t['name']} [{CHROME}]({desc})[/{CHROME}]")
             else:
                 console.print(f"    - {t['name']}")
 
@@ -753,7 +764,7 @@ def render_mcp_server_detail(name: str, statuses: dict[str, dict[str, Any]], mcp
 def render_tool_detail() -> None:
     """Render full detail of the last turn's tool calls."""
     if not _tool_history:
-        console.print("[grey62]No tool calls in the last turn.[/grey62]\n")
+        console.print(f"[{CHROME}]No tool calls in the last turn.[/{CHROME}]\n")
         return
 
     console.print(f"\n[bold]Last turn: {len(_tool_history)} tool call(s)[/bold]\n")
@@ -768,7 +779,7 @@ def render_tool_detail() -> None:
         # Show full arguments
         args_str = json.dumps(tc["arguments"], indent=2, default=str)
         for line in args_str.split("\n"):
-            console.print(f"    [dim]{escape(line)}[/dim]")
+            console.print(f"    [{MUTED}]{escape(line)}[/{MUTED}]")
 
         # Show output
         output = tc.get("output")
@@ -781,18 +792,18 @@ def render_tool_detail() -> None:
                     if len(content) > 500:
                         content = content[:500] + "..."
                     for line in content.split("\n")[:20]:
-                        console.print(f"    [grey62]{escape(line)}[/grey62]")
+                        console.print(f"    [{CHROME}]{escape(line)}[/{CHROME}]")
                     total_lines = str(output["content"]).count("\n") + 1
                     if total_lines > 20:
-                        console.print(f"    [dim]... ({total_lines - 20} more lines)[/dim]")
+                        console.print(f"    [{MUTED}]... ({total_lines - 20} more lines)[/{MUTED}]")
                 elif "stdout" in output:
                     stdout = str(output.get("stdout", ""))
                     if len(stdout) > 500:
                         stdout = stdout[:500] + "..."
                     for line in stdout.split("\n")[:20]:
-                        console.print(f"    [grey62]{escape(line)}[/grey62]")
+                        console.print(f"    [{CHROME}]{escape(line)}[/{CHROME}]")
             else:
-                console.print(f"    [grey62]{escape(str(output)[:200])}[/grey62]")
+                console.print(f"    [{CHROME}]{escape(str(output)[:200])}[/{CHROME}]")
         console.print()
 
 
@@ -807,7 +818,7 @@ def render_verbosity_change(v: Verbosity) -> None:
         Verbosity.DETAILED: "detailed",
         Verbosity.VERBOSE: "verbose",
     }
-    console.print(f"[grey62]Verbosity: {labels[v]}[/grey62]\n")
+    console.print(f"[{CHROME}]Verbosity: {labels[v]}[/{CHROME}]\n")
 
 
 # ---------------------------------------------------------------------------
@@ -886,7 +897,7 @@ def render_context_footer(
     elif pct_full > 50:
         color = "yellow"
     else:
-        color = "grey62"
+        color = CHROME
 
     parts = [f"{_format_tokens(current_tokens)}/{_format_tokens(max_context)} ({pct_full:.0f}%)"]
     if response_tokens:
