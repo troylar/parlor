@@ -69,7 +69,7 @@ If NO issue references are found, abort: "Every PR must reference at least one G
 
 ### Step 3: Code Quality (parallel, unless --skip-checks)
 
-If `--skip-checks` is passed, warn that this is not recommended and skip to Step 8.
+If `--skip-checks` is passed, warn that this is not recommended and skip to Step 9.
 
 Run all checks in parallel:
 
