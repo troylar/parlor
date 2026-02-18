@@ -446,7 +446,10 @@ async def run_cli(
             from ..services.mcp_manager import McpManager
 
             mcp_manager = McpManager(config.mcp_servers)
-            await mcp_manager.startup()
+            server_count = len(config.mcp_servers)
+            label = f"Starting {server_count} MCP server{'s' if server_count != 1 else ''}..."
+            with renderer.startup_step(label):
+                await mcp_manager.startup()
             # Show per-server errors at startup so user knows immediately
             for name, status in mcp_manager.get_server_statuses().items():
                 if status.get("status") == "error":
@@ -548,7 +551,8 @@ async def run_cli(
     ai_service = create_ai_service(config.ai)
 
     # Validate connection before proceeding
-    valid, message, _ = await ai_service.validate_connection()
+    with renderer.startup_step("Validating AI connection..."):
+        valid, message, _ = await ai_service.validate_connection()
     if not valid:
         renderer.render_error(f"Cannot connect to AI service: {message}")
         renderer.console.print(f"  [dim]base_url: {config.ai.base_url}[/dim]")
@@ -593,7 +597,8 @@ async def run_cli(
     else:
         git_branch = _detect_git_branch()
         build_date = renderer._get_build_date()
-        latest_version = await _check_for_update(__version__)
+        with renderer.startup_step("Checking for updates..."):
+            latest_version = await _check_for_update(__version__)
         renderer.render_welcome(
             model=config.ai.model,
             tool_count=len(all_tool_names),

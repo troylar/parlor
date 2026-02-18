@@ -507,6 +507,19 @@ def render_error(message: str) -> None:
     console.print(f"\n[red bold]Error:[/red bold] {escape(message)}")
 
 
+def startup_step(message: str) -> Status:
+    """Create a dim animated spinner for a startup step.
+
+    Returns a **sync** context manager (Rich Status).  Use ``with``,
+    not ``async with`` — ``await`` inside a sync ``with`` block is
+    valid Python in async functions::
+
+        with renderer.startup_step("Connecting to servers..."):
+            await slow_operation()
+    """
+    return console.status(f"  [dim]{message}[/dim]", spinner="dots12", spinner_style="dim")
+
+
 # ---------------------------------------------------------------------------
 # Welcome / help
 # ---------------------------------------------------------------------------

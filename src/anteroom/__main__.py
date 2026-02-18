@@ -84,7 +84,7 @@ async def _test_connection(config) -> None:
         response = await ai_service.client.chat.completions.create(
             model=config.ai.model,
             messages=[{"role": "user", "content": "Say hello in one sentence."}],
-            max_tokens=50,
+            max_completion_tokens=50,
         )
         reply = response.choices[0].message.content or "(empty response)"
         print(f"   OK - Response: {reply.strip()}")
