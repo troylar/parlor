@@ -1081,3 +1081,380 @@ class TestSubagentCliWiring:
         assert captured_kwargs["_config"] is cfg
         assert captured_kwargs["_config"].max_depth == 2
         assert captured_kwargs["_config"].timeout == 30
+
+
+class TestSubagentMcpTools:
+    """Tests for MCP tool availability in sub-agents (#100)."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_tools_included_in_child_tools(self) -> None:
+        """MCP tool definitions should be merged into child_tools passed to run_agent_loop."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = [
+            {"function": {"name": "read_file"}, "type": "function"},
+        ]
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = [
+            {"function": {"name": "search_web"}, "type": "function"},
+            {"function": {"name": "get_weather"}, "type": "function"},
+        ]
+
+        captured_tools: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            captured_tools.extend(kwargs.get("tools_openai", []))
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        tool_names = [t["function"]["name"] for t in captured_tools]
+        assert "read_file" in tool_names
+        assert "search_web" in tool_names
+        assert "get_weather" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_no_mcp_manager_only_builtin_tools(self) -> None:
+        """Without _mcp_manager, only built-in tools should appear."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = [
+            {"function": {"name": "read_file"}, "type": "function"},
+        ]
+
+        captured_tools: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            captured_tools.extend(kwargs.get("tools_openai", []))
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        tool_names = [t["function"]["name"] for t in captured_tools]
+        assert tool_names == ["read_file"]
+
+    @pytest.mark.asyncio
+    async def test_mcp_manager_returns_none_tools(self) -> None:
+        """MCP manager returning None for get_openai_tools should not blow up."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = [
+            {"function": {"name": "read_file"}, "type": "function"},
+        ]
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = None
+
+        captured_tools: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            captured_tools.extend(kwargs.get("tools_openai", []))
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        tool_names = [t["function"]["name"] for t in captured_tools]
+        assert tool_names == ["read_file"]
+
+    @pytest.mark.asyncio
+    async def test_child_executor_routes_mcp_tool_to_manager(self) -> None:
+        """When child agent calls an MCP tool, it should route to mcp_manager.call_tool."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = []
+        mock_registry.has_tool.return_value = False
+        mock_registry.check_safety.return_value = None
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = [
+            {"function": {"name": "search_web"}, "type": "function"},
+        ]
+
+        async def mock_mcp_call(name, args):
+            return {"content": f"result for {name}"}
+
+        mock_mcp.call_tool = mock_mcp_call
+
+        mcp_results: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            executor = kwargs["tool_executor"]
+            result = await executor("search_web", {"query": "test"})
+            mcp_results.append(result)
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        assert len(mcp_results) == 1
+        assert mcp_results[0]["content"] == "result for search_web"
+
+    @pytest.mark.asyncio
+    async def test_child_executor_builtin_not_routed_to_mcp(self) -> None:
+        """Built-in tools should route to tool_registry, not mcp_manager."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = [
+            {"function": {"name": "read_file"}, "type": "function"},
+        ]
+        mock_registry.has_tool.return_value = True
+
+        async def mock_call_tool(name, args, confirm_callback=None):
+            return {"content": "builtin result"}
+
+        mock_registry.call_tool = mock_call_tool
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = []
+
+        builtin_results: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            executor = kwargs["tool_executor"]
+            result = await executor("read_file", {"path": "/tmp/test"})
+            builtin_results.append(result)
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        assert len(builtin_results) == 1
+        assert builtin_results[0]["content"] == "builtin result"
+        mock_mcp.call_tool.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_child_executor_no_mcp_unknown_tool_raises(self) -> None:
+        """Without mcp_manager, unknown tools should raise ValueError."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = []
+        mock_registry.has_tool.return_value = False
+
+        errors: list[str] = []
+
+        async def mock_agent_loop(**kwargs):
+            executor = kwargs["tool_executor"]
+            try:
+                await executor("nonexistent_tool", {})
+            except ValueError as e:
+                errors.append(str(e))
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=None,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        assert len(errors) == 1
+        assert "nonexistent_tool" in errors[0]
+
+    @pytest.mark.asyncio
+    async def test_mcp_tool_safety_gate_applied(self) -> None:
+        """MCP tools in child executor should go through safety gate."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = []
+        mock_registry.has_tool.return_value = False
+
+        verdict = MagicMock()
+        verdict.needs_approval = True
+        verdict.hard_denied = False
+        mock_registry.check_safety.return_value = verdict
+
+        async def mock_confirm(v):
+            return False  # deny
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = [
+            {"function": {"name": "dangerous_tool"}, "type": "function"},
+        ]
+
+        denied_results: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            executor = kwargs["tool_executor"]
+            result = await executor("dangerous_tool", {"action": "delete"})
+            denied_results.append(result)
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _confirm_callback=mock_confirm,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        assert len(denied_results) == 1
+        assert "denied" in denied_results[0]["error"].lower()
+        mock_mcp.call_tool.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mcp_tool_hard_denied(self) -> None:
+        """Hard-denied MCP tools should be blocked without calling confirm."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = []
+        mock_registry.has_tool.return_value = False
+
+        verdict = MagicMock()
+        verdict.needs_approval = True
+        verdict.hard_denied = True
+        mock_registry.check_safety.return_value = verdict
+
+        confirm_called = False
+
+        async def mock_confirm(v):
+            nonlocal confirm_called
+            confirm_called = True
+            return True
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = []
+
+        blocked_results: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            executor = kwargs["tool_executor"]
+            result = await executor("blocked_tool", {})
+            blocked_results.append(result)
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _confirm_callback=mock_confirm,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        assert len(blocked_results) == 1
+        assert "blocked" in blocked_results[0]["error"].lower()
+        assert not confirm_called
+
+    @pytest.mark.asyncio
+    async def test_mcp_tool_no_confirm_callback_fails_closed(self) -> None:
+        """MCP tool needing approval with no confirm callback should fail closed."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = []
+        mock_registry.has_tool.return_value = False
+
+        verdict = MagicMock()
+        verdict.needs_approval = True
+        verdict.hard_denied = False
+        mock_registry.check_safety.return_value = verdict
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = []
+
+        results: list[dict] = []
+
+        async def mock_agent_loop(**kwargs):
+            executor = kwargs["tool_executor"]
+            result = await executor("needs_approval_tool", {})
+            results.append(result)
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="test",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _confirm_callback=None,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        assert len(results) == 1
+        assert "approval" in results[0]["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_mcp_manager_propagated_to_nested_subagent(self) -> None:
+        """_mcp_manager should be forwarded in nested run_agent calls."""
+        mock_registry = MagicMock()
+        mock_registry.get_openai_tools.return_value = [
+            {"function": {"name": "run_agent"}, "type": "function"},
+        ]
+        mock_registry.has_tool.return_value = True
+
+        mock_mcp = MagicMock()
+        mock_mcp.get_openai_tools.return_value = []
+
+        captured_mcp_managers: list = []
+
+        async def mock_call_tool(name, args, confirm_callback=None):
+            if name == "run_agent":
+                captured_mcp_managers.append(args.get("_mcp_manager"))
+            return {"output": "ok"}
+
+        mock_registry.call_tool = mock_call_tool
+
+        async def mock_agent_loop(**kwargs):
+            executor = kwargs["tool_executor"]
+            await executor("run_agent", {"prompt": "nested"})
+            yield AgentEvent(kind="done", data={})
+
+        with patch("anteroom.tools.subagent.run_agent_loop", side_effect=mock_agent_loop):
+            with patch("anteroom.tools.subagent.AIService"):
+                await handle(
+                    prompt="parent task",
+                    _ai_service=_mock_ai(),
+                    _tool_registry=mock_registry,
+                    _mcp_manager=mock_mcp,
+                    _depth=0,
+                    _limiter=_make_limiter(),
+                )
+
+        assert len(captured_mcp_managers) == 1
+        assert captured_mcp_managers[0] is mock_mcp

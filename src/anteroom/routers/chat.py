@@ -603,6 +603,7 @@ async def chat(conversation_id: str, request: Request):
                 **arguments,
                 "_ai_service": ai_service,
                 "_tool_registry": tool_registry,
+                "_mcp_manager": mcp_manager,
                 "_cancel_event": cancel_event,
                 "_depth": 0,
                 "_agent_id": f"agent-{_subagent_counter}",

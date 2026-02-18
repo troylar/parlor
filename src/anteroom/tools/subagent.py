@@ -119,6 +119,7 @@ async def handle(
     *,
     _ai_service: AIService | None = None,
     _tool_registry: Any | None = None,
+    _mcp_manager: Any | None = None,
     _cancel_event: Any | None = None,
     _depth: int = 0,
     _event_sink: EventSink | None = None,
@@ -164,6 +165,7 @@ async def handle(
             model=model,
             _ai_service=_ai_service,
             _tool_registry=_tool_registry,
+            _mcp_manager=_mcp_manager,
             _cancel_event=_cancel_event,
             _depth=_depth,
             _event_sink=_event_sink,
@@ -182,6 +184,7 @@ async def _run_subagent(
     *,
     _ai_service: AIService,
     _tool_registry: Any,
+    _mcp_manager: Any | None = None,
     _cancel_event: Any | None,
     _depth: int,
     _event_sink: EventSink | None,
@@ -206,8 +209,12 @@ async def _run_subagent(
 
     child_ai = AIService(child_config, token_provider=_ai_service._token_provider)
 
-    # Build child tool list — exclude run_agent at max depth
+    # Build child tool list — include MCP tools, exclude run_agent at max depth
     child_tools = _tool_registry.get_openai_tools()
+    if _mcp_manager:
+        mcp_tools = _mcp_manager.get_openai_tools()
+        if mcp_tools:
+            child_tools.extend(mcp_tools)
     if child_depth >= max_depth:
         child_tools = [t for t in child_tools if t["function"]["name"] != "run_agent"]
 
@@ -221,6 +228,7 @@ async def _run_subagent(
             arguments = dict(arguments)
             arguments["_ai_service"] = child_ai
             arguments["_tool_registry"] = _tool_registry
+            arguments["_mcp_manager"] = _mcp_manager
             arguments["_cancel_event"] = _cancel_event
             arguments["_depth"] = child_depth
             arguments["_agent_id"] = f"{_agent_id}.{_child_counter}"
@@ -228,7 +236,21 @@ async def _run_subagent(
             arguments["_limiter"] = _limiter
             arguments["_confirm_callback"] = _confirm_callback
             arguments["_config"] = _config
-        return await _tool_registry.call_tool(tool_name, arguments, confirm_callback=_confirm_callback)
+        if _tool_registry.has_tool(tool_name):
+            return await _tool_registry.call_tool(tool_name, arguments, confirm_callback=_confirm_callback)
+        if _mcp_manager:
+            verdict = _tool_registry.check_safety(tool_name, arguments)
+            if verdict and verdict.needs_approval:
+                if verdict.hard_denied:
+                    return {"error": f"Tool '{tool_name}' is blocked by configuration", "safety_blocked": True}
+                if _confirm_callback:
+                    confirmed = await _confirm_callback(verdict)
+                    if not confirmed:
+                        return {"error": "Operation denied by user", "exit_code": -1}
+                else:
+                    return {"error": f"Tool '{tool_name}' requires approval but no approval channel available"}
+            return await _mcp_manager.call_tool(tool_name, arguments)
+        raise ValueError(f"Unknown tool: {tool_name}")
 
     # Isolated message history for the child
     messages: list[dict[str, Any]] = [
