@@ -471,16 +471,22 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     sa_raw = safety_raw.get("subagent", {})
     if not isinstance(sa_raw, dict):
         sa_raw = {}
-    sa_timeout = int(sa_raw.get("timeout", 120))
-    sa_timeout = max(10, min(sa_timeout, 600))
+
+    def _sa_int(key: str, default: int, lo: int, hi: int) -> int:
+        try:
+            val = int(sa_raw.get(key, default))
+        except (ValueError, TypeError):
+            val = default
+        return max(lo, min(val, hi))
+
     subagent_config = SubagentConfig(
-        max_concurrent=int(sa_raw.get("max_concurrent", 5)),
-        max_total=int(sa_raw.get("max_total", 10)),
-        max_depth=int(sa_raw.get("max_depth", 3)),
-        max_iterations=int(sa_raw.get("max_iterations", 15)),
-        timeout=sa_timeout,
-        max_output_chars=int(sa_raw.get("max_output_chars", 4000)),
-        max_prompt_chars=int(sa_raw.get("max_prompt_chars", 32_000)),
+        max_concurrent=_sa_int("max_concurrent", 5, 1, 20),
+        max_total=_sa_int("max_total", 10, 1, 50),
+        max_depth=_sa_int("max_depth", 3, 1, 10),
+        max_iterations=_sa_int("max_iterations", 15, 1, 100),
+        timeout=_sa_int("timeout", 120, 10, 600),
+        max_output_chars=_sa_int("max_output_chars", 4000, 100, 100_000),
+        max_prompt_chars=_sa_int("max_prompt_chars", 32_000, 100, 100_000),
     )
 
     safety_config = SafetyConfig(

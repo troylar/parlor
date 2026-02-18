@@ -926,6 +926,33 @@ class TestSubagentConfigParsing:
         cfg = load_config(config_file)
         assert cfg.safety.subagent.timeout == 600
 
+    def test_load_config_clamps_negative_values(self, tmp_path) -> None:
+        """Negative config values should be clamped to minimums."""
+        from anteroom.config import load_config
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "ai:\n  base_url: http://localhost:8000\n  api_key: test-key\n"
+            "safety:\n  subagent:\n    max_concurrent: -1\n    max_total: 0\n    max_depth: -5\n"
+        )
+        cfg = load_config(config_file)
+        assert cfg.safety.subagent.max_concurrent >= 1
+        assert cfg.safety.subagent.max_total >= 1
+        assert cfg.safety.subagent.max_depth >= 1
+
+    def test_load_config_non_numeric_falls_back(self, tmp_path) -> None:
+        """Non-numeric YAML values should fall back to defaults."""
+        from anteroom.config import load_config
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "ai:\n  base_url: http://localhost:8000\n  api_key: test-key\n"
+            "safety:\n  subagent:\n    timeout: fast\n    max_depth: null\n"
+        )
+        cfg = load_config(config_file)
+        assert cfg.safety.subagent.timeout == 120
+        assert cfg.safety.subagent.max_depth == 3
+
 
 class TestSubagentConcurrentExecution:
     """Test parallel sub-agent execution with limiter contention."""
