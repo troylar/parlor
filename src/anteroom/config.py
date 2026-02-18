@@ -241,6 +241,7 @@ class AIConfig:
     verify_ssl: bool = True
     api_key_command: str = ""
     request_timeout: int = 120  # seconds; connect + per-chunk read timeout
+    narration_cadence: int = 5  # progress updates every N tool calls; 0 = disabled
 
 
 @dataclass
@@ -396,6 +397,21 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     except (ValueError, TypeError):
         request_timeout = 120
 
+    try:
+        narration_cadence = int(ai_raw.get("narration_cadence", os.environ.get("AI_CHAT_NARRATION_CADENCE", 5)))
+        narration_cadence = max(0, narration_cadence)
+    except (ValueError, TypeError):
+        narration_cadence = 5
+
+    if narration_cadence > 0:
+        system_prompt += (
+            "\n\n<narration>\n"
+            f"During multi-step tasks with tool calls, give a brief 1-2 sentence progress update every "
+            f"{narration_cadence} tool calls — what you've found so far and what you're doing next. "
+            f"Keep updates concise and actionable.\n"
+            "</narration>"
+        )
+
     ai = AIConfig(
         base_url=base_url,
         api_key=api_key,
@@ -405,6 +421,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         user_system_prompt=user_system_prompt,
         verify_ssl=verify_ssl,
         request_timeout=request_timeout,
+        narration_cadence=narration_cadence,
     )
 
     app_raw = raw.get("app", {})
