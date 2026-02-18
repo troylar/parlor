@@ -202,11 +202,11 @@ const Chat = (() => {
                 credentials: 'same-origin',
             });
 
+            if (response.status === 401) {
+                App._handle401();
+                throw new Error('Session expired');
+            }
             if (!response.ok) {
-                if (response.status === 401) {
-                    App._handle401();
-                    throw new Error('Session expired');
-                }
                 throw new Error(`HTTP ${response.status}`);
             }
 

@@ -13,7 +13,6 @@ const App = (() => {
     };
 
     let _eventSource = null;
-    let _sseFailCount = 0;
     const _shownApprovalIds = new Set();
 
     // --- Theme System ---
@@ -539,20 +538,37 @@ const App = (() => {
             }
         });
 
-        _eventSource.onopen = () => { _sseFailCount = 0; };
+        let _esConnectedAt = Date.now();
+        let _esFailCount = 0;
+
+        _eventSource.onopen = () => {
+            _esConnectedAt = Date.now();
+            _esFailCount = 0;
+        };
+
         _eventSource.onerror = () => {
-            _sseFailCount++;
-            if (_sseFailCount >= 3) {
-                // Likely a persistent auth error — trigger 401 recovery
-                if (_eventSource) { _eventSource.close(); _eventSource = null; }
+            const elapsed = Date.now() - _esConnectedAt;
+            _esFailCount++;
+
+            // Rapid failure (< 2s after connect) likely means 401.
+            // After 3 consecutive rapid failures, trigger auth recovery
+            // instead of looping forever.
+            if (elapsed < 2000 && _esFailCount >= 3) {
+                if (_eventSource) {
+                    _eventSource.close();
+                    _eventSource = null;
+                }
                 _handle401();
                 return;
             }
+
+            // Normal reconnect with backoff (3s base, max 30s)
+            const delay = Math.min(3000 * _esFailCount, 30000);
             setTimeout(() => {
                 if (_eventSource && _eventSource.readyState === EventSource.CLOSED) {
                     _connectEventSource();
                 }
-            }, 3000);
+            }, delay);
         };
     }
 

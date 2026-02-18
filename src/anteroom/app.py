@@ -240,9 +240,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 class BearerTokenMiddleware(BaseHTTPMiddleware):
     """Auth via bearer token header or HttpOnly session cookie with session expiry."""
 
-    def __init__(self, app: FastAPI, token_hash: str) -> None:
+    def __init__(self, app: FastAPI, token_hash: str, auth_token: str = "", secure_cookies: bool = False) -> None:
         super().__init__(app)
         self.token_hash = token_hash
+        self._auth_token = auth_token
+        self._secure_cookies = secure_cookies
         self._session_created_at = time.time()
         self._last_activity = time.time()
 
@@ -260,6 +262,21 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         provided_hash = hashlib.sha256(provided.encode()).hexdigest()
         return hmac.compare_digest(provided_hash, self.token_hash)
 
+    def _make_401(self, detail: str = "Unauthorized") -> JSONResponse:
+        """Return a 401 response with a fresh session cookie so the browser auto-recovers."""
+        response = JSONResponse(status_code=401, content={"detail": detail})
+        if self._auth_token:
+            response.set_cookie(
+                key="anteroom_session",
+                value=self._auth_token,
+                httponly=True,
+                secure=self._secure_cookies,
+                samesite="strict",
+                path="/api/",
+                max_age=SESSION_ABSOLUTE_TIMEOUT,
+            )
+        return response
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if not path.startswith("/api/"):
@@ -269,7 +286,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
         if not self._is_session_valid():
             security_logger.warning("Expired session access attempt from %s: %s", client_ip, path)
-            return JSONResponse(status_code=401, content={"detail": "Session expired"})
+            return self._make_401("Session expired")
 
         # Check Authorization header
         auth = request.headers.get("authorization", "")
@@ -298,7 +315,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         security_logger.warning("Authentication failed from %s: %s %s", client_ip, request.method, path)
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        return self._make_401()
 
 
 def _derive_auth_token(config: AppConfig) -> str:
@@ -329,6 +346,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     # Ensure user identity exists with a private key before token derivation
     # so first-run also gets a stable token (identity is auto-generated if missing).
+    # Also repair partial identity (user_id present but private_key missing)
+    # from pre-identity upgrades.
     if not config.identity or not config.identity.private_key:
         try:
             config.identity = ensure_identity()
@@ -378,7 +397,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     auth_token = _derive_auth_token(config)
     token_hash = hashlib.sha256(auth_token.encode()).hexdigest()
-    app.add_middleware(BearerTokenMiddleware, token_hash=token_hash)
+    app.add_middleware(
+        BearerTokenMiddleware,
+        token_hash=token_hash,
+        auth_token=auth_token,
+        secure_cookies=config.app.tls,
+    )
     app.state.auth_token = auth_token
 
     csrf_token = secrets.token_urlsafe(32)

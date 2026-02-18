@@ -499,12 +499,36 @@ def ensure_identity(config_path: Path | None = None) -> UserIdentity:
             raw = yaml.safe_load(f) or {}
 
     identity_raw = raw.get("identity", {})
-    if identity_raw.get("user_id"):
+    if identity_raw.get("user_id") and identity_raw.get("private_key"):
         return UserIdentity(
             user_id=identity_raw["user_id"],
             display_name=identity_raw.get("display_name", ""),
             public_key=identity_raw.get("public_key", ""),
             private_key=identity_raw.get("private_key", ""),
+        )
+
+    # Partial identity (user_id but no private_key) — repair by generating keypair
+    if identity_raw.get("user_id") and not identity_raw.get("private_key"):
+        from .identity import generate_identity
+
+        fresh = generate_identity(identity_raw.get("display_name", ""))
+        identity_raw["private_key"] = fresh["private_key"]
+        identity_raw["public_key"] = fresh["public_key"]
+        raw["identity"] = identity_raw
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+        try:
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+
+        return UserIdentity(
+            user_id=identity_raw["user_id"],
+            display_name=identity_raw.get("display_name", ""),
+            public_key=identity_raw["public_key"],
+            private_key=identity_raw["private_key"],
         )
 
     try:
