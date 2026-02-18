@@ -240,6 +240,7 @@ class AIConfig:
     user_system_prompt: str = ""
     verify_ssl: bool = True
     api_key_command: str = ""
+    request_timeout: int = 120  # seconds; connect + per-chunk read timeout
 
 
 @dataclass
@@ -272,6 +273,8 @@ class AppSettings:
 class CliConfig:
     builtin_tools: bool = True
     max_tool_iterations: int = 50
+    context_warn_tokens: int = 80_000
+    context_auto_compact_tokens: int = 100_000
 
 
 @dataclass
@@ -387,6 +390,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
 
     verify_ssl_raw = ai_raw.get("verify_ssl", os.environ.get("AI_CHAT_VERIFY_SSL", "true"))
     verify_ssl = str(verify_ssl_raw).lower() not in ("false", "0", "no")
+    request_timeout = max(10, int(ai_raw.get("request_timeout", os.environ.get("AI_CHAT_REQUEST_TIMEOUT", 120))))
 
     ai = AIConfig(
         base_url=base_url,
@@ -396,6 +400,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         system_prompt=system_prompt,
         user_system_prompt=user_system_prompt,
         verify_ssl=verify_ssl,
+        request_timeout=request_timeout,
     )
 
     app_raw = raw.get("app", {})
@@ -464,6 +469,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     cli_config = CliConfig(
         builtin_tools=cli_raw.get("builtin_tools", True),
         max_tool_iterations=int(cli_raw.get("max_tool_iterations", 50)),
+        context_warn_tokens=int(cli_raw.get("context_warn_tokens", 80_000)),
+        context_auto_compact_tokens=int(cli_raw.get("context_auto_compact_tokens", 100_000)),
     )
 
     identity_raw = raw.get("identity", {})

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from anteroom.services.agent_loop import AgentEvent, _execute_tool, run_agent_loop
+from anteroom.services.agent_loop import AgentEvent, _build_compaction_history, _execute_tool, run_agent_loop
 
 # -- Helpers --
 
@@ -432,7 +432,7 @@ class TestParallelToolExecution:
 
     @pytest.mark.asyncio
     async def test_thinking_event_emitted_for_second_iteration(self):
-        """A thinking event is emitted on iteration > 1 (after tools, before next API call)."""
+        """A thinking event is emitted before every API call, including the first and second iterations."""
 
         async def tool_executor(name: str, args: dict) -> dict:
             return {}
@@ -452,7 +452,7 @@ class TestParallelToolExecution:
         )
 
         thinking_events = [e for e in events if e.kind == "thinking"]
-        assert len(thinking_events) == 1  # Emitted before the second API call
+        assert len(thinking_events) == 2  # Emitted before each API call (iterations 1 and 2)
 
     @pytest.mark.asyncio
     async def test_cancel_after_tools_complete_yields_done(self):
@@ -848,11 +848,12 @@ class TestMessageQueue:
 
         kinds = [e.kind for e in events]
         assert kinds == [
+            "thinking",  # iteration 1 — before first API call
             "token",
             "assistant_message",
             "done",
             "queued_message",
-            "thinking",  # iteration > 1
+            "thinking",  # iteration 2 — after queued message appended
             "token",
             "assistant_message",
             "done",
@@ -1006,3 +1007,148 @@ class TestMixedScenarios:
         error_event = [e for e in events if e.kind == "error"][0]
         assert "Max iterations" in error_event.data["message"]
         assert kinds.count("tool_call_end") == 3
+
+
+# =============================================================================
+# Thinking event on first iteration (#153)
+# =============================================================================
+
+
+class TestThinkingEventFirstIteration:
+    @pytest.mark.asyncio
+    async def test_thinking_emitted_on_iteration_one(self):
+        """thinking event must be emitted before the first API response, not just on iteration 2+."""
+        ai_service = _mock_ai_service(_make_stream_events(content="Hello"))
+
+        async def tool_executor(name: str, args: dict) -> dict:
+            return {}
+
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=ai_service,
+                messages=[{"role": "user", "content": "hi"}],
+                tool_executor=tool_executor,
+                tools_openai=[],
+            )
+        )
+
+        kinds = [e.kind for e in events]
+        assert kinds[0] == "thinking", f"First event should be 'thinking', got {kinds[0]!r}"
+
+    @pytest.mark.asyncio
+    async def test_thinking_emitted_on_every_iteration(self):
+        """thinking event emitted before each API call, including the first."""
+        ai_service = _mock_ai_service(
+            _make_stream_events(tool_calls=[_tc("tc1", "some_tool")]),
+            _make_stream_events(content="Done"),
+        )
+
+        async def tool_executor(name: str, args: dict) -> dict:
+            return {"ok": True}
+
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=ai_service,
+                messages=[{"role": "user", "content": "go"}],
+                tool_executor=tool_executor,
+                tools_openai=[],
+            )
+        )
+
+        thinking_events = [e for e in events if e.kind == "thinking"]
+        # Two iterations: one before the tool-call API call, one before the follow-up
+        assert len(thinking_events) == 2
+
+
+# =============================================================================
+# _build_compaction_history (#153)
+# =============================================================================
+
+
+class TestBuildCompactionHistory:
+    def test_includes_tool_result_success(self):
+        """Successful tool results must appear as 'tool_result: <name> → SUCCESS'."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Writing file.",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "type": "function",
+                        "function": {"name": "write_file", "arguments": '{"path":"foo.py"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc1", "content": '{"written": true}'},
+        ]
+        history = _build_compaction_history(messages)
+        assert "tool_result: write_file → SUCCESS" in history
+
+    def test_includes_tool_result_error(self):
+        """Failed tool results must appear as 'tool_result: <name> → ERROR'."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Running command.",
+                "tool_calls": [
+                    {"id": "tc2", "type": "function", "function": {"name": "bash", "arguments": '{"command":"ls"}'}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc2", "content": '{"error": "permission denied"}'},
+        ]
+        history = _build_compaction_history(messages)
+        assert "tool_result: bash → ERROR" in history
+        assert "permission denied" in history
+
+    def test_tool_call_includes_args_preview(self):
+        """Tool call lines must include an argument preview, not just the tool name."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc3",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": '{"path": "/etc/hosts"}'},
+                    }
+                ],
+            },
+        ]
+        history = _build_compaction_history(messages)
+        assert "read_file(" in history
+        assert "path" in history
+
+    def test_user_and_assistant_text_preserved(self):
+        """User and assistant text messages must appear in the history."""
+        messages = [
+            {"role": "user", "content": "Please implement feature X"},
+            {"role": "assistant", "content": "I will implement feature X now."},
+        ]
+        history = _build_compaction_history(messages)
+        assert "Please implement feature X" in history
+        assert "I will implement feature X now." in history
+
+    def test_long_content_truncated(self):
+        """Long content must be truncated so the summary stays compact."""
+        long_content = "A" * 1000
+        messages = [{"role": "user", "content": long_content}]
+        history = _build_compaction_history(messages)
+        assert len(history) < 700  # well below 1000
+
+    def test_tool_result_name_resolved_from_assistant_message(self):
+        """Tool result name must be resolved from the preceding assistant tool_calls, not left as 'unknown'."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "abc", "type": "function", "function": {"name": "glob_files", "arguments": "{}"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "abc", "content": '["file1.py", "file2.py"]'},
+        ]
+        history = _build_compaction_history(messages)
+        assert "glob_files" in history
+        assert "unknown" not in history

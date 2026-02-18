@@ -65,6 +65,59 @@ def _truncate_large_tool_outputs(messages: list[dict[str, Any]]) -> bool:
     return truncated_any
 
 
+def _build_compaction_history(messages: list[dict[str, Any]]) -> str:
+    """Build a structured history string for the compaction summary prompt.
+
+    Includes tool call outcomes (not just names) so the AI can distinguish
+    completed steps from pending ones after compaction.
+    """
+    history_text = []
+    # Map tool_call_id -> tool name for annotating tool result messages
+    tool_id_to_name: dict[str, str] = {}
+    for msg in messages:
+        for tc in msg.get("tool_calls", []):
+            tc_id = tc.get("id", "")
+            func = tc.get("function", {})
+            if tc_id and func.get("name"):
+                tool_id_to_name[tc_id] = func["name"]
+
+    for msg in messages:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+
+        if role == "tool":
+            tc_id = msg.get("tool_call_id", "")
+            tool_name = tool_id_to_name.get(tc_id, "unknown")
+            try:
+                result = json.loads(content) if isinstance(content, str) and content else {}
+            except (json.JSONDecodeError, ValueError):
+                result = {"raw": content}
+            if isinstance(result, dict) and "error" in result:
+                snippet = str(result["error"])[:200]
+                history_text.append(f"  tool_result: {tool_name} → ERROR: {snippet}")
+            else:
+                snippet = content[:200] + "..." if len(content) > 200 else content
+                history_text.append(f"  tool_result: {tool_name} → SUCCESS: {snippet}")
+            continue
+
+        if isinstance(content, str) and content:
+            truncated = content[:500] + "..." if len(content) > 500 else content
+            history_text.append(f"{role}: {truncated}")
+
+        for tc in msg.get("tool_calls", []):
+            func = tc.get("function", {})
+            name = func.get("name", "?")
+            args_raw = func.get("arguments", "")
+            try:
+                args = json.loads(args_raw) if args_raw else {}
+                args_preview = ", ".join(f"{k}={str(v)[:40]!r}" for k, v in list(args.items())[:3])
+            except (json.JSONDecodeError, ValueError):
+                args_preview = args_raw[:80]
+            history_text.append(f"  tool_call: {name}({args_preview})")
+
+    return "\n".join(history_text)
+
+
 async def _compact_messages(
     ai_service: AIService,
     messages: list[dict[str, Any]],
@@ -73,24 +126,16 @@ async def _compact_messages(
     if len(messages) < 4:
         return False
 
-    history_text = []
-    for msg in messages:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        if isinstance(content, str) and content:
-            truncated = content[:500] + "..." if len(content) > 500 else content
-            history_text.append(f"{role}: {truncated}")
-        for tc in msg.get("tool_calls", []):
-            func = tc.get("function", {})
-            history_text.append(f"  tool_call: {func.get('name', '?')}")
+    history_text = _build_compaction_history(messages)
 
     summary_prompt = (
         "Summarize the following conversation concisely, preserving:\n"
         "- Key decisions and conclusions\n"
         "- File paths that were read, written, or edited\n"
         "- Important code changes and their purpose\n"
-        "- Current state of the task\n"
-        "- Any errors encountered and how they were resolved\n\n" + "\n".join(history_text)
+        "- Which steps of any multi-step plan have been COMPLETED (tool_result SUCCESS) vs remaining\n"
+        "- Current state of the task — what has been done and what is next\n"
+        "- Any errors encountered and how they were resolved\n\n" + history_text
     )
 
     try:
@@ -167,8 +212,7 @@ async def run_agent_loop(
         assistant_content = ""
         got_context_error = False
 
-        if iteration > 1:
-            yield AgentEvent(kind="thinking", data={})
+        yield AgentEvent(kind="thinking", data={})
 
         async for event in ai_service.stream_chat(
             messages,

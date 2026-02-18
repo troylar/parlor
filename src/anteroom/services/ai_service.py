@@ -8,7 +8,7 @@ import logging
 from typing import Any, AsyncGenerator
 
 import httpx
-from openai import AsyncOpenAI, AuthenticationError, BadRequestError, RateLimitError
+from openai import APITimeoutError, AsyncOpenAI, AuthenticationError, BadRequestError, RateLimitError
 
 from ..config import AIConfig
 from .token_provider import TokenProvider, TokenProviderError
@@ -31,13 +31,21 @@ class AIService:
     def _build_client(self) -> None:
         """Build (or rebuild) the AsyncOpenAI client with the current API key."""
         api_key = self._resolve_api_key()
+        timeout = httpx.Timeout(
+            connect=10.0,
+            read=float(self.config.request_timeout),
+            write=30.0,
+            pool=10.0,
+        )
         kwargs: dict[str, Any] = {
             "base_url": self.config.base_url,
             "api_key": api_key,
+            # SECURITY-REVIEW: verify=False only when user explicitly sets verify_ssl: false in config
+            "http_client": httpx.AsyncClient(
+                verify=self.config.verify_ssl,
+                timeout=timeout,
+            ),
         }
-        if not self.config.verify_ssl:
-            # SECURITY-REVIEW: intentional — user explicitly set verify_ssl: false in config for local/dev endpoints
-            kwargs["http_client"] = httpx.AsyncClient(verify=False)  # noqa: S501
         self.client = AsyncOpenAI(**kwargs)
 
     def _resolve_api_key(self) -> str:
@@ -173,6 +181,19 @@ class AIService:
             else:
                 logger.exception("AI bad request error")
                 yield {"event": "error", "data": {"message": f"AI request error: {e.message}"}}
+        except APITimeoutError:
+            logger.warning("AI request timed out after %ds", self.config.request_timeout)
+            yield {
+                "event": "error",
+                "data": {
+                    "message": (
+                        f"AI request timed out after {self.config.request_timeout}s. "
+                        "The API may be slow or unreachable. Try again, or increase "
+                        "`ai.request_timeout` in your config."
+                    ),
+                    "code": "timeout",
+                },
+            }
         except RateLimitError as e:
             logger.warning("Rate limited by AI provider: %s", e)
             yield {

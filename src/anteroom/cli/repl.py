@@ -20,7 +20,7 @@ from .. import __version__
 from ..config import AppConfig, build_runtime_context
 from ..db import init_db
 from ..services import storage
-from ..services.agent_loop import run_agent_loop
+from ..services.agent_loop import _build_compaction_history, run_agent_loop
 from ..services.ai_service import AIService, create_ai_service
 from ..services.rewind import collect_file_paths
 from ..services.rewind import rewind_conversation as rewind_service
@@ -213,7 +213,7 @@ def _load_conversation_messages(db: Any, conversation_id: str) -> list[dict[str,
     return messages
 
 
-# Context window management
+# Context window management — overridden at runtime by config.cli thresholds
 _CONTEXT_WARN_TOKENS = 80_000
 _CONTEXT_AUTO_COMPACT_TOKENS = 100_000
 
@@ -1661,14 +1661,16 @@ async def _run_repl(
             # Expand file references
             expanded = _expand_file_references(user_input, working_dir)
 
-            # Auto-compact if approaching context limit
+            # Auto-compact if approaching context limit (thresholds from config)
             token_estimate = _estimate_tokens(ai_messages)
-            if token_estimate > _CONTEXT_AUTO_COMPACT_TOKENS:
+            auto_compact_threshold = config.cli.context_auto_compact_tokens
+            warn_threshold = config.cli.context_warn_tokens
+            if token_estimate > auto_compact_threshold:
                 renderer.console.print(
                     f"[yellow]Context approaching limit (~{token_estimate:,} tokens). Auto-compacting...[/yellow]"
                 )
                 await _compact_messages(ai_service, ai_messages, db, conv["id"])
-            elif token_estimate > _CONTEXT_WARN_TOKENS:
+            elif token_estimate > warn_threshold:
                 renderer.console.print(
                     f"[yellow]Context: ~{token_estimate:,} tokens. Use /compact to free space.[/yellow]"
                 )
@@ -1795,7 +1797,7 @@ async def _run_repl(
                         context_tokens = _estimate_tokens(ai_messages)
                         renderer.render_context_footer(
                             current_tokens=context_tokens,
-                            auto_compact_threshold=_CONTEXT_AUTO_COMPACT_TOKENS,
+                            auto_compact_threshold=config.cli.context_auto_compact_tokens,
                             response_tokens=response_token_count,
                             elapsed=total_elapsed,
                         )
@@ -1858,26 +1860,16 @@ async def _compact_messages(
     original_count = len(ai_messages)
     original_tokens = _estimate_tokens(ai_messages)
 
-    # Build summary from all messages, truncating long tool outputs
-    history_text = []
-    for msg in ai_messages:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        if isinstance(content, str) and content:
-            truncated = content[:500] + "..." if len(content) > 500 else content
-            history_text.append(f"{role}: {truncated}")
-        tool_calls = msg.get("tool_calls", [])
-        for tc in tool_calls:
-            func = tc.get("function", {})
-            history_text.append(f"  tool_call: {func.get('name', '?')}")
+    history_text = _build_compaction_history(ai_messages)
 
     summary_prompt = (
         "Summarize the following conversation concisely, preserving:\n"
         "- Key decisions and conclusions\n"
         "- File paths that were read, written, or edited\n"
         "- Important code changes and their purpose\n"
-        "- Current state of the task\n"
-        "- Any errors encountered and how they were resolved\n\n" + "\n".join(history_text)
+        "- Which steps of any multi-step plan have been COMPLETED (tool_result SUCCESS) vs remaining\n"
+        "- Current state of the task — what has been done and what is next\n"
+        "- Any errors encountered and how they were resolved\n\n" + history_text
     )
 
     try:
