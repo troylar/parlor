@@ -20,6 +20,7 @@ from ..config import build_runtime_context
 from ..models import ChatRequest
 from ..services import storage
 from ..services.ai_service import AIService, create_ai_service
+from ..tools.path_utils import safe_resolve_pathlib
 
 logger = logging.getLogger(__name__)
 
@@ -904,8 +905,8 @@ async def get_attachment(attachment_id: str, request: Request):
     if not att:
         raise HTTPException(status_code=404, detail="Attachment not found")
     data_dir = request.app.state.config.app.data_dir
-    file_path = (data_dir / att["storage_path"]).resolve()
-    if not file_path.is_relative_to(data_dir.resolve()):
+    file_path = safe_resolve_pathlib(data_dir / att["storage_path"])
+    if not file_path.is_relative_to(safe_resolve_pathlib(data_dir)):
         raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Attachment file missing")

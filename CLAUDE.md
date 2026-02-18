@@ -25,7 +25,7 @@ aroom --approval-mode auto chat     # Works with subcommands too
 
 # Testing
 pytest tests/ -v                    # All tests
-pytest tests/unit/ -v               # Unit tests only (~1080 tests)
+pytest tests/unit/ -v               # Unit tests only (~1035 tests)
 pytest tests/e2e/ -v                # E2e tests (requires uvx/npx)
 pytest -m e2e -v                    # Run only e2e-marked tests
 pytest tests/unit/test_tools.py -v  # Single test file
