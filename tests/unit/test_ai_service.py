@@ -86,3 +86,41 @@ class TestTimeoutErrorHandling:
         assert events[0]["data"]["code"] == "timeout"
         assert "30s" in events[0]["data"]["message"]
         assert "request_timeout" in events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_client_rebuilt_after_stream_chat_timeout(self):
+        """_build_client must be called after APITimeoutError in stream_chat to reset the connection pool."""
+        from openai import APITimeoutError
+
+        config = _make_config(request_timeout=30)
+        service = AIService.__new__(AIService)
+        service.config = config
+        service._token_provider = None
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+        service.client = mock_client
+
+        with patch.object(service, "_build_client") as mock_build:
+            async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+                pass
+            assert mock_build.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_generate_title_rebuilds_client_on_timeout(self):
+        """_build_client must be called after APITimeoutError in generate_title."""
+        from openai import APITimeoutError
+
+        config = _make_config(request_timeout=30)
+        service = AIService.__new__(AIService)
+        service.config = config
+        service._token_provider = None
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+        service.client = mock_client
+
+        with patch.object(service, "_build_client") as mock_build:
+            result = await service.generate_title("hello")
+            assert result == "New Conversation"
+            assert mock_build.call_count == 1

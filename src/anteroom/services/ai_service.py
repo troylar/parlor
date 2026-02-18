@@ -183,6 +183,7 @@ class AIService:
                 yield {"event": "error", "data": {"message": f"AI request error: {e.message}"}}
         except APITimeoutError:
             logger.warning("AI request timed out after %ds", self.config.request_timeout)
+            self._build_client()
             yield {
                 "event": "error",
                 "data": {
@@ -229,6 +230,10 @@ class AIService:
             if self._try_refresh_token():
                 return await self.generate_title(user_message)
             logger.error("Authentication failed during title generation")
+            return "New Conversation"
+        except APITimeoutError:
+            logger.warning("Title generation timed out")
+            self._build_client()
             return "New Conversation"
         except Exception:
             logger.exception("Failed to generate title")
