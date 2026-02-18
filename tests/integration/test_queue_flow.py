@@ -258,8 +258,8 @@ class TestConversationIsolation:
         cid_a = "00000000-0000-0000-0000-000000000022"
         cid_b = "00000000-0000-0000-0000-000000000023"
 
-        _active_streams[cid_a] = True
-        assert _active_streams.get(cid_a) is True
+        _active_streams[cid_a] = _stream_entry()
+        assert _active_streams.get(cid_a)
         assert _active_streams.get(cid_b) is None
 
     def test_cleanup_one_doesnt_affect_other(self):
@@ -267,8 +267,8 @@ class TestConversationIsolation:
         cid_a = "00000000-0000-0000-0000-000000000024"
         cid_b = "00000000-0000-0000-0000-000000000025"
 
-        _active_streams[cid_a] = True
-        _active_streams[cid_b] = True
+        _active_streams[cid_a] = _stream_entry()
+        _active_streams[cid_b] = _stream_entry()
         _message_queues[cid_a] = asyncio.Queue()
         _message_queues[cid_b] = asyncio.Queue()
 

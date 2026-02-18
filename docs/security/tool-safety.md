@@ -103,7 +103,7 @@ Content-Type: application/json
 
 The approval ID is regex-validated on receipt. The handler uses an atomic `dict.pop()` on the in-memory `pending_approvals` store (capped at 100 entries) to prevent TOCTOU races — a second response to the same ID is silently ignored.
 
-The waiting agent loop side uses an `asyncio.Event` with a configurable timeout (default 120 s). If the timeout expires with no response, the operation is blocked (fails closed). If no approval channel exists — for example, when running headless — the operation is also blocked.
+The waiting agent loop side uses an `asyncio.Event` with disconnect-aware polling: every 1 second, the loop checks `request.is_disconnected()` and exits immediately if the client has left, rather than blocking for the full configurable timeout (default 120 s). If the timeout expires with no response, the operation is blocked (fails closed). If no approval channel exists — for example, when running headless — the operation is also blocked.
 
 ## Configuration
 

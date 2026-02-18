@@ -4,7 +4,7 @@ Anteroom uses token-based authentication with HttpOnly session cookies.
 
 ## Session Management
 
-- **Token generation**: 32-byte cryptographic random token via `secrets.token_urlsafe`
+- **Token generation**: Stable HMAC-SHA256 token derived from the Ed25519 identity key (`_derive_auth_token()` in `app.py`). Uses the private key PEM as HMAC key with context string `anteroom-session-v1`, producing a deterministic token that survives server restarts. Falls back to `secrets.token_urlsafe(32)` when no identity is configured
 - **Storage**: Token hash stored server-side, compared with `hmac.compare_digest` (timing-safe)
 - **Cookie flags**: `HttpOnly`, `Secure` (non-localhost), `SameSite=Strict`
 - **Session expiry**: 12-hour absolute timeout, 30-minute idle timeout

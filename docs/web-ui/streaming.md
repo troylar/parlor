@@ -56,5 +56,10 @@ When a destructive tool call is intercepted by the safety gate, the stream emits
 | Event | Payload fields |
 |---|---|
 | `approval_required` | `approval_id`, `tool_name`, `command` (or `path`) |
+| `approval_resolved` | `approval_id`, `approved`, `reason` |
 
 The browser renders an inline Approve / Deny prompt inside the tool call panel. The user's response is submitted to `POST /api/approvals/{approval_id}/respond`. See [Tool Safety](../security/tool-safety.md#web-ui-approval-flow) for the full flow.
+
+**Deduplication**: The browser tracks shown approval IDs in a `_shownApprovalIds` set. Duplicate `approval_required` events for the same `approval_id` (e.g., on SSE reconnect) are ignored. On SSE reconnect, all stale approval prompts are cleared from the DOM and the set is reset.
+
+**Resolution display**: When `approval_resolved` fires, the approval card updates to show "Allowed" (green) or "Denied" (red) status. Timed-out approvals show "Timed out".
