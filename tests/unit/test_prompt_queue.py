@@ -1152,3 +1152,17 @@ class TestBuildCompactionHistory:
         history = _build_compaction_history(messages)
         assert "glob_files" in history
         assert "unknown" not in history
+
+    def test_tool_result_content_none_does_not_raise(self):
+        """content=None on a tool message must not raise TypeError."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "bash", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "t1", "content": None},
+        ]
+        history = _build_compaction_history(messages)
+        assert "bash" in history
+        assert "SUCCESS" in history

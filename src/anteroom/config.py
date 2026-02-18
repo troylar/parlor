@@ -470,11 +470,19 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         pass  # May fail on Windows or non-owned files
 
     cli_raw = raw.get("cli", {})
+    try:
+        context_warn_tokens = int(cli_raw.get("context_warn_tokens", 80_000))
+    except (ValueError, TypeError):
+        context_warn_tokens = 80_000
+    try:
+        context_auto_compact_tokens = int(cli_raw.get("context_auto_compact_tokens", 100_000))
+    except (ValueError, TypeError):
+        context_auto_compact_tokens = 100_000
     cli_config = CliConfig(
         builtin_tools=cli_raw.get("builtin_tools", True),
         max_tool_iterations=int(cli_raw.get("max_tool_iterations", 50)),
-        context_warn_tokens=int(cli_raw.get("context_warn_tokens", 80_000)),
-        context_auto_compact_tokens=int(cli_raw.get("context_auto_compact_tokens", 100_000)),
+        context_warn_tokens=context_warn_tokens,
+        context_auto_compact_tokens=context_auto_compact_tokens,
     )
 
     identity_raw = raw.get("identity", {})

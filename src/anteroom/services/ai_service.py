@@ -37,16 +37,16 @@ class AIService:
             write=30.0,
             pool=10.0,
         )
-        kwargs: dict[str, Any] = {
-            "base_url": self.config.base_url,
-            "api_key": api_key,
-            # SECURITY-REVIEW: verify=False only when user explicitly sets verify_ssl: false in config
-            "http_client": httpx.AsyncClient(
-                verify=self.config.verify_ssl,
-                timeout=timeout,
-            ),
-        }
-        self.client = AsyncOpenAI(**kwargs)
+        # SECURITY-REVIEW: verify=False only when user explicitly sets verify_ssl: false in config
+        new_http_client = httpx.AsyncClient(
+            verify=self.config.verify_ssl,
+            timeout=timeout,
+        )
+        self.client = AsyncOpenAI(
+            base_url=self.config.base_url,
+            api_key=api_key,
+            http_client=new_http_client,
+        )
 
     def _resolve_api_key(self) -> str:
         """Get API key from token provider (if set) or static config."""

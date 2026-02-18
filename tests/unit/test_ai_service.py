@@ -49,7 +49,8 @@ class TestClientConfiguration:
             with patch("anteroom.services.ai_service.AsyncOpenAI"):
                 AIService(config)
             _, kwargs = mock_client_cls.call_args
-            assert kwargs.get("verify", True) is True
+            assert "verify" in kwargs, "verify must be explicitly passed to AsyncClient"
+            assert kwargs["verify"] is True
 
     def test_verify_ssl_false_when_configured(self):
         """SSL verification must be disabled when verify_ssl: false is explicitly set."""
