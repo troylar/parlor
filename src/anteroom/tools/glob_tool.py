@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .path_utils import safe_resolve_pathlib
 from .security import validate_path
 
 _MAX_RESULTS = 500
@@ -54,13 +55,13 @@ async def handle(pattern: str, path: str | None = None, **_: Any) -> dict[str, A
     except OSError:
         return {"error": "Search failed: unable to list directory contents"}
 
-    resolved_base = base.resolve()
+    resolved_base = safe_resolve_pathlib(base)
     results = []
     for m in matches[:_MAX_RESULTS]:
         if not m.is_file():
             continue
         try:
-            if not m.resolve().is_relative_to(resolved_base):
+            if not safe_resolve_pathlib(m).is_relative_to(resolved_base):
                 continue
         except (OSError, ValueError):
             continue

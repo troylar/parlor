@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from ..models import AppConfigResponse, ConnectionValidation, DatabaseAdd, McpServerStatus, McpTool
 from ..services.ai_service import create_ai_service
+from ..tools.path_utils import safe_resolve_pathlib
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,7 @@ async def add_database(body: DatabaseAdd, request: Request):
 
     try:
         # SECURITY-REVIEW: path validated below — extension allowlist + is_relative_to(home)
-        db_path = Path(os.path.expanduser(body.path)).resolve()
+        db_path = safe_resolve_pathlib(Path(os.path.expanduser(body.path)))
         # Only allow .db/.sqlite/.sqlite3 extensions
         if db_path.suffix.lower() not in (".db", ".sqlite", ".sqlite3"):
             raise HTTPException(
@@ -244,7 +245,7 @@ async def add_database(body: DatabaseAdd, request: Request):
                 detail="Database path must end with .db, .sqlite, or .sqlite3",
             )
         # Restrict to user's home directory
-        home = Path.home().resolve()
+        home = safe_resolve_pathlib(Path.home())
         if not db_path.is_relative_to(home):
             raise HTTPException(
                 status_code=400,
@@ -303,8 +304,8 @@ def _persist_database(name: str, path: str) -> None:
 async def browse_directory(path: str = "~"):
     """List directories and .db files at the given path for file browsing."""
     try:
-        resolved = Path(os.path.expanduser(path)).resolve()
-        home = Path.home().resolve()
+        resolved = safe_resolve_pathlib(Path(os.path.expanduser(path)))
+        home = safe_resolve_pathlib(Path.home())
         if not resolved.is_relative_to(home):
             raise HTTPException(status_code=403, detail="Access denied: path must be within home directory")
         if not resolved.is_dir():

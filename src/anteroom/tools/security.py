@@ -15,6 +15,8 @@ import logging
 import os
 import re
 
+from .path_utils import safe_resolve
+
 logger = logging.getLogger(__name__)
 
 # Paths that should never be accessible via tools
@@ -43,19 +45,19 @@ def validate_path(path: str, working_dir: str) -> tuple[str, str | None]:
 
     # Resolve relative to working dir
     if os.path.isabs(path):
-        resolved = os.path.realpath(path)
+        resolved = safe_resolve(path)
     else:
-        resolved = os.path.realpath(os.path.join(working_dir, path))
+        resolved = safe_resolve(os.path.join(working_dir, path))
 
-    # Check blocked paths (also check the realpath of blocked entries for symlinks)
+    # Check blocked paths (also check the resolved form of blocked entries for symlinks)
     for blocked in _BLOCKED_PATHS:
-        blocked_real = os.path.realpath(blocked)
+        blocked_real = safe_resolve(blocked)
         if resolved == blocked or resolved == blocked_real:
             logger.warning("Blocked access to sensitive path: %s", resolved)
             return "", f"Access denied: {path}"
 
     for prefix in _BLOCKED_PREFIXES:
-        prefix_real = os.path.realpath(prefix)
+        prefix_real = safe_resolve(prefix)
         if resolved.startswith(prefix) or resolved.startswith(prefix_real):
             logger.warning("Blocked access to system path: %s", resolved)
             return "", f"Access denied: {path}"

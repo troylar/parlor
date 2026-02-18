@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .path_utils import safe_resolve_pathlib
 from .security import validate_path
 
 _MAX_OUTPUT = 100_000
@@ -121,13 +122,13 @@ async def handle(
 
     file_pattern = glob or "**/*"
     all_matches: list[dict[str, Any]] = []
-    resolved_base = base.resolve()
+    resolved_base = safe_resolve_pathlib(base)
     try:
         for file_path in sorted(base.glob(file_pattern)):
             if not file_path.is_file():
                 continue
             try:
-                if not file_path.resolve().is_relative_to(resolved_base):
+                if not safe_resolve_pathlib(file_path).is_relative_to(resolved_base):
                     continue
             except (OSError, ValueError):
                 continue

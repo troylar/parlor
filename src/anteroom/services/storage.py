@@ -15,6 +15,8 @@ from typing import Any
 
 import filetype
 
+from ..tools.path_utils import safe_resolve_pathlib
+
 logger = logging.getLogger(__name__)
 
 
@@ -821,8 +823,8 @@ def delete_messages_after_position(
             tuple(in_params),
         )
         for att in atts:
-            file_path = (data_dir / dict(att)["storage_path"]).resolve()
-            if file_path.is_relative_to(data_dir.resolve()) and file_path.exists():
+            file_path = safe_resolve_pathlib(data_dir / dict(att)["storage_path"])
+            if file_path.is_relative_to(safe_resolve_pathlib(data_dir)) and file_path.exists():
                 file_path.unlink()
 
     db.execute(
@@ -904,8 +906,8 @@ def save_attachment(
     attachments_dir = data_dir / "attachments" / conversation_id
     attachments_dir.mkdir(parents=True, exist_ok=True)
     storage_path = f"attachments/{conversation_id}/{aid}_{safe_filename}"
-    full_path = (data_dir / storage_path).resolve()
-    if not full_path.is_relative_to(data_dir.resolve()):
+    full_path = safe_resolve_pathlib(data_dir / storage_path)
+    if not full_path.is_relative_to(safe_resolve_pathlib(data_dir)):
         raise ValueError("Invalid filename")
     full_path.write_bytes(data)
 
