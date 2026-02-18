@@ -3389,7 +3389,8 @@ body {
    ============================================================ */
 
 .tool-call.tool-call-subagent {
-    border-left: 3px solid var(--accent);
+    border-left-width: 3px;
+    border-left-color: var(--accent);
 }
 .tool-call.tool-call-subagent.subagent-running {
     animation: subagentPulse 2s ease-in-out infinite;
