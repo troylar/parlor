@@ -960,7 +960,7 @@ async def _run_repl(
         multiline=True,
         prompt_continuation=_continuation,
         completer=completer,
-        reserve_space_for_menu=8,
+        reserve_space_for_menu=0,
         style=_repl_style,
     )
 
