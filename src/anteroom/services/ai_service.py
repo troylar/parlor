@@ -249,6 +249,10 @@ class AIService:
                 return await self.validate_connection()
             logger.error("Authentication failed during connection validation")
             return False, "Authentication failed. Check your API key or api_key_command.", []
+        except APITimeoutError:
+            logger.warning("Connection validation timed out")
+            self._build_client()
+            return False, "Connection timed out. The API may be slow or unreachable.", []
         except Exception as e:
             logger.error("AI connection validation failed: %s", e)
             return False, "Connection to AI service failed", []
