@@ -56,6 +56,9 @@ _tool_start: float = 0
 _dedup_summary: str = ""
 _dedup_count: int = 0
 
+# Track whether we've started a tool call batch (for spacing)
+_tool_batch_active: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Verbosity
@@ -99,7 +102,9 @@ def clear_turn_history() -> None:
 
 def save_turn_history() -> None:
     """Save current turn tools to history. Called at end of each turn."""
+    global _tool_batch_active
     _flush_dedup()
+    _tool_batch_active = False
     if _current_turn_tools:
         _tool_history.clear()
         _tool_history.extend(_current_turn_tools)
@@ -359,13 +364,19 @@ def render_token(content: str) -> None:
 
 def render_response_end() -> None:
     """Render the complete buffered response with Rich Markdown."""
-    global _streaming_buffer
+    global _streaming_buffer, _tool_batch_active
     _flush_dedup()
     full_text = "".join(_streaming_buffer)
     _streaming_buffer = []
 
     if not full_text.strip():
+        _tool_batch_active = False
         return
+
+    # Add spacing after tool call block before AI response
+    if _tool_batch_active:
+        console.print()
+        _tool_batch_active = False
 
     from rich.padding import Padding
 
@@ -384,10 +395,15 @@ def render_newline() -> None:
 
 def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
     """Show tool call breadcrumb. Static print (no live spinner) for terminal compatibility."""
-    global _tool_start
+    global _tool_start, _tool_batch_active
 
     # Flush any buffered AI text so task explanations appear before tool output
     flush_buffered_text()
+
+    # Add spacing before the first tool call in a batch
+    if not _tool_batch_active:
+        console.print()
+        _tool_batch_active = True
 
     summary = _humanize_tool(tool_name, arguments)
 
@@ -470,14 +486,14 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
         _dedup_count = 0
     elif _verbosity == Verbosity.DETAILED:
         detail = _output_summary(output)
-        console.print(f"{status_icon} {escape(summary)}{elapsed_str}")
+        console.print(f"{status_icon} [dim]{escape(summary)}{elapsed_str}[/dim]")
         if detail:
             console.print(f"    [grey62]{escape(detail)}[/grey62]")
         _dedup_summary = summary
         _dedup_count = 1
     else:
         # Compact: just result line
-        console.print(f"{status_icon} {escape(summary)}{elapsed_str}")
+        console.print(f"{status_icon} [dim]{escape(summary)}{elapsed_str}[/dim]")
         _dedup_summary = summary
         _dedup_count = 1
 

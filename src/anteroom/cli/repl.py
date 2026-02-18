@@ -476,12 +476,19 @@ async def run_cli(
             if choice in ("a", "always"):
                 tool_registry.grant_session_permission(verdict.tool_name)
                 _persist_allowed_tool(verdict.tool_name)
+                renderer.console.print(f"  [dim]✓ Allowed: {verdict.tool_name} (always)[/dim]\n")
                 return True
             if choice in ("s", "session"):
                 tool_registry.grant_session_permission(verdict.tool_name)
+                renderer.console.print(f"  [dim]✓ Allowed: {verdict.tool_name} (session)[/dim]\n")
                 return True
-            return choice in ("y", "yes")
+            if choice in ("y", "yes"):
+                renderer.console.print(f"  [dim]✓ Allowed: {verdict.tool_name} (once)[/dim]\n")
+                return True
+            renderer.console.print(f"  [dim]✗ Denied: {verdict.tool_name}[/dim]\n")
+            return False
         except (EOFError, KeyboardInterrupt):
+            renderer.console.print(f"  [dim]✗ Denied: {verdict.tool_name}[/dim]\n")
             return False
 
     def _persist_allowed_tool(tool_name: str) -> None:
