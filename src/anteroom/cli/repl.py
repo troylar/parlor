@@ -545,6 +545,7 @@ async def run_cli(
                 **arguments,
                 "_ai_service": ai_service,
                 "_tool_registry": tool_registry,
+                "_mcp_manager": mcp_manager,
                 "_cancel_event": _active_cancel_event[0],
                 "_depth": 0,
                 "_agent_id": f"agent-{_subagent_counter}",
