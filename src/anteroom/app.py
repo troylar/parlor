@@ -327,9 +327,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     if config is None:
         config = load_config()
 
-    # Ensure user identity exists before token derivation so first-run
-    # also gets a stable token (identity is auto-generated if missing).
-    if not config.identity:
+    # Ensure user identity exists with a private key before token derivation
+    # so first-run also gets a stable token (identity is auto-generated if missing).
+    if not config.identity or not config.identity.private_key:
         try:
             config.identity = ensure_identity()
         except Exception:

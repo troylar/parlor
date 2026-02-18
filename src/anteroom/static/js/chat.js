@@ -203,6 +203,10 @@ const Chat = (() => {
             });
 
             if (!response.ok) {
+                if (response.status === 401) {
+                    App._handle401();
+                    throw new Error('Session expired');
+                }
                 throw new Error(`HTTP ${response.status}`);
             }
 
@@ -1173,6 +1177,7 @@ const Chat = (() => {
     }
 
     function showThinking() {
+        if (document.getElementById('thinking')) return;
         const container = document.getElementById('messages-container');
         const el = document.createElement('div');
         el.className = 'thinking-indicator';
@@ -1183,8 +1188,7 @@ const Chat = (() => {
     }
 
     function hideThinking() {
-        const el = document.getElementById('thinking');
-        if (el) el.remove();
+        document.querySelectorAll('.thinking-indicator').forEach(el => el.remove());
     }
 
     function showError(msgEl, message) {
