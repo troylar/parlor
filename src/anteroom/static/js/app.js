@@ -13,6 +13,7 @@ const App = (() => {
     };
 
     let _eventSource = null;
+    let _sseFailCount = 0;
     const _shownApprovalIds = new Set();
 
     // --- Theme System ---
@@ -538,7 +539,6 @@ const App = (() => {
             }
         });
 
-        let _sseFailCount = 0;
         _eventSource.onopen = () => { _sseFailCount = 0; };
         _eventSource.onerror = () => {
             _sseFailCount++;
