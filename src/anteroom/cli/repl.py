@@ -775,6 +775,93 @@ async def _run_one_shot(
         _remove_signal_handler(loop, signal.SIGINT)
 
 
+def _patch_completion_menu_position(session: Any) -> None:
+    """Patch PromptSession layout so the completion menu renders above the cursor.
+
+    prompt_toolkit positions the completion menu below the cursor by default and
+    only flips above when there is more vertical space above than below.  With
+    ``reserve_space_for_menu=0`` (no whitespace gap) the menu may not appear at
+    all near the terminal bottom.  This walks the layout, finds the
+    ``FloatContainer`` that holds the ``CompletionsMenu``, and replaces the
+    ``_draw_float`` method with one that always places completion menus above
+    the cursor line.
+    """
+    import types
+
+    from prompt_toolkit.data_structures import Point
+    from prompt_toolkit.layout.containers import Float, FloatContainer
+    from prompt_toolkit.layout.menus import CompletionsMenu, MultiColumnCompletionsMenu
+    from prompt_toolkit.layout.screen import WritePosition
+
+    def _draw_float_above(
+        self: Any,
+        fl: Float,
+        screen: Any,
+        mouse_handlers: Any,
+        write_position: WritePosition,
+        style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        is_completion = isinstance(fl.content, (CompletionsMenu, MultiColumnCompletionsMenu))
+        if not is_completion:
+            return _original_draw_float(fl, screen, mouse_handlers, write_position, style, erase_bg, z_index)
+
+        from prompt_toolkit.application.current import get_app
+
+        cpos = screen.get_menu_position(fl.attach_to_window or get_app().layout.current_window)
+        cursor = Point(x=cpos.x - write_position.xpos, y=cpos.y - write_position.ypos)
+
+        fl_w = fl.get_width()
+        width = (
+            fl_w
+            if fl_w is not None
+            else min(
+                write_position.width,
+                fl.content.preferred_width(write_position.width).preferred,
+            )
+        )
+        xpos = cursor.x
+        if xpos + width > write_position.width:
+            xpos = max(0, write_position.width - width)
+
+        fl_h = fl.get_height()
+        height = (
+            fl_h
+            if fl_h is not None
+            else fl.content.preferred_height(
+                width,
+                write_position.height,
+            ).preferred
+        )
+        height = min(height, cursor.y)
+        ypos = cursor.y - height
+
+        if height > 0 and width > 0:
+            fl.content.write_to_screen(
+                screen,
+                mouse_handlers,
+                WritePosition(
+                    xpos=xpos + write_position.xpos,
+                    ypos=ypos + write_position.ypos,
+                    width=width,
+                    height=height,
+                ),
+                style,
+                erase_bg=not fl.transparent(),
+                z_index=z_index,
+            )
+
+    for container in session.layout.walk():
+        if not isinstance(container, FloatContainer):
+            continue
+        has_menu = any(isinstance(fl.content, (CompletionsMenu, MultiColumnCompletionsMenu)) for fl in container.floats)
+        if has_menu:
+            _original_draw_float = container._draw_float
+            container._draw_float = types.MethodType(_draw_float_above, container)
+            break
+
+
 async def _run_repl(
     config: AppConfig,
     db: Any,
@@ -963,6 +1050,8 @@ async def _run_repl(
         reserve_space_for_menu=0,
         style=_repl_style,
     )
+
+    _patch_completion_menu_position(session)
 
     # Hook buffer changes for paste detection timing
     def _on_buffer_change(_buf: Any) -> None:
