@@ -135,11 +135,11 @@ class EmbeddingWorker:
         while self._running:
             if self._disabled:
                 logger.debug("Embedding worker is disabled: %s", self._disabled_reason)
-                await asyncio.sleep(self._current_interval)
+                await asyncio.sleep(MAX_INTERVAL)
                 continue
             try:
-                count = await self.process_pending()
-                if count > 0:
+                await self.process_pending()
+                if self._consecutive_failures > 0:
                     self._reset_backoff()
             except EmbeddingPermanentError as e:
                 self._disable_permanent(f"Permanent API error: {e} (status={e.status_code})")

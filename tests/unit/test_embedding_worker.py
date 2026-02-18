@@ -315,14 +315,14 @@ class TestEmbeddingWorkerBackoff:
             call_count += 1
             if call_count >= 3:
                 worker.stop()
-                return 0
+                raise EmbeddingTransientError("rate limited", status_code=429)
             raise EmbeddingTransientError("rate limited", status_code=429)
 
         worker.process_pending = mock_process
 
         await asyncio.wait_for(worker.run_forever(interval=0.01), timeout=5.0)
         assert call_count >= 3
-        assert worker.consecutive_failures == 2
+        assert worker.consecutive_failures == 3
 
     @pytest.mark.asyncio
     async def test_run_forever_disables_on_permanent_error(self) -> None:
@@ -331,19 +331,29 @@ class TestEmbeddingWorkerBackoff:
         from anteroom.services.embeddings import EmbeddingPermanentError
 
         worker = self._make_worker()
+        call_count = 0
 
         async def mock_process():
-            raise EmbeddingPermanentError("model not found", status_code=404)
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise EmbeddingPermanentError("model not found", status_code=404)
+            # Should not reach here — worker should be disabled
+            worker.stop()
+            return 0
 
         worker.process_pending = mock_process
 
-        # run_forever should disable and keep looping (sleeping); we stop it
-        async def stop_after_delay():
-            await asyncio.sleep(0.05)
-            worker.stop()
-
-        asyncio.create_task(stop_after_delay())
-        await asyncio.wait_for(worker.run_forever(interval=0.01), timeout=2.0)
+        # Worker disables on permanent error, then sleeps at MAX_INTERVAL.
+        # We cancel after a short delay to verify disabled state.
+        task = asyncio.create_task(worker.run_forever(interval=0.01))
+        await asyncio.sleep(0.05)
+        worker.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
         assert worker.disabled
         assert "Permanent" in (worker.disabled_reason or "")
 
@@ -362,7 +372,7 @@ class TestEmbeddingWorkerBackoff:
             if call_count == 1:
                 raise EmbeddingTransientError("rate limited", status_code=429)
             if call_count == 2:
-                return 1  # success
+                return 0  # successful poll (no errors), resets backoff
             worker.stop()
             return 0
 
@@ -370,3 +380,31 @@ class TestEmbeddingWorkerBackoff:
 
         await asyncio.wait_for(worker.run_forever(interval=0.01), timeout=5.0)
         assert worker.consecutive_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_embed_batch_auth_retry_failure_raises_permanent(self) -> None:
+        from openai import AuthenticationError
+
+        from anteroom.services.embeddings import EmbeddingPermanentError, EmbeddingService
+
+        client = AsyncMock()
+        fresh_client = AsyncMock()
+        # Both original and refreshed client fail with auth error
+        client.embeddings.create = AsyncMock(
+            side_effect=AuthenticationError(message="invalid", response=MagicMock(status_code=401), body=None)
+        )
+        fresh_client.embeddings.create = AsyncMock(
+            side_effect=AuthenticationError(message="still invalid", response=MagicMock(status_code=401), body=None)
+        )
+        client.base_url = "https://api.test/v1"
+
+        service = EmbeddingService(client, dimensions=1)
+        provider = MagicMock()
+        provider.refresh = MagicMock()
+        provider.get_token = MagicMock(return_value="new-token")
+        service._set_token_provider(provider)
+
+        with patch("anteroom.services.embeddings.AsyncOpenAI", return_value=fresh_client):
+            with pytest.raises(EmbeddingPermanentError) as exc_info:
+                await service.embed_batch(["hello world test"])
+        assert exc_info.value.status_code == 401

@@ -128,11 +128,14 @@ class EmbeddingService:
                 results.extend(batch_results)
             except AuthenticationError:
                 if self._try_refresh_token():
-                    retry_response = await self._client.embeddings.create(
-                        model=self._model,
-                        input=truncated,
-                        dimensions=self._dimensions,
-                    )
+                    try:
+                        retry_response = await self._client.embeddings.create(
+                            model=self._model,
+                            input=truncated,
+                            dimensions=self._dimensions,
+                        )
+                    except AuthenticationError:
+                        raise EmbeddingPermanentError("Batch authentication failed after refresh", status_code=401)
                     batch_results = [None] * len(batch)
                     for item in retry_response.data:
                         batch_results[item.index] = item.embedding
