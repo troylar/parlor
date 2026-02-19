@@ -95,6 +95,34 @@ class TestEstimateTokens:
         tokens = _estimate_tokens(messages)
         assert tokens > 0
 
+    def test_special_tokens_in_content(self) -> None:
+        """Regression test: tiktoken special tokens in content should not crash."""
+        messages = [
+            {"role": "user", "content": "Review this code with <|endoftext|> token"},
+            {"role": "assistant", "content": "Found <|fim_prefix|> and <|fim_suffix|> patterns"},
+        ]
+        tokens = _estimate_tokens(messages)
+        assert tokens > 0
+
+    def test_special_tokens_in_tool_calls(self) -> None:
+        """Regression test: special tokens in tool call args should not crash."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path": "file_with_<|endoftext|>.py"}',
+                        }
+                    }
+                ],
+            }
+        ]
+        tokens = _estimate_tokens(messages)
+        assert tokens > 0
+
 
 class TestDetectGitBranch:
     def test_detect_branch(self) -> None:

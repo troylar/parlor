@@ -244,14 +244,14 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
         content = msg.get("content", "")
         if isinstance(content, str):
             if enc:
-                total += len(enc.encode(content))
+                total += len(enc.encode(content, allowed_special="all"))
             else:
                 total += len(content) // 4
         elif isinstance(content, list):
             for part in content:
                 text = str(part) if isinstance(part, dict) else ""
                 if enc:
-                    total += len(enc.encode(text))
+                    total += len(enc.encode(text, allowed_special="all"))
                 else:
                     total += len(text) // 4
         for tc in msg.get("tool_calls", []):
@@ -260,7 +260,7 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
                 args = func.get("arguments", "")
                 name = func.get("name", "")
                 if enc:
-                    total += len(enc.encode(args)) + len(enc.encode(name))
+                    total += len(enc.encode(args, allowed_special="all")) + len(enc.encode(name, allowed_special="all"))
                 else:
                     total += (len(args) + len(name)) // 4
     return total
@@ -1757,7 +1757,7 @@ async def _run_repl(
                         renderer.update_thinking()
                         enc = _get_tiktoken_encoding()
                         if enc:
-                            response_token_count += len(enc.encode(event.data["content"]))
+                            response_token_count += len(enc.encode(event.data["content"], allowed_special="all"))
                         else:
                             response_token_count += max(1, len(event.data["content"]) // 4)
                     elif event.kind == "tool_call_start":
