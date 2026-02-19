@@ -261,6 +261,18 @@ class McpManager:
                     exc_info=True,
                 )
 
+            # Re-raise CancelledError so asyncio.wait_for's timeout mechanism
+            # functions correctly across Python versions.
+            if isinstance(e, asyncio.CancelledError):
+                raise
+
+            # Import McpError here (MCP SDK may not be installed).
+            try:
+                from mcp import McpError
+            except ImportError:
+                McpError = None  # type: ignore[assignment,misc]  # noqa: N806
+
+            is_mcp_error = McpError is not None and isinstance(e, McpError)
             error_type = type(e).__name__
             error_msg = f"{error_type}: {e}"
             logger.error(
@@ -268,7 +280,9 @@ class McpManager:
                 config.name,
                 error_msg,
                 desc,
-                exc_info=True,
+                # Suppress full traceback for known MCP protocol errors — the
+                # message is already diagnostic.  Keep it for unexpected errors.
+                exc_info=not is_mcp_error,
             )
             self._server_status[config.name] = {
                 "status": "error",
