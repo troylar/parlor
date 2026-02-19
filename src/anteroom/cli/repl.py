@@ -764,6 +764,7 @@ async def _run_one_shot(
             cancel_event=cancel_event,
             extra_system_prompt=extra_system_prompt,
             max_iterations=config.cli.max_tool_iterations,
+            narration_cadence=ai_service.config.narration_cadence,
         ):
             if event.kind == "thinking":
                 if not thinking:
@@ -1729,6 +1730,7 @@ async def _run_repl(
                     extra_system_prompt=extra_system_prompt,
                     max_iterations=config.cli.max_tool_iterations,
                     message_queue=msg_queue,
+                    narration_cadence=ai_service.config.narration_cadence,
                 ):
                     # Drain input_queue into msg_queue during streaming
                     await _drain_input_to_msg_queue(
