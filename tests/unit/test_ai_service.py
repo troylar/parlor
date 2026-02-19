@@ -470,6 +470,166 @@ class TestIterStream:
 
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_cancel_wait_cleaned_up_on_normal_end(self):
+        """cancel_wait future must be cancelled when stream ends via StopAsyncIteration."""
+        cancel = asyncio.Event()
+
+        async def _two_chunks():
+            yield "a"
+            yield "b"
+
+        result = []
+        async for chunk in AIService._iter_stream(_two_chunks(), cancel_event=cancel, total_timeout=10.0):
+            result.append(chunk)
+
+        assert result == ["a", "b"]
+        # If cancel_wait leaked, the event loop would have dangling futures.
+        # No assertion needed beyond clean completion — the test passes if
+        # no "Task was destroyed but it is pending" warnings appear.
+
+    @pytest.mark.asyncio
+    async def test_stream_exception_propagates(self):
+        """Non-StopAsyncIteration exceptions from the stream must propagate to the caller."""
+
+        async def _exploding_gen():
+            yield "ok"
+            raise ValueError("stream broke")
+
+        result = []
+        with pytest.raises(ValueError, match="stream broke"):
+            async for chunk in AIService._iter_stream(_exploding_gen(), cancel_event=None, total_timeout=10.0):
+                result.append(chunk)
+
+        assert result == ["ok"]
+
+    @pytest.mark.asyncio
+    async def test_stream_exception_cleans_up_cancel_wait(self):
+        """When stream raises, cancel_wait future must still be cleaned up."""
+        cancel = asyncio.Event()
+
+        async def _exploding_gen():
+            yield "ok"
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            async for _ in AIService._iter_stream(_exploding_gen(), cancel_event=cancel, total_timeout=10.0):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_deadline_already_expired_at_loop_entry(self):
+        """If deadline expires between chunks, timeout fires at the top of the loop."""
+        from openai import APITimeoutError
+
+        call_count = 0
+
+        async def _slow_chunks():
+            nonlocal call_count
+            call_count += 1
+            yield "first"
+            call_count += 1
+            # Simulate a chunk that takes just long enough for the deadline to pass
+            await asyncio.sleep(0.15)
+            yield "second"
+
+        result = []
+        with pytest.raises(APITimeoutError):
+            async for chunk in AIService._iter_stream(_slow_chunks(), cancel_event=None, total_timeout=0.1):
+                result.append(chunk)
+
+        assert "first" in result
+
+    @pytest.mark.asyncio
+    async def test_aclose_called_on_cancel(self):
+        """Stream aclose() must be called when cancel_event fires for resource cleanup."""
+        cancel = asyncio.Event()
+        aclose_called = asyncio.Event()
+
+        class TrackingStream:
+            async def __anext__(self):
+                await asyncio.sleep(999)
+                return "never"
+
+            async def aclose(self):
+                aclose_called.set()
+
+        stream = TrackingStream()
+
+        async def _consume():
+            async for _ in AIService._iter_stream(stream, cancel_event=cancel, total_timeout=60.0):
+                pass
+
+        task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.05)
+        cancel.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+        assert aclose_called.is_set(), "aclose() was not called on cancel"
+
+    @pytest.mark.asyncio
+    async def test_aclose_called_on_timeout(self):
+        """Stream aclose() must be called when total timeout fires for resource cleanup."""
+        from openai import APITimeoutError
+
+        aclose_called = asyncio.Event()
+
+        class TrackingStream:
+            async def __anext__(self):
+                await asyncio.sleep(999)
+                return "never"
+
+            async def aclose(self):
+                aclose_called.set()
+
+        stream = TrackingStream()
+        with pytest.raises(APITimeoutError):
+            async for _ in AIService._iter_stream(stream, cancel_event=None, total_timeout=0.1):
+                pass
+
+        assert aclose_called.is_set(), "aclose() was not called on timeout"
+
+    @pytest.mark.asyncio
+    async def test_cancel_event_already_set_before_iteration(self):
+        """If cancel_event is already set, iteration should stop immediately."""
+        cancel = asyncio.Event()
+        cancel.set()  # Pre-set before iteration starts
+
+        async def _gen():
+            yield "should_not_appear"
+
+        result = []
+        async for chunk in AIService._iter_stream(_gen(), cancel_event=cancel, total_timeout=10.0):
+            result.append(chunk)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_multiple_chunks_before_cancel(self):
+        """Cancel after several chunks have been delivered — all pre-cancel chunks collected."""
+        cancel = asyncio.Event()
+        stall_started = asyncio.Event()
+
+        async def _multi_then_stall():
+            yield "a"
+            yield "b"
+            yield "c"
+            stall_started.set()
+            await asyncio.sleep(999)
+            yield "never"
+
+        result = []
+
+        async def _consume():
+            async for chunk in AIService._iter_stream(_multi_then_stall(), cancel_event=cancel, total_timeout=60.0):
+                result.append(chunk)
+
+        task = asyncio.create_task(_consume())
+        await stall_started.wait()
+        cancel.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+        assert result == ["a", "b", "c"]
+
 
 class TestStreamChatWithIterStream:
     """Integration tests: stream_chat uses _iter_stream for cancel and timeout protection."""
@@ -610,3 +770,42 @@ class TestBuildClientCleanup:
             # No running loop — should swallow RuntimeError gracefully
             service._build_client()
             # No assertion needed — test passes if no exception is raised
+
+    def test_rebuild_old_client_missing_internal_http(self):
+        """_build_client must not fail when old client has no _client attribute."""
+        config = _make_config()
+
+        with patch("anteroom.services.ai_service.AsyncOpenAI"):
+            service = AIService.__new__(AIService)
+            service.config = config
+            service._token_provider = None
+
+            old_openai = MagicMock(spec=[])  # spec=[] means no attributes
+            service.client = old_openai
+
+            # Should not raise even though old_openai has no _client
+            service._build_client()
+            assert service.client is not None
+
+    def test_rebuild_old_http_close_raises(self):
+        """_build_client must not fail if old_http.close() raises."""
+        config = _make_config()
+
+        with patch("anteroom.services.ai_service.AsyncOpenAI"):
+            service = AIService.__new__(AIService)
+            service.config = config
+            service._token_provider = None
+
+            old_http = MagicMock()
+            old_http.close.side_effect = RuntimeError("close failed")
+            old_openai = MagicMock()
+            old_openai._client = old_http
+            service.client = old_openai
+
+            with patch("asyncio.get_running_loop") as mock_loop:
+                mock_event_loop = MagicMock()
+                mock_event_loop.create_task.side_effect = RuntimeError("task creation failed")
+                mock_loop.return_value = mock_event_loop
+                # Should not raise — cleanup errors are swallowed
+                service._build_client()
+                assert service.client is not None

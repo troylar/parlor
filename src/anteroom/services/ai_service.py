@@ -104,12 +104,12 @@ class AIService:
         - total_timeout seconds elapse since iteration started
         - the stream is exhausted (StopAsyncIteration)
         """
-        deadline = asyncio.get_event_loop().time() + total_timeout
+        deadline = asyncio.get_running_loop().time() + total_timeout
 
         while True:
-            remaining = deadline - asyncio.get_event_loop().time()
+            remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                logger.warning("Stream total timeout reached (%.0fs)", total_timeout)
+                logger.warning("Stream deadline exceeded before next chunk (%.0fs)", total_timeout)
                 try:
                     await stream_iter.aclose()
                 except Exception:
@@ -142,7 +142,7 @@ class AIService:
                 next_chunk.cancel()
                 if cancel_wait:
                     cancel_wait.cancel()
-                logger.warning("Stream total timeout reached (%.0fs)", total_timeout)
+                logger.warning("Stream wait timed out after %.0fs total", total_timeout)
                 try:
                     await stream_iter.aclose()
                 except Exception:
@@ -165,6 +165,8 @@ class AIService:
             try:
                 chunk = next_chunk.result()
             except StopAsyncIteration:
+                if cancel_wait:
+                    cancel_wait.cancel()
                 return
 
             yield chunk
