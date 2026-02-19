@@ -343,6 +343,27 @@ async def chat(conversation_id: str, request: Request):
                         file_data,
                         data_dir,
                     )
+                    # Dual citizenship: also create a source from this attachment
+                    try:
+                        identity = getattr(request.app.state.config, "identity", None)
+                        _uid = identity.user_id if identity else None
+                        _udn = identity.display_name if identity else None
+                        source = storage.create_source_from_attachment(
+                            db,
+                            att["id"],
+                            data_dir,
+                            user_id=_uid,
+                            user_display_name=_udn,
+                        )
+                        if source:
+                            worker = getattr(request.app.state, "embedding_worker", None)
+                            if worker and source.get("content"):
+                                try:
+                                    await worker.embed_source(source["id"])
+                                except Exception:
+                                    pass
+                    except Exception:
+                        logger.debug("Failed to create source from attachment %s", att["id"], exc_info=True)
                     if f.content_type and f.content_type.startswith("image/"):
                         b64_data = base64.b64encode(file_data).decode("ascii")
                         attachment_contents.append(

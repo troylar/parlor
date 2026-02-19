@@ -68,7 +68,26 @@ async def semantic_search(
         conv_type = conv.get("type", "chat") if conv else "chat"
         conversations.append({"conversation_id": conv_id, "title": title, "type": conv_type, "messages": messages})
 
-    return {"results": conversations}
+    # Also search source chunks
+    source_results = storage.search_similar_source_chunks(db, query_embedding, limit=limit)
+    source_grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in source_results:
+        source_grouped[r["source_id"]].append(
+            {
+                "chunk_id": r["chunk_id"],
+                "content": r["content"],
+                "chunk_index": r["chunk_index"],
+                "distance": r["distance"],
+            }
+        )
+
+    source_entries = []
+    for src_id, chunks in source_grouped.items():
+        src = storage.get_source(db, src_id)
+        title = src["title"] if src else "Unknown"
+        source_entries.append({"source_id": src_id, "title": title, "chunks": chunks})
+
+    return {"results": conversations, "source_results": source_entries}
 
 
 @router.get("/search")
@@ -96,6 +115,7 @@ async def unified_search(
         query_embedding = await embedding_service.embed(q)
         if query_embedding is not None:
             results = storage.search_similar_messages(db, query_embedding, limit=limit)
+            source_results = storage.search_similar_source_chunks(db, query_embedding, limit=limit)
             return {
                 "mode": "semantic",
                 "results": [
@@ -107,6 +127,16 @@ async def unified_search(
                         "distance": r["distance"],
                     }
                     for r in results
+                ],
+                "source_results": [
+                    {
+                        "chunk_id": r["chunk_id"],
+                        "source_id": r["source_id"],
+                        "content": r["content"],
+                        "chunk_index": r["chunk_index"],
+                        "distance": r["distance"],
+                    }
+                    for r in source_results
                 ],
             }
 

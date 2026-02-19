@@ -73,6 +73,12 @@ class EmbeddingWorker:
         logger.error("Embedding worker permanently disabled: %s", reason)
 
     async def process_pending(self) -> int:
+        """Process unembedded messages and source chunks. Returns total count embedded."""
+        count = await self._process_pending_messages()
+        count += await self._process_pending_source_chunks()
+        return count
+
+    async def _process_pending_messages(self) -> int:
         """Process unembedded messages. Returns count of messages embedded."""
         messages = storage.get_unembedded_messages(self._db, limit=self._batch_size)
         if not messages:
@@ -105,6 +111,74 @@ class EmbeddingWorker:
 
         if count:
             logger.info("Embedded %d messages", count)
+        return count
+
+    async def _process_pending_source_chunks(self) -> int:
+        """Process unembedded source chunks. Returns count of chunks embedded."""
+        chunks = storage.get_unembedded_source_chunks(self._db, limit=self._batch_size)
+        if not chunks:
+            return 0
+
+        eligible = [c for c in chunks if len(c.get("content", "")) >= MIN_CONTENT_LENGTH]
+        if not eligible:
+            return 0
+
+        texts = [c["content"] for c in eligible]
+        embeddings = await self._service.embed_batch(texts, batch_size=self._batch_size)
+
+        count = 0
+        for chunk, embedding in zip(eligible, embeddings):
+            if embedding is None:
+                continue
+            try:
+                storage.store_source_chunk_embedding(
+                    self._db,
+                    chunk["id"],
+                    chunk["source_id"],
+                    embedding,
+                    chunk["content_hash"],
+                )
+                count += 1
+            except Exception as e:
+                logger.error("Failed to store embedding for source chunk %s: %s", chunk["id"], type(e).__name__)
+
+        if count:
+            logger.info("Embedded %d source chunks", count)
+        return count
+
+    async def embed_source(self, source_id: str) -> int:
+        """Embed all chunks of a source inline. Returns count of chunks embedded."""
+        chunks = storage.list_source_chunks(self._db, source_id)
+        if not chunks:
+            return 0
+
+        eligible = [c for c in chunks if len(c.get("content", "")) >= MIN_CONTENT_LENGTH]
+        if not eligible:
+            return 0
+
+        texts = [c["content"] for c in eligible]
+        try:
+            embeddings = await self._service.embed_batch(texts, batch_size=self._batch_size)
+        except (EmbeddingPermanentError, EmbeddingTransientError):
+            logger.warning("Embedding failed for source %s, will be retried by worker", source_id)
+            return 0
+
+        count = 0
+        for chunk, embedding in zip(eligible, embeddings):
+            if embedding is None:
+                continue
+            try:
+                storage.store_source_chunk_embedding(
+                    self._db,
+                    chunk["id"],
+                    source_id,
+                    embedding,
+                    chunk["content_hash"],
+                )
+                count += 1
+            except Exception as e:
+                logger.error("Failed to store embedding for source chunk %s: %s", chunk["id"], type(e).__name__)
+
         return count
 
     async def embed_message(self, message_id: str, content: str, conversation_id: str) -> None:
