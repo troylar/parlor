@@ -33,6 +33,7 @@ from anteroom.services.storage import (
     register_user,
     remove_tag_from_conversation,
     replace_document_content,
+    save_attachment,
     update_conversation_title,
     update_conversation_type,
     update_folder,
@@ -1095,3 +1096,60 @@ class TestDeleteMessageCascade:
         assert result is False
         msgs = list_messages(db, conv["id"])
         assert len(msgs) == 1
+
+
+class TestSaveAttachment:
+    def test_save_text_attachment(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        result = save_attachment(db, msg["id"], conv["id"], "notes.txt", "text/plain", b"Hello", tmp_path)
+        assert result["filename"] == "notes.txt"
+        assert result["mime_type"] == "text/plain"
+        assert result["size_bytes"] == 5
+
+    def test_save_markdown_attachment(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        result = save_attachment(db, msg["id"], conv["id"], "readme.md", "text/markdown", b"# Hello", tmp_path)
+        assert result["filename"] == "readme.md"
+
+    def test_save_json_attachment(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        result = save_attachment(db, msg["id"], conv["id"], "data.json", "application/json", b"{}", tmp_path)
+        assert result["filename"] == "data.json"
+
+    def test_save_docx_attachment(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        zip_header = b"PK\x03\x04" + b"\x00" * 26
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        result = save_attachment(db, msg["id"], conv["id"], "doc.docx", mime, zip_header, tmp_path)
+        assert result["filename"] == "doc.docx"
+
+    def test_reject_unsupported_type(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            save_attachment(db, msg["id"], conv["id"], "bad.exe", "application/x-executable", b"MZ", tmp_path)
+
+    def test_reject_oversized_file(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        with pytest.raises(ValueError, match="maximum size"):
+            save_attachment(db, msg["id"], conv["id"], "big.txt", "text/plain", b"x" * (11 * 1024 * 1024), tmp_path)
+
+    def test_octet_stream_text_passes(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        result = save_attachment(
+            db, msg["id"], conv["id"], "file.md", "application/octet-stream", b"# Markdown content", tmp_path
+        )
+        assert result["filename"] == "file.md"
+
+    def test_octet_stream_binary_rejected(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Test")
+        msg = create_message(db, conv["id"], "user", "See attached")
+        binary_data = bytes(range(256)) * 10
+        with pytest.raises(ValueError, match="Cannot verify file content type"):
+            save_attachment(db, msg["id"], conv["id"], "file.md", "application/octet-stream", binary_data, tmp_path)

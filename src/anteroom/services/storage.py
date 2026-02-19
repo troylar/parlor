@@ -848,24 +848,68 @@ def delete_messages_after_position(
 # --- Attachments ---
 
 ALLOWED_MIME_TYPES = {
+    # Text / code
     "text/plain",
     "text/markdown",
     "text/css",
     "text/csv",
     "text/xml",
+    "text/html",
+    "text/javascript",
+    "text/x-python",
+    "text/x-c",
+    "text/x-c++src",
+    "text/x-java-source",
+    "text/x-go",
+    "text/x-rust",
+    "text/x-ruby",
+    "text/x-shellscript",
+    "text/x-sql",
+    "text/x-toml",
+    "text/x-typescript",
+    # Application / code
     "application/json",
-    "application/pdf",
+    "application/javascript",
     "application/x-yaml",
     "application/yaml",
+    "application/x-python-code",
+    "application/xml",
+    "application/sql",
+    "application/toml",
+    # Documents
+    "application/pdf",
+    "application/rtf",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    # Images
     "image/png",
     "image/jpeg",
     "image/gif",
     "image/webp",
+    # NOTE: image/svg+xml intentionally excluded — SVG can contain embedded
+    # JavaScript, making it a stored XSS vector when served to browsers.
+    # Archives
+    "application/zip",
+    "application/gzip",
+    "application/x-tar",
+}
+
+# MIME types that are text-based but don't start with "text/" — these are safe
+# to accept even when filetype.guess() returns None (no magic bytes).
+_TEXT_LIKE_MIME_TYPES = {
+    "application/json",
     "application/javascript",
-    "text/javascript",
+    "application/x-yaml",
+    "application/yaml",
     "application/x-python-code",
-    "text/x-python",
-    "application/octet-stream",
+    "application/xml",
+    "application/sql",
+    "application/toml",
+    "application/rtf",
 }
 
 MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -878,6 +922,94 @@ def _sanitize_filename(filename: str) -> str:
     return safe or "unnamed"
 
 
+# File extensions considered text-like for application/octet-stream fallback.
+# When a browser sends no MIME type, we verify the content is valid UTF-8
+# AND the extension is in this set before accepting.
+_TEXT_LIKE_EXTENSIONS = {
+    "txt",
+    "md",
+    "markdown",
+    "rst",
+    "csv",
+    "tsv",
+    "log",
+    "json",
+    "yaml",
+    "yml",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "xml",
+    "html",
+    "htm",
+    "css",
+    "sql",
+    "py",
+    "js",
+    "ts",
+    "jsx",
+    "tsx",
+    "java",
+    "c",
+    "cpp",
+    "h",
+    "hpp",
+    "rs",
+    "go",
+    "rb",
+    "php",
+    "sh",
+    "bat",
+    "ps1",
+}
+
+
+def _validate_upload(mime_type: str, data: bytes, filename: str) -> None:
+    """Shared upload validation: size limit, MIME allowlist, and content verification."""
+    if len(data) > MAX_ATTACHMENT_SIZE:
+        raise ValueError(f"File exceeds maximum size of {MAX_ATTACHMENT_SIZE // (1024 * 1024)} MB")
+
+    # Handle application/octet-stream as a special case: browser sent no MIME type.
+    # Only accept if the file extension is text-like AND content is valid UTF-8.
+    if mime_type == "application/octet-stream":
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in _TEXT_LIKE_EXTENSIONS:
+            raise ValueError(f"Unsupported file type: {mime_type}")
+        sample = data[:8192]
+        try:
+            sample.decode("utf-8")
+        except (UnicodeDecodeError, ValueError):
+            logger.warning("Cannot verify binary content for %s", filename)
+            raise ValueError("Cannot verify file content type")
+        return  # Passed extension + UTF-8 checks
+
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise ValueError(f"Unsupported file type: {mime_type}")
+
+    # Magic-byte verification for binary formats
+    guess = filetype.guess(data)
+    if guess is not None:
+        if guess.mime != mime_type:
+            # Allow Office format MIME mismatches:
+            # - OpenXML (.docx/.xlsx/.pptx): filetype detects ZIP container
+            # - Legacy (.doc/.xls/.ppt): filetype detects OLE/CFB container
+            if mime_type.startswith("application/vnd.") and guess.mime in (
+                "application/zip",
+                "application/x-ole-storage",
+                "application/x-cfb",
+            ):
+                pass  # Office formats use container formats — this is expected
+            else:
+                logger.warning("MIME mismatch: claimed %s, detected %s for %s", mime_type, guess.mime, filename)
+                raise ValueError("File content does not match declared type")
+    elif mime_type.startswith("text/") or mime_type in _TEXT_LIKE_MIME_TYPES:
+        pass  # Text-based formats have no magic bytes — this is expected
+    else:
+        logger.warning("Cannot verify binary MIME type %s for %s", mime_type, filename)
+        raise ValueError("Cannot verify file content type")
+
+
 def save_attachment(
     db: sqlite3.Connection,
     message_id: str,
@@ -887,27 +1019,7 @@ def save_attachment(
     data: bytes,
     data_dir: Path,
 ) -> dict[str, Any]:
-    if len(data) > MAX_ATTACHMENT_SIZE:
-        raise ValueError(f"File exceeds maximum size of {MAX_ATTACHMENT_SIZE // (1024 * 1024)} MB")
-
-    if mime_type not in ALLOWED_MIME_TYPES:
-        raise ValueError(f"Unsupported file type: {mime_type}")
-
-    # Magic-byte verification for binary formats
-    guess = filetype.guess(data)
-    if guess is not None:
-        if guess.mime != mime_type:
-            logger.warning("MIME mismatch: claimed %s, detected %s for %s", mime_type, guess.mime, filename)
-            raise ValueError("File content does not match declared type")
-    elif not mime_type.startswith("text/") and mime_type not in (
-        "application/json",
-        "application/javascript",
-        "application/x-yaml",
-        "application/yaml",
-        "application/x-python-code",
-    ):
-        logger.warning("Cannot verify binary MIME type %s for %s", mime_type, filename)
-        raise ValueError("Cannot verify file content type")
+    _validate_upload(mime_type, data, filename)
 
     safe_filename = _sanitize_filename(filename)
     aid = _uuid()
@@ -1531,27 +1643,8 @@ def save_source_file(
     user_id: str | None = None,
     user_display_name: str | None = None,
 ) -> dict[str, Any]:
-    """Save a file as a source, reusing MIME validation from save_attachment."""
-    if len(data) > MAX_ATTACHMENT_SIZE:
-        raise ValueError(f"File exceeds maximum size of {MAX_ATTACHMENT_SIZE // (1024 * 1024)} MB")
-
-    if mime_type not in ALLOWED_MIME_TYPES:
-        raise ValueError(f"Unsupported file type: {mime_type}")
-
-    guess = filetype.guess(data)
-    if guess is not None:
-        if guess.mime != mime_type:
-            logger.warning("MIME mismatch: claimed %s, detected %s for %s", mime_type, guess.mime, filename)
-            raise ValueError("File content does not match declared type")
-    elif not mime_type.startswith("text/") and mime_type not in (
-        "application/json",
-        "application/javascript",
-        "application/x-yaml",
-        "application/yaml",
-        "application/x-python-code",
-    ):
-        logger.warning("Cannot verify binary MIME type %s for %s", mime_type, filename)
-        raise ValueError("Cannot verify file content type")
+    """Save a file as a source with MIME validation."""
+    _validate_upload(mime_type, data, filename)
 
     import hashlib
 
