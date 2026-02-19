@@ -678,6 +678,7 @@ async def chat(conversation_id: str, request: Request):
                 cancel_event=cancel_event,
                 extra_system_prompt=extra_system_prompt,
                 message_queue=_message_queues.get(conversation_id),
+                narration_cadence=ai_service.config.narration_cadence,
             ):
                 kind = agent_event.kind
                 data = agent_event.data

@@ -189,6 +189,12 @@ async def _execute_tool(
         return tc, {"error": str(e)}, "error"
 
 
+_NARRATION_PROMPT = (
+    "Briefly summarize your progress in 1-2 sentences: what have you found or done so far, "
+    "and what are you doing next? Then continue your work."
+)
+
+
 async def run_agent_loop(
     ai_service: AIService,
     messages: list[dict[str, Any]],
@@ -198,6 +204,7 @@ async def run_agent_loop(
     extra_system_prompt: str | None = None,
     max_iterations: int = 50,
     message_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    narration_cadence: int = 0,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -206,6 +213,7 @@ async def run_agent_loop(
     iteration = 0
     context_recovery_attempts = 0
     max_context_recoveries = 2  # truncate once, compact once
+    total_tool_calls = 0
 
     while iteration < max_iterations:
         iteration += 1
@@ -356,10 +364,33 @@ async def run_agent_loop(
                         "content": json.dumps(llm_result),
                     }
                 )
+            total_tool_calls += len(tool_calls_pending)
 
         if cancel_event and cancel_event.is_set():
             yield AgentEvent(kind="done", data={})
             return
+
+        # Enforce narration cadence: inject an ephemeral prompt to force a progress update.
+        # The injected message is removed from history immediately after the narration response
+        # so it does not pollute the conversation context for subsequent tool calls.
+        if narration_cadence > 0 and total_tool_calls > 0 and total_tool_calls % narration_cadence == 0:
+            messages.append({"role": "user", "content": _NARRATION_PROMPT})
+            try:
+                async for event in ai_service.stream_chat(
+                    messages,
+                    cancel_event=cancel_event,
+                    extra_system_prompt=extra_system_prompt,
+                ):
+                    if event["event"] == "token":
+                        yield AgentEvent(kind="token", data=event["data"])
+                    elif event["event"] in ("done", "error"):
+                        break
+            except Exception:
+                logger.exception("Narration request failed; continuing without update")
+            finally:
+                # Always remove the ephemeral prompt regardless of outcome
+                if messages and messages[-1].get("content") == _NARRATION_PROMPT:
+                    messages.pop()
 
         assistant_content = ""
 
