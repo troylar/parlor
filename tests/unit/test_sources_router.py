@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
@@ -102,6 +103,69 @@ class TestCreateSource:
             headers={"Content-Type": "text/plain"},
         )
         assert resp.status_code == 415
+
+
+class TestUploadSource:
+    def test_upload_file(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.save_source_file.return_value = {
+                "id": "s1",
+                "type": "file",
+                "title": "test.txt",
+                "filename": "test.txt",
+                "content": "file content",
+            }
+            client = TestClient(app)
+            resp = client.post(
+                "/api/sources/upload",
+                files={"file": ("test.txt", io.BytesIO(b"file content"), "text/plain")},
+            )
+            assert resp.status_code == 201
+            assert resp.json()["id"] == "s1"
+            mock_storage.save_source_file.assert_called_once()
+
+    def test_upload_with_title(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.save_source_file.return_value = {
+                "id": "s2",
+                "type": "file",
+                "title": "Custom Title",
+            }
+            client = TestClient(app)
+            resp = client.post(
+                "/api/sources/upload",
+                files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")},
+                data={"title": "Custom Title"},
+            )
+            assert resp.status_code == 201
+            call_kwargs = mock_storage.save_source_file.call_args
+            assert call_kwargs[1]["title"] == "Custom Title"
+
+    def test_upload_invalid_mime_returns_400(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.save_source_file.side_effect = ValueError("Unsupported file type")
+            client = TestClient(app)
+            resp = client.post(
+                "/api/sources/upload",
+                files={"file": ("malware.exe", io.BytesIO(b"\x00\x00"), "application/x-msdownload")},
+            )
+            assert resp.status_code == 400
+            assert "Unsupported file type" in resp.json()["detail"]
+
+    def test_upload_oversized_returns_400(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.save_source_file.side_effect = ValueError("File too large")
+            client = TestClient(app)
+            resp = client.post(
+                "/api/sources/upload",
+                files={"file": ("big.bin", io.BytesIO(b"x" * 100), "application/octet-stream")},
+            )
+            assert resp.status_code == 400
+            assert "File too large" in resp.json()["detail"]
 
 
 class TestGetSource:
@@ -272,4 +336,25 @@ class TestProjectSources:
             json={"source_id": "s1", "group_id": "g1"},
             headers={"Content-Type": "application/json"},
         )
+        assert resp.status_code == 422
+
+    def test_unlink_source_from_project(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            client = TestClient(app)
+            resp = client.delete("/api/projects/12345678-1234-1234-1234-123456789012/sources?source_id=s1")
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "unlinked"
+            mock_storage.unlink_source_from_project.assert_called_once()
+
+    def test_unlink_requires_exactly_one(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.delete("/api/projects/12345678-1234-1234-1234-123456789012/sources")
+        assert resp.status_code == 422
+
+    def test_unlink_rejects_multiple_params(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.delete("/api/projects/12345678-1234-1234-1234-123456789012/sources?source_id=s1&group_id=g1")
         assert resp.status_code == 422

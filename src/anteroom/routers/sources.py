@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid as uuid_mod
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 from pydantic import ValidationError
 
 from ..models import ProjectSourceLink, SourceCreate, SourceGroupCreate, SourceGroupUpdate, SourceUpdate
@@ -112,7 +112,7 @@ async def create_source(request: Request) -> dict[str, Any]:
 async def upload_source(
     request: Request,
     file: UploadFile,
-    title: str | None = None,
+    title: str | None = Form(default=None),
 ) -> dict[str, Any]:
     db = _get_db(request)
     data_dir = request.app.state.config.app.data_dir
@@ -315,17 +315,23 @@ async def link_project_source(request: Request, project_id: str) -> dict[str, An
 
 
 @router.delete("/projects/{project_id}/sources")
-async def unlink_project_source(request: Request, project_id: str) -> dict[str, Any]:
-    _validate_json_content_type(request)
+async def unlink_project_source(
+    request: Request,
+    project_id: str,
+    source_id: str | None = Query(default=None),
+    group_id: str | None = Query(default=None),
+    tag_filter: str | None = Query(default=None),
+) -> dict[str, Any]:
     _validate_uuid(project_id, "project_id")
-    body = await request.json()
-    data = _parse_body(ProjectSourceLink, body)
+    non_null = sum(1 for v in (source_id, group_id, tag_filter) if v is not None)
+    if non_null != 1:
+        raise HTTPException(status_code=422, detail="Exactly one of source_id, group_id, or tag_filter required")
     db = _get_db(request)
     storage.unlink_source_from_project(
         db,
         project_id,
-        source_id=data.source_id,
-        group_id=data.group_id,
-        tag_filter=data.tag_filter,
+        source_id=source_id,
+        group_id=group_id,
+        tag_filter=tag_filter,
     )
     return {"status": "unlinked"}
