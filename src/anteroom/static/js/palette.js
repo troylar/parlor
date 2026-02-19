@@ -65,6 +65,20 @@ const Palette = (() => {
             action: () => App.newConversation(),
         });
 
+        items.push({
+            type: 'action',
+            label: 'Toggle Sources',
+            hint: 'Panel',
+            action: () => Sources.togglePanel(),
+        });
+
+        items.push({
+            type: 'action',
+            label: 'New Source',
+            hint: 'Sources',
+            action: async () => { await Sources.openPanel(); Sources.showCreateView(); },
+        });
+
         // Theme switching commands
         Object.entries(App.THEMES).forEach(([key, theme]) => {
             items.push({
