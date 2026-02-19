@@ -141,6 +141,86 @@ CREATE TABLE IF NOT EXISTS change_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_change_log_id ON change_log(id);
+
+CREATE TABLE IF NOT EXISTS sources (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK(type IN ('file', 'text', 'url')),
+    title TEXT NOT NULL,
+    content TEXT,
+    mime_type TEXT,
+    filename TEXT,
+    url TEXT,
+    storage_path TEXT,
+    size_bytes INTEGER,
+    content_hash TEXT,
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_chunks (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_chunks_source
+    ON source_chunks(source_id, chunk_index);
+
+CREATE TABLE IF NOT EXISTS source_tags (
+    source_id TEXT NOT NULL,
+    tag_id TEXT NOT NULL,
+    PRIMARY KEY (source_id, tag_id),
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS source_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_group_members (
+    group_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    PRIMARY KEY (group_id, source_id),
+    FOREIGN KEY (group_id) REFERENCES source_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS project_sources (
+    project_id TEXT NOT NULL,
+    source_id TEXT,
+    group_id TEXT,
+    tag_filter TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES source_groups(id) ON DELETE CASCADE,
+    CHECK (
+        (source_id IS NOT NULL AND group_id IS NULL AND tag_filter IS NULL) OR
+        (source_id IS NULL AND group_id IS NOT NULL AND tag_filter IS NULL) OR
+        (source_id IS NULL AND group_id IS NULL AND tag_filter IS NOT NULL)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS source_attachments (
+    source_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    PRIMARY KEY (source_id, attachment_id),
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+    FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
+);
 """
 
 _FTS_SCHEMA = """
@@ -161,6 +241,14 @@ CREATE TABLE IF NOT EXISTS message_embeddings (
     created_at TEXT NOT NULL,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS source_chunk_embeddings (
+    chunk_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (chunk_id) REFERENCES source_chunks(id) ON DELETE CASCADE
+);
 """
 
 
@@ -173,6 +261,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_messages USING vec0(
     embedding float[{dimensions}],
     +message_id TEXT,
     conversation_id TEXT
+);
+"""
+
+
+def _make_source_vec_schema(dimensions: int = 384) -> str:
+    """Build vec_source_chunks DDL with the configured embedding dimensions."""
+    if not isinstance(dimensions, int) or not (1 <= dimensions <= 4096):
+        raise ValueError(f"Invalid embedding dimensions: {dimensions!r}")
+    return f"""
+CREATE VIRTUAL TABLE IF NOT EXISTS vec_source_chunks USING vec0(
+    embedding float[{dimensions}],
+    +chunk_id TEXT,
+    source_id TEXT
 );
 """
 
@@ -283,33 +384,42 @@ def _restrict_file_permissions(path: Path) -> None:
         pass
 
 
-def _ensure_vec_dimensions(conn: sqlite3.Connection, dimensions: int) -> None:
-    """Recreate vec_messages if the configured dimensions differ from the existing table."""
-    if not has_vec_support(conn):
-        return
+def _ensure_vec_table_dimensions(
+    conn: sqlite3.Connection,
+    vec_table: str,
+    metadata_table: str,
+    dimensions: int,
+) -> None:
+    """Recreate a vec0 table if the configured dimensions differ from the existing table."""
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    # vec0 virtual tables also appear as 'table' type in sqlite_master;
-    # check for the shadow table pattern to detect existence.
-    if "vec_messages" not in tables:
+    if vec_table not in tables:
         return
     try:
-        # vec0 doesn't expose dimension info via typeof; inspect the original DDL instead.
-        ddl_row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_messages'").fetchone()
+        ddl_row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (vec_table,)).fetchone()
         if ddl_row and ddl_row[0]:
             m = re.search(r"float\[(\d+)\]", ddl_row[0])
             if m:
                 existing_dims = int(m.group(1))
                 if existing_dims != dimensions:
                     logger.warning(
-                        "Embedding dimensions changed (%d -> %d). Dropping vec_messages — "
+                        "Embedding dimensions changed (%d -> %d). Dropping %s — "
                         "existing embeddings will be regenerated.",
                         existing_dims,
                         dimensions,
+                        vec_table,
                     )
-                    conn.execute("DROP TABLE vec_messages")
-                    conn.execute("DELETE FROM message_embeddings")
+                    conn.execute(f"DROP TABLE {vec_table}")
+                    conn.execute(f"DELETE FROM {metadata_table}")
     except (sqlite3.OperationalError, Exception):
-        logger.debug("Could not check vec_messages dimensions", exc_info=True)
+        logger.debug("Could not check %s dimensions", vec_table, exc_info=True)
+
+
+def _ensure_vec_dimensions(conn: sqlite3.Connection, dimensions: int) -> None:
+    """Recreate vec tables if the configured dimensions differ from existing tables."""
+    if not has_vec_support(conn):
+        return
+    _ensure_vec_table_dimensions(conn, "vec_messages", "message_embeddings", dimensions)
+    _ensure_vec_table_dimensions(conn, "vec_source_chunks", "source_chunk_embeddings", dimensions)
 
 
 def init_db(db_path: Path, vec_dimensions: int = 384) -> ThreadSafeConnection:
@@ -349,6 +459,10 @@ def init_db(db_path: Path, vec_dimensions: int = 384) -> ThreadSafeConnection:
     _ensure_vec_dimensions(conn, vec_dimensions)
     try:
         conn.executescript(_make_vec_schema(vec_dimensions))
+    except sqlite3.OperationalError:
+        pass  # sqlite-vec not loaded
+    try:
+        conn.executescript(_make_source_vec_schema(vec_dimensions))
     except sqlite3.OperationalError:
         pass  # sqlite-vec not loaded
 
@@ -489,6 +603,109 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
     # Ensure vec_messages virtual table exists (requires sqlite-vec)
     try:
         conn.executescript(_make_vec_schema(vec_dimensions))
+    except sqlite3.OperationalError:
+        pass
+
+    # Ensure source tables exist for existing databases
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS sources (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL CHECK(type IN ('file', 'text', 'url')),
+            title TEXT NOT NULL,
+            content TEXT,
+            mime_type TEXT,
+            filename TEXT,
+            url TEXT,
+            storage_path TEXT,
+            size_bytes INTEGER,
+            content_hash TEXT,
+            user_id TEXT DEFAULT NULL,
+            user_display_name TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS source_chunks (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, chunk_index)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS source_tags (
+            source_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            PRIMARY KEY (source_id, tag_id),
+            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS source_groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            user_id TEXT DEFAULT NULL,
+            user_display_name TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS source_group_members (
+            group_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            PRIMARY KEY (group_id, source_id),
+            FOREIGN KEY (group_id) REFERENCES source_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS project_sources (
+            project_id TEXT NOT NULL,
+            source_id TEXT,
+            group_id TEXT,
+            tag_filter TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+            FOREIGN KEY (group_id) REFERENCES source_groups(id) ON DELETE CASCADE,
+            CHECK (
+                (source_id IS NOT NULL AND group_id IS NULL AND tag_filter IS NULL) OR
+                (source_id IS NULL AND group_id IS NOT NULL AND tag_filter IS NULL) OR
+                (source_id IS NULL AND group_id IS NULL AND tag_filter IS NOT NULL)
+            )
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS source_attachments (
+            source_id TEXT NOT NULL,
+            attachment_id TEXT NOT NULL,
+            PRIMARY KEY (source_id, attachment_id),
+            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+            FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
+        )"""
+    )
+
+    # Ensure source chunk embeddings metadata + vec table exist
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS source_chunk_embeddings (
+            chunk_id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (chunk_id) REFERENCES source_chunks(id) ON DELETE CASCADE
+        )"""
+    )
+    _ensure_vec_table_dimensions(conn, "vec_source_chunks", "source_chunk_embeddings", vec_dimensions)
+    try:
+        conn.executescript(_make_source_vec_schema(vec_dimensions))
     except sqlite3.OperationalError:
         pass
 

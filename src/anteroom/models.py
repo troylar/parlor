@@ -173,3 +173,62 @@ class CanvasUpdate(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(default="", max_length=100000)
     regenerate: bool = False
+    source_ids: list[str] = Field(default_factory=list, max_length=50)
+    source_tag: str | None = Field(default=None, max_length=200)
+    source_group_id: str | None = Field(default=None, max_length=200)
+
+
+class SourceCreate(BaseModel):
+    type: str = Field(pattern=r"^(text|url)$")
+    title: str = Field(min_length=1, max_length=500)
+    content: str | None = Field(default=None, max_length=500000)
+    url: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _validate_content_or_url(self) -> "SourceCreate":
+        if self.type == "text" and not self.content:
+            raise ValueError("Content is required for text sources")
+        if self.type == "url" and not self.url:
+            raise ValueError("URL is required for url sources")
+        return self
+
+
+class SourceUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    content: str | None = Field(default=None, max_length=500000)
+    url: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> "SourceUpdate":
+        if self.title is None and self.content is None and self.url is None:
+            raise ValueError("At least one of 'title', 'content', or 'url' must be provided")
+        return self
+
+
+class SourceGroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class SourceGroupUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> "SourceGroupUpdate":
+        if self.name is None and self.description is None:
+            raise ValueError("At least one of 'name' or 'description' must be provided")
+        return self
+
+
+class ProjectSourceLink(BaseModel):
+    source_id: str | None = Field(default=None, max_length=200)
+    group_id: str | None = Field(default=None, max_length=200)
+    tag_filter: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _validate_exactly_one(self) -> "ProjectSourceLink":
+        non_null = sum(1 for v in (self.source_id, self.group_id, self.tag_filter) if v is not None)
+        if non_null != 1:
+            raise ValueError("Exactly one of 'source_id', 'group_id', or 'tag_filter' must be provided")
+        return self

@@ -133,6 +133,10 @@ const Chat = (() => {
         const files = Attachments.getFiles();
         Attachments.clear();
 
+        // Collect source references
+        const sourceRefs = (typeof Sources !== 'undefined' && Sources.hasAttached()) ? Sources.getAttachedSources() : {};
+        if (typeof Sources !== 'undefined') Sources.clearAttached();
+
         let body;
         let headers = { 'X-CSRF-Token': App._getCsrfToken(), 'X-Client-Id': App.state.clientId };
         if (files.length > 0) {
@@ -141,7 +145,11 @@ const Chat = (() => {
             files.forEach(f => formData.append('files', f));
             body = formData;
         } else {
-            body = JSON.stringify({ message: text });
+            const payload = { message: text };
+            if (sourceRefs.source_ids && sourceRefs.source_ids.length > 0) payload.source_ids = sourceRefs.source_ids;
+            if (sourceRefs.source_tag) payload.source_tag = sourceRefs.source_tag;
+            if (sourceRefs.source_group_id) payload.source_group_id = sourceRefs.source_group_id;
+            body = JSON.stringify(payload);
             headers['Content-Type'] = 'application/json';
         }
 

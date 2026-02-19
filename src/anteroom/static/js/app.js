@@ -172,6 +172,7 @@ const App = (() => {
         _migrateLocalStorage();
         Chat.init();
         Canvas.init();
+        Sources.init();
         Sidebar.init();
         Palette.init();
         Attachments.init();
