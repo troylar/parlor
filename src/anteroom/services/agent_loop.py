@@ -374,6 +374,7 @@ async def run_agent_loop(
         # The injected message is removed from history immediately after the narration response
         # so it does not pollute the conversation context for subsequent tool calls.
         if narration_cadence > 0 and total_tool_calls > 0 and total_tool_calls % narration_cadence == 0:
+            narration_idx = len(messages)
             messages.append({"role": "user", "content": _NARRATION_PROMPT})
             try:
                 async for event in ai_service.stream_chat(
@@ -388,9 +389,9 @@ async def run_agent_loop(
             except Exception:
                 logger.exception("Narration request failed; continuing without update")
             finally:
-                # Always remove the ephemeral prompt regardless of outcome
-                if messages and messages[-1].get("content") == _NARRATION_PROMPT:
-                    messages.pop()
+                # Remove by index — safer than content equality if stream_chat mutated messages
+                if len(messages) > narration_idx:
+                    messages.pop(narration_idx)
 
         assistant_content = ""
 

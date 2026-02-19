@@ -155,3 +155,93 @@ class TestNarrationCadence:
         # The final messages list must not contain any narration prompts
         narration_prompts = [m for m in messages if "summarize your progress" in m.get("content", "")]
         assert narration_prompts == [], f"Narration prompt was not removed from message history: {narration_prompts}"
+
+    @pytest.mark.asyncio
+    async def test_narration_exception_does_not_propagate_and_prompt_removed(self):
+        """If the narration stream_chat call raises, the loop must continue and the prompt must be removed."""
+        call_count = 0
+
+        service = AsyncMock()
+
+        async def _stream_chat(messages, tools=None, cancel_event=None, extra_system_prompt=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: 1 tool call (triggers cadence at narration_cadence=1)
+                yield {"event": "tool_call", "data": _tc("t1", "bash")}
+                yield {"event": "done", "data": {}}
+            elif call_count == 2:
+                # Second call: narration — raises unexpectedly
+                raise RuntimeError("narration API error")
+            else:
+                # Third call: final response after exception recovery
+                yield {"event": "token", "data": {"content": "Finished."}}
+                yield {"event": "done", "data": {}}
+
+        service.stream_chat = _stream_chat
+
+        async def tool_executor(name: str, args: dict) -> dict:
+            return {"output": "ok"}
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "do stuff"}]
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=service,
+                messages=messages,
+                tool_executor=tool_executor,
+                tools_openai=[],
+                narration_cadence=1,
+            )
+        )
+
+        # Loop must complete (done event present)
+        assert any(e.kind == "done" for e in events), "Loop did not complete after narration exception"
+        # Narration prompt must not remain in history
+        narration_prompts = [m for m in messages if "summarize your progress" in m.get("content", "")]
+        assert narration_prompts == [], f"Narration prompt leaked into history after exception: {narration_prompts}"
+
+    @pytest.mark.asyncio
+    async def test_narration_fires_on_cross_iteration_accumulation(self):
+        """Cadence counter must accumulate across iterations (e.g. cadence=3, 2+1 tools across 2 rounds)."""
+        call_count = 0
+        rounds = [
+            # Round 1: 2 tool calls (total=2, cadence=3 → no narration yet)
+            _make_stream_events(tool_calls=[_tc("t1", "bash"), _tc("t2", "read_file")]),
+            # Round 2: 1 more tool call (total=3, cadence=3 → narration fires)
+            _make_stream_events(tool_calls=[_tc("t3", "write_file")]),
+            # Round 3: narration response
+            _make_stream_events(content="Found 2 files, writing results now."),
+            # Round 4: final response
+            _make_stream_events(content="Done."),
+        ]
+
+        service = AsyncMock()
+
+        async def _stream_chat(messages, tools=None, cancel_event=None, extra_system_prompt=None):
+            nonlocal call_count
+            idx = min(call_count, len(rounds) - 1)
+            call_count += 1
+            for event in rounds[idx]:
+                yield event
+
+        service.stream_chat = _stream_chat
+
+        async def tool_executor(name: str, args: dict) -> dict:
+            return {"output": "ok"}
+
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=service,
+                messages=[{"role": "user", "content": "do stuff"}],
+                tool_executor=tool_executor,
+                tools_openai=[],
+                narration_cadence=3,
+            )
+        )
+
+        # 4 API calls: round1(tools), round2(tools), round3(narration), round4(final)
+        assert call_count == 4, f"Expected 4 API calls (2 tool rounds + 1 narration + 1 final), got {call_count}"
+        token_contents = [e.data["content"] for e in events if e.kind == "token"]
+        assert any("Found" in t or "writing" in t for t in token_contents), (
+            f"Expected narration token from cross-iteration cadence. Got: {token_contents}"
+        )
