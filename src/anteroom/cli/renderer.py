@@ -66,7 +66,6 @@ _tool_start: float = 0
 _dedup_key: str = ""  # tool action type (e.g. "Editing", "Reading", "bash")
 _dedup_count: int = 0
 _dedup_first_summary: str = ""  # first summary in the group (printed immediately)
-_dedup_targets: list[str] = []  # targets accumulated after the first
 
 # Legacy alias used by tests — kept in sync with _dedup_key
 _dedup_summary: str = ""
@@ -202,7 +201,7 @@ def _dedup_key_from_summary(summary: str) -> str:
     return summary.split(" ", 1)[0] if " " in summary else summary
 
 
-def _dedup_flush_label(key: str, count: int, targets: list[str]) -> str:
+def _dedup_flush_label(key: str, count: int) -> str:
     """Build a human-readable summary for a flushed dedup group."""
     verb_map = {
         "Editing": "edited",
@@ -413,14 +412,13 @@ def flush_buffered_text() -> None:
 
 def _flush_dedup() -> None:
     """Flush accumulated dedup counter if needed."""
-    global _dedup_key, _dedup_count, _dedup_first_summary, _dedup_targets, _dedup_summary
+    global _dedup_key, _dedup_count, _dedup_first_summary, _dedup_summary
     if _dedup_count > 1:
-        label = _dedup_flush_label(_dedup_key, _dedup_count, _dedup_targets)
+        label = _dedup_flush_label(_dedup_key, _dedup_count)
         console.print(f"    [{MUTED}]{label}[/{MUTED}]")
     _dedup_key = ""
     _dedup_count = 0
     _dedup_first_summary = ""
-    _dedup_targets = []
     _dedup_summary = ""
 
 
@@ -532,7 +530,7 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
         return
 
     # Build the result line
-    global _dedup_key, _dedup_count, _dedup_first_summary, _dedup_targets, _dedup_summary
+    global _dedup_key, _dedup_count, _dedup_first_summary, _dedup_summary
     status_icon = "[green]  ✓[/green]" if status == "success" else "[red]  ✗[/red]"
     elapsed_str = f" {elapsed:.1f}s" if elapsed >= 0.1 else ""
 
@@ -540,7 +538,6 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
     key = _dedup_key_from_summary(summary) if _tool_dedup_enabled else ""
     if _tool_dedup_enabled and status == "success" and key == _dedup_key and _dedup_count >= 1:
         _dedup_count += 1
-        _dedup_targets.append(summary)
         return
 
     # Different tool type or first occurrence — flush previous dedup, print new line

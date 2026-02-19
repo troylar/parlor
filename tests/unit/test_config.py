@@ -706,10 +706,12 @@ class TestToolDedupConfig:
         config = load_config(cfg_file)
         assert config.cli.tool_dedup is False
 
-    def test_tool_dedup_yaml_takes_precedence_over_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_tool_dedup_env_var_takes_precedence_over_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("AI_CHAT_TOOL_DEDUP", "false")
         cfg_file = _write_config(
             tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}, "cli": {"tool_dedup": True}}
         )
         config = load_config(cfg_file)
-        assert config.cli.tool_dedup is True
+        assert config.cli.tool_dedup is False

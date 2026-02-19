@@ -226,7 +226,7 @@ class TestDedup:
         r._dedup_key = ""
         r._dedup_count = 0
         r._dedup_first_summary = ""
-        r._dedup_targets = []
+
         r._dedup_summary = ""
         r._tool_dedup_enabled = True
 
@@ -254,7 +254,7 @@ class TestStartThinkingFlushesDedup:
         r._dedup_key = ""
         r._dedup_count = 0
         r._dedup_first_summary = ""
-        r._dedup_targets = []
+
         r._dedup_summary = ""
         r._tool_batch_active = False
         r._tool_dedup_enabled = True
@@ -291,7 +291,7 @@ class TestStartThinkingFlushesDedup:
         r._dedup_key = ""
         r._dedup_count = 0
         r._dedup_first_summary = ""
-        r._dedup_targets = []
+
         r._dedup_summary = ""
         r._tool_batch_active = False
         r._current_turn_tools.clear()
@@ -354,7 +354,7 @@ class TestToolCallDimming:
         r._dedup_key = ""
         r._dedup_count = 0
         r._dedup_first_summary = ""
-        r._dedup_targets = []
+
         r._dedup_summary = ""
         r._tool_batch_active = False
         r._current_turn_tools.clear()
@@ -457,7 +457,7 @@ class TestToolBatchSpacing:
         r._dedup_key = ""
         r._dedup_count = 0
         r._dedup_first_summary = ""
-        r._dedup_targets = []
+
         r._dedup_summary = ""
         r._tool_dedup_enabled = True
 
@@ -627,23 +627,23 @@ class TestDedupFlushLabel:
     """Tests for _dedup_flush_label human-readable summaries."""
 
     def test_editing_label(self) -> None:
-        result = _dedup_flush_label("Editing", 5, ["a", "b", "c", "d", "e"])
+        result = _dedup_flush_label("Editing", 5)
         assert "edited" in result
         assert "5" in result
         assert "files" in result
 
     def test_reading_label(self) -> None:
-        result = _dedup_flush_label("Reading", 3, [])
+        result = _dedup_flush_label("Reading", 3)
         assert "read" in result
         assert "3" in result
 
     def test_bash_label(self) -> None:
-        result = _dedup_flush_label("bash", 4, [])
+        result = _dedup_flush_label("bash", 4)
         assert "ran" in result
         assert "4" in result
 
     def test_unknown_tool_label(self) -> None:
-        result = _dedup_flush_label("my_mcp_tool", 2, [])
+        result = _dedup_flush_label("my_mcp_tool", 2)
         assert "my_mcp_tool" in result
         assert "2" in result
 
@@ -658,7 +658,7 @@ class TestEnhancedDedup:
         r._dedup_key = ""
         r._dedup_count = 0
         r._dedup_first_summary = ""
-        r._dedup_targets = []
+
         r._dedup_summary = ""
         r._tool_batch_active = False
         r._current_turn_tools.clear()
@@ -726,7 +726,6 @@ class TestEnhancedDedup:
         r._dedup_key = "Editing"
         r._dedup_count = 3
         r._dedup_first_summary = "Editing foo.py"
-        r._dedup_targets = ["Editing bar.py", "Editing baz.py"]
         r._dedup_summary = "Editing foo.py"
 
         with patch("anteroom.cli.renderer.console") as mock_console:

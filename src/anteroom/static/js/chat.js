@@ -1232,11 +1232,6 @@ const Chat = (() => {
     let _webDedupGroup = null;  // the <details> wrapper for grouped calls
     let _webDedupCount = 0;
 
-    function _webDedupKey(toolName) {
-        // Normalize tool name for grouping (same tool type = same group)
-        return toolName || '';
-    }
-
     function _webDedupFlush() {
         _webDedupToolName = '';
         _webDedupGroup = null;
@@ -1311,7 +1306,7 @@ const Chat = (() => {
             details.appendChild(toolContent);
 
             // Dedup grouping: consecutive same-type tool calls
-            const key = _webDedupKey(data.tool_name);
+            const key = data.tool_name || '';
             if (key && key === _webDedupToolName && _webDedupCount >= 1) {
                 // Same tool type — add to existing group
                 if (_webDedupCount === 1 && !_webDedupGroup) {

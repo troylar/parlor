@@ -496,7 +496,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         context_auto_compact_tokens = int(cli_raw.get("context_auto_compact_tokens", 100_000))
     except (ValueError, TypeError):
         context_auto_compact_tokens = 100_000
-    tool_dedup_raw = cli_raw.get("tool_dedup", os.environ.get("AI_CHAT_TOOL_DEDUP", "true"))
+    tool_dedup_env = os.environ.get("AI_CHAT_TOOL_DEDUP")
+    tool_dedup_raw = tool_dedup_env if tool_dedup_env is not None else cli_raw.get("tool_dedup", True)
     tool_dedup = str(tool_dedup_raw).lower() not in ("false", "0", "no", "off")
 
     cli_config = CliConfig(
