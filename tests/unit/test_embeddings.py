@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
 import pytest
 
-from anteroom.services.embeddings import EmbeddingService, create_embedding_service
+from anteroom.services.embeddings import (
+    EmbeddingService,
+    LocalEmbeddingService,
+    create_embedding_service,
+    get_effective_dimensions,
+    get_local_model_dimensions,
+)
 
 
 def _make_embedding_response(embeddings: list[list[float]]) -> MagicMock:
@@ -247,34 +254,36 @@ class TestCreateEmbeddingService:
         )
         assert create_embedding_service(config) is None
 
-    def test_returns_none_when_no_api_key(self) -> None:
+    def test_returns_none_when_api_provider_no_key(self) -> None:
         from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
 
         config = AppConfig(
             ai=AIConfig(base_url="https://api.test", api_key=""),
-            embeddings=EmbeddingsConfig(enabled=True, api_key=""),
+            embeddings=EmbeddingsConfig(enabled=True, provider="api", api_key=""),
         )
         assert create_embedding_service(config) is None
 
-    def test_creates_service_with_ai_config(self) -> None:
+    def test_creates_api_service_with_ai_config(self) -> None:
         from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
 
         config = AppConfig(
             ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
-            embeddings=EmbeddingsConfig(enabled=True),
+            embeddings=EmbeddingsConfig(enabled=True, provider="api"),
         )
         service = create_embedding_service(config)
         assert service is not None
+        assert isinstance(service, EmbeddingService)
         assert service.model == "text-embedding-3-small"
         assert service.dimensions == 1536
 
-    def test_creates_service_with_override_config(self) -> None:
+    def test_creates_api_service_with_override_config(self) -> None:
         from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
 
         config = AppConfig(
             ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
             embeddings=EmbeddingsConfig(
                 enabled=True,
+                provider="api",
                 base_url="https://embeddings.test",
                 api_key="sk-embed",
                 model="custom-embed",
@@ -283,5 +292,179 @@ class TestCreateEmbeddingService:
         )
         service = create_embedding_service(config)
         assert service is not None
+        assert isinstance(service, EmbeddingService)
         assert service.model == "custom-embed"
         assert service.dimensions == 768
+
+    def test_creates_local_service_by_default(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(enabled=True),
+        )
+        service = create_embedding_service(config)
+        assert service is not None
+        assert isinstance(service, LocalEmbeddingService)
+        assert service.model == "BAAI/bge-small-en-v1.5"
+        assert service.dimensions == 384
+
+    def test_creates_local_service_with_custom_model(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key=""),
+            embeddings=EmbeddingsConfig(
+                enabled=True,
+                provider="local",
+                local_model="BAAI/bge-base-en-v1.5",
+            ),
+        )
+        service = create_embedding_service(config)
+        assert service is not None
+        assert isinstance(service, LocalEmbeddingService)
+        assert service.model == "BAAI/bge-base-en-v1.5"
+        assert service.dimensions == 768
+
+    def test_local_service_no_api_key_needed(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="", api_key=""),
+            embeddings=EmbeddingsConfig(enabled=True, provider="local"),
+        )
+        service = create_embedding_service(config)
+        assert service is not None
+        assert isinstance(service, LocalEmbeddingService)
+
+
+class TestLocalEmbeddingService:
+    def test_model_and_dimensions_properties(self) -> None:
+        service = LocalEmbeddingService(model_name="BAAI/bge-small-en-v1.5")
+        assert service.model == "BAAI/bge-small-en-v1.5"
+        assert service.dimensions == 384
+
+    def test_explicit_dimensions_override(self) -> None:
+        service = LocalEmbeddingService(model_name="BAAI/bge-small-en-v1.5", dimensions=512)
+        assert service.dimensions == 512
+
+    @pytest.mark.asyncio
+    async def test_embed_returns_none_on_empty_text(self) -> None:
+        service = LocalEmbeddingService()
+        assert await service.embed("") is None
+        assert await service.embed("   ") is None
+
+    @pytest.mark.asyncio
+    async def test_embed_calls_fastembed(self) -> None:
+        service = LocalEmbeddingService(model_name="test-model", dimensions=3)
+        mock_model = MagicMock()
+        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2, 0.3])])
+        service._embedding_model = mock_model
+
+        result = await service.embed("hello world")
+
+        assert result == [0.1, 0.2, 0.3]
+        mock_model.embed.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_embed_batch(self) -> None:
+        service = LocalEmbeddingService(model_name="test-model", dimensions=2)
+        mock_model = MagicMock()
+        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2]), np.array([0.3, 0.4])])
+        service._embedding_model = mock_model
+
+        results = await service.embed_batch(["hello", "world"])
+
+        assert len(results) == 2
+        assert results[0] == [0.1, 0.2]
+        assert results[1] == [0.3, 0.4]
+
+    @pytest.mark.asyncio
+    async def test_embed_batch_skips_empty(self) -> None:
+        service = LocalEmbeddingService(model_name="test-model", dimensions=2)
+        mock_model = MagicMock()
+        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2]), np.array([0.3, 0.4])])
+        service._embedding_model = mock_model
+
+        results = await service.embed_batch(["hello", "", "world"])
+
+        assert len(results) == 3
+        assert results[0] is not None
+        assert results[1] is None
+        assert results[2] is not None
+
+    @pytest.mark.asyncio
+    async def test_embed_raises_permanent_when_fastembed_missing(self) -> None:
+        from anteroom.services.embeddings import EmbeddingPermanentError
+
+        service = LocalEmbeddingService()
+        with patch.dict("sys.modules", {"fastembed": None}):
+            with patch("builtins.__import__", side_effect=ImportError("No module named 'fastembed'")):
+                with pytest.raises(EmbeddingPermanentError, match="fastembed is not installed"):
+                    await service.embed("hello")
+
+    @pytest.mark.asyncio
+    async def test_embed_raises_transient_on_runtime_error(self) -> None:
+        from anteroom.services.embeddings import EmbeddingTransientError
+
+        service = LocalEmbeddingService()
+        mock_model = MagicMock()
+        mock_model.embed = MagicMock(side_effect=RuntimeError("ONNX crash"))
+        service._embedding_model = mock_model
+
+        with pytest.raises(EmbeddingTransientError, match="Local embedding failed"):
+            await service.embed("hello")
+
+    @pytest.mark.asyncio
+    async def test_embed_truncates_long_text(self) -> None:
+        from anteroom.services.embeddings import MAX_INPUT_TOKENS
+
+        service = LocalEmbeddingService(dimensions=2)
+        mock_model = MagicMock()
+        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2])])
+        service._embedding_model = mock_model
+
+        long_text = "a" * (MAX_INPUT_TOKENS * 4 + 1000)
+        await service.embed(long_text)
+
+        call_args = mock_model.embed.call_args[0][0]
+        assert len(call_args[0]) == MAX_INPUT_TOKENS * 4
+
+
+class TestGetLocalModelDimensions:
+    def test_known_model(self) -> None:
+        assert get_local_model_dimensions("BAAI/bge-small-en-v1.5") == 384
+        assert get_local_model_dimensions("BAAI/bge-base-en-v1.5") == 768
+        assert get_local_model_dimensions("BAAI/bge-large-en-v1.5") == 1024
+
+    def test_unknown_model_defaults_384(self) -> None:
+        assert get_local_model_dimensions("some/unknown-model") == 384
+
+
+class TestGetEffectiveDimensions:
+    def test_explicit_dimensions(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(dimensions=512),
+        )
+        assert get_effective_dimensions(config) == 512
+
+    def test_local_auto_detect(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(provider="local", dimensions=0, local_model="BAAI/bge-base-en-v1.5"),
+        )
+        assert get_effective_dimensions(config) == 768
+
+    def test_api_defaults_to_1536(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(provider="api", dimensions=0),
+        )
+        assert get_effective_dimensions(config) == 1536

@@ -376,8 +376,10 @@ class TestEmbeddingsConfig:
         )
         config = load_config(cfg_file)
         assert config.embeddings.enabled is True
+        assert config.embeddings.provider == "local"
         assert config.embeddings.model == "text-embedding-3-small"
-        assert config.embeddings.dimensions == 1536
+        assert config.embeddings.dimensions == 0  # auto-detect from provider/model
+        assert config.embeddings.local_model == "BAAI/bge-small-en-v1.5"
         assert config.embeddings.base_url == ""
         assert config.embeddings.api_key == ""
 

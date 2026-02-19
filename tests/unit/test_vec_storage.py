@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from anteroom.db import _SCHEMA, _VEC_METADATA_SCHEMA, _VEC_SCHEMA, has_vec_support
+from anteroom.db import _SCHEMA, _VEC_METADATA_SCHEMA, _make_vec_schema, has_vec_support
 from anteroom.services.storage import (
     create_conversation,
     create_message,
@@ -93,7 +93,7 @@ def _init_vec_db() -> _FakeThreadSafe:
     except sqlite3.OperationalError:
         pass
     try:
-        conn.executescript(_VEC_SCHEMA)
+        conn.executescript(_make_vec_schema(1536))
     except sqlite3.OperationalError:
         pass
     conn.commit()

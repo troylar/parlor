@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, _VEC_METADATA_SCHEMA, _VEC_SCHEMA, has_vec_support
+from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, _VEC_METADATA_SCHEMA, _make_vec_schema, has_vec_support
 
 
 def _init_in_memory() -> sqlite3.Connection:
@@ -326,7 +326,7 @@ class TestVecSupport:
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
-            conn.executescript(_VEC_SCHEMA)
+            conn.executescript(_make_vec_schema())
             conn.commit()
             # Check that vec_messages exists (virtual tables show up in sqlite_master)
             rows = conn.execute("SELECT name FROM sqlite_master WHERE name = 'vec_messages'").fetchall()

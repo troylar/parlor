@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import sqlite3
 import stat
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -159,13 +163,17 @@ CREATE TABLE IF NOT EXISTS message_embeddings (
 );
 """
 
-_VEC_SCHEMA = """
+
+def _make_vec_schema(dimensions: int = 384) -> str:
+    """Build vec_messages DDL with the configured embedding dimensions."""
+    return f"""
 CREATE VIRTUAL TABLE IF NOT EXISTS vec_messages USING vec0(
-    embedding float[1536],
+    embedding float[{dimensions}],
     +message_id TEXT,
     conversation_id TEXT
 );
 """
+
 
 _FTS_TRIGGERS = """
 CREATE TRIGGER IF NOT EXISTS fts_conversations_insert
@@ -273,7 +281,36 @@ def _restrict_file_permissions(path: Path) -> None:
         pass
 
 
-def init_db(db_path: Path) -> ThreadSafeConnection:
+def _ensure_vec_dimensions(conn: sqlite3.Connection, dimensions: int) -> None:
+    """Recreate vec_messages if the configured dimensions differ from the existing table."""
+    if not has_vec_support(conn):
+        return
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    # vec0 virtual tables also appear as 'table' type in sqlite_master;
+    # check for the shadow table pattern to detect existence.
+    if "vec_messages" not in tables:
+        return
+    try:
+        # vec0 doesn't expose dimension info via typeof; inspect the original DDL instead.
+        ddl_row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_messages'").fetchone()
+        if ddl_row and ddl_row[0]:
+            m = re.search(r"float\[(\d+)\]", ddl_row[0])
+            if m:
+                existing_dims = int(m.group(1))
+                if existing_dims != dimensions:
+                    logger.warning(
+                        "Embedding dimensions changed (%d -> %d). Dropping vec_messages — "
+                        "existing embeddings will be regenerated.",
+                        existing_dims,
+                        dimensions,
+                    )
+                    conn.execute("DROP TABLE vec_messages")
+                    conn.execute("DELETE FROM message_embeddings")
+    except (sqlite3.OperationalError, Exception):
+        logger.debug("Could not check vec_messages dimensions", exc_info=True)
+
+
+def init_db(db_path: Path, vec_dimensions: int = 384) -> ThreadSafeConnection:
     is_new = not db_path.exists()
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
 
@@ -307,12 +344,13 @@ def init_db(db_path: Path) -> ThreadSafeConnection:
         conn.executescript(_VEC_METADATA_SCHEMA)
     except sqlite3.OperationalError:
         pass
+    _ensure_vec_dimensions(conn, vec_dimensions)
     try:
-        conn.executescript(_VEC_SCHEMA)
+        conn.executescript(_make_vec_schema(vec_dimensions))
     except sqlite3.OperationalError:
         pass  # sqlite-vec not loaded
 
-    _run_migrations(conn)
+    _run_migrations(conn, vec_dimensions=vec_dimensions)
 
     conn.commit()
 
@@ -325,7 +363,7 @@ def init_db(db_path: Path) -> ThreadSafeConnection:
     return ThreadSafeConnection(conn)
 
 
-def _run_migrations(conn: sqlite3.Connection) -> None:
+def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None:
     """Apply schema migrations for existing databases."""
     cursor = conn.execute("PRAGMA table_info(conversations)")
     cols = {row[1] for row in cursor.fetchall()}
@@ -448,7 +486,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
     # Ensure vec_messages virtual table exists (requires sqlite-vec)
     try:
-        conn.executescript(_VEC_SCHEMA)
+        conn.executescript(_make_vec_schema(vec_dimensions))
     except sqlite3.OperationalError:
         pass
 

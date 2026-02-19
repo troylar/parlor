@@ -1,7 +1,8 @@
-"""Embedding service: generate vector embeddings via OpenAI-compatible API."""
+"""Embedding service: generate vector embeddings via OpenAI-compatible API or locally via fastembed."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -23,6 +24,14 @@ from .token_provider import TokenProvider, TokenProviderError
 logger = logging.getLogger(__name__)
 
 MAX_INPUT_TOKENS = 8191
+
+_LOCAL_MODEL_DIMENSIONS: dict[str, int] = {
+    "BAAI/bge-small-en-v1.5": 384,
+    "BAAI/bge-base-en-v1.5": 768,
+    "BAAI/bge-large-en-v1.5": 1024,
+    "sentence-transformers/all-MiniLM-L6-v2": 384,
+    "nomic-ai/nomic-embed-text-v1.5": 768,
+}
 
 _PERMANENT_ERRORS = (NotFoundError, UnprocessableEntityError)
 _TRANSIENT_ERRORS = (RateLimitError, APIConnectionError, APITimeoutError, InternalServerError)
@@ -153,11 +162,118 @@ class EmbeddingService:
         return results
 
 
-def create_embedding_service(config: AppConfig) -> EmbeddingService | None:
-    """Factory: create an EmbeddingService from app config. Returns None if unavailable."""
+def get_local_model_dimensions(model_name: str) -> int:
+    """Return the known output dimensions for a local embedding model, or 384 as default."""
+    return _LOCAL_MODEL_DIMENSIONS.get(model_name, 384)
+
+
+def get_effective_dimensions(config: AppConfig) -> int:
+    """Resolve the effective embedding dimensions from config (for DB schema setup)."""
+    if config.embeddings.dimensions > 0:
+        return config.embeddings.dimensions
+    if config.embeddings.provider == "local":
+        return get_local_model_dimensions(config.embeddings.local_model)
+    return 1536  # OpenAI default
+
+
+class LocalEmbeddingService:
+    """Generate embeddings locally using fastembed (ONNX Runtime, no external API)."""
+
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5", dimensions: int = 0) -> None:
+        self._model_name = model_name
+        self._dimensions = dimensions if dimensions > 0 else get_local_model_dimensions(model_name)
+        self._embedding_model: Any = None
+
+    @property
+    def model(self) -> str:
+        return self._model_name
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    def _ensure_model(self) -> Any:
+        """Lazy-load the fastembed TextEmbedding model on first use."""
+        if self._embedding_model is not None:
+            return self._embedding_model
+        try:
+            from fastembed import TextEmbedding
+        except ImportError:
+            raise EmbeddingPermanentError(
+                "fastembed is not installed. Install it with: pip install anteroom[embeddings]"
+            )
+        logger.info("Loading local embedding model '%s' (first use may download ~50MB)", self._model_name)
+        try:
+            self._embedding_model = TextEmbedding(model_name=self._model_name)
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(hint in error_str for hint in ("connection", "timeout", "resolve", "ssl", "network", "urlopen")):
+                raise EmbeddingPermanentError(
+                    f"Failed to download embedding model '{self._model_name}'. "
+                    f"If you're behind a firewall, download the model on a machine with internet access "
+                    f"and copy ~/.cache/fastembed/ to this machine. Error: {e}"
+                ) from e
+            raise EmbeddingPermanentError(f"Failed to load local embedding model '{self._model_name}': {e}") from e
+        logger.info("Local embedding model '%s' loaded (%d dimensions)", self._model_name, self._dimensions)
+        return self._embedding_model
+
+    async def embed(self, text: str) -> list[float] | None:
+        """Generate an embedding for a single text using the local model."""
+        if not text or not text.strip():
+            return None
+        truncated = text[: MAX_INPUT_TOKENS * 4]
+        try:
+            model = self._ensure_model()
+            embeddings = await asyncio.to_thread(lambda: list(model.embed([truncated])))
+            return embeddings[0].tolist()
+        except EmbeddingPermanentError:
+            raise
+        except MemoryError as e:
+            raise EmbeddingTransientError(f"Out of memory during embedding: {e}") from e
+        except Exception as e:
+            raise EmbeddingTransientError(f"Local embedding failed: {e}") from e
+
+    async def embed_batch(self, texts: list[str], batch_size: int = 100) -> list[list[float] | None]:
+        """Generate embeddings for a batch of texts using the local model."""
+        results: list[list[float] | None] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            non_empty = [(j, t[: MAX_INPUT_TOKENS * 4]) for j, t in enumerate(batch) if t and t.strip()]
+            batch_results: list[list[float] | None] = [None] * len(batch)
+            if not non_empty:
+                results.extend(batch_results)
+                continue
+            try:
+                model = self._ensure_model()
+                indices, clean_texts = zip(*non_empty)
+                embeddings = await asyncio.to_thread(lambda ct=list(clean_texts): list(model.embed(ct)))
+                for idx, emb in zip(indices, embeddings):
+                    batch_results[idx] = emb.tolist()
+            except EmbeddingPermanentError:
+                raise
+            except MemoryError as e:
+                raise EmbeddingTransientError(f"Out of memory during batch embedding: {e}") from e
+            except Exception as e:
+                raise EmbeddingTransientError(f"Local batch embedding failed: {e}") from e
+            results.extend(batch_results)
+        return results
+
+
+def create_embedding_service(config: AppConfig) -> EmbeddingService | LocalEmbeddingService | None:
+    """Factory: create an embedding service from app config. Returns None if unavailable."""
     if not config.embeddings.enabled:
         return None
 
+    if config.embeddings.provider == "local":
+        dims = config.embeddings.dimensions
+        if dims == 0:
+            dims = get_local_model_dimensions(config.embeddings.local_model)
+        return LocalEmbeddingService(
+            model_name=config.embeddings.local_model,
+            dimensions=dims,
+        )
+
+    # API-based provider
     base_url = config.embeddings.base_url or config.ai.base_url
     api_key = config.embeddings.api_key or config.ai.api_key
     api_key_command = config.embeddings.api_key_command or config.ai.api_key_command
@@ -177,11 +293,12 @@ def create_embedding_service(config: AppConfig) -> EmbeddingService | None:
     if not config.ai.verify_ssl:
         kwargs["http_client"] = httpx.AsyncClient(verify=False)  # noqa: S501
 
+    dims = config.embeddings.dimensions if config.embeddings.dimensions > 0 else 1536
     client = AsyncOpenAI(**kwargs)
     service = EmbeddingService(
         client=client,
         model=config.embeddings.model,
-        dimensions=config.embeddings.dimensions,
+        dimensions=dims,
     )
     if provider:
         service._set_token_provider(provider)

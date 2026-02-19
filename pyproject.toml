@@ -34,6 +34,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+embeddings = [
+    "fastembed>=0.4.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.23.0",

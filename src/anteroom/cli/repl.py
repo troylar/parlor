@@ -22,6 +22,7 @@ from ..db import init_db
 from ..services import storage
 from ..services.agent_loop import _build_compaction_history, run_agent_loop
 from ..services.ai_service import AIService, create_ai_service
+from ..services.embeddings import get_effective_dimensions
 from ..services.rewind import collect_file_paths
 from ..services.rewind import rewind_conversation as rewind_service
 from ..tools import ToolRegistry, register_default_tools
@@ -472,7 +473,8 @@ async def run_cli(
     # Init DB (same as web UI)
     db_path = config.app.data_dir / "chat.db"
     config.app.data_dir.mkdir(parents=True, exist_ok=True)
-    db = init_db(db_path)
+    vec_dims = get_effective_dimensions(config)
+    db = init_db(db_path, vec_dimensions=vec_dims)
 
     # Register built-in tools
     tool_registry = ToolRegistry()
