@@ -30,6 +30,8 @@ SLATE = "#94A3B8"  # labels ("You:", "AI:"), directory display
 MUTED = "#8b8b8b"  # secondary text (tool results, approval feedback, version info)
 CHROME = "#6b7280"  # UI chrome (status messages, hints, MCP info)
 
+_ESC_HINT_DELAY = 3.0  # seconds before showing "esc to cancel" hint
+
 
 def use_stdout_console() -> None:
     """Switch renderer to REPL-compatible mode.
@@ -324,7 +326,8 @@ def _write_thinking_line(elapsed: float) -> None:
     if elapsed < 0.5:
         text = "\r\033[2K\033[38;2;197;160;89mThinking...\033[0m"
     else:
-        text = f"\r\033[2K\033[38;2;197;160;89mThinking...\033[0m \033[38;2;107;114;128m{elapsed:.0f}s\033[0m"
+        hint = "  \033[38;2;139;139;139mesc to cancel\033[0m" if elapsed >= _ESC_HINT_DELAY else ""
+        text = f"\r\033[2K\033[38;2;197;160;89mThinking...\033[0m \033[38;2;107;114;128m{elapsed:.0f}s\033[0m{hint}"
     if _stdout:
         _stdout.write(text)
         _stdout.flush()

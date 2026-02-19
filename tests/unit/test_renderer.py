@@ -13,6 +13,7 @@ from anteroom.cli.renderer import (
     _humanize_tool,
     _output_summary,
     _short_path,
+    _write_thinking_line,
     clear_turn_history,
     cycle_verbosity,
     flush_buffered_text,
@@ -758,3 +759,77 @@ class TestEnhancedDedup:
         assert r._tool_dedup_enabled is False
         set_tool_dedup(True)
         assert r._tool_dedup_enabled is True
+
+
+class TestWriteThinkingLine:
+    """Tests for _write_thinking_line() ESC cancel hint (#164)."""
+
+    def test_no_timer_under_half_second(self) -> None:
+        """Under 0.5s: only 'Thinking...' with no timer or hint."""
+        import io
+
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(0.3)
+        output = buf.getvalue()
+        assert "Thinking..." in output
+        assert "s" not in output.split("Thinking...")[1].split("\033")[0]
+        assert "esc to cancel" not in output
+        r._stdout = None
+
+    def test_no_hint_under_threshold(self) -> None:
+        """Between 0.5s and 3s: timer shown but no ESC hint."""
+        import io
+
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(2.0)
+        output = buf.getvalue()
+        assert "2s" in output
+        assert "esc to cancel" not in output
+        r._stdout = None
+
+    def test_hint_at_threshold(self) -> None:
+        """At exactly 3s: ESC hint appears."""
+        import io
+
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(3.0)
+        output = buf.getvalue()
+        assert "3s" in output
+        assert "esc to cancel" in output
+        r._stdout = None
+
+    def test_hint_after_threshold(self) -> None:
+        """Well past threshold: ESC hint still present."""
+        import io
+
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(10.0)
+        output = buf.getvalue()
+        assert "10s" in output
+        assert "esc to cancel" in output
+        r._stdout = None
+
+    def test_hint_uses_muted_color(self) -> None:
+        """ESC hint should use the MUTED color (RGB 139,139,139)."""
+        import io
+
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(5.0)
+        output = buf.getvalue()
+        assert "\033[38;2;139;139;139m" in output
+        r._stdout = None
