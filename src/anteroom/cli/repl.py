@@ -504,39 +504,42 @@ async def run_cli(
     # Set up safety configuration and confirmation callback
     from ..tools.safety import SafetyVerdict
 
+    _approval_lock = asyncio.Lock()
+
     async def _confirm_destructive(verdict: SafetyVerdict) -> bool:
         from rich.markup import escape
 
-        renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
-        if verdict.details.get("command"):
-            renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
-        elif verdict.details.get("path"):
-            renderer.console.print(f"  Path: [{MUTED}]{verdict.details['path']}[/{MUTED}]")
-        try:
-            from prompt_toolkit import PromptSession as _ConfirmSession
+        async with _approval_lock:
+            renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
+            if verdict.details.get("command"):
+                renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
+            elif verdict.details.get("path"):
+                renderer.console.print(f"  Path: [{MUTED}]{verdict.details['path']}[/{MUTED}]")
+            try:
+                from prompt_toolkit import PromptSession as _ConfirmSession
 
-            _confirm_session = _ConfirmSession()
-            answer = await _confirm_session.prompt_async(
-                "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
-            )
-            choice = answer.strip().lower()
-            if choice in ("a", "always"):
-                tool_registry.grant_session_permission(verdict.tool_name)
-                _persist_allowed_tool(verdict.tool_name)
-                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (always)[/{MUTED}]\n")
-                return True
-            if choice in ("s", "session"):
-                tool_registry.grant_session_permission(verdict.tool_name)
-                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (session)[/{MUTED}]\n")
-                return True
-            if choice in ("y", "yes"):
-                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (once)[/{MUTED}]\n")
-                return True
-            renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
-            return False
-        except (EOFError, KeyboardInterrupt):
-            renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
-            return False
+                _confirm_session = _ConfirmSession()
+                answer = await _confirm_session.prompt_async(
+                    "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
+                )
+                choice = answer.strip().lower()
+                if choice in ("a", "always"):
+                    tool_registry.grant_session_permission(verdict.tool_name)
+                    _persist_allowed_tool(verdict.tool_name)
+                    renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (always)[/{MUTED}]\n")
+                    return True
+                if choice in ("s", "session"):
+                    tool_registry.grant_session_permission(verdict.tool_name)
+                    renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (session)[/{MUTED}]\n")
+                    return True
+                if choice in ("y", "yes"):
+                    renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (once)[/{MUTED}]\n")
+                    return True
+                renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
+                return False
+            except (EOFError, KeyboardInterrupt):
+                renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
+                return False
 
     def _persist_allowed_tool(tool_name: str) -> None:
         """Append a tool to safety.allowed_tools in the config file."""
