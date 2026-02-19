@@ -712,7 +712,9 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         pass
 
     # Add status column to embedding metadata tables for skip/fail tracking
-    for emb_table in ("message_embeddings", "source_chunk_embeddings"):
+    embedding_tables = {"message_embeddings", "source_chunk_embeddings"}
+    for emb_table in embedding_tables:
+        assert emb_table in embedding_tables  # guard: DDL cannot be parameterized in SQLite
         emb_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         if emb_table in emb_tables:
             emb_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({emb_table})").fetchall()}

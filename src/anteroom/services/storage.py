@@ -1357,6 +1357,9 @@ def get_unembedded_messages(db: sqlite3.Connection, limit: int = 100) -> list[di
     return [dict(r) for r in rows]
 
 
+_VALID_EMBEDDING_STATUSES = frozenset({"skipped", "failed", "embedded"})
+
+
 def mark_embedding_skipped(
     db: sqlite3.Connection,
     message_id: str,
@@ -1368,6 +1371,8 @@ def mark_embedding_skipped(
 
     No vector is inserted into vec_messages — only the metadata row is written.
     """
+    if status not in _VALID_EMBEDDING_STATUSES:
+        raise ValueError(f"Invalid embedding status: {status!r}")
     now = _now()
     db.execute(
         "INSERT OR IGNORE INTO message_embeddings"
@@ -1805,6 +1810,8 @@ def mark_source_chunk_embedding_skipped(
     status: str = "skipped",
 ) -> None:
     """Write a sentinel row to source_chunk_embeddings so the chunk is excluded from future queries."""
+    if status not in _VALID_EMBEDDING_STATUSES:
+        raise ValueError(f"Invalid embedding status: {status!r}")
     now = _now()
     db.execute(
         "INSERT OR IGNORE INTO source_chunk_embeddings"
