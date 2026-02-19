@@ -254,7 +254,7 @@ class McpManager:
             # leak and crash with "unhandled exception in a TaskGroup".
             try:
                 await stack.aclose()
-            except Exception:
+            except BaseException:
                 logger.debug(
                     "Error closing stack for '%s' during cleanup",
                     config.name,
@@ -330,7 +330,7 @@ class McpManager:
         if stack:
             try:
                 await stack.aclose()
-            except Exception:
+            except BaseException:
                 logger.warning(f"Error closing exit stack for '{name}'", exc_info=True)
 
         self._server_status[name] = {
@@ -404,12 +404,19 @@ class McpManager:
         return result
 
     async def shutdown(self) -> None:
+        saved_interrupt: BaseException | None = None
         for name, stack in list(self._exit_stacks.items()):
             try:
-                await stack.aclose()
-            except Exception:
+                await asyncio.wait_for(stack.aclose(), timeout=5.0)
+            except (KeyboardInterrupt, SystemExit) as e:
+                logger.warning(f"Error closing exit stack for '{name}'", exc_info=True)
+                if saved_interrupt is None:
+                    saved_interrupt = e
+            except BaseException:
                 logger.warning(f"Error closing exit stack for '{name}'", exc_info=True)
         self._exit_stacks.clear()
         self._sessions.clear()
         self._server_tools.clear()
         self._tool_to_server.clear()
+        if saved_interrupt is not None:
+            raise saved_interrupt

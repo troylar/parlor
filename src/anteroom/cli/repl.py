@@ -1847,7 +1847,7 @@ async def _run_repl(
             t.cancel()
             try:
                 await t
-            except (asyncio.CancelledError, Exception):
+            except BaseException:
                 pass
 
 
