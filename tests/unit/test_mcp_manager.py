@@ -386,3 +386,99 @@ class TestMcpManagerFailedConnection:
         mgr = McpManager([config])
         desc = mgr._describe_config(config)
         assert "timeout=15.0s" in desc
+
+
+class TestMcpManagerErrorClassification:
+    """Tests for exc_info suppression on McpError vs full traceback for unexpected errors."""
+
+    @pytest.mark.asyncio()
+    async def test_mcp_error_suppresses_traceback(self) -> None:
+        """McpError should be logged without exc_info so no raw traceback appears."""
+        try:
+            from mcp import McpError
+            from mcp.types import ErrorData
+        except ImportError:
+            pytest.skip("mcp SDK not installed")
+
+        config = McpServerConfig(name="mcp-err-server", transport="stdio", command="echo")
+        mgr = McpManager([config])
+        logged_kwargs: list[dict] = []
+
+        import logging
+
+        mcp_error = McpError(ErrorData(code=-32000, message="server rejected handshake"))
+
+        with (
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack") as mock_stack_cls,
+            patch.object(
+                logging.getLogger("anteroom.services.mcp_manager"),
+                "error",
+                side_effect=lambda *a, **kw: logged_kwargs.append(kw),
+            ),
+        ):
+            mock_stack = AsyncMock()
+            mock_stack_cls.return_value = mock_stack
+            mock_stack.enter_async_context.side_effect = mcp_error
+            mock_stack.aclose = AsyncMock()
+            await mgr._do_connect(config)
+
+        error_calls = [kw for kw in logged_kwargs if "exc_info" in kw]
+        assert error_calls, "Expected at least one logger.error call with exc_info kwarg"
+        assert error_calls[-1]["exc_info"] is False, "McpError should suppress traceback (exc_info=False)"
+
+    @pytest.mark.asyncio()
+    async def test_unexpected_error_keeps_traceback(self) -> None:
+        """Non-McpError exceptions should be logged with exc_info=True."""
+        config = McpServerConfig(name="unexpected-server", transport="stdio", command="echo")
+        mgr = McpManager([config])
+        logged_kwargs: list[dict] = []
+
+        import logging
+
+        with (
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack") as mock_stack_cls,
+            patch.object(
+                logging.getLogger("anteroom.services.mcp_manager"),
+                "error",
+                side_effect=lambda *a, **kw: logged_kwargs.append(kw),
+            ),
+        ):
+            mock_stack = AsyncMock()
+            mock_stack_cls.return_value = mock_stack
+            mock_stack.enter_async_context.side_effect = RuntimeError("segfault in subprocess")
+            mock_stack.aclose = AsyncMock()
+            await mgr._do_connect(config)
+
+        error_calls = [kw for kw in logged_kwargs if "exc_info" in kw]
+        assert error_calls, "Expected at least one logger.error call with exc_info kwarg"
+        assert error_calls[-1]["exc_info"] is True, "Unexpected errors should include traceback (exc_info=True)"
+
+    @pytest.mark.asyncio()
+    async def test_cancelled_error_reraised_after_stack_cleanup(self) -> None:
+        """CancelledError must propagate out of _do_connect so wait_for works."""
+        config = McpServerConfig(name="cancelled-server", transport="stdio", command="echo")
+        mgr = McpManager([config])
+        stack_closed = False
+
+        with (
+            patch("anteroom.services.mcp_manager.shutil.which", return_value="/usr/bin/echo"),
+            patch("anteroom.services.mcp_manager.AsyncExitStack") as mock_stack_cls,
+        ):
+            mock_stack = AsyncMock()
+
+            async def close_and_track():
+                nonlocal stack_closed
+                stack_closed = True
+
+            mock_stack.aclose = close_and_track
+            mock_stack_cls.return_value = mock_stack
+            mock_stack.enter_async_context.side_effect = asyncio.CancelledError()
+
+            with pytest.raises(asyncio.CancelledError):
+                await mgr._do_connect(config)
+
+        assert stack_closed, "Stack should be closed even when CancelledError is re-raised"
+        # Server status should NOT be set to error — cancellation is not a connection failure
+        assert "cancelled-server" not in mgr._server_status
