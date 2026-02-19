@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import numpy as np
 import pytest
 
 from anteroom.services.embeddings import (
@@ -14,6 +13,16 @@ from anteroom.services.embeddings import (
     get_effective_dimensions,
     get_local_model_dimensions,
 )
+
+
+class _FakeArray:
+    """Minimal numpy array stand-in with .tolist() for tests."""
+
+    def __init__(self, data: list[float]) -> None:
+        self._data = data
+
+    def tolist(self) -> list[float]:
+        return list(self._data)
 
 
 def _make_embedding_response(embeddings: list[list[float]]) -> MagicMock:
@@ -367,7 +376,7 @@ class TestLocalEmbeddingService:
     async def test_embed_calls_fastembed(self) -> None:
         service = LocalEmbeddingService(model_name="test-model", dimensions=3)
         mock_model = MagicMock()
-        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2, 0.3])])
+        mock_model.embed = MagicMock(return_value=[_FakeArray([0.1, 0.2, 0.3])])
         service._embedding_model = mock_model
 
         result = await service.embed("hello world")
@@ -379,7 +388,7 @@ class TestLocalEmbeddingService:
     async def test_embed_batch(self) -> None:
         service = LocalEmbeddingService(model_name="test-model", dimensions=2)
         mock_model = MagicMock()
-        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2]), np.array([0.3, 0.4])])
+        mock_model.embed = MagicMock(return_value=[_FakeArray([0.1, 0.2]), _FakeArray([0.3, 0.4])])
         service._embedding_model = mock_model
 
         results = await service.embed_batch(["hello", "world"])
@@ -392,7 +401,7 @@ class TestLocalEmbeddingService:
     async def test_embed_batch_skips_empty(self) -> None:
         service = LocalEmbeddingService(model_name="test-model", dimensions=2)
         mock_model = MagicMock()
-        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2]), np.array([0.3, 0.4])])
+        mock_model.embed = MagicMock(return_value=[_FakeArray([0.1, 0.2]), _FakeArray([0.3, 0.4])])
         service._embedding_model = mock_model
 
         results = await service.embed_batch(["hello", "", "world"])
@@ -430,7 +439,7 @@ class TestLocalEmbeddingService:
 
         service = LocalEmbeddingService(dimensions=2)
         mock_model = MagicMock()
-        mock_model.embed = MagicMock(return_value=[np.array([0.1, 0.2])])
+        mock_model.embed = MagicMock(return_value=[_FakeArray([0.1, 0.2])])
         service._embedding_model = mock_model
 
         long_text = "a" * (MAX_INPUT_TOKENS * 4 + 1000)
