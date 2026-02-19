@@ -194,8 +194,17 @@ def _run_web(config, config_path: Path) -> None:
 
     try:
         asyncio.run(_validate_ai_connection(config))
-    except Exception:
-        print("AI connection: Could not validate (will try on first request)", file=sys.stderr)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        err_name = type(e).__name__
+        if "APIConnectionError" in err_name or "ConnectError" in err_name:
+            print(
+                f"AI connection: Cannot reach {config.ai.base_url} (will try on first request)",
+                file=sys.stderr,
+            )
+        else:
+            print("AI connection: Could not validate (will try on first request)", file=sys.stderr)
 
     from .app import create_app
 
@@ -272,7 +281,18 @@ def _run_chat(
             else:
                 raise
         else:
-            raise
+            err_name = type(e).__name__
+            if "APIConnectionError" in err_name or "ConnectError" in err_name:
+                print(
+                    f"\nCannot connect to API at {config.ai.base_url}.",
+                    file=sys.stderr,
+                )
+                print("Check the URL and your network connection.", file=sys.stderr)
+                print("  Config: ~/.anteroom/config.yaml (ai.base_url)", file=sys.stderr)
+                print("  Env var: AI_CHAT_BASE_URL", file=sys.stderr)
+                sys.exit(1)
+            else:
+                raise
 
 
 def main() -> None:

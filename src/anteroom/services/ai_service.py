@@ -8,7 +8,14 @@ import logging
 from typing import Any, AsyncGenerator
 
 import httpx
-from openai import APITimeoutError, AsyncOpenAI, AuthenticationError, BadRequestError, RateLimitError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    BadRequestError,
+    RateLimitError,
+)
 
 from ..config import AIConfig
 from .token_provider import TokenProvider, TokenProviderError
@@ -204,6 +211,18 @@ class AIService:
                     "code": "rate_limit",
                 },
             }
+        except APIConnectionError:
+            logger.warning("Cannot connect to API at %s", self.config.base_url)
+            self._build_client()
+            yield {
+                "event": "error",
+                "data": {
+                    "message": (
+                        f"Cannot connect to API at {self.config.base_url}. Check the URL and your network connection."
+                    ),
+                    "code": "connection_error",
+                },
+            }
         except Exception:
             logger.exception("AI stream error")
             yield {"event": "error", "data": {"message": "An internal error occurred"}}
@@ -235,6 +254,10 @@ class AIService:
             logger.warning("Title generation timed out")
             self._build_client()
             return "New Conversation"
+        except APIConnectionError:
+            logger.warning("Cannot connect to API at %s during title generation", self.config.base_url)
+            self._build_client()
+            return "New Conversation"
         except Exception:
             logger.exception("Failed to generate title")
             return "New Conversation"
@@ -253,6 +276,14 @@ class AIService:
             logger.warning("Connection validation timed out")
             self._build_client()
             return False, "Connection timed out. The API may be slow or unreachable.", []
+        except APIConnectionError:
+            logger.warning("Cannot connect to API at %s", self.config.base_url)
+            self._build_client()
+            return (
+                False,
+                f"Cannot connect to API at {self.config.base_url}. Check the URL and your network connection.",
+                [],
+            )
         except Exception as e:
             logger.error("AI connection validation failed: %s", e)
             return False, "Connection to AI service failed", []

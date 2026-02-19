@@ -320,6 +320,8 @@ const Chat = (() => {
                 hideThinking();
                 if (currentAssistantEl) {
                     showError(currentAssistantEl, data.message);
+                } else {
+                    showError(null, data.message);
                 }
                 break;
         }

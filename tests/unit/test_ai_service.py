@@ -1,4 +1,4 @@
-"""Tests for AIService timeout handling and client configuration."""
+"""Tests for AIService error handling and client configuration."""
 
 from __future__ import annotations
 
@@ -144,3 +144,216 @@ class TestTimeoutErrorHandling:
             assert ok is False
             assert "timed out" in msg.lower()
             assert mock_build.call_count == 1
+
+
+def _make_service(config: AIConfig | None = None) -> AIService:
+    """Create an AIService with a mock client, bypassing __init__."""
+    service = AIService.__new__(AIService)
+    service.config = config or _make_config()
+    service._token_provider = None
+    service.client = MagicMock()
+    return service
+
+
+class TestConnectionErrorHandling:
+    @pytest.mark.asyncio
+    async def test_stream_chat_yields_connection_error_event(self):
+        """APIConnectionError in stream_chat must yield an error event with base_url."""
+        from openai import APIConnectionError
+
+        service = _make_service(_make_config(base_url="http://bad-host:1234/v1"))
+        service.client.chat.completions.create = AsyncMock(side_effect=APIConnectionError(request=MagicMock()))
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["event"] == "error"
+        assert events[0]["data"]["code"] == "connection_error"
+        assert "bad-host:1234" in events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_rebuilds_client_on_connection_error(self):
+        """_build_client must be called after APIConnectionError in stream_chat."""
+        from openai import APIConnectionError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=APIConnectionError(request=MagicMock()))
+
+        with patch.object(service, "_build_client") as mock_build:
+            async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+                pass
+            assert mock_build.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_validate_connection_returns_connection_error(self):
+        """APIConnectionError in validate_connection must return helpful message with base_url."""
+        from openai import APIConnectionError
+
+        service = _make_service(_make_config(base_url="http://dead-server:8080/v1"))
+        service.client.models.list = AsyncMock(side_effect=APIConnectionError(request=MagicMock()))
+
+        with patch.object(service, "_build_client") as mock_build:
+            ok, msg, models = await service.validate_connection()
+            assert ok is False
+            assert "dead-server:8080" in msg
+            assert models == []
+            assert mock_build.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_generate_title_returns_fallback_on_connection_error(self):
+        """APIConnectionError in generate_title must return 'New Conversation'."""
+        from openai import APIConnectionError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=APIConnectionError(request=MagicMock()))
+
+        with patch.object(service, "_build_client") as mock_build:
+            result = await service.generate_title("hello")
+            assert result == "New Conversation"
+            assert mock_build.call_count == 1
+
+
+class TestAuthErrorHandling:
+    @pytest.mark.asyncio
+    async def test_auth_error_yields_auth_failed_event(self):
+        """AuthenticationError without token provider must yield auth_failed error event."""
+        from openai import AuthenticationError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=AuthenticationError(message="Invalid API key", response=MagicMock(status_code=401), body={})
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["event"] == "error"
+        assert events[0]["data"]["code"] == "auth_failed"
+        assert "API key" in events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_auth_error_retries_after_token_refresh(self):
+        """AuthenticationError with a token provider must attempt refresh and retry."""
+        from openai import AuthenticationError
+
+        service = _make_service()
+        service._token_provider = MagicMock()
+
+        # First call raises auth error, second call succeeds with a done event
+        async def fake_stream():
+            yield MagicMock(choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")])
+
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=[
+                AuthenticationError(message="Invalid API key", response=MagicMock(status_code=401), body={}),
+                fake_stream(),
+            ]
+        )
+
+        with patch.object(service, "_build_client"):
+            events = []
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        assert any(e["event"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_validate_connection_auth_error(self):
+        """AuthenticationError in validate_connection must return auth failure message."""
+        from openai import AuthenticationError
+
+        service = _make_service()
+        service.client.models.list = AsyncMock(
+            side_effect=AuthenticationError(message="Invalid API key", response=MagicMock(status_code=401), body={})
+        )
+
+        ok, msg, models = await service.validate_connection()
+        assert ok is False
+        assert "authentication" in msg.lower() or "api key" in msg.lower()
+
+
+class TestRateLimitErrorHandling:
+    @pytest.mark.asyncio
+    async def test_rate_limit_yields_rate_limit_event(self):
+        """RateLimitError must yield a rate_limit error event."""
+        from openai import RateLimitError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=RateLimitError(message="Rate limit exceeded", response=MagicMock(status_code=429), body={})
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["event"] == "error"
+        assert events[0]["data"]["code"] == "rate_limit"
+
+
+class TestBadRequestErrorHandling:
+    @pytest.mark.asyncio
+    async def test_context_length_exceeded_yields_correct_code(self):
+        """BadRequestError with context_length_exceeded must yield the correct error code."""
+        from openai import BadRequestError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=BadRequestError(
+                message="context_length_exceeded",
+                response=MagicMock(status_code=400),
+                body={"error": {"code": "context_length_exceeded"}},
+            )
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["event"] == "error"
+        assert events[0]["data"]["code"] == "context_length_exceeded"
+
+    @pytest.mark.asyncio
+    async def test_other_bad_request_yields_error_message(self):
+        """BadRequestError without context_length_exceeded must yield the error message."""
+        from openai import BadRequestError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=BadRequestError(
+                message="Invalid request parameters",
+                response=MagicMock(status_code=400),
+                body={"error": {"code": "invalid_request"}},
+            )
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["event"] == "error"
+        assert "Invalid request parameters" in events[0]["data"]["message"]
+
+
+class TestGenericExceptionHandling:
+    @pytest.mark.asyncio
+    async def test_generic_exception_yields_internal_error(self):
+        """Unexpected exceptions must yield a generic internal error (no details leaked)."""
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=RuntimeError("something unexpected"))
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["event"] == "error"
+        assert events[0]["data"]["message"] == "An internal error occurred"
+        assert "something unexpected" not in events[0]["data"].get("message", "")
