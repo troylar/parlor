@@ -9,6 +9,7 @@ import pytest
 
 from anteroom.db import _SCHEMA, _VEC_METADATA_SCHEMA, ThreadSafeConnection
 from anteroom.services.storage import (
+    _validate_upload,
     add_source_to_group,
     add_tag_to_source,
     chunk_text,
@@ -354,3 +355,164 @@ class TestSaveSourceFile:
                 data=b"x" * (11 * 1024 * 1024),
                 data_dir=tmp_path,
             )
+
+    def test_save_docx_file(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        # .docx files are ZIP containers — filetype detects application/zip
+        # but the declared MIME is application/vnd.openxmlformats-...
+        # Use minimal ZIP header to simulate a .docx
+        zip_header = b"PK\x03\x04" + b"\x00" * 26
+        source = save_source_file(
+            db,
+            title="Document",
+            filename="report.docx",
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            data=zip_header,
+            data_dir=tmp_path,
+        )
+        assert source["type"] == "file"
+        assert source["filename"] == "report.docx"
+
+    def test_save_json_file(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        source = save_source_file(
+            db,
+            title="Config",
+            filename="config.json",
+            mime_type="application/json",
+            data=b'{"key": "value"}',
+            data_dir=tmp_path,
+        )
+        assert source["type"] == "file"
+        assert source["content"] == '{"key": "value"}'
+
+    def test_save_yaml_file(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        source = save_source_file(
+            db,
+            title="Config",
+            filename="config.yaml",
+            mime_type="application/x-yaml",
+            data=b"key: value\n",
+            data_dir=tmp_path,
+        )
+        assert source["type"] == "file"
+        assert source["content"] == "key: value\n"
+
+
+class TestValidateUpload:
+    def test_text_plain_passes(self) -> None:
+        _validate_upload("text/plain", b"hello world", "test.txt")
+
+    def test_text_markdown_passes(self) -> None:
+        _validate_upload("text/markdown", b"# Hello", "readme.md")
+
+    def test_application_json_passes(self) -> None:
+        _validate_upload("application/json", b'{"key": "value"}', "data.json")
+
+    def test_application_yaml_passes(self) -> None:
+        _validate_upload("application/x-yaml", b"key: value", "config.yaml")
+
+    def test_application_toml_passes(self) -> None:
+        _validate_upload("application/toml", b"[section]\nkey = 1", "config.toml")
+
+    def test_application_sql_passes(self) -> None:
+        _validate_upload("application/sql", b"SELECT 1", "query.sql")
+
+    def test_unsupported_mime_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            _validate_upload("application/x-executable", b"binary", "bad.exe")
+
+    def test_size_limit(self) -> None:
+        with pytest.raises(ValueError, match="maximum size"):
+            _validate_upload("text/plain", b"x" * (11 * 1024 * 1024), "big.txt")
+
+    def test_png_magic_bytes_match(self) -> None:
+        # PNG magic bytes
+        png_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+        _validate_upload("image/png", png_data, "image.png")
+
+    def test_mime_mismatch_rejected(self) -> None:
+        # PNG magic bytes but claimed as JPEG
+        png_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+        with pytest.raises(ValueError, match="does not match"):
+            _validate_upload("image/jpeg", png_data, "fake.jpg")
+
+    def test_docx_zip_container_allowed(self) -> None:
+        # .docx is a ZIP container — filetype detects application/zip
+        zip_header = b"PK\x03\x04" + b"\x00" * 26
+        _validate_upload(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            zip_header,
+            "report.docx",
+        )
+
+    def test_xlsx_zip_container_allowed(self) -> None:
+        zip_header = b"PK\x03\x04" + b"\x00" * 26
+        _validate_upload(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            zip_header,
+            "data.xlsx",
+        )
+
+    def test_pptx_zip_container_allowed(self) -> None:
+        zip_header = b"PK\x03\x04" + b"\x00" * 26
+        _validate_upload(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            zip_header,
+            "slides.pptx",
+        )
+
+    def test_legacy_xls_ole_container_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Legacy .xls files use OLE/CFB containers — filetype detects the container format
+        from unittest.mock import MagicMock
+
+        import anteroom.services.storage as storage_mod
+
+        mock_guess = MagicMock()
+        mock_guess.mime = "application/x-ole-storage"
+        monkeypatch.setattr(storage_mod.filetype, "guess", lambda _: mock_guess)
+        _validate_upload("application/vnd.ms-excel", b"\xd0\xcf\x11\xe0" + b"\x00" * 100, "data.xls")
+
+    def test_octet_stream_utf8_text_passes(self) -> None:
+        # Browser sent no MIME type — but content is valid UTF-8 and extension is text-like
+        _validate_upload("application/octet-stream", b"Hello, this is a text file.", "readme.md")
+
+    def test_octet_stream_binary_rejected(self) -> None:
+        # Binary content with application/octet-stream should be rejected
+        binary_data = bytes(range(256)) * 10
+        with pytest.raises(ValueError, match="Cannot verify file content type"):
+            _validate_upload("application/octet-stream", binary_data, "unknown.md")
+
+    def test_octet_stream_bad_extension_rejected(self) -> None:
+        # Valid UTF-8 content but non-text-like extension
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            _validate_upload("application/octet-stream", b"hello", "file.exe")
+
+    def test_octet_stream_no_extension_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            _validate_upload("application/octet-stream", b"hello", "noext")
+
+    def test_octet_stream_json_extension_passes(self) -> None:
+        _validate_upload("application/octet-stream", b'{"key": "value"}', "data.json")
+
+    def test_octet_stream_py_extension_passes(self) -> None:
+        _validate_upload("application/octet-stream", b"print('hello')", "script.py")
+
+    def test_svg_rejected_xss_prevention(self) -> None:
+        # SVG intentionally excluded — can contain embedded JavaScript (stored XSS)
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            _validate_upload("image/svg+xml", b"<svg></svg>", "icon.svg")
+
+    def test_html_passes(self) -> None:
+        _validate_upload("text/html", b"<html><body>Hello</body></html>", "page.html")
+
+    def test_rtf_passes(self) -> None:
+        _validate_upload("application/rtf", b"{\\rtf1 hello}", "doc.rtf")
+
+    def test_pdf_magic_bytes_match(self) -> None:
+        pdf_data = b"%PDF-1.4 " + b"\x00" * 100
+        _validate_upload("application/pdf", pdf_data, "doc.pdf")
+
+    def test_unverifiable_binary_mime_rejected(self) -> None:
+        # Binary MIME type where filetype.guess() returns None — should be rejected
+        # (e.g., claiming image/png but providing content with no magic bytes)
+        with pytest.raises(ValueError, match="Cannot verify file content type"):
+            _validate_upload("image/png", b"\x00" * 200, "fake.png")
