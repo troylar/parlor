@@ -482,3 +482,150 @@ class TestMcpManagerErrorClassification:
         assert stack_closed, "Stack should be closed even when CancelledError is re-raised"
         # Server status should NOT be set to error — cancellation is not a connection failure
         assert "cancelled-server" not in mgr._server_status
+
+
+class TestMcpManagerShutdown:
+    """Tests for shutdown handling of BaseException and ExceptionGroup."""
+
+    @pytest.mark.asyncio()
+    async def test_shutdown_closes_active_stacks(self) -> None:
+        """Shutdown should close all active exit stacks."""
+        mgr = McpManager([])
+        stack_a = AsyncMock(spec=AsyncExitStack)
+        stack_b = AsyncMock(spec=AsyncExitStack)
+        mgr._exit_stacks = {"server-a": stack_a, "server-b": stack_b}
+        mgr._sessions = {"server-a": AsyncMock(), "server-b": AsyncMock()}
+
+        await mgr.shutdown()
+
+        stack_a.aclose.assert_awaited_once()
+        stack_b.aclose.assert_awaited_once()
+        assert mgr._exit_stacks == {}
+        assert mgr._sessions == {}
+
+    @pytest.mark.asyncio()
+    async def test_shutdown_handles_base_exception_from_stack(self) -> None:
+        """Shutdown must catch BaseException (including ExceptionGroup) from stack.aclose()."""
+        mgr = McpManager([])
+        stack = AsyncMock(spec=AsyncExitStack)
+        stack.aclose = AsyncMock(side_effect=BaseException("task group teardown"))
+        mgr._exit_stacks = {"server": stack}
+        mgr._sessions = {"server": AsyncMock()}
+
+        await mgr.shutdown()
+
+        assert mgr._exit_stacks == {}
+        assert mgr._sessions == {}
+
+    @pytest.mark.asyncio()
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="ExceptionGroup requires 3.11+")
+    async def test_shutdown_handles_exception_group(self) -> None:
+        """Shutdown must survive ExceptionGroup from TaskGroup teardown."""
+        mgr = McpManager([])
+        exc_group = ExceptionGroup("task group failed", [RuntimeError("subtask died")])  # noqa: F821
+        stack = AsyncMock(spec=AsyncExitStack)
+        stack.aclose = AsyncMock(side_effect=exc_group)
+        mgr._exit_stacks = {"server": stack}
+        mgr._sessions = {"server": AsyncMock()}
+
+        await mgr.shutdown()
+
+        assert mgr._exit_stacks == {}
+        assert mgr._sessions == {}
+
+    @pytest.mark.asyncio()
+    async def test_shutdown_timeout_prevents_hang(self) -> None:
+        """Shutdown should complete within its internal 5s timeout, not hang forever."""
+        mgr = McpManager([])
+        entered_hang = asyncio.Event()
+
+        async def hang_forever() -> None:
+            entered_hang.set()
+            await asyncio.sleep(999)
+
+        stack = AsyncMock(spec=AsyncExitStack)
+        stack.aclose = hang_forever
+        mgr._exit_stacks = {"stuck-server": stack}
+        mgr._sessions = {"stuck-server": AsyncMock()}
+
+        import time
+
+        start = time.monotonic()
+        await mgr.shutdown()
+        elapsed = time.monotonic() - start
+
+        assert mgr._exit_stacks == {}
+        assert entered_hang.is_set(), "hang_forever should have been entered"
+        assert elapsed < 8.0, f"Shutdown took {elapsed:.1f}s — internal timeout not working"
+
+    @pytest.mark.asyncio()
+    async def test_disconnect_handles_base_exception_from_stack(self) -> None:
+        """disconnect_server must catch BaseException from stack.aclose()."""
+        config = McpServerConfig(name="server", transport="stdio", command="echo")
+        mgr = McpManager([config])
+        stack = AsyncMock(spec=AsyncExitStack)
+        stack.aclose = AsyncMock(side_effect=BaseException("task group teardown"))
+        mgr._exit_stacks = {"server": stack}
+        mgr._sessions = {"server": AsyncMock()}
+
+        await mgr.disconnect_server("server")
+
+        assert mgr._server_status["server"]["status"] == "disconnected"
+        assert "server" not in mgr._exit_stacks
+
+    @pytest.mark.asyncio()
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="ExceptionGroup requires 3.11+")
+    async def test_disconnect_handles_exception_group(self) -> None:
+        """disconnect_server must survive ExceptionGroup from TaskGroup teardown."""
+        config = McpServerConfig(name="server", transport="stdio", command="echo")
+        mgr = McpManager([config])
+        exc_group = ExceptionGroup("task group failed", [RuntimeError("subtask died")])  # noqa: F821
+        stack = AsyncMock(spec=AsyncExitStack)
+        stack.aclose = AsyncMock(side_effect=exc_group)
+        mgr._exit_stacks = {"server": stack}
+        mgr._sessions = {"server": AsyncMock()}
+
+        await mgr.disconnect_server("server")
+
+        assert mgr._server_status["server"]["status"] == "disconnected"
+        assert "server" not in mgr._exit_stacks
+
+    @pytest.mark.asyncio()
+    @pytest.mark.skipif(
+        sys.version_info < (3, 12),
+        reason="asyncio.wait_for propagates KeyboardInterrupt at the event loop level on <3.12",
+    )
+    async def test_shutdown_reraises_keyboard_interrupt_after_cleanup(self) -> None:
+        """KeyboardInterrupt during shutdown should be re-raised after all stacks are cleaned."""
+        mgr = McpManager([])
+
+        # Use a real async function rather than AsyncMock side_effect for
+        # KeyboardInterrupt — AsyncMock's side_effect handling for BaseException
+        # subclasses leaks through asyncio.wait_for on Python <3.12.
+        stack_a_closed = False
+        stack_b_closed = False
+
+        async def _aclose_raises_ki() -> None:
+            nonlocal stack_a_closed
+            stack_a_closed = True
+            raise KeyboardInterrupt()
+
+        async def _aclose_ok() -> None:
+            nonlocal stack_b_closed
+            stack_b_closed = True
+
+        stack_a = AsyncMock(spec=AsyncExitStack)
+        stack_a.aclose = _aclose_raises_ki
+        stack_b = AsyncMock(spec=AsyncExitStack)
+        stack_b.aclose = _aclose_ok
+        mgr._exit_stacks = {"server-a": stack_a, "server-b": stack_b}
+        mgr._sessions = {"server-a": AsyncMock(), "server-b": AsyncMock()}
+
+        with pytest.raises(KeyboardInterrupt):
+            await mgr.shutdown()
+
+        # Both stacks must have been closed before re-raising
+        assert stack_a_closed
+        assert stack_b_closed
+        assert mgr._exit_stacks == {}
+        assert mgr._sessions == {}

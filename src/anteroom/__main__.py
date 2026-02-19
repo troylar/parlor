@@ -260,6 +260,19 @@ def _run_chat(
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
+    except BaseException as e:
+        if type(e).__name__ in ("ExceptionGroup", "BaseExceptionGroup"):
+            # ExceptionGroup from anyio TaskGroup teardown during Ctrl+C.
+            # Only suppress if all member exceptions are cancellation/interrupt —
+            # re-raise if any contain real errors to avoid masking failures.
+            exceptions = getattr(e, "exceptions", ())
+            _suppressed = (KeyboardInterrupt, asyncio.CancelledError)
+            if all(isinstance(exc, _suppressed) for exc in exceptions):
+                pass
+            else:
+                raise
+        else:
+            raise
 
 
 def main() -> None:
