@@ -22,7 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import AppConfig, ensure_identity, load_config
 from .db import DatabaseManager, has_vec_support, init_db
 from .services.embedding_worker import EmbeddingWorker
-from .services.embeddings import create_embedding_service
+from .services.embeddings import create_embedding_service, get_effective_dimensions
 from .services.event_bus import EventBus
 from .services.mcp_manager import McpManager
 from .tools import ToolRegistry, register_default_tools
@@ -49,7 +49,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("Failed to auto-generate user identity")
 
     db_path = config.app.data_dir / "chat.db"
-    app.state.db = init_db(db_path)
+    vec_dims = get_effective_dimensions(config)
+    app.state.db = init_db(db_path, vec_dimensions=vec_dims)
 
     db_manager = DatabaseManager()
     db_manager.add("personal", db_path)

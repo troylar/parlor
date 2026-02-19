@@ -290,8 +290,10 @@ class UserIdentity:
 @dataclass
 class EmbeddingsConfig:
     enabled: bool = True
+    provider: str = "local"  # "local" (fastembed) or "api" (OpenAI-compatible)
     model: str = "text-embedding-3-small"
-    dimensions: int = 1536
+    dimensions: int = 0  # 0 = auto-detect from provider/model
+    local_model: str = "BAAI/bge-small-en-v1.5"
     base_url: str = ""
     api_key: str = ""
     api_key_command: str = ""
@@ -529,17 +531,28 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         "0",
         "no",
     )
+    emb_provider = emb_raw.get("provider") or os.environ.get("AI_CHAT_EMBEDDINGS_PROVIDER", "local")
     emb_model = emb_raw.get("model") or os.environ.get("AI_CHAT_EMBEDDINGS_MODEL", "text-embedding-3-small")
-    emb_dimensions = int(emb_raw.get("dimensions") or os.environ.get("AI_CHAT_EMBEDDINGS_DIMENSIONS", "1536"))
-    emb_dimensions = max(1, min(emb_dimensions, 4096))
+    emb_local_model = emb_raw.get("local_model") or os.environ.get(
+        "AI_CHAT_EMBEDDINGS_LOCAL_MODEL", "BAAI/bge-small-en-v1.5"
+    )
+    emb_dimensions_raw = emb_raw.get("dimensions") or os.environ.get("AI_CHAT_EMBEDDINGS_DIMENSIONS", "")
+    if emb_dimensions_raw:
+        emb_dimensions = int(emb_dimensions_raw)
+        emb_dimensions = max(1, min(emb_dimensions, 4096))
+    else:
+        # Auto-detect: 0 means "use model default"
+        emb_dimensions = 0
     emb_base_url = emb_raw.get("base_url") or os.environ.get("AI_CHAT_EMBEDDINGS_BASE_URL", "")
     emb_api_key = emb_raw.get("api_key") or os.environ.get("AI_CHAT_EMBEDDINGS_API_KEY", "")
     emb_api_key_command = emb_raw.get("api_key_command") or os.environ.get("AI_CHAT_EMBEDDINGS_API_KEY_COMMAND", "")
 
     embeddings_config = EmbeddingsConfig(
         enabled=emb_enabled,
+        provider=emb_provider,
         model=emb_model,
         dimensions=emb_dimensions,
+        local_model=emb_local_model,
         base_url=emb_base_url,
         api_key=emb_api_key,
         api_key_command=emb_api_key_command,
