@@ -1357,6 +1357,27 @@ def get_unembedded_messages(db: sqlite3.Connection, limit: int = 100) -> list[di
     return [dict(r) for r in rows]
 
 
+def mark_embedding_skipped(
+    db: sqlite3.Connection,
+    message_id: str,
+    conversation_id: str,
+    content_hash: str,
+    status: str = "skipped",
+) -> None:
+    """Write a sentinel row to message_embeddings so the message is excluded from future queries.
+
+    No vector is inserted into vec_messages — only the metadata row is written.
+    """
+    now = _now()
+    db.execute(
+        "INSERT OR IGNORE INTO message_embeddings"
+        " (message_id, conversation_id, chunk_index, content_hash, status, created_at)"
+        " VALUES (?, ?, 0, ?, ?, ?)",
+        (message_id, conversation_id, content_hash, status, now),
+    )
+    db.commit()
+
+
 def delete_embeddings_for_conversation(db: sqlite3.Connection, conversation_id: str) -> None:
     """Delete all embeddings for a conversation."""
     from ..db import has_vec_support
@@ -1774,6 +1795,24 @@ def get_unembedded_source_chunks(db: sqlite3.Connection, limit: int = 100) -> li
         (limit,),
     )
     return [dict(r) for r in rows]
+
+
+def mark_source_chunk_embedding_skipped(
+    db: sqlite3.Connection,
+    chunk_id: str,
+    source_id: str,
+    content_hash: str,
+    status: str = "skipped",
+) -> None:
+    """Write a sentinel row to source_chunk_embeddings so the chunk is excluded from future queries."""
+    now = _now()
+    db.execute(
+        "INSERT OR IGNORE INTO source_chunk_embeddings"
+        " (chunk_id, source_id, content_hash, status, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (chunk_id, source_id, content_hash, status, now),
+    )
+    db.commit()
 
 
 # --- Source Tags ---

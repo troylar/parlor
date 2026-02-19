@@ -16,6 +16,7 @@ DEFAULT_INTERVAL = 30.0
 MAX_INTERVAL = 300.0
 BACKOFF_MULTIPLIER = 2.0
 MAX_CONSECUTIVE_FAILURES = 10
+MAX_STORE_RETRIES = 3
 
 
 class EmbeddingWorker:
@@ -30,6 +31,7 @@ class EmbeddingWorker:
         self._current_interval = DEFAULT_INTERVAL
         self._base_interval = DEFAULT_INTERVAL
         self._task: asyncio.Task[None] | None = None
+        self._store_failures: dict[str, int] = {}
 
     @property
     def disabled(self) -> bool:
@@ -84,8 +86,20 @@ class EmbeddingWorker:
         if not messages:
             return 0
 
-        # Filter out short messages
-        eligible = [m for m in messages if len(m.get("content", "")) >= MIN_CONTENT_LENGTH]
+        # Mark short messages as skipped so they are never re-queried
+        eligible = []
+        for m in messages:
+            if len(m.get("content", "")) < MIN_CONTENT_LENGTH:
+                content_hash = hashlib.sha256(m.get("content", "").encode()).hexdigest()
+                try:
+                    storage.mark_embedding_skipped(
+                        self._db, m["id"], m["conversation_id"], content_hash, status="skipped"
+                    )
+                except Exception:
+                    logger.debug("Failed to mark short message %s as skipped", m["id"], exc_info=True)
+            else:
+                eligible.append(m)
+
         if not eligible:
             return 0
 
@@ -94,9 +108,16 @@ class EmbeddingWorker:
 
         count = 0
         for msg, embedding in zip(eligible, embeddings):
-            if embedding is None:
-                continue
             content_hash = hashlib.sha256(msg["content"].encode()).hexdigest()
+            if embedding is None:
+                logger.warning("Embedding returned None for message %s, marking as skipped", msg["id"])
+                try:
+                    storage.mark_embedding_skipped(
+                        self._db, msg["id"], msg["conversation_id"], content_hash, status="failed"
+                    )
+                except Exception:
+                    logger.debug("Failed to mark message %s as skipped", msg["id"], exc_info=True)
+                continue
             try:
                 storage.store_embedding(
                     self._db,
@@ -106,8 +127,32 @@ class EmbeddingWorker:
                     content_hash,
                 )
                 count += 1
+                self._store_failures.pop(msg["id"], None)
             except Exception as e:
-                logger.error("Failed to store embedding for message %s: %s", msg["id"], type(e).__name__)
+                fails = self._store_failures.get(msg["id"], 0) + 1
+                self._store_failures[msg["id"]] = fails
+                if fails >= MAX_STORE_RETRIES:
+                    logger.error(
+                        "Failed to store embedding for message %s %d times, marking as failed: %s",
+                        msg["id"],
+                        fails,
+                        type(e).__name__,
+                    )
+                    try:
+                        storage.mark_embedding_skipped(
+                            self._db, msg["id"], msg["conversation_id"], content_hash, status="failed"
+                        )
+                    except Exception:
+                        logger.debug("Failed to mark message %s as failed", msg["id"], exc_info=True)
+                    self._store_failures.pop(msg["id"], None)
+                else:
+                    logger.error(
+                        "Failed to store embedding for message %s (%d/%d): %s",
+                        msg["id"],
+                        fails,
+                        MAX_STORE_RETRIES,
+                        type(e).__name__,
+                    )
 
         if count:
             logger.info("Embedded %d messages", count)
@@ -119,7 +164,18 @@ class EmbeddingWorker:
         if not chunks:
             return 0
 
-        eligible = [c for c in chunks if len(c.get("content", "")) >= MIN_CONTENT_LENGTH]
+        eligible = []
+        for c in chunks:
+            if len(c.get("content", "")) < MIN_CONTENT_LENGTH:
+                try:
+                    storage.mark_source_chunk_embedding_skipped(
+                        self._db, c["id"], c["source_id"], c["content_hash"], status="skipped"
+                    )
+                except Exception:
+                    logger.debug("Failed to mark short chunk %s as skipped", c["id"], exc_info=True)
+            else:
+                eligible.append(c)
+
         if not eligible:
             return 0
 
@@ -129,6 +185,13 @@ class EmbeddingWorker:
         count = 0
         for chunk, embedding in zip(eligible, embeddings):
             if embedding is None:
+                logger.warning("Embedding returned None for source chunk %s, marking as skipped", chunk["id"])
+                try:
+                    storage.mark_source_chunk_embedding_skipped(
+                        self._db, chunk["id"], chunk["source_id"], chunk["content_hash"], status="failed"
+                    )
+                except Exception:
+                    logger.debug("Failed to mark chunk %s as skipped", chunk["id"], exc_info=True)
                 continue
             try:
                 storage.store_source_chunk_embedding(
@@ -139,8 +202,32 @@ class EmbeddingWorker:
                     chunk["content_hash"],
                 )
                 count += 1
+                self._store_failures.pop(chunk["id"], None)
             except Exception as e:
-                logger.error("Failed to store embedding for source chunk %s: %s", chunk["id"], type(e).__name__)
+                fails = self._store_failures.get(chunk["id"], 0) + 1
+                self._store_failures[chunk["id"]] = fails
+                if fails >= MAX_STORE_RETRIES:
+                    logger.error(
+                        "Failed to store embedding for chunk %s %d times, marking as failed: %s",
+                        chunk["id"],
+                        fails,
+                        type(e).__name__,
+                    )
+                    try:
+                        storage.mark_source_chunk_embedding_skipped(
+                            self._db, chunk["id"], chunk["source_id"], chunk["content_hash"], status="failed"
+                        )
+                    except Exception:
+                        logger.debug("Failed to mark chunk %s as failed", chunk["id"], exc_info=True)
+                    self._store_failures.pop(chunk["id"], None)
+                else:
+                    logger.error(
+                        "Failed to store embedding for chunk %s (%d/%d): %s",
+                        chunk["id"],
+                        fails,
+                        MAX_STORE_RETRIES,
+                        type(e).__name__,
+                    )
 
         if count:
             logger.info("Embedded %d source chunks", count)

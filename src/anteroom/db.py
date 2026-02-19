@@ -238,6 +238,7 @@ CREATE TABLE IF NOT EXISTS message_embeddings (
     conversation_id TEXT NOT NULL,
     chunk_index INTEGER NOT NULL DEFAULT 0,
     content_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'embedded',
     created_at TEXT NOT NULL,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
@@ -246,6 +247,7 @@ CREATE TABLE IF NOT EXISTS source_chunk_embeddings (
     chunk_id TEXT PRIMARY KEY,
     source_id TEXT NOT NULL,
     content_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'embedded',
     created_at TEXT NOT NULL,
     FOREIGN KEY (chunk_id) REFERENCES source_chunks(id) ON DELETE CASCADE
 );
@@ -708,6 +710,14 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         conn.executescript(_make_source_vec_schema(vec_dimensions))
     except sqlite3.OperationalError:
         pass
+
+    # Add status column to embedding metadata tables for skip/fail tracking
+    for emb_table in ("message_embeddings", "source_chunk_embeddings"):
+        emb_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if emb_table in emb_tables:
+            emb_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({emb_table})").fetchall()}
+            if "status" not in emb_cols:
+                conn.execute(f"ALTER TABLE {emb_table} ADD COLUMN status TEXT NOT NULL DEFAULT 'embedded'")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:
