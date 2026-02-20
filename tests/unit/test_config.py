@@ -45,7 +45,9 @@ class TestLoadConfig:
         assert config.app.host == "0.0.0.0"
         assert config.app.port == 9090
 
-    def test_raises_when_api_key_missing(self, tmp_path: Path) -> None:
+    def test_raises_when_api_key_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AI_CHAT_API_KEY", raising=False)
+        monkeypatch.delenv("AI_CHAT_API_KEY_COMMAND", raising=False)
         cfg_file = _write_config(
             tmp_path,
             {
