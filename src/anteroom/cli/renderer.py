@@ -744,10 +744,20 @@ def render_conversation_recap(messages: list[dict[str, Any]]) -> None:
             truncated += "..."
         console.print(f"  [{SLATE}]You:[/] [{MUTED}]{escape(truncated)}[/{MUTED}]")
     if last_assistant:
-        truncated = last_assistant[:300].replace("\n", " ")
-        if len(last_assistant) > 300:
-            truncated += "..."
-        console.print(f"  [{SLATE}]AI:[/]  [{MUTED}]{escape(truncated)}[/{MUTED}]")
+        from rich.padding import Padding
+
+        if len(last_assistant) > 500:
+            # Truncate at a line boundary to preserve markdown structure
+            cut = last_assistant[:500]
+            last_newline = cut.rfind("\n")
+            if last_newline > 100:
+                truncated = cut[:last_newline] + "\n\n..."
+            else:
+                truncated = cut + "\n\n..."
+        else:
+            truncated = last_assistant
+        console.print(f"  [{SLATE}]AI:[/{SLATE}]")
+        _stdout_console.print(Padding(_make_markdown(truncated), (0, 2, 0, 4)))
     console.print()
 
 
