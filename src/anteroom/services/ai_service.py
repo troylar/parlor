@@ -315,6 +315,7 @@ class AIService:
                         "data": {
                             "message": "Authentication failed. Check your API key or api_key_command.",
                             "code": "auth_failed",
+                            "retryable": False,
                         },
                     }
                 return
@@ -328,19 +329,24 @@ class AIService:
                         "data": {
                             "message": "Conversation too long for model context window.",
                             "code": "context_length_exceeded",
+                            "retryable": False,
                         },
                     }
                 else:
                     logger.exception("AI bad request error")
-                    yield {"event": "error", "data": {"message": f"AI request error: {e.message}"}}
+                    yield {
+                        "event": "error",
+                        "data": {"message": f"AI request error: {e.message}", "retryable": False},
+                    }
                 return
             except RateLimitError as e:
                 logger.warning("Rate limited by AI provider: %s", e)
                 yield {
                     "event": "error",
                     "data": {
-                        "message": "AI provider rate limit reached. Please wait a moment and try again.",
+                        "message": "Rate limited by API provider",
                         "code": "rate_limit",
+                        "retryable": True,
                     },
                 }
                 return
@@ -350,12 +356,9 @@ class AIService:
                 yield {
                     "event": "error",
                     "data": {
-                        "message": (
-                            f"AI response timed out after {self.config.request_timeout}s. "
-                            "The API may be slow or unreachable. Try again, or increase "
-                            "`ai.request_timeout` in your config."
-                        ),
+                        "message": "Stream timed out",
                         "code": "timeout",
+                        "retryable": True,
                     },
                 }
                 return
@@ -394,7 +397,7 @@ class AIService:
                 # Last attempt exhausted — fall through to yield error
             except Exception:
                 logger.exception("AI stream error")
-                yield {"event": "error", "data": {"message": "An internal error occurred"}}
+                yield {"event": "error", "data": {"message": "An internal error occurred", "retryable": False}}
                 return
 
         # All retries exhausted — yield appropriate error for the last transient error
@@ -402,35 +405,27 @@ class AIService:
             yield {
                 "event": "error",
                 "data": {
-                    "message": (
-                        f"AI request timed out after {max_attempts} attempts. "
-                        "The API may be slow or unreachable. Try again, or increase "
-                        "`ai.request_timeout` in your config."
-                    ),
+                    "message": f"Request timed out ({max_attempts} attempts)",
                     "code": "timeout",
+                    "retryable": True,
                 },
             }
         elif isinstance(last_transient_error, _FirstTokenTimeoutError):
             yield {
                 "event": "error",
                 "data": {
-                    "message": (
-                        f"No response from API within {self.config.first_token_timeout}s "
-                        f"after {max_attempts} attempts. The API may be overloaded. "
-                        "Try again, or increase `ai.first_token_timeout` in your config."
-                    ),
+                    "message": f"No response from API ({max_attempts} attempts)",
                     "code": "timeout",
+                    "retryable": True,
                 },
             }
         elif isinstance(last_transient_error, APIConnectionError):
             yield {
                 "event": "error",
                 "data": {
-                    "message": (
-                        f"Cannot connect to API at {self.config.base_url} "
-                        f"after {max_attempts} attempts. Check the URL and your network connection."
-                    ),
+                    "message": f"Cannot connect to API ({max_attempts} attempts)",
                     "code": "connection_error",
+                    "retryable": True,
                 },
             }
 

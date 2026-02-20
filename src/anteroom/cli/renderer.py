@@ -30,6 +30,7 @@ GOLD = "#C5A059"  # accents, "Thinking..." text
 SLATE = "#94A3B8"  # labels ("You:", "AI:"), directory display
 MUTED = "#8b8b8b"  # secondary text (tool results, approval feedback, version info)
 CHROME = "#6b7280"  # UI chrome (status messages, hints, MCP info)
+ERROR_RED = "#CD6B6B"  # pale red for inline errors (operational, not alarming)
 
 _ESC_HINT_DELAY = 3.0  # seconds before showing "esc to cancel" hint
 _STALL_THRESHOLD = 15.0  # seconds before showing API stall warning
@@ -67,7 +68,9 @@ _thinking_ticker_task: asyncio.Task[None] | None = None
 # Lifecycle phase tracking
 _thinking_phase: str = ""  # current phase: connecting, waiting, streaming
 _thinking_tokens: int = 0  # token counter during streaming
+_streaming_chars: int = 0  # character counter during streaming
 _last_chunk_time: float = 0  # monotonic time of last token (for stall detection)
+_phase_start_time: float = 0  # monotonic time when current phase began
 _MID_STREAM_STALL: float = 5.0  # seconds of silence before marking "stalled"
 
 # Tool call timing
@@ -324,8 +327,6 @@ async def _thinking_ticker() -> None:
                     label = f"[{GOLD}]Thinking...[/] [{CHROME}]{elapsed:.0f}s[/{CHROME}]"
                     if suffix:
                         label += f"  [{MUTED}]{suffix}[/{MUTED}]"
-                    elif elapsed >= _STALL_THRESHOLD:
-                        label += f" [{CHROME}](waiting for API response)[/{CHROME}]"
                     _spinner.update(label)
                 elif _repl_mode:
                     _write_thinking_line(elapsed)
@@ -336,13 +337,15 @@ async def _thinking_ticker() -> None:
 def start_thinking() -> None:
     """Show a spinner with timer while AI is generating."""
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
-    global _thinking_phase, _thinking_tokens, _last_chunk_time, _retrying_info
+    global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
     _flush_dedup()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
     _thinking_phase = ""
     _thinking_tokens = 0
+    _streaming_chars = 0
     _last_chunk_time = 0
+    _phase_start_time = 0
     _retrying_info = {}
     _last_spinner_update = _thinking_start
     if _repl_mode:
@@ -366,21 +369,50 @@ def start_thinking() -> None:
         _thinking_ticker_task = None
 
 
-def _write_thinking_line(elapsed: float) -> None:
-    """Overwrite the current line with Thinking + elapsed timer."""
-    if elapsed < 0.5:
-        text = "\r\033[2K\033[38;2;197;160;89mThinking...\033[0m"
+def _write_thinking_line(
+    elapsed: float,
+    *,
+    error_msg: str = "",
+    countdown: int = 0,
+    cancel_msg: str = "",
+) -> None:
+    """Overwrite the current line with Thinking + elapsed timer + phase status.
+
+    Optional keyword args for special states:
+    - ``error_msg``: pale-red inline error replacing phase text
+    - ``countdown``: seconds remaining for auto-retry (shown after error_msg)
+    - ``cancel_msg``: muted message like "cancelled" (user-initiated, not error)
+    """
+    # ANSI color codes (inlined to avoid Rich overhead on raw fd writes)
+    gold = "\033[38;2;197;160;89m"
+    timer_c = "\033[38;2;107;114;128m"
+    muted = "\033[38;2;139;139;139m"
+    err_c = "\033[38;2;205;107;107m"  # ERROR_RED #CD6B6B
+    rst = "\033[0m"
+
+    if elapsed < 0.5 and not error_msg and not cancel_msg:
+        text = f"\r\033[2K{gold}Thinking...{rst}"
     else:
-        hint = "  \033[38;2;139;139;139mesc to cancel\033[0m" if elapsed >= _ESC_HINT_DELAY else ""
-        suffix = _phase_suffix(elapsed)
-        if suffix:
-            phase_text = f"  \033[38;2;139;139;139m{suffix}\033[0m"
-        elif elapsed >= _STALL_THRESHOLD:
-            phase_text = "  \033[38;2;139;139;139m(waiting for API response)\033[0m"
+        timer = f"{timer_c}{elapsed:.0f}s{rst}"
+        if cancel_msg:
+            # User-initiated cancel: muted "cancelled"
+            suffix_text = f"  {muted}{cancel_msg}{rst}"
+            text = f"\r\033[2K{gold}Thinking...{rst} {timer}{suffix_text}"
+        elif error_msg:
+            # System error: pale red error + optional countdown
+            err_text = f"  {err_c}{error_msg}{rst}"
+            if countdown > 0:
+                retry_text = f" · {muted}retrying in {countdown}s{rst}"
+                hint = f"  {muted}esc to give up{rst}"
+                text = f"\r\033[2K{gold}Thinking...{rst} {timer}{err_text}{retry_text}{hint}"
+            else:
+                text = f"\r\033[2K{gold}Thinking...{rst} {timer}{err_text}"
         else:
-            phase_text = ""
-        timer = f"\033[38;2;107;114;128m{elapsed:.0f}s\033[0m"
-        text = f"\r\033[2K\033[38;2;197;160;89mThinking...\033[0m {timer}{phase_text}{hint}"
+            # Normal: phase text + esc hint
+            hint = f"  {muted}esc to cancel{rst}" if elapsed >= _ESC_HINT_DELAY else ""
+            suffix = _phase_suffix(elapsed)
+            phase_text = f"  {muted}{suffix}{rst}" if suffix else ""
+            text = f"\r\033[2K{gold}Thinking...{rst} {timer}{phase_text}{hint}"
     if _stdout:
         _stdout.write(text)
         _stdout.flush()
@@ -408,8 +440,58 @@ def update_thinking() -> None:
             _last_spinner_update = now
 
 
-def stop_thinking() -> float:
-    """Stop the spinner, return elapsed seconds."""
+async def stop_thinking(
+    *,
+    error_msg: str = "",
+    cancel_msg: str = "",
+) -> float:
+    """Stop the spinner, return elapsed seconds.
+
+    Awaits ticker task termination to prevent output races.
+
+    Optional keyword args control the final thinking line:
+    - ``error_msg``: pale-red inline error (system failure)
+    - ``cancel_msg``: muted message (user-initiated cancel)
+    - Neither: clean final line (just "Thinking... Ns")
+    """
+    global _spinner, _thinking_ticker_task
+    elapsed = 0.0
+    # Await ticker termination to prevent race conditions
+    if _thinking_ticker_task is not None:
+        _thinking_ticker_task.cancel()
+        try:
+            await _thinking_ticker_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _thinking_ticker_task = None
+    if _spinner:
+        elapsed = time.monotonic() - _thinking_start
+        _spinner.stop()
+        _spinner = None
+    else:
+        elapsed = time.monotonic() - _thinking_start
+        if _repl_mode and _stdout:
+            if error_msg:
+                _write_thinking_line(elapsed, error_msg=error_msg)
+                _stdout.write("\n")
+                _stdout.flush()
+            elif cancel_msg:
+                _write_thinking_line(elapsed, cancel_msg=cancel_msg)
+                _stdout.write("\n")
+                _stdout.flush()
+            else:
+                # Clean final line: just timer, no phase/hint
+                _write_thinking_line(elapsed)
+                _stdout.write("\n")
+                _stdout.flush()
+    return elapsed
+
+
+def stop_thinking_sync() -> float:
+    """Synchronous fallback for stop_thinking (KeyboardInterrupt handlers).
+
+    Does not await the ticker — use only when an event loop is unavailable.
+    """
     global _spinner, _thinking_ticker_task
     elapsed = 0.0
     if _thinking_ticker_task is not None:
@@ -427,13 +509,43 @@ def stop_thinking() -> float:
     return elapsed
 
 
+async def thinking_countdown(
+    delay: float,
+    cancel_event: "asyncio.Event",
+    error_msg: str,
+) -> bool:
+    """Show a retry countdown on the thinking line after a system error.
+
+    Ticks once per second displaying ``error_msg · retrying in Ns``.
+    Returns ``True`` if countdown completed (caller should retry),
+    ``False`` if ``cancel_event`` fired (caller should give up).
+    """
+    elapsed = time.monotonic() - _thinking_start if _thinking_start else 0.0
+    remaining = int(delay)
+    while remaining > 0:
+        if _repl_mode and _stdout:
+            _write_thinking_line(elapsed, error_msg=error_msg, countdown=remaining)
+        try:
+            await asyncio.wait_for(cancel_event.wait(), timeout=1.0)
+            # cancel_event fired — give up
+            if _repl_mode and _stdout:
+                _write_thinking_line(elapsed, cancel_msg="cancelled")
+                _stdout.write("\n")
+                _stdout.flush()
+            return False
+        except asyncio.TimeoutError:
+            remaining -= 1
+    return True
+
+
 _retrying_info: dict[str, Any] = {}
 
 
 def set_thinking_phase(phase: str) -> None:
     """Update the current lifecycle phase displayed by the thinking ticker."""
-    global _thinking_phase, _last_chunk_time
+    global _thinking_phase, _last_chunk_time, _phase_start_time
     _thinking_phase = phase
+    _phase_start_time = time.monotonic()
     _last_chunk_time = time.monotonic()
 
 
@@ -449,37 +561,57 @@ def increment_thinking_tokens() -> None:
 
     Calling this implicitly transitions to the 'streaming' phase.
     """
-    global _thinking_tokens, _thinking_phase, _last_chunk_time
+    global _thinking_tokens, _thinking_phase, _last_chunk_time, _phase_start_time
     _thinking_tokens += 1
     # Set chunk time before phase to avoid a race with the background ticker:
     # if the ticker reads _thinking_phase=="streaming" before _last_chunk_time
     # is updated, it could briefly show "stalled" on a fresh phase transition.
     _last_chunk_time = time.monotonic()
+    if _thinking_phase != "streaming":
+        _phase_start_time = _last_chunk_time
     _thinking_phase = "streaming"
+
+
+def increment_streaming_chars(n: int) -> None:
+    """Accumulate character count during streaming for the health display."""
+    global _streaming_chars
+    _streaming_chars += n
+
+
+def _phase_elapsed_str() -> str:
+    """Return per-phase elapsed as ``(Ns)`` when > 1s, else empty string."""
+    if not _phase_start_time:
+        return ""
+    phase_secs = time.monotonic() - _phase_start_time
+    if phase_secs >= 1.5:
+        return f" ({phase_secs:.0f}s)"
+    return ""
 
 
 def _phase_suffix(elapsed: float) -> str:
     """Build the dim phase text appended to the thinking line.
 
-    Returns an empty string if verbosity is COMPACT or no phase is set.
+    Connection health status is always shown (all verbosity levels).
+    Returns an empty string only when no phase is set.
     """
-    if _verbosity == Verbosity.COMPACT or not _thinking_phase:
+    if not _thinking_phase:
         return ""
     phase = _thinking_phase
+    pe = _phase_elapsed_str()
     if phase == "connecting":
-        return "connecting"
+        return f"connecting{pe}"
     if phase == "waiting":
-        return "waiting for first token"
+        return f"connected · waiting for first token{pe}"
     if phase == "streaming":
         now = time.monotonic()
         if _last_chunk_time and now - _last_chunk_time > _MID_STREAM_STALL:
             stall_secs = now - _last_chunk_time
-            return f"stalled {stall_secs:.0f}s"
-        return f"streaming ({_thinking_tokens} tokens)"
+            return f"streaming · {_streaming_chars:,} chars · stalled {stall_secs:.0f}s"
+        return f"streaming · {_streaming_chars:,} chars"
     if phase == "retrying":
         attempt = _retrying_info.get("attempt", 2)
         max_attempts = _retrying_info.get("max_attempts", 3)
-        return f"retrying ({attempt}/{max_attempts})"
+        return f"retry {attempt}/{max_attempts}"
     return phase
 
 

@@ -763,52 +763,85 @@ async def _run_one_shot(
 
     renderer.clear_subagent_state()
     thinking = False
+    max_user_retries = 3
+    retry_delay = 5.0
+    user_attempt = 0
     try:
-        async for event in run_agent_loop(
-            ai_service=ai_service,
-            messages=messages,
-            tool_executor=tool_executor,
-            tools_openai=tools_openai,
-            cancel_event=cancel_event,
-            extra_system_prompt=extra_system_prompt,
-            max_iterations=config.cli.max_tool_iterations,
-            narration_cadence=ai_service.config.narration_cadence,
-        ):
-            if event.kind == "thinking":
-                if not thinking:
-                    renderer.start_thinking()
-                    thinking = True
-            elif event.kind == "phase":
-                renderer.set_thinking_phase(event.data.get("phase", ""))
-            elif event.kind == "retrying":
-                renderer.set_retrying(event.data)
-            elif event.kind == "token":
-                if not thinking:
-                    renderer.start_thinking()
-                    thinking = True
-                renderer.render_token(event.data["content"])
-                renderer.increment_thinking_tokens()
-                renderer.update_thinking()
-            elif event.kind == "tool_call_start":
-                if thinking:
-                    renderer.stop_thinking()
-                    thinking = False
-                renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
-            elif event.kind == "tool_call_end":
-                renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
-            elif event.kind == "assistant_message":
-                if event.data["content"]:
-                    storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
-            elif event.kind == "error":
-                if thinking:
-                    renderer.stop_thinking()
-                    thinking = False
-                renderer.render_error(event.data.get("message", "Unknown error"))
-            elif event.kind == "done":
-                if thinking:
-                    renderer.stop_thinking()
-                    thinking = False
-                renderer.render_response_end()
+        while True:
+            user_attempt += 1
+            should_retry = False
+            async for event in run_agent_loop(
+                ai_service=ai_service,
+                messages=messages,
+                tool_executor=tool_executor,
+                tools_openai=tools_openai,
+                cancel_event=cancel_event,
+                extra_system_prompt=extra_system_prompt,
+                max_iterations=config.cli.max_tool_iterations,
+                narration_cadence=ai_service.config.narration_cadence,
+            ):
+                if event.kind == "thinking":
+                    if not thinking:
+                        renderer.start_thinking()
+                        thinking = True
+                elif event.kind == "phase":
+                    renderer.set_thinking_phase(event.data.get("phase", ""))
+                elif event.kind == "retrying":
+                    renderer.set_retrying(event.data)
+                elif event.kind == "token":
+                    if not thinking:
+                        renderer.start_thinking()
+                        thinking = True
+                    renderer.render_token(event.data["content"])
+                    renderer.increment_thinking_tokens()
+                    renderer.increment_streaming_chars(len(event.data.get("content", "")))
+                    renderer.update_thinking()
+                elif event.kind == "tool_call_start":
+                    if thinking:
+                        await renderer.stop_thinking()
+                        thinking = False
+                    renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
+                elif event.kind == "tool_call_end":
+                    renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
+                elif event.kind == "assistant_message":
+                    if event.data["content"]:
+                        storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
+                elif event.kind == "error":
+                    error_msg = event.data.get("message", "Unknown error")
+                    retryable = event.data.get("retryable", False)
+                    if thinking and retryable and user_attempt <= max_user_retries:
+                        # Show countdown on thinking line, auto-retry
+                        should_retry = await renderer.thinking_countdown(retry_delay, cancel_event, error_msg)
+                        if should_retry:
+                            # Reset cancel_event for the retry
+                            cancel_event.clear()
+                            renderer.start_thinking()
+                            # thinking stays True
+                        else:
+                            await renderer.stop_thinking(cancel_msg="cancelled")
+                            thinking = False
+                    elif thinking and retryable and user_attempt > max_user_retries:
+                        # Exhausted user retries
+                        await renderer.stop_thinking(error_msg=f"{error_msg} · {user_attempt} attempts failed")
+                        thinking = False
+                    elif thinking:
+                        # Non-retryable error
+                        await renderer.stop_thinking(error_msg=error_msg)
+                        thinking = False
+                    else:
+                        renderer.render_error(error_msg)
+                elif event.kind == "done":
+                    if thinking and cancel_event.is_set():
+                        await renderer.stop_thinking(cancel_msg="cancelled")
+                        thinking = False
+                    elif thinking:
+                        await renderer.stop_thinking()
+                        thinking = False
+                    if not cancel_event.is_set():
+                        renderer.render_response_end()
+
+            if not should_retry:
+                break
 
         try:
             title = await ai_service.generate_title(prompt)
@@ -818,7 +851,7 @@ async def _run_one_shot(
 
     except KeyboardInterrupt:
         if thinking:
-            renderer.stop_thinking()
+            renderer.stop_thinking_sync()
             thinking = False
         renderer.render_response_end()
     finally:
@@ -1214,7 +1247,8 @@ async def _run_repl(
         ce = _current_cancel_event[0]
         if ce is not None:
             ce.set()
-            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]")
+            # Cancel display is handled by stop_thinking(cancel_msg="cancelled")
+            # in the event loop when it detects the cancel_event.
 
     async def _collect_input() -> None:
         """Continuously collect user input and put on queue."""
@@ -1712,6 +1746,9 @@ async def _run_repl(
             agent_busy.set()
 
             thinking = False
+            max_user_retries = 3
+            retry_delay = 5.0
+            user_attempt = 0
             try:
                 response_token_count = 0
                 total_elapsed = 0.0
@@ -1734,94 +1771,122 @@ async def _run_repl(
                     identity_kwargs=id_kw,
                 )
 
-                async for event in run_agent_loop(
-                    ai_service=ai_service,
-                    messages=ai_messages,
-                    tool_executor=tool_executor,
-                    tools_openai=tools_openai,
-                    cancel_event=cancel_event,
-                    extra_system_prompt=extra_system_prompt,
-                    max_iterations=config.cli.max_tool_iterations,
-                    message_queue=msg_queue,
-                    narration_cadence=ai_service.config.narration_cadence,
-                ):
-                    # Drain input_queue into msg_queue during streaming
-                    await _drain_input_to_msg_queue(
-                        input_queue,
-                        msg_queue,
-                        working_dir,
-                        db,
-                        conv["id"],
-                        cancel_event,
-                        exit_flag,
-                        warn_callback=_warn,
-                        identity_kwargs=id_kw,
-                    )
+                while True:
+                    user_attempt += 1
+                    should_retry = False
 
-                    if event.kind == "thinking":
-                        if not thinking:
-                            renderer.start_thinking()
-                            thinking = True
-                    elif event.kind == "phase":
-                        renderer.set_thinking_phase(event.data.get("phase", ""))
-                    elif event.kind == "retrying":
-                        renderer.set_retrying(event.data)
-                    elif event.kind == "token":
-                        if not thinking:
-                            renderer.start_thinking()
-                            thinking = True
-                        renderer.render_token(event.data["content"])
-                        renderer.increment_thinking_tokens()
-                        renderer.update_thinking()
-                        enc = _get_tiktoken_encoding()
-                        if enc:
-                            response_token_count += len(enc.encode(event.data["content"], allowed_special="all"))
-                        else:
-                            response_token_count += max(1, len(event.data["content"]) // 4)
-                    elif event.kind == "tool_call_start":
-                        if thinking:
-                            total_elapsed += renderer.stop_thinking()
-                            thinking = False
-                        renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
-                    elif event.kind == "tool_call_end":
-                        renderer.render_tool_call_end(
-                            event.data["tool_name"], event.data["status"], event.data["output"]
+                    async for event in run_agent_loop(
+                        ai_service=ai_service,
+                        messages=ai_messages,
+                        tool_executor=tool_executor,
+                        tools_openai=tools_openai,
+                        cancel_event=cancel_event,
+                        extra_system_prompt=extra_system_prompt,
+                        max_iterations=config.cli.max_tool_iterations,
+                        message_queue=msg_queue,
+                        narration_cadence=ai_service.config.narration_cadence,
+                    ):
+                        # Drain input_queue into msg_queue during streaming
+                        await _drain_input_to_msg_queue(
+                            input_queue,
+                            msg_queue,
+                            working_dir,
+                            db,
+                            conv["id"],
+                            cancel_event,
+                            exit_flag,
+                            warn_callback=_warn,
+                            identity_kwargs=id_kw,
                         )
-                    elif event.kind == "assistant_message":
-                        if event.data["content"]:
-                            storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
-                    elif event.kind == "queued_message":
-                        if thinking:
-                            total_elapsed += renderer.stop_thinking()
-                            thinking = False
-                        renderer.save_turn_history()
-                        renderer.render_newline()
-                        renderer.render_response_end()
-                        renderer.render_newline()
-                        renderer.console.print(f"[{CHROME}]Processing queued message...[/{CHROME}]")
-                        renderer.render_newline()
-                        renderer.clear_turn_history()
-                        response_token_count = 0
-                    elif event.kind == "error":
-                        if thinking:
-                            total_elapsed += renderer.stop_thinking()
-                            thinking = False
-                        renderer.render_error(event.data.get("message", "Unknown error"))
-                    elif event.kind == "done":
-                        if thinking:
-                            total_elapsed += renderer.stop_thinking()
-                            thinking = False
-                        renderer.save_turn_history()
-                        renderer.render_response_end()
-                        renderer.render_newline()
-                        context_tokens = _estimate_tokens(ai_messages)
-                        renderer.render_context_footer(
-                            current_tokens=context_tokens,
-                            auto_compact_threshold=config.cli.context_auto_compact_tokens,
-                            response_tokens=response_token_count,
-                            elapsed=total_elapsed,
-                        )
-                        renderer.render_newline()
+
+                        if event.kind == "thinking":
+                            if not thinking:
+                                renderer.start_thinking()
+                                thinking = True
+                        elif event.kind == "phase":
+                            renderer.set_thinking_phase(event.data.get("phase", ""))
+                        elif event.kind == "retrying":
+                            renderer.set_retrying(event.data)
+                        elif event.kind == "token":
+                            if not thinking:
+                                renderer.start_thinking()
+                                thinking = True
+                            renderer.render_token(event.data["content"])
+                            renderer.increment_thinking_tokens()
+                            renderer.increment_streaming_chars(len(event.data.get("content", "")))
+                            renderer.update_thinking()
+                            enc = _get_tiktoken_encoding()
+                            if enc:
+                                response_token_count += len(enc.encode(event.data["content"], allowed_special="all"))
+                            else:
+                                response_token_count += max(1, len(event.data["content"]) // 4)
+                        elif event.kind == "tool_call_start":
+                            if thinking:
+                                total_elapsed += await renderer.stop_thinking()
+                                thinking = False
+                            renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
+                        elif event.kind == "tool_call_end":
+                            renderer.render_tool_call_end(
+                                event.data["tool_name"], event.data["status"], event.data["output"]
+                            )
+                        elif event.kind == "assistant_message":
+                            if event.data["content"]:
+                                storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
+                        elif event.kind == "queued_message":
+                            if thinking:
+                                total_elapsed += await renderer.stop_thinking()
+                                thinking = False
+                            renderer.save_turn_history()
+                            renderer.render_newline()
+                            renderer.render_response_end()
+                            renderer.render_newline()
+                            renderer.console.print(f"[{CHROME}]Processing queued message...[/{CHROME}]")
+                            renderer.render_newline()
+                            renderer.clear_turn_history()
+                            response_token_count = 0
+                        elif event.kind == "error":
+                            error_msg = event.data.get("message", "Unknown error")
+                            retryable = event.data.get("retryable", False)
+                            if thinking and retryable and user_attempt <= max_user_retries:
+                                should_retry = await renderer.thinking_countdown(retry_delay, cancel_event, error_msg)
+                                if should_retry:
+                                    cancel_event.clear()
+                                    renderer.start_thinking()
+                                else:
+                                    total_elapsed += await renderer.stop_thinking(cancel_msg="cancelled")
+                                    thinking = False
+                            elif thinking and retryable and user_attempt > max_user_retries:
+                                total_elapsed += await renderer.stop_thinking(
+                                    error_msg=f"{error_msg} · {user_attempt} attempts failed"
+                                )
+                                thinking = False
+                            elif thinking:
+                                total_elapsed += await renderer.stop_thinking(error_msg=error_msg)
+                                thinking = False
+                            else:
+                                renderer.render_error(error_msg)
+                        elif event.kind == "done":
+                            if thinking and cancel_event.is_set():
+                                total_elapsed += await renderer.stop_thinking(cancel_msg="cancelled")
+                                thinking = False
+                            elif thinking:
+                                total_elapsed += await renderer.stop_thinking()
+                                thinking = False
+                            if not cancel_event.is_set():
+                                renderer.save_turn_history()
+                                renderer.render_response_end()
+                                renderer.render_newline()
+                                context_tokens = _estimate_tokens(ai_messages)
+                                renderer.render_context_footer(
+                                    current_tokens=context_tokens,
+                                    auto_compact_threshold=config.cli.context_auto_compact_tokens,
+                                    response_tokens=response_token_count,
+                                    elapsed=total_elapsed,
+                                )
+                                renderer.render_newline()
+
+                    if not should_retry:
+                        break
 
                 # Generate title on first exchange
                 if is_first_message:
@@ -1834,11 +1899,11 @@ async def _run_repl(
 
             except KeyboardInterrupt:
                 if thinking:
-                    renderer.stop_thinking()
+                    renderer.stop_thinking_sync()
                 renderer.render_response_end()
             finally:
                 if thinking:
-                    renderer.stop_thinking()
+                    renderer.stop_thinking_sync()
                     thinking = False
                 if not _has_pending_work():
                     agent_busy.clear()

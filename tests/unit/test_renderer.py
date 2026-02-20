@@ -17,6 +17,7 @@ from anteroom.cli.renderer import (
     _format_tokens,
     _humanize_tool,
     _output_summary,
+    _phase_elapsed_str,
     _phase_suffix,
     _short_path,
     _write_thinking_line,
@@ -24,6 +25,7 @@ from anteroom.cli.renderer import (
     cycle_verbosity,
     flush_buffered_text,
     get_verbosity,
+    increment_streaming_chars,
     increment_thinking_tokens,
     render_response_end,
     render_tool_call_end,
@@ -36,6 +38,8 @@ from anteroom.cli.renderer import (
     start_thinking,
     startup_step,
     stop_thinking,
+    stop_thinking_sync,
+    thinking_countdown,
 )
 
 
@@ -857,32 +861,33 @@ class TestWriteThinkingLine:
         assert "waiting for API" not in output
         r._stdout = None
 
-    def test_stall_warning_at_threshold(self) -> None:
-        """At 15s: stall warning appears."""
+    def test_no_stall_warning_without_phase(self) -> None:
+        """At 15s+ with no phase set: no stall warning (phase system handles it)."""
         import io
 
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
         r._stdout = buf
+        r._thinking_phase = ""
         _write_thinking_line(15.0)
         output = buf.getvalue()
         assert "15s" in output
-        assert "waiting for API response" in output
+        assert "esc to cancel" in output
         r._stdout = None
 
-    def test_stall_warning_after_threshold(self) -> None:
-        """Well past threshold: stall warning still present."""
+    def test_long_elapsed_still_shows_hint(self) -> None:
+        """Well past threshold: timer and ESC hint present."""
         import io
 
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
         r._stdout = buf
+        r._thinking_phase = ""
         _write_thinking_line(30.0)
         output = buf.getvalue()
         assert "30s" in output
-        assert "waiting for API response" in output
         assert "esc to cancel" in output
         r._stdout = None
 
@@ -902,13 +907,13 @@ class TestThinkingTicker:
             assert r._thinking_ticker_task is not None
             assert not r._thinking_ticker_task.done()
         finally:
-            stop_thinking()
+            stop_thinking_sync()
             r._repl_mode = False
             r._stdout = None
 
     @pytest.mark.asyncio
     async def test_stop_thinking_cancels_ticker_task(self) -> None:
-        """stop_thinking() should cancel the ticker task."""
+        """stop_thinking() should cancel and await the ticker task."""
         import anteroom.cli.renderer as r
 
         r._repl_mode = True
@@ -917,10 +922,8 @@ class TestThinkingTicker:
             start_thinking()
             task = r._thinking_ticker_task
             assert task is not None
-            stop_thinking()
+            await stop_thinking()
             assert r._thinking_ticker_task is None
-            # Allow cancellation to propagate
-            await asyncio.sleep(0)
             assert task.cancelled() or task.done()
         finally:
             r._repl_mode = False
@@ -942,7 +945,7 @@ class TestThinkingTicker:
             output = buf.getvalue()
             assert "5s" in output or "6s" in output
         finally:
-            stop_thinking()
+            stop_thinking_sync()
             r._repl_mode = False
             r._stdout = None
 
@@ -956,7 +959,7 @@ class TestThinkingTicker:
             start_thinking()
             assert r._thinking_ticker_task is None
         finally:
-            stop_thinking()
+            stop_thinking_sync()
 
     @pytest.mark.asyncio
     async def test_double_start_cancels_previous_ticker(self) -> None:
@@ -976,7 +979,7 @@ class TestThinkingTicker:
             await asyncio.sleep(0)
             assert first_task.cancelled() or first_task.done()
         finally:
-            stop_thinking()
+            stop_thinking_sync()
             r._repl_mode = False
             r._stdout = None
 
@@ -989,7 +992,9 @@ class TestThinkingPhases:
 
         r._thinking_phase = ""
         r._thinking_tokens = 0
+        r._streaming_chars = 0
         r._last_chunk_time = 0
+        r._phase_start_time = 0
         r._retrying_info = {}
         set_verbosity(Verbosity.DETAILED)
 
@@ -998,7 +1003,9 @@ class TestThinkingPhases:
 
         r._thinking_phase = ""
         r._thinking_tokens = 0
+        r._streaming_chars = 0
         r._last_chunk_time = 0
+        r._phase_start_time = 0
         r._retrying_info = {}
         set_verbosity(Verbosity.COMPACT)
 
@@ -1060,13 +1067,13 @@ class TestThinkingPhases:
         r._thinking_phase = ""
         assert _phase_suffix(5.0) == ""
 
-    def test_phase_suffix_empty_in_compact_mode(self) -> None:
-        """_phase_suffix returns empty string in COMPACT verbosity."""
+    def test_phase_suffix_shown_in_compact_mode(self) -> None:
+        """_phase_suffix returns phase text even in COMPACT verbosity (health monitor)."""
         import anteroom.cli.renderer as r
 
         set_verbosity(Verbosity.COMPACT)
         r._thinking_phase = "connecting"
-        assert _phase_suffix(5.0) == ""
+        assert _phase_suffix(5.0) == "connecting"
 
     def test_phase_suffix_connecting(self) -> None:
         """_phase_suffix returns 'connecting' for the connecting phase."""
@@ -1076,28 +1083,28 @@ class TestThinkingPhases:
         assert _phase_suffix(1.0) == "connecting"
 
     def test_phase_suffix_waiting(self) -> None:
-        """_phase_suffix returns 'waiting for first token' for the waiting phase."""
+        """_phase_suffix returns 'connected · waiting for first token' for the waiting phase."""
         import anteroom.cli.renderer as r
 
         r._thinking_phase = "waiting"
-        assert _phase_suffix(2.0) == "waiting for first token"
+        assert _phase_suffix(2.0) == "connected · waiting for first token"
 
-    def test_phase_suffix_streaming_with_token_count(self) -> None:
-        """_phase_suffix returns 'streaming (N tokens)' during active streaming."""
+    def test_phase_suffix_streaming_with_char_count(self) -> None:
+        """_phase_suffix returns 'streaming · N chars' during active streaming."""
         import anteroom.cli.renderer as r
 
         r._thinking_phase = "streaming"
-        r._thinking_tokens = 42
+        r._streaming_chars = 420
         r._last_chunk_time = time.monotonic()  # recent, no stall
         result = _phase_suffix(3.0)
-        assert result == "streaming (42 tokens)"
+        assert result == "streaming · 420 chars"
 
     def test_phase_suffix_streaming_stalled(self) -> None:
         """_phase_suffix returns 'stalled Ns' when no chunks arrive for >5s."""
         import anteroom.cli.renderer as r
 
         r._thinking_phase = "streaming"
-        r._thinking_tokens = 10
+        r._streaming_chars = 100
         r._last_chunk_time = time.monotonic() - 7.0  # 7s since last chunk
         result = _phase_suffix(10.0)
         assert "stalled" in result
@@ -1108,11 +1115,11 @@ class TestThinkingPhases:
         import anteroom.cli.renderer as r
 
         r._thinking_phase = "streaming"
-        r._thinking_tokens = 10
+        r._streaming_chars = 100
         r._last_chunk_time = time.monotonic() - 2.0  # 2s ago, under threshold
         result = _phase_suffix(10.0)
         assert "stalled" not in result
-        assert "streaming (10 tokens)" == result
+        assert result == "streaming · 100 chars"
 
     def test_phase_suffix_unknown_phase_returns_raw(self) -> None:
         """_phase_suffix returns the raw phase string for unknown phases."""
@@ -1135,16 +1142,20 @@ class TestThinkingPhases:
 
         r._thinking_phase = "streaming"
         r._thinking_tokens = 100
+        r._streaming_chars = 500
         r._last_chunk_time = time.monotonic()
+        r._phase_start_time = time.monotonic()
         r._repl_mode = True
         r._stdout = io.StringIO()
         try:
             start_thinking()
             assert r._thinking_phase == ""
             assert r._thinking_tokens == 0
+            assert r._streaming_chars == 0
             assert r._last_chunk_time == 0
+            assert r._phase_start_time == 0
         finally:
-            stop_thinking()
+            stop_thinking_sync()
             r._repl_mode = False
             r._stdout = None
 
@@ -1168,44 +1179,48 @@ class TestThinkingPhases:
         assert r._thinking_tokens == 1
 
     def test_full_phase_lifecycle(self) -> None:
-        """Full lifecycle: connecting → waiting → streaming with tokens."""
+        """Full lifecycle: connecting → waiting → streaming with chars."""
+        import anteroom.cli.renderer as r
+
         set_thinking_phase("connecting")
         assert _phase_suffix(0.5) == "connecting"
 
         set_thinking_phase("waiting")
-        assert _phase_suffix(1.0) == "waiting for first token"
+        assert _phase_suffix(1.0) == "connected · waiting for first token"
 
         increment_thinking_tokens()
         increment_thinking_tokens()
         increment_thinking_tokens()
+        r._streaming_chars = 150
         result = _phase_suffix(2.0)
-        assert "streaming (3 tokens)" == result
+        assert result == "streaming · 150 chars"
 
     def test_stall_detection_clears_when_chunks_resume(self) -> None:
         """Stall detection clears when new chunks arrive."""
         import anteroom.cli.renderer as r
 
         r._thinking_phase = "streaming"
-        r._thinking_tokens = 5
+        r._streaming_chars = 50
         r._last_chunk_time = time.monotonic() - 10.0  # stalled
         assert "stalled" in _phase_suffix(15.0)
 
         # New chunk arrives
         increment_thinking_tokens()
+        r._streaming_chars = 80
         result = _phase_suffix(15.0)
         assert "stalled" not in result
-        assert "streaming (6 tokens)" == result
+        assert result == "streaming · 80 chars"
 
     def test_phase_suffix_streaming_with_zero_chunk_time(self) -> None:
-        """_phase_suffix with _last_chunk_time=0 skips stall check, returns token count."""
+        """_phase_suffix with _last_chunk_time=0 skips stall check, returns char count."""
         import anteroom.cli.renderer as r
 
         r._thinking_phase = "streaming"
-        r._thinking_tokens = 7
+        r._streaming_chars = 70
         r._last_chunk_time = 0  # falsy — stall check skipped
         result = _phase_suffix(20.0)
         assert "stalled" not in result
-        assert result == "streaming (7 tokens)"
+        assert result == "streaming · 70 chars"
 
 
 class TestWriteThinkingLinePhases:
@@ -1216,7 +1231,9 @@ class TestWriteThinkingLinePhases:
 
         r._thinking_phase = ""
         r._thinking_tokens = 0
+        r._streaming_chars = 0
         r._last_chunk_time = 0
+        r._phase_start_time = 0
         set_verbosity(Verbosity.DETAILED)
 
     def teardown_method(self) -> None:
@@ -1224,7 +1241,9 @@ class TestWriteThinkingLinePhases:
 
         r._thinking_phase = ""
         r._thinking_tokens = 0
+        r._streaming_chars = 0
         r._last_chunk_time = 0
+        r._phase_start_time = 0
         set_verbosity(Verbosity.COMPACT)
 
     def test_connecting_phase_in_ansi_output(self) -> None:
@@ -1255,17 +1274,18 @@ class TestWriteThinkingLinePhases:
         r._stdout = None
 
     def test_streaming_phase_in_ansi_output(self) -> None:
-        """_write_thinking_line includes 'streaming (N tokens)' phase text."""
+        """_write_thinking_line includes 'streaming · N chars' phase text."""
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
         r._stdout = buf
         r._thinking_phase = "streaming"
-        r._thinking_tokens = 25
+        r._streaming_chars = 250
         r._last_chunk_time = time.monotonic()
         _write_thinking_line(3.0)
         output = buf.getvalue()
-        assert "streaming (25 tokens)" in output
+        assert "streaming" in output
+        assert "250 chars" in output
         r._stdout = None
 
     def test_stalled_phase_in_ansi_output(self) -> None:
@@ -1295,8 +1315,8 @@ class TestWriteThinkingLinePhases:
         assert "\033[38;2;139;139;139m" in output
         r._stdout = None
 
-    def test_no_phase_text_in_compact_mode(self) -> None:
-        """_write_thinking_line omits phase text in COMPACT verbosity."""
+    def test_phase_text_shown_in_compact_mode(self) -> None:
+        """_write_thinking_line shows phase text even in COMPACT mode (health monitor)."""
         import anteroom.cli.renderer as r
 
         set_verbosity(Verbosity.COMPACT)
@@ -1306,7 +1326,7 @@ class TestWriteThinkingLinePhases:
         r._last_chunk_time = time.monotonic()
         _write_thinking_line(2.0)
         output = buf.getvalue()
-        assert "connecting" not in output
+        assert "connecting" in output
         r._stdout = None
 
     def test_phase_text_overrides_stall_warning(self) -> None:
@@ -1323,8 +1343,8 @@ class TestWriteThinkingLinePhases:
         assert "(waiting for API response)" not in output
         r._stdout = None
 
-    def test_no_phase_falls_back_to_stall_warning(self) -> None:
-        """When no phase is set, the generic stall warning still appears."""
+    def test_no_phase_no_stall_warning(self) -> None:
+        """When no phase is set, no phase text or stall warning appears (phase system handles it)."""
         import anteroom.cli.renderer as r
 
         set_verbosity(Verbosity.DETAILED)
@@ -1333,7 +1353,8 @@ class TestWriteThinkingLinePhases:
         r._thinking_phase = ""
         _write_thinking_line(20.0)
         output = buf.getvalue()
-        assert "waiting for API response" in output
+        assert "waiting for API response" not in output
+        assert "Thinking..." in output
         r._stdout = None
 
 
@@ -1376,8 +1397,8 @@ class TestThinkingTickerPhases:
             r._thinking_phase = ""
 
     @pytest.mark.asyncio
-    async def test_ticker_shows_streaming_token_count(self) -> None:
-        """Background ticker shows token count during streaming phase."""
+    async def test_ticker_shows_streaming_char_count(self) -> None:
+        """Background ticker shows char count during streaming phase."""
         import anteroom.cli.renderer as r
 
         set_verbosity(Verbosity.DETAILED)
@@ -1386,7 +1407,7 @@ class TestThinkingTickerPhases:
         r._stdout = buf
         r._thinking_start = time.monotonic() - 2.0
         r._thinking_phase = "streaming"
-        r._thinking_tokens = 150
+        r._streaming_chars = 1500
         r._last_chunk_time = time.monotonic()
 
         try:
@@ -1401,12 +1422,13 @@ class TestThinkingTickerPhases:
                 pass
 
             output = buf.getvalue()
-            assert "streaming (150 tokens)" in output
+            assert "streaming" in output
+            assert "1,500 chars" in output
         finally:
             r._repl_mode = False
             r._stdout = None
             r._thinking_phase = ""
-            r._thinking_tokens = 0
+            r._streaming_chars = 0
 
     @pytest.mark.asyncio
     async def test_ticker_shows_stalled_during_streaming(self) -> None:
@@ -1450,7 +1472,9 @@ class TestRetryingPhase:
 
         r._thinking_phase = ""
         r._thinking_tokens = 0
+        r._streaming_chars = 0
         r._last_chunk_time = 0
+        r._phase_start_time = 0
         r._retrying_info = {}
         set_verbosity(Verbosity.DETAILED)
 
@@ -1459,7 +1483,9 @@ class TestRetryingPhase:
 
         r._thinking_phase = ""
         r._thinking_tokens = 0
+        r._streaming_chars = 0
         r._last_chunk_time = 0
+        r._phase_start_time = 0
         r._retrying_info = {}
         set_verbosity(Verbosity.COMPACT)
 
@@ -1479,23 +1505,23 @@ class TestRetryingPhase:
         assert r._retrying_info == data
 
     def test_phase_suffix_retrying(self) -> None:
-        """_phase_suffix must show 'retrying (N/M)' for retrying phase."""
+        """_phase_suffix must show 'retry N/M' for retrying phase."""
         import anteroom.cli.renderer as r
 
         r._thinking_phase = "retrying"
         r._retrying_info = {"attempt": 2, "max_attempts": 3}
         result = _phase_suffix(5.0)
-        assert result == "retrying (2/3)"
+        assert result == "retry 2/3"
 
-    def test_phase_suffix_retrying_compact_hidden(self) -> None:
-        """_phase_suffix must return empty string in COMPACT mode."""
+    def test_phase_suffix_retrying_shown_in_compact(self) -> None:
+        """_phase_suffix shows retry info even in COMPACT mode (health monitor)."""
         import anteroom.cli.renderer as r
 
         set_verbosity(Verbosity.COMPACT)
         r._thinking_phase = "retrying"
         r._retrying_info = {"attempt": 2, "max_attempts": 3}
         result = _phase_suffix(5.0)
-        assert result == ""
+        assert result == "retry 2/3"
 
     def test_start_thinking_resets_retrying_info(self) -> None:
         """start_thinking must clear _retrying_info."""
@@ -1508,6 +1534,675 @@ class TestRetryingPhase:
             start_thinking()
             assert r._retrying_info == {}
         finally:
-            stop_thinking()
+            stop_thinking_sync()
             r._repl_mode = False
             r._stdout = None
+
+
+class TestIncrementStreamingChars:
+    """Tests for increment_streaming_chars() (#221)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._streaming_chars = 0
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._streaming_chars = 0
+
+    def test_increment_adds_chars(self) -> None:
+        import anteroom.cli.renderer as r
+
+        increment_streaming_chars(42)
+        assert r._streaming_chars == 42
+
+    def test_increment_accumulates(self) -> None:
+        import anteroom.cli.renderer as r
+
+        increment_streaming_chars(10)
+        increment_streaming_chars(20)
+        increment_streaming_chars(5)
+        assert r._streaming_chars == 35
+
+    def test_increment_zero_is_noop(self) -> None:
+        import anteroom.cli.renderer as r
+
+        increment_streaming_chars(0)
+        assert r._streaming_chars == 0
+
+
+class TestPhaseElapsedStr:
+    """Tests for _phase_elapsed_str() (#221)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = 0
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = 0
+
+    def test_returns_empty_when_no_start_time(self) -> None:
+        assert _phase_elapsed_str() == ""
+
+    def test_returns_empty_when_under_threshold(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = time.monotonic() - 0.5  # 0.5s, under 1.5s threshold
+        assert _phase_elapsed_str() == ""
+
+    def test_returns_elapsed_when_over_threshold(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = time.monotonic() - 3.0
+        result = _phase_elapsed_str()
+        assert result.startswith(" (")
+        assert result.endswith("s)")
+        # Should be approximately 3s
+        secs = int(result.strip(" ()s"))
+        assert 2 <= secs <= 4
+
+    def test_phase_suffix_includes_elapsed(self) -> None:
+        """Phase suffix includes per-phase elapsed when > 1.5s."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "connecting"
+        r._phase_start_time = time.monotonic() - 5.0
+        result = _phase_suffix(10.0)
+        assert "connecting" in result
+        assert "(5s)" in result or "(4s)" in result
+
+
+class TestWriteThinkingLineMessages:
+    """Tests for error_msg, cancel_msg, countdown in _write_thinking_line() (#221)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._streaming_chars = 0
+        r._phase_start_time = 0
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._streaming_chars = 0
+        r._phase_start_time = 0
+
+    def test_error_msg_shown_in_red(self) -> None:
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(10.0, error_msg="Stream timed out")
+        output = buf.getvalue()
+        assert "Stream timed out" in output
+        # ERROR_RED #CD6B6B = rgb(205, 107, 107)
+        assert "\033[38;2;205;107;107m" in output
+        r._stdout = None
+
+    def test_error_with_countdown(self) -> None:
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(10.0, error_msg="Stream timed out", countdown=3)
+        output = buf.getvalue()
+        assert "Stream timed out" in output
+        assert "retrying in 3s" in output
+        assert "esc to give up" in output
+        r._stdout = None
+
+    def test_cancel_msg_shown_muted(self) -> None:
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(10.0, cancel_msg="cancelled")
+        output = buf.getvalue()
+        assert "cancelled" in output
+        # MUTED color
+        assert "\033[38;2;139;139;139m" in output
+        r._stdout = None
+
+    def test_error_msg_overrides_phase(self) -> None:
+        """Error message replaces phase text (not shown alongside it)."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 100
+        _write_thinking_line(10.0, error_msg="Connection lost")
+        output = buf.getvalue()
+        assert "Connection lost" in output
+        assert "streaming" not in output
+        r._stdout = None
+
+    def test_cancel_msg_overrides_phase(self) -> None:
+        """Cancel message replaces phase text."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 100
+        _write_thinking_line(10.0, cancel_msg="cancelled")
+        output = buf.getvalue()
+        assert "cancelled" in output
+        assert "streaming" not in output
+        r._stdout = None
+
+    def test_no_esc_hint_during_error(self) -> None:
+        """'esc to cancel' should NOT appear when showing error (shows 'esc to give up' instead)."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(10.0, error_msg="Timed out", countdown=5)
+        output = buf.getvalue()
+        assert "esc to cancel" not in output
+        assert "esc to give up" in output
+        r._stdout = None
+
+    def test_no_esc_hint_during_cancel(self) -> None:
+        """'esc to cancel' should NOT appear when showing cancel message."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(10.0, cancel_msg="cancelled")
+        output = buf.getvalue()
+        assert "esc to cancel" not in output
+        r._stdout = None
+
+
+class TestAsyncStopThinking:
+    """Tests for async stop_thinking() with messages (#221)."""
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_with_error_msg(self) -> None:
+        """stop_thinking(error_msg=...) writes error on final line."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 5.0
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        elapsed = await stop_thinking(error_msg="Stream timed out")
+        output = buf.getvalue()
+        assert "Stream timed out" in output
+        assert "\n" in output  # newline after final line
+        assert elapsed >= 4.0
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_with_cancel_msg(self) -> None:
+        """stop_thinking(cancel_msg=...) writes cancel on final line."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 3.0
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        await stop_thinking(cancel_msg="cancelled")
+        output = buf.getvalue()
+        assert "cancelled" in output
+        assert "\n" in output
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_clean_final_line(self) -> None:
+        """stop_thinking() with no args writes clean final line."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 2.0
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        await stop_thinking()
+        output = buf.getvalue()
+        assert "Thinking..." in output
+        assert "\n" in output
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_awaits_ticker(self) -> None:
+        """stop_thinking() awaits ticker task before writing final line."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        r._thinking_start = time.monotonic() - 1.0
+        r._spinner = None
+
+        # Create a real ticker task
+        start_thinking()
+        assert r._thinking_ticker_task is not None
+
+        await stop_thinking()
+        assert r._thinking_ticker_task is None
+        r._repl_mode = False
+        r._stdout = None
+
+    def test_stop_thinking_sync_clears_line(self) -> None:
+        """stop_thinking_sync() clears the line without writing a message."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 3.0
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        elapsed = stop_thinking_sync()
+        output = buf.getvalue()
+        assert "\r\033[2K" in output  # line clear
+        assert elapsed >= 2.0
+        r._repl_mode = False
+        r._stdout = None
+
+
+class TestThinkingCountdown:
+    """Tests for thinking_countdown() (#221)."""
+
+    @pytest.mark.asyncio
+    async def test_countdown_completes_returns_true(self) -> None:
+        """Countdown finishes without cancel -> returns True (should retry)."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 5.0
+
+        cancel = asyncio.Event()
+        result = await thinking_countdown(2.0, cancel, "Stream timed out")
+        assert result is True
+        output = buf.getvalue()
+        assert "Stream timed out" in output
+        assert "retrying in" in output
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_countdown_cancelled_returns_false(self) -> None:
+        """Cancel event during countdown -> returns False (give up)."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 5.0
+
+        cancel = asyncio.Event()
+
+        async def fire_cancel() -> None:
+            await asyncio.sleep(0.5)
+            cancel.set()
+
+        asyncio.create_task(fire_cancel())
+        result = await thinking_countdown(10.0, cancel, "Connection lost")
+        assert result is False
+        output = buf.getvalue()
+        assert "cancelled" in output
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_countdown_zero_delay_returns_true(self) -> None:
+        """Zero-second countdown returns True immediately."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        r._thinking_start = time.monotonic()
+
+        cancel = asyncio.Event()
+        result = await thinking_countdown(0.0, cancel, "error")
+        assert result is True
+        r._repl_mode = False
+        r._stdout = None
+
+
+class TestStreamingCharsInPhaseDisplay:
+    """Integration tests: streaming chars display across the full pipeline (#221)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._streaming_chars = 0
+        r._last_chunk_time = 0
+        r._phase_start_time = 0
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._streaming_chars = 0
+        r._last_chunk_time = 0
+        r._phase_start_time = 0
+
+    def test_chars_formatted_with_comma_separator(self) -> None:
+        """Large char counts use comma grouping (e.g. '1,500 chars')."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 12345
+        r._last_chunk_time = time.monotonic()
+        result = _phase_suffix(5.0)
+        assert "12,345 chars" in result
+
+    def test_zero_chars_shows_zero(self) -> None:
+        """Zero chars during streaming shows '0 chars'."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 0
+        r._last_chunk_time = time.monotonic()
+        result = _phase_suffix(2.0)
+        assert result == "streaming · 0 chars"
+
+    def test_chars_and_stall_coexist(self) -> None:
+        """Stall message includes char count."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 500
+        r._last_chunk_time = time.monotonic() - 8.0
+        result = _phase_suffix(10.0)
+        assert "500 chars" in result
+        assert "stalled" in result
+
+    def test_streaming_chars_independent_of_tokens(self) -> None:
+        """Char count and token count are tracked independently."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 99
+        r._streaming_chars = 2000
+        r._last_chunk_time = time.monotonic()
+        result = _phase_suffix(3.0)
+        assert "2,000 chars" in result
+        assert "99" not in result  # tokens not shown
+
+    def test_start_thinking_resets_streaming_chars(self) -> None:
+        """start_thinking() resets streaming chars to 0."""
+        import anteroom.cli.renderer as r
+
+        r._streaming_chars = 5000
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        try:
+            start_thinking()
+            assert r._streaming_chars == 0
+        finally:
+            stop_thinking_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+
+class TestPhaseElapsedEdgeCases:
+    """Edge cases for per-phase elapsed timing (#221)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = 0
+        r._thinking_phase = ""
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = 0
+        r._thinking_phase = ""
+
+    def test_set_thinking_phase_resets_phase_timer(self) -> None:
+        """set_thinking_phase() records a new _phase_start_time."""
+        import anteroom.cli.renderer as r
+
+        set_thinking_phase("connecting")
+        assert r._phase_start_time > 0
+
+        old_start = r._phase_start_time
+        time.sleep(0.01)
+        set_thinking_phase("waiting")
+        assert r._phase_start_time > old_start
+
+    def test_elapsed_not_shown_for_fast_phases(self) -> None:
+        """Phases that resolve quickly (< 1.5s) don't show elapsed."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "connecting"
+        r._phase_start_time = time.monotonic() - 1.0  # 1s, under 1.5s threshold
+        result = _phase_suffix(3.0)
+        assert result == "connecting"
+        assert "(" not in result
+
+    def test_elapsed_shown_for_slow_phases(self) -> None:
+        """Phases taking > 1.5s show per-phase elapsed."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "waiting"
+        r._phase_start_time = time.monotonic() - 10.0
+        result = _phase_suffix(15.0)
+        assert "connected · waiting for first token" in result
+        assert "(10s)" in result or "(9s)" in result
+
+    def test_elapsed_not_shown_for_streaming(self) -> None:
+        """Streaming phase doesn't show per-phase elapsed (char count is enough)."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 100
+        r._last_chunk_time = time.monotonic()
+        r._phase_start_time = time.monotonic() - 10.0
+        result = _phase_suffix(15.0)
+        # Streaming uses char count, not per-phase elapsed
+        assert "100 chars" in result
+
+
+class TestWriteThinkingLineColorCodes:
+    """Verify ANSI color codes in _write_thinking_line() (#221)."""
+
+    def test_gold_color_for_thinking_text(self) -> None:
+        """'Thinking...' text uses GOLD color."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(2.0)
+        output = buf.getvalue()
+        # GOLD #C5A059 = rgb(197, 160, 89)
+        assert "\033[38;2;197;160;89m" in output
+        r._stdout = None
+
+    def test_timer_color_for_elapsed(self) -> None:
+        """Timer uses CHROME color."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(5.0)
+        output = buf.getvalue()
+        # CHROME #6b7280 = rgb(107, 114, 128)
+        assert "\033[38;2;107;114;128m" in output
+        r._stdout = None
+
+    def test_error_red_color(self) -> None:
+        """Error messages use ERROR_RED color."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(5.0, error_msg="timeout")
+        output = buf.getvalue()
+        # ERROR_RED #CD6B6B = rgb(205, 107, 107)
+        assert "\033[38;2;205;107;107m" in output
+        r._stdout = None
+
+    def test_reset_codes_present(self) -> None:
+        """ANSI reset codes are present to avoid color bleed."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(5.0, error_msg="error", countdown=3)
+        output = buf.getvalue()
+        assert "\033[0m" in output
+        r._stdout = None
+
+
+class TestCountdownEdgeCases:
+    """Edge cases for thinking_countdown() (#221)."""
+
+    @pytest.mark.asyncio
+    async def test_countdown_ticks_once_per_second(self) -> None:
+        """Countdown writes to stdout once per second."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 5.0
+
+        cancel = asyncio.Event()
+        start = time.monotonic()
+        await thinking_countdown(3.0, cancel, "error")
+        elapsed = time.monotonic() - start
+
+        # Should take ~3 seconds
+        assert 2.5 <= elapsed <= 4.0
+
+        output = buf.getvalue()
+        # Should contain countdown values
+        assert "retrying in 3s" in output
+        assert "retrying in 2s" in output
+        assert "retrying in 1s" in output
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_countdown_preserves_error_message(self) -> None:
+        """Error message persists throughout countdown ticks."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 10.0
+
+        cancel = asyncio.Event()
+        await thinking_countdown(2.0, cancel, "Stream timed out")
+
+        output = buf.getvalue()
+        # Each tick should include the error message
+        assert output.count("Stream timed out") >= 2
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_countdown_not_active_in_non_repl_mode(self) -> None:
+        """Countdown does nothing visible when not in REPL mode."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = False
+        r._stdout = buf
+        r._thinking_start = time.monotonic()
+
+        cancel = asyncio.Event()
+        result = await thinking_countdown(1.0, cancel, "error")
+        assert result is True
+        # No output when not in repl mode
+        assert buf.getvalue() == ""
+        r._stdout = None
+
+
+class TestStopThinkingEdgeCases:
+    """Edge cases for stop_thinking() and stop_thinking_sync() (#221)."""
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_returns_elapsed_time(self) -> None:
+        """stop_thinking() returns accurate elapsed seconds."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        r._thinking_start = time.monotonic() - 7.0
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        elapsed = await stop_thinking()
+        assert 6.0 <= elapsed <= 8.0
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_no_output_without_repl_mode(self) -> None:
+        """stop_thinking() writes nothing when not in REPL mode."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = False
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 2.0
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        await stop_thinking(error_msg="error")
+        assert buf.getvalue() == ""
+        r._stdout = None
+
+    def test_stop_thinking_sync_returns_elapsed(self) -> None:
+        """stop_thinking_sync() returns accurate elapsed seconds."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        r._thinking_start = time.monotonic() - 4.0
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        elapsed = stop_thinking_sync()
+        assert 3.0 <= elapsed <= 5.0
+        r._repl_mode = False
+        r._stdout = None
+
+    def test_stop_thinking_sync_cancels_ticker_without_await(self) -> None:
+        """stop_thinking_sync() cancels ticker task but does not await it."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        r._thinking_start = time.monotonic()
+
+        # Simulate a ticker task
+        fake_task = type("FakeTask", (), {"cancel": lambda self: None})()
+        r._thinking_ticker_task = fake_task
+
+        stop_thinking_sync()
+        assert r._thinking_ticker_task is None
+        r._repl_mode = False
+        r._stdout = None

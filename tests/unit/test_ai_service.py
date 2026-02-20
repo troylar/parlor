@@ -180,7 +180,7 @@ class TestConnectionErrorHandling:
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
         assert error_events[0]["data"]["code"] == "connection_error"
-        assert "bad-host:1234" in error_events[0]["data"]["message"]
+        assert "Cannot connect to API" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
     async def test_stream_chat_rebuilds_client_on_connection_error(self):
@@ -1364,7 +1364,7 @@ class TestRetryWithExponentialBackoff:
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
         assert error_events[0]["data"]["code"] == "timeout"
-        assert "first_token_timeout" in error_events[0]["data"]["message"]
+        assert "No response from API" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
     async def test_connection_error_all_retries_exhausted(self):
@@ -1383,7 +1383,7 @@ class TestRetryWithExponentialBackoff:
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
         assert error_events[0]["data"]["code"] == "connection_error"
-        assert "dead-host:1234" in error_events[0]["data"]["message"]
+        assert "Cannot connect to API" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
     async def test_cancel_during_retry_backoff_exits_immediately(self):
@@ -1410,3 +1410,125 @@ class TestRetryWithExponentialBackoff:
         retry_events = [e for e in events if e["event"] == "retrying"]
         assert len(retry_events) == 1
         assert not any(e["event"] == "error" for e in events)
+
+
+class TestRetryableFlag:
+    """Tests for retryable flag on error events (#221)."""
+
+    @pytest.mark.asyncio
+    async def test_auth_error_not_retryable(self):
+        """Authentication errors must have retryable=False."""
+        from openai import AuthenticationError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=AuthenticationError("bad key", response=MagicMock(), body=None)
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["retryable"] is False
+
+    @pytest.mark.asyncio
+    async def test_bad_request_not_retryable(self):
+        """Bad request errors must have retryable=False."""
+        from openai import BadRequestError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=BadRequestError("invalid", response=MagicMock(), body={})
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["retryable"] is False
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_retryable(self):
+        """Rate limit errors must have retryable=True."""
+        from openai import RateLimitError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=RateLimitError("too many", response=MagicMock(), body=None)
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["retryable"] is True
+
+    @pytest.mark.asyncio
+    async def test_stream_timeout_retryable(self):
+        """Stream timeout errors must have retryable=True."""
+        service = _make_service()
+
+        # Patch to raise _StreamTimeoutError after getting past the initial stream setup
+        class TimeoutStream:
+            choices = []
+
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                raise _StreamTimeoutError()
+                yield  # pragma: no cover
+
+            async def close(self):
+                pass
+
+        mock_stream = TimeoutStream()
+        service.client.chat.completions.create = AsyncMock(return_value=mock_stream)
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["retryable"] is True
+        assert error_events[0]["data"]["code"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_connection_error_retryable_after_retries(self):
+        """Connection error after exhausting retries must have retryable=True."""
+        from openai import APIConnectionError
+
+        config = _make_config(retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=APIConnectionError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["retryable"] is True
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_not_retryable(self):
+        """Generic exceptions must have retryable=False."""
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=RuntimeError("something broke"))
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["retryable"] is False
