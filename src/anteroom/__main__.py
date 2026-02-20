@@ -276,6 +276,8 @@ def _run_chat(
     resume_id: str | None = None,
     project_path: str | None = None,
     model: str | None = None,
+    trust_project: bool = False,
+    no_project_context: bool = False,
 ) -> None:
     """Launch the CLI chat mode."""
     import os
@@ -302,6 +304,8 @@ def _run_chat(
                 no_tools=no_tools,
                 continue_last=continue_last,
                 conversation_id=resume_id,
+                trust_project=trust_project,
+                no_project_context=no_project_context,
             )
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -374,6 +378,16 @@ def main() -> None:
         dest="model",
         default=None,
         help="Override AI model (e.g., gpt-4o, claude-3-opus)",
+    )
+    chat_parser.add_argument(
+        "--trust-project",
+        action="store_true",
+        help="Auto-trust the current project's ANTEROOM.md without prompting",
+    )
+    chat_parser.add_argument(
+        "--no-project-context",
+        action="store_true",
+        help="Skip loading project-level ANTEROOM.md entirely",
     )
     # `aroom db` subcommand
     db_parser = subparsers.add_parser("db", help="Manage shared databases")
@@ -462,6 +476,8 @@ def main() -> None:
             resume_id=args.resume_id,
             project_path=args.project_path,
             model=args.model,
+            trust_project=args.trust_project,
+            no_project_context=args.no_project_context,
         )
     else:
         _run_web(config, config_path)

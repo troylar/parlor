@@ -27,7 +27,7 @@ from ..services.rewind import collect_file_paths
 from ..services.rewind import rewind_conversation as rewind_service
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
-from .instructions import load_instructions
+from .instructions import find_global_instructions, find_project_instructions_path
 from .renderer import CHROME, GOLD, MUTED
 from .skills import SkillRegistry
 
@@ -461,12 +461,136 @@ def _identity_kwargs(config: AppConfig) -> dict[str, str | None]:
     return {"user_id": None, "user_display_name": None}
 
 
+async def _check_project_trust(
+    file_path: Path,
+    content: str,
+    trust_project: bool = False,
+    no_project_context: bool = False,
+    data_dir: Path | None = None,
+) -> str | None:
+    """Gate project-level ANTEROOM.md behind user trust consent.
+
+    Returns the file content if trusted, or None if denied/skipped.
+    """
+    from ..services.trust import check_trust, compute_content_hash, save_trust_decision
+
+    if no_project_context:
+        return None
+
+    folder_path = str(file_path.parent)
+    content_hash = compute_content_hash(content)
+
+    if trust_project:
+        save_trust_decision(folder_path, content_hash, data_dir=data_dir)
+        return content
+
+    status = check_trust(folder_path, content_hash, data_dir=data_dir)
+
+    if status == "trusted":
+        return content
+
+    # Both "changed" and "untrusted" require user consent
+    file_size = len(content.encode("utf-8"))
+
+    if status == "changed":
+        renderer.console.print("\n[yellow bold]Warning:[/yellow bold] ANTEROOM.md has changed since last trusted.")
+    else:
+        renderer.console.print(
+            "\n[yellow bold]Warning:[/yellow bold] This project contains an ANTEROOM.md "
+            "file that will be loaded into the AI context."
+        )
+
+    renderer.console.print(f"  Path: [{MUTED}]{file_path}[/{MUTED}]")
+    renderer.console.print(f"  Size: [{MUTED}]{file_size:,} bytes[/{MUTED}]")
+
+    try:
+        from prompt_toolkit import PromptSession as _TrustSession
+
+        _trust_session = _TrustSession()
+
+        while True:
+            answer = await _trust_session.prompt_async(
+                "  [y] Trust this folder  [r] Trust parent  [v] View  [n] Skip: "
+            )
+            choice = answer.strip().lower()
+
+            if choice in ("y", "yes"):
+                save_trust_decision(folder_path, content_hash, data_dir=data_dir)
+                renderer.console.print(f"  [{MUTED}]Trusted: {folder_path}[/{MUTED}]\n")
+                return content
+
+            if choice in ("r", "recursive"):
+                parent_path = str(file_path.parent.parent)
+                save_trust_decision(parent_path, content_hash, recursive=True, data_dir=data_dir)
+                renderer.console.print(f"  [{MUTED}]Trusted (recursive): {parent_path}[/{MUTED}]\n")
+                return content
+
+            if choice in ("v", "view"):
+                renderer.console.print(f"\n[dim]{'─' * 60}[/dim]")
+                # Limit display to prevent terminal flooding
+                lines = content.splitlines()
+                if len(lines) > 50:
+                    for line in lines[:50]:
+                        renderer.console.print(f"  [dim]{line}[/dim]")
+                    renderer.console.print(f"  [dim]... ({len(lines) - 50} more lines)[/dim]")
+                else:
+                    for line in lines:
+                        renderer.console.print(f"  [dim]{line}[/dim]")
+                renderer.console.print(f"[dim]{'─' * 60}[/dim]\n")
+                continue
+
+            if choice in ("n", "no", ""):
+                renderer.console.print(f"  [{MUTED}]Skipped: project context not loaded[/{MUTED}]\n")
+                return None
+
+    except (EOFError, KeyboardInterrupt):
+        renderer.console.print(f"\n  [{MUTED}]Skipped: project context not loaded[/{MUTED}]\n")
+        return None
+
+
+async def _load_instructions_with_trust(
+    working_dir: str,
+    trust_project: bool = False,
+    no_project_context: bool = False,
+    data_dir: Path | None = None,
+) -> str | None:
+    """Load global + project instructions with trust gating on project files."""
+    parts: list[str] = []
+
+    # Global instructions (~/.anteroom/ANTEROOM.md) are loaded unconditionally.
+    # They share the same trust boundary as the config file itself — if an attacker
+    # can write to ~/.anteroom/, they already control the app configuration.
+    global_inst = find_global_instructions()
+    if global_inst:
+        parts.append(f"# Global Instructions\n{global_inst}")
+
+    if not no_project_context:
+        result = find_project_instructions_path(working_dir)
+        if result is not None:
+            file_path, content = result
+            trusted_content = await _check_project_trust(
+                file_path,
+                content,
+                trust_project=trust_project,
+                no_project_context=no_project_context,
+                data_dir=data_dir,
+            )
+            if trusted_content:
+                parts.append(f"# Project Instructions\n{trusted_content}")
+
+    if not parts:
+        return None
+    return "\n\n".join(parts)
+
+
 async def run_cli(
     config: AppConfig,
     prompt: str | None = None,
     no_tools: bool = False,
     continue_last: bool = False,
     conversation_id: str | None = None,
+    trust_project: bool = False,
+    no_project_context: bool = False,
 ) -> None:
     """Main entry point for CLI mode."""
     working_dir = os.getcwd()
@@ -625,8 +749,13 @@ async def run_cli(
 
     tools_openai_or_none = tools_openai if tools_openai else None
 
-    # Load PARLOR.md instructions
-    instructions = load_instructions(working_dir)
+    # Load ANTEROOM.md instructions (with trust gating for project-level files)
+    instructions = await _load_instructions_with_trust(
+        working_dir,
+        trust_project=trust_project,
+        no_project_context=no_project_context,
+        data_dir=config.app.data_dir,
+    )
     mcp_statuses = mcp_manager.get_server_statuses() if mcp_manager else None
     extra_system_prompt = _build_system_prompt(
         config,
