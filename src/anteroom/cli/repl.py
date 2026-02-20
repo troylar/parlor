@@ -34,8 +34,6 @@ from .skills import SkillRegistry
 logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = platform.system() == "Windows"
-_MAX_USER_RETRIES = 3  # max auto-retry attempts for retryable errors
-_RETRY_DELAY = 5.0  # seconds between auto-retry countdown ticks
 
 
 def _add_signal_handler(loop: asyncio.AbstractEventLoop, sig: int, callback: Any) -> bool:
@@ -809,9 +807,11 @@ async def _run_one_shot(
                 elif event.kind == "error":
                     error_msg = event.data.get("message", "Unknown error")
                     retryable = event.data.get("retryable", False)
-                    if thinking and retryable and user_attempt < _MAX_USER_RETRIES:
+                    if thinking and retryable and user_attempt < config.cli.max_retries:
                         # Show countdown on thinking line, auto-retry
-                        should_retry = await renderer.thinking_countdown(_RETRY_DELAY, cancel_event, error_msg)
+                        should_retry = await renderer.thinking_countdown(
+                            config.cli.retry_delay, cancel_event, error_msg
+                        )
                         if should_retry and not cancel_event.is_set():
                             # Reset cancel_event for the retry
                             cancel_event.clear()
@@ -820,7 +820,7 @@ async def _run_one_shot(
                         else:
                             await renderer.stop_thinking(cancel_msg="cancelled")
                             thinking = False
-                    elif thinking and retryable and user_attempt >= _MAX_USER_RETRIES:
+                    elif thinking and retryable and user_attempt >= config.cli.max_retries:
                         # Exhausted user retries
                         await renderer.stop_thinking(error_msg=f"{error_msg} · {user_attempt} attempts failed")
                         thinking = False
@@ -1845,15 +1845,17 @@ async def _run_repl(
                         elif event.kind == "error":
                             error_msg = event.data.get("message", "Unknown error")
                             retryable = event.data.get("retryable", False)
-                            if thinking and retryable and user_attempt < _MAX_USER_RETRIES:
-                                should_retry = await renderer.thinking_countdown(_RETRY_DELAY, cancel_event, error_msg)
+                            if thinking and retryable and user_attempt < config.cli.max_retries:
+                                should_retry = await renderer.thinking_countdown(
+                                    config.cli.retry_delay, cancel_event, error_msg
+                                )
                                 if should_retry and not cancel_event.is_set():
                                     cancel_event.clear()
                                     renderer.start_thinking()
                                 else:
                                     total_elapsed += await renderer.stop_thinking(cancel_msg="cancelled")
                                     thinking = False
-                            elif thinking and retryable and user_attempt >= _MAX_USER_RETRIES:
+                            elif thinking and retryable and user_attempt >= config.cli.max_retries:
                                 total_elapsed += await renderer.stop_thinking(
                                     error_msg=f"{error_msg} · {user_attempt} attempts failed"
                                 )

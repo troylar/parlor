@@ -282,6 +282,8 @@ class CliConfig:
     context_warn_tokens: int = 80_000
     context_auto_compact_tokens: int = 100_000
     tool_dedup: bool = True  # collapse consecutive similar tool calls; False = show all
+    retry_delay: float = 5.0  # seconds between CLI auto-retry countdown ticks
+    max_retries: int = 3  # max CLI auto-retry attempts for retryable errors
     esc_hint_delay: float = 3.0  # seconds before showing "esc to cancel" hint
     stall_display_threshold: float = 5.0  # seconds of chunk silence before showing "stalled"
     stall_warning_threshold: float = 15.0  # seconds before showing full stall warning
@@ -552,6 +554,14 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     tool_dedup = str(tool_dedup_raw).lower() not in ("false", "0", "no", "off")
 
     try:
+        retry_delay = max(1.0, min(60.0, float(cli_raw.get("retry_delay", 5.0))))
+    except (ValueError, TypeError):
+        retry_delay = 5.0
+    try:
+        max_retries = max(0, min(10, int(cli_raw.get("max_retries", 3))))
+    except (ValueError, TypeError):
+        max_retries = 3
+    try:
         esc_hint_delay = max(0.0, float(cli_raw.get("esc_hint_delay", 3.0)))
     except (ValueError, TypeError):
         esc_hint_delay = 3.0
@@ -570,6 +580,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         context_warn_tokens=context_warn_tokens,
         context_auto_compact_tokens=context_auto_compact_tokens,
         tool_dedup=tool_dedup,
+        retry_delay=retry_delay,
+        max_retries=max_retries,
         esc_hint_delay=esc_hint_delay,
         stall_display_threshold=stall_display_threshold,
         stall_warning_threshold=stall_warning_threshold,
