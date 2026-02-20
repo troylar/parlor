@@ -779,6 +779,9 @@ async def chat(conversation_id: str, request: Request):
                 if kind == "thinking":
                     yield {"event": "thinking", "data": json.dumps({})}
 
+                elif kind == "phase":
+                    yield {"event": "phase", "data": json.dumps(data)}
+
                 elif kind == "token":
                     yield {"event": "token", "data": json.dumps(data)}
                     _streamed_content += data.get("content", "")

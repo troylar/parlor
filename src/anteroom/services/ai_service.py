@@ -194,7 +194,9 @@ class AIService:
             kwargs["tools"] = tools
 
         try:
+            yield {"event": "phase", "data": {"phase": "connecting"}}
             stream = await self.client.chat.completions.create(**kwargs)
+            yield {"event": "phase", "data": {"phase": "waiting"}}
 
             current_tool_calls: dict[int, dict[str, Any]] = {}
             stream_iter = stream.__aiter__()

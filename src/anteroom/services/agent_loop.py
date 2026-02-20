@@ -245,6 +245,8 @@ async def run_agent_loop(
                 )
             elif etype == "tool_call_args_delta":
                 yield AgentEvent(kind="tool_call_args_delta", data=event["data"])
+            elif etype == "phase":
+                yield AgentEvent(kind="phase", data=event["data"])
             elif etype == "error":
                 if (
                     event["data"].get("code") == "context_length_exceeded"

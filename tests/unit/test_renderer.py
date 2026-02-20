@@ -17,16 +17,19 @@ from anteroom.cli.renderer import (
     _format_tokens,
     _humanize_tool,
     _output_summary,
+    _phase_suffix,
     _short_path,
     _write_thinking_line,
     clear_turn_history,
     cycle_verbosity,
     flush_buffered_text,
     get_verbosity,
+    increment_thinking_tokens,
     render_response_end,
     render_tool_call_end,
     render_tool_call_start,
     save_turn_history,
+    set_thinking_phase,
     set_tool_dedup,
     set_verbosity,
     start_thinking,
@@ -975,3 +978,418 @@ class TestThinkingTicker:
             stop_thinking()
             r._repl_mode = False
             r._stdout = None
+
+
+class TestThinkingPhases:
+    """Tests for lifecycle phase tracking in the thinking indicator (#203)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._last_chunk_time = 0
+        set_verbosity(Verbosity.DETAILED)
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._last_chunk_time = 0
+        set_verbosity(Verbosity.COMPACT)
+
+    def test_set_thinking_phase_connecting(self) -> None:
+        """set_thinking_phase('connecting') updates the module state."""
+        import anteroom.cli.renderer as r
+
+        set_thinking_phase("connecting")
+        assert r._thinking_phase == "connecting"
+        assert r._last_chunk_time > 0
+
+    def test_set_thinking_phase_waiting(self) -> None:
+        """set_thinking_phase('waiting') updates the module state."""
+        import anteroom.cli.renderer as r
+
+        set_thinking_phase("waiting")
+        assert r._thinking_phase == "waiting"
+
+    def test_set_thinking_phase_updates_chunk_time(self) -> None:
+        """set_thinking_phase updates _last_chunk_time for stall detection."""
+        import anteroom.cli.renderer as r
+
+        before = time.monotonic()
+        set_thinking_phase("connecting")
+        assert r._last_chunk_time >= before
+
+    def test_increment_thinking_tokens_increments_counter(self) -> None:
+        """increment_thinking_tokens increases _thinking_tokens by 1."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_tokens = 0
+        increment_thinking_tokens()
+        assert r._thinking_tokens == 1
+        increment_thinking_tokens()
+        assert r._thinking_tokens == 2
+        increment_thinking_tokens()
+        assert r._thinking_tokens == 3
+
+    def test_increment_thinking_tokens_sets_streaming_phase(self) -> None:
+        """increment_thinking_tokens implicitly transitions to 'streaming' phase."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "waiting"
+        increment_thinking_tokens()
+        assert r._thinking_phase == "streaming"
+
+    def test_increment_thinking_tokens_updates_chunk_time(self) -> None:
+        """increment_thinking_tokens updates _last_chunk_time."""
+        import anteroom.cli.renderer as r
+
+        before = time.monotonic()
+        increment_thinking_tokens()
+        assert r._last_chunk_time >= before
+
+    def test_phase_suffix_empty_when_no_phase(self) -> None:
+        """_phase_suffix returns empty string when no phase is set."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        assert _phase_suffix(5.0) == ""
+
+    def test_phase_suffix_empty_in_compact_mode(self) -> None:
+        """_phase_suffix returns empty string in COMPACT verbosity."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.COMPACT)
+        r._thinking_phase = "connecting"
+        assert _phase_suffix(5.0) == ""
+
+    def test_phase_suffix_connecting(self) -> None:
+        """_phase_suffix returns 'connecting' for the connecting phase."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "connecting"
+        assert _phase_suffix(1.0) == "connecting"
+
+    def test_phase_suffix_waiting(self) -> None:
+        """_phase_suffix returns 'waiting for first token' for the waiting phase."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "waiting"
+        assert _phase_suffix(2.0) == "waiting for first token"
+
+    def test_phase_suffix_streaming_with_token_count(self) -> None:
+        """_phase_suffix returns 'streaming (N tokens)' during active streaming."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 42
+        r._last_chunk_time = time.monotonic()  # recent, no stall
+        result = _phase_suffix(3.0)
+        assert result == "streaming (42 tokens)"
+
+    def test_phase_suffix_streaming_stalled(self) -> None:
+        """_phase_suffix returns 'stalled Ns' when no chunks arrive for >5s."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 10
+        r._last_chunk_time = time.monotonic() - 7.0  # 7s since last chunk
+        result = _phase_suffix(10.0)
+        assert "stalled" in result
+        assert "7s" in result or "6s" in result  # allow for timing jitter
+
+    def test_phase_suffix_streaming_not_stalled_within_threshold(self) -> None:
+        """_phase_suffix does NOT report stalled when chunk arrived within 5s."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 10
+        r._last_chunk_time = time.monotonic() - 2.0  # 2s ago, under threshold
+        result = _phase_suffix(10.0)
+        assert "stalled" not in result
+        assert "streaming (10 tokens)" == result
+
+    def test_phase_suffix_unknown_phase_returns_raw(self) -> None:
+        """_phase_suffix returns the raw phase string for unknown phases."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "custom_phase"
+        assert _phase_suffix(1.0) == "custom_phase"
+
+    def test_phase_suffix_verbose_mode_works(self) -> None:
+        """_phase_suffix works in VERBOSE mode (not just DETAILED)."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.VERBOSE)
+        r._thinking_phase = "connecting"
+        assert _phase_suffix(1.0) == "connecting"
+
+    def test_start_thinking_resets_phase_state(self) -> None:
+        """start_thinking() resets all phase-related state."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 100
+        r._last_chunk_time = time.monotonic()
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        try:
+            start_thinking()
+            assert r._thinking_phase == ""
+            assert r._thinking_tokens == 0
+            assert r._last_chunk_time == 0
+        finally:
+            stop_thinking()
+            r._repl_mode = False
+            r._stdout = None
+
+    def test_phase_transition_connecting_to_waiting(self) -> None:
+        """Phase transition from connecting to waiting updates correctly."""
+        import anteroom.cli.renderer as r
+
+        set_thinking_phase("connecting")
+        assert r._thinking_phase == "connecting"
+        set_thinking_phase("waiting")
+        assert r._thinking_phase == "waiting"
+
+    def test_phase_transition_waiting_to_streaming_via_tokens(self) -> None:
+        """Phase transition from waiting to streaming happens via increment_thinking_tokens."""
+        import anteroom.cli.renderer as r
+
+        set_thinking_phase("waiting")
+        assert r._thinking_phase == "waiting"
+        increment_thinking_tokens()
+        assert r._thinking_phase == "streaming"
+        assert r._thinking_tokens == 1
+
+    def test_full_phase_lifecycle(self) -> None:
+        """Full lifecycle: connecting → waiting → streaming with tokens."""
+        set_thinking_phase("connecting")
+        assert _phase_suffix(0.5) == "connecting"
+
+        set_thinking_phase("waiting")
+        assert _phase_suffix(1.0) == "waiting for first token"
+
+        increment_thinking_tokens()
+        increment_thinking_tokens()
+        increment_thinking_tokens()
+        result = _phase_suffix(2.0)
+        assert "streaming (3 tokens)" == result
+
+    def test_stall_detection_clears_when_chunks_resume(self) -> None:
+        """Stall detection clears when new chunks arrive."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 5
+        r._last_chunk_time = time.monotonic() - 10.0  # stalled
+        assert "stalled" in _phase_suffix(15.0)
+
+        # New chunk arrives
+        increment_thinking_tokens()
+        result = _phase_suffix(15.0)
+        assert "stalled" not in result
+        assert "streaming (6 tokens)" == result
+
+
+class TestWriteThinkingLinePhases:
+    """Tests for phase text in _write_thinking_line() ANSI output (#203)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._last_chunk_time = 0
+        set_verbosity(Verbosity.DETAILED)
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._last_chunk_time = 0
+        set_verbosity(Verbosity.COMPACT)
+
+    def test_connecting_phase_in_ansi_output(self) -> None:
+        """_write_thinking_line includes 'connecting' phase text."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "connecting"
+        r._last_chunk_time = time.monotonic()
+        _write_thinking_line(2.0)
+        output = buf.getvalue()
+        assert "connecting" in output
+        assert "2s" in output
+        r._stdout = None
+
+    def test_waiting_phase_in_ansi_output(self) -> None:
+        """_write_thinking_line includes 'waiting for first token' phase text."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "waiting"
+        r._last_chunk_time = time.monotonic()
+        _write_thinking_line(5.0)
+        output = buf.getvalue()
+        assert "waiting for first token" in output
+        r._stdout = None
+
+    def test_streaming_phase_in_ansi_output(self) -> None:
+        """_write_thinking_line includes 'streaming (N tokens)' phase text."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 25
+        r._last_chunk_time = time.monotonic()
+        _write_thinking_line(3.0)
+        output = buf.getvalue()
+        assert "streaming (25 tokens)" in output
+        r._stdout = None
+
+    def test_stalled_phase_in_ansi_output(self) -> None:
+        """_write_thinking_line includes 'stalled Ns' when streaming is stalled."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 10
+        r._last_chunk_time = time.monotonic() - 8.0
+        _write_thinking_line(12.0)
+        output = buf.getvalue()
+        assert "stalled" in output
+        r._stdout = None
+
+    def test_phase_text_uses_muted_color(self) -> None:
+        """Phase text in _write_thinking_line uses MUTED color (RGB 139,139,139)."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "connecting"
+        r._last_chunk_time = time.monotonic()
+        _write_thinking_line(2.0)
+        output = buf.getvalue()
+        assert "\033[38;2;139;139;139m" in output
+        r._stdout = None
+
+    def test_no_phase_text_in_compact_mode(self) -> None:
+        """_write_thinking_line omits phase text in COMPACT verbosity."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.COMPACT)
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "connecting"
+        r._last_chunk_time = time.monotonic()
+        _write_thinking_line(2.0)
+        output = buf.getvalue()
+        assert "connecting" not in output
+        r._stdout = None
+
+    def test_phase_text_overrides_stall_warning(self) -> None:
+        """When phase is set, phase text is shown instead of the generic stall warning."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = "waiting"
+        r._last_chunk_time = time.monotonic()
+        _write_thinking_line(20.0)  # past _STALL_THRESHOLD
+        output = buf.getvalue()
+        assert "waiting for first token" in output
+        assert "(waiting for API response)" not in output
+        r._stdout = None
+
+    def test_no_phase_falls_back_to_stall_warning(self) -> None:
+        """When no phase is set, the generic stall warning still appears."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.DETAILED)
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_phase = ""
+        _write_thinking_line(20.0)
+        output = buf.getvalue()
+        assert "waiting for API response" in output
+        r._stdout = None
+
+
+class TestThinkingTickerPhases:
+    """Tests for phase display in the background ticker (#203)."""
+
+    @pytest.mark.asyncio
+    async def test_ticker_includes_phase_in_spinner(self) -> None:
+        """Background ticker includes phase suffix in Rich spinner label."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.DETAILED)
+        r._repl_mode = False  # Use spinner mode
+        r._thinking_start = time.monotonic() - 3.0
+        r._thinking_phase = "waiting"
+        r._last_chunk_time = time.monotonic()
+
+        mock_spinner = r._spinner = type("FakeSpinner", (), {"update": lambda self, label: None})()
+        labels_seen: list[str] = []
+        mock_spinner.update = lambda label: labels_seen.append(label)
+
+        r._spinner = mock_spinner
+        try:
+            from anteroom.cli.renderer import _thinking_ticker
+
+            task = asyncio.create_task(_thinking_ticker())
+            await asyncio.sleep(0.6)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+            # At least one label should contain the phase suffix
+            assert any("waiting for first token" in label for label in labels_seen), (
+                f"Expected 'waiting for first token' in spinner labels, got: {labels_seen}"
+            )
+        finally:
+            r._spinner = None
+            r._thinking_phase = ""
+
+    @pytest.mark.asyncio
+    async def test_ticker_shows_streaming_token_count(self) -> None:
+        """Background ticker shows token count during streaming phase."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.DETAILED)
+        r._repl_mode = True
+        buf = io.StringIO()
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 2.0
+        r._thinking_phase = "streaming"
+        r._thinking_tokens = 150
+        r._last_chunk_time = time.monotonic()
+
+        try:
+            from anteroom.cli.renderer import _thinking_ticker
+
+            task = asyncio.create_task(_thinking_ticker())
+            await asyncio.sleep(0.6)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+            output = buf.getvalue()
+            assert "streaming (150 tokens)" in output
+        finally:
+            r._repl_mode = False
+            r._stdout = None
+            r._thinking_phase = ""
+            r._thinking_tokens = 0

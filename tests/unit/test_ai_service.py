@@ -82,11 +82,11 @@ class TestTimeoutErrorHandling:
         async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
             events.append(event)
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "timeout"
-        assert "30s" in events[0]["data"]["message"]
-        assert "request_timeout" in events[0]["data"]["message"]
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "timeout"
+        assert "30s" in error_events[0]["data"]["message"]
+        assert "request_timeout" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
     async def test_client_rebuilt_after_stream_chat_timeout(self):
@@ -169,10 +169,10 @@ class TestConnectionErrorHandling:
         async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
             events.append(event)
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "connection_error"
-        assert "bad-host:1234" in events[0]["data"]["message"]
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "connection_error"
+        assert "bad-host:1234" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
     async def test_stream_chat_rebuilds_client_on_connection_error(self):
@@ -231,10 +231,10 @@ class TestAuthErrorHandling:
         async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
             events.append(event)
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "auth_failed"
-        assert "API key" in events[0]["data"]["message"]
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "auth_failed"
+        assert "API key" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
     async def test_auth_error_retries_after_token_refresh(self):
@@ -292,9 +292,9 @@ class TestRateLimitErrorHandling:
         async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
             events.append(event)
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "rate_limit"
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "rate_limit"
 
 
 class TestBadRequestErrorHandling:
@@ -316,9 +316,9 @@ class TestBadRequestErrorHandling:
         async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
             events.append(event)
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["code"] == "context_length_exceeded"
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "context_length_exceeded"
 
     @pytest.mark.asyncio
     async def test_other_bad_request_yields_error_message(self):
@@ -338,9 +338,9 @@ class TestBadRequestErrorHandling:
         async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
             events.append(event)
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert "Invalid request parameters" in events[0]["data"]["message"]
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert "Invalid request parameters" in error_events[0]["data"]["message"]
 
 
 class TestGenericExceptionHandling:
@@ -354,10 +354,10 @@ class TestGenericExceptionHandling:
         async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
             events.append(event)
 
-        assert len(events) == 1
-        assert events[0]["event"] == "error"
-        assert events[0]["data"]["message"] == "An internal error occurred"
-        assert "something unexpected" not in events[0]["data"].get("message", "")
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["message"] == "An internal error occurred"
+        assert "something unexpected" not in error_events[0]["data"].get("message", "")
 
 
 class TestIterStream:
@@ -809,3 +809,290 @@ class TestBuildClientCleanup:
                 # Should not raise — cleanup errors are swallowed
                 service._build_client()
                 assert service.client is not None
+
+
+class TestStreamChatPhaseEvents:
+    """Tests for lifecycle phase events emitted by stream_chat() (#203)."""
+
+    @pytest.mark.asyncio
+    async def test_phase_connecting_emitted_before_api_call(self):
+        """stream_chat must emit phase:connecting before the API create() call."""
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(return_value=MockStream())
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        event_types = [e["event"] for e in events]
+        assert "phase" in event_types
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert phase_events[0]["data"]["phase"] == "connecting"
+
+    @pytest.mark.asyncio
+    async def test_phase_waiting_emitted_after_api_call(self):
+        """stream_chat must emit phase:waiting after the API create() returns."""
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(return_value=MockStream())
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) >= 2
+        assert phase_events[1]["data"]["phase"] == "waiting"
+
+    @pytest.mark.asyncio
+    async def test_phase_order_connecting_then_waiting_then_content(self):
+        """Phase events must appear in order: connecting → waiting → token/done."""
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content="hello", tool_calls=None), finish_reason=None)]
+                )
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(return_value=MockStream())
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        event_types = [e["event"] for e in events]
+        # connecting must come first
+        assert event_types[0] == "phase"
+        assert events[0]["data"]["phase"] == "connecting"
+        # waiting must come second
+        assert event_types[1] == "phase"
+        assert events[1]["data"]["phase"] == "waiting"
+        # token must come after the phase events
+        assert event_types[2] == "token"
+
+    @pytest.mark.asyncio
+    async def test_phase_events_before_tool_calls(self):
+        """Phase events must be emitted even when the response contains tool calls."""
+        from openai.types.chat.chat_completion_chunk import (
+            ChoiceDeltaToolCall,
+            ChoiceDeltaToolCallFunction,
+        )
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                tc = ChoiceDeltaToolCall(
+                    index=0,
+                    id="call_123",
+                    function=ChoiceDeltaToolCallFunction(name="bash", arguments='{"command":"ls"}'),
+                )
+                yield MagicMock(choices=[MagicMock(delta=MagicMock(content=None, tool_calls=[tc]), finish_reason=None)])
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="tool_calls")]
+                )
+
+            async def close(self):
+                pass
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(return_value=MockStream())
+
+        events = []
+        async for event in service.stream_chat(
+            [{"role": "user", "content": "hi"}],
+            tools=[{"type": "function", "function": {"name": "bash"}}],
+        ):
+            events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) == 2
+        assert phase_events[0]["data"]["phase"] == "connecting"
+        assert phase_events[1]["data"]["phase"] == "waiting"
+
+    @pytest.mark.asyncio
+    async def test_phase_connecting_emitted_before_timeout_error(self):
+        """phase:connecting must still be emitted even if the API call times out."""
+        from openai import APITimeoutError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        # connecting is emitted before the create() call, so it should appear
+        # even when create() raises
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) >= 1
+        assert phase_events[0]["data"]["phase"] == "connecting"
+
+    @pytest.mark.asyncio
+    async def test_phase_connecting_emitted_before_connection_error(self):
+        """phase:connecting must be emitted even if the API connection fails."""
+        from openai import APIConnectionError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=APIConnectionError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) >= 1
+        assert phase_events[0]["data"]["phase"] == "connecting"
+
+    @pytest.mark.asyncio
+    async def test_phase_connecting_emitted_before_auth_error(self):
+        """phase:connecting must be emitted even if the API returns 401."""
+        from openai import AuthenticationError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=AuthenticationError(message="bad key", response=MagicMock(status_code=401), body={})
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) >= 1
+        assert phase_events[0]["data"]["phase"] == "connecting"
+
+    @pytest.mark.asyncio
+    async def test_no_waiting_phase_on_create_failure(self):
+        """phase:waiting must NOT be emitted when create() raises (we never started waiting)."""
+        from openai import APITimeoutError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        phase_names = [e["data"]["phase"] for e in phase_events]
+        assert "waiting" not in phase_names
+
+    @pytest.mark.asyncio
+    async def test_phase_events_with_cancel_event(self):
+        """Phase events must be emitted even when cancel_event is provided."""
+        cancel = asyncio.Event()
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(choices=[MagicMock(delta=MagicMock(content="hi", tool_calls=None), finish_reason=None)])
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(return_value=MockStream())
+
+        events = []
+        async for event in service.stream_chat(
+            [{"role": "user", "content": "hi"}],
+            cancel_event=cancel,
+        ):
+            events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) == 2
+        assert phase_events[0]["data"]["phase"] == "connecting"
+        assert phase_events[1]["data"]["phase"] == "waiting"
+
+    @pytest.mark.asyncio
+    async def test_phase_events_with_extra_system_prompt(self):
+        """Phase events must work when extra_system_prompt is provided."""
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(return_value=MockStream())
+
+        events = []
+        async for event in service.stream_chat(
+            [{"role": "user", "content": "hi"}],
+            extra_system_prompt="Be helpful",
+        ):
+            events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) == 2
+
+    @pytest.mark.asyncio
+    async def test_phase_connecting_emitted_before_rate_limit(self):
+        """phase:connecting must be emitted before RateLimitError."""
+        from openai import RateLimitError
+
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=RateLimitError(message="rate limited", response=MagicMock(status_code=429), body={})
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert len(phase_events) >= 1
+        assert phase_events[0]["data"]["phase"] == "connecting"

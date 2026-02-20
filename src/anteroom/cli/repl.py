@@ -775,11 +775,14 @@ async def _run_one_shot(
                 if not thinking:
                     renderer.start_thinking()
                     thinking = True
+            elif event.kind == "phase":
+                renderer.set_thinking_phase(event.data.get("phase", ""))
             elif event.kind == "token":
                 if not thinking:
                     renderer.start_thinking()
                     thinking = True
                 renderer.render_token(event.data["content"])
+                renderer.increment_thinking_tokens()
                 renderer.update_thinking()
             elif event.kind == "tool_call_start":
                 if thinking:
@@ -1754,11 +1757,14 @@ async def _run_repl(
                         if not thinking:
                             renderer.start_thinking()
                             thinking = True
+                    elif event.kind == "phase":
+                        renderer.set_thinking_phase(event.data.get("phase", ""))
                     elif event.kind == "token":
                         if not thinking:
                             renderer.start_thinking()
                             thinking = True
                         renderer.render_token(event.data["content"])
+                        renderer.increment_thinking_tokens()
                         renderer.update_thinking()
                         enc = _get_tiktoken_encoding()
                         if enc:

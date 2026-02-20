@@ -64,6 +64,12 @@ _spinner: Status | None = None
 _last_spinner_update: float = 0
 _thinking_ticker_task: asyncio.Task[None] | None = None
 
+# Lifecycle phase tracking
+_thinking_phase: str = ""  # current phase: connecting, waiting, streaming
+_thinking_tokens: int = 0  # token counter during streaming
+_last_chunk_time: float = 0  # monotonic time of last token (for stall detection)
+_MID_STREAM_STALL: float = 5.0  # seconds of silence before marking "stalled"
+
 # Tool call timing
 _tool_start: float = 0
 
@@ -313,9 +319,12 @@ async def _thinking_ticker() -> None:
             await asyncio.sleep(0.5)
             if _thinking_start:
                 elapsed = time.monotonic() - _thinking_start
+                suffix = _phase_suffix(elapsed)
                 if _spinner:
                     label = f"[{GOLD}]Thinking...[/] [{CHROME}]{elapsed:.0f}s[/{CHROME}]"
-                    if elapsed >= _STALL_THRESHOLD:
+                    if suffix:
+                        label += f"  [{MUTED}]{suffix}[/{MUTED}]"
+                    elif elapsed >= _STALL_THRESHOLD:
                         label += f" [{CHROME}](waiting for API response)[/{CHROME}]"
                     _spinner.update(label)
                 elif _repl_mode:
@@ -327,9 +336,13 @@ async def _thinking_ticker() -> None:
 def start_thinking() -> None:
     """Show a spinner with timer while AI is generating."""
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
+    global _thinking_phase, _thinking_tokens, _last_chunk_time
     _flush_dedup()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
+    _thinking_phase = ""
+    _thinking_tokens = 0
+    _last_chunk_time = 0
     _last_spinner_update = _thinking_start
     if _repl_mode:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
@@ -358,9 +371,15 @@ def _write_thinking_line(elapsed: float) -> None:
         text = "\r\033[2K\033[38;2;197;160;89mThinking...\033[0m"
     else:
         hint = "  \033[38;2;139;139;139mesc to cancel\033[0m" if elapsed >= _ESC_HINT_DELAY else ""
-        stall = "  \033[38;2;139;139;139m(waiting for API response)\033[0m" if elapsed >= _STALL_THRESHOLD else ""
+        suffix = _phase_suffix(elapsed)
+        if suffix:
+            phase_text = f"  \033[38;2;139;139;139m{suffix}\033[0m"
+        elif elapsed >= _STALL_THRESHOLD:
+            phase_text = "  \033[38;2;139;139;139m(waiting for API response)\033[0m"
+        else:
+            phase_text = ""
         timer = f"\033[38;2;107;114;128m{elapsed:.0f}s\033[0m"
-        text = f"\r\033[2K\033[38;2;197;160;89mThinking...\033[0m {timer}{stall}{hint}"
+        text = f"\r\033[2K\033[38;2;197;160;89mThinking...\033[0m {timer}{phase_text}{hint}"
     if _stdout:
         _stdout.write(text)
         _stdout.flush()
@@ -405,6 +424,44 @@ def stop_thinking() -> float:
             _stdout.write("\r\033[2K")
             _stdout.flush()
     return elapsed
+
+
+def set_thinking_phase(phase: str) -> None:
+    """Update the current lifecycle phase displayed by the thinking ticker."""
+    global _thinking_phase, _last_chunk_time
+    _thinking_phase = phase
+    _last_chunk_time = time.monotonic()
+
+
+def increment_thinking_tokens() -> None:
+    """Increment the streaming token counter and mark chunk arrival time.
+
+    Calling this implicitly transitions to the 'streaming' phase.
+    """
+    global _thinking_tokens, _thinking_phase, _last_chunk_time
+    _thinking_tokens += 1
+    _thinking_phase = "streaming"
+    _last_chunk_time = time.monotonic()
+
+
+def _phase_suffix(elapsed: float) -> str:
+    """Build the dim phase text appended to the thinking line.
+
+    Returns an empty string if verbosity is COMPACT or no phase is set.
+    """
+    if _verbosity == Verbosity.COMPACT or not _thinking_phase:
+        return ""
+    phase = _thinking_phase
+    if phase == "connecting":
+        return "connecting"
+    if phase == "waiting":
+        return "waiting for first token"
+    if phase == "streaming":
+        if _last_chunk_time and time.monotonic() - _last_chunk_time > _MID_STREAM_STALL:
+            stall_secs = time.monotonic() - _last_chunk_time
+            return f"stalled {stall_secs:.0f}s"
+        return f"streaming ({_thinking_tokens} tokens)"
+    return phase
 
 
 # ---------------------------------------------------------------------------
