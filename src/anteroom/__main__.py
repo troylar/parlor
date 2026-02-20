@@ -252,7 +252,7 @@ def _run_web(config, config_path: Path) -> None:
     try:
         uvicorn.run(app, host=config.app.host, port=config.app.port, log_level="info", **ssl_kwargs)
     except OSError as e:
-        if e.errno in (errno.EADDRINUSE, errno.EADDRNOTAVAIL, 48):
+        if e.errno in (errno.EADDRINUSE, errno.EADDRNOTAVAIL):
             port = config.app.port
             print(f"\nPort {port} is already in use.", file=sys.stderr)
             print(f"Try a different port with: aroom --port {port + 1}", file=sys.stderr)
@@ -437,6 +437,9 @@ def main() -> None:
 
     _port = getattr(args, "port", None)
     if _port is not None:
+        if not 1 <= _port <= 65535:
+            print(f"Invalid port: {_port}. Must be between 1 and 65535.", file=sys.stderr)
+            sys.exit(1)
         config.app.port = _port
 
     if args.test:

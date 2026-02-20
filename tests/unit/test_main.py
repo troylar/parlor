@@ -167,6 +167,40 @@ class TestPortFlag:
         assert config.app.port == 9999
         mock_run_web.assert_called_once()
 
+    def test_port_flag_rejects_invalid_port(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--port with out-of-range value must exit with error."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "--port", "99999"]):
+                main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "Invalid port" in captured.err
+
+    def test_port_flag_rejects_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--port 0 must be rejected."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "--port", "0"]):
+                main()
+
+        assert exc_info.value.code == 1
+
     def test_port_flag_not_provided_uses_config(self) -> None:
         """Without --port, config.app.port should remain unchanged."""
         from anteroom.__main__ import main
