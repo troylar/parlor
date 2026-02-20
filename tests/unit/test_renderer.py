@@ -1153,7 +1153,7 @@ class TestThinkingPhases:
             assert r._thinking_tokens == 0
             assert r._streaming_chars == 0
             assert r._last_chunk_time == 0
-            assert r._phase_start_time == 0
+            assert r._phase_start_time == r._thinking_start
         finally:
             stop_thinking_sync()
             r._repl_mode = False
@@ -1766,13 +1766,15 @@ class TestAsyncStopThinking:
 
     @pytest.mark.asyncio
     async def test_stop_thinking_clean_final_line(self) -> None:
-        """stop_thinking() with no args writes clean final line."""
+        """stop_thinking() with no args writes clean final line with no phase or hint."""
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
         r._repl_mode = True
         r._stdout = buf
-        r._thinking_start = time.monotonic() - 2.0
+        r._thinking_start = time.monotonic() - 10.0  # long enough for esc hint
+        r._thinking_phase = "waiting"  # stale phase that should NOT appear
+        r._phase_start_time = time.monotonic() - 8.0
         r._thinking_ticker_task = None
         r._spinner = None
 
@@ -1780,6 +1782,57 @@ class TestAsyncStopThinking:
         output = buf.getvalue()
         assert "Thinking..." in output
         assert "\n" in output
+        # Must NOT contain stale phase or esc hint
+        assert "waiting" not in output
+        assert "first token" not in output
+        assert "esc to cancel" not in output
+        assert "streaming" not in output
+        # Phase should be cleared
+        assert r._thinking_phase == ""
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_cleans_stale_streaming_phase(self) -> None:
+        """stop_thinking() clears stale 'streaming' phase on clean completion."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 5.0
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 1234
+        r._phase_start_time = time.monotonic() - 3.0
+        r._last_chunk_time = time.monotonic()
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        await stop_thinking()
+        output = buf.getvalue()
+        assert "Thinking..." in output
+        assert "streaming" not in output
+        assert "1,234" not in output  # char count should not appear
+        assert "esc" not in output
+        r._repl_mode = False
+        r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_error_msg_preserves_phase_state(self) -> None:
+        """stop_thinking(error_msg=...) does NOT clear phase (only clean completion does)."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 5.0
+        r._thinking_phase = "waiting"
+        r._thinking_ticker_task = None
+        r._spinner = None
+
+        await stop_thinking(error_msg="Connection failed")
+        # Phase is NOT cleared for error paths
+        assert r._thinking_phase == "waiting"
         r._repl_mode = False
         r._stdout = None
 
@@ -2021,6 +2074,43 @@ class TestPhaseElapsedEdgeCases:
         result = _phase_suffix(15.0)
         # Streaming uses char count, not per-phase elapsed
         assert "100 chars" in result
+
+
+class TestPhaseStartTimeInitialization:
+    """Verify _phase_start_time is initialized to _thinking_start (#238)."""
+
+    def test_start_thinking_sets_phase_start_to_thinking_start(self) -> None:
+        """start_thinking() initializes _phase_start_time to _thinking_start."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        try:
+            start_thinking()
+            assert r._phase_start_time == r._thinking_start
+            assert r._phase_start_time > 0
+        finally:
+            stop_thinking_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+    def test_phase_elapsed_works_immediately_after_start(self) -> None:
+        """_phase_elapsed_str() returns timing immediately (no set_thinking_phase needed)."""
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = time.monotonic() - 3.0
+        result = _phase_elapsed_str()
+        assert result.startswith(" (")
+        assert result.endswith("s)")
+
+    def test_set_thinking_phase_overrides_initial_start(self) -> None:
+        """set_thinking_phase() resets _phase_start_time from the initial value."""
+        import anteroom.cli.renderer as r
+
+        r._phase_start_time = time.monotonic() - 10.0
+        old = r._phase_start_time
+        set_thinking_phase("connecting")
+        assert r._phase_start_time > old
 
 
 class TestWriteThinkingLineColorCodes:

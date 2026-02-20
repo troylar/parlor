@@ -345,7 +345,7 @@ def start_thinking() -> None:
     _thinking_tokens = 0
     _streaming_chars = 0
     _last_chunk_time = 0
-    _phase_start_time = 0
+    _phase_start_time = _thinking_start
     _retrying_info = {}
     _last_spinner_update = _thinking_start
     if _repl_mode:
@@ -454,7 +454,7 @@ async def stop_thinking(
     - ``cancel_msg``: muted message (user-initiated cancel)
     - Neither: clean final line (just "Thinking... Ns")
     """
-    global _spinner, _thinking_ticker_task
+    global _spinner, _thinking_ticker_task, _thinking_phase
     elapsed = 0.0
     # Await ticker termination to prevent race conditions
     if _thinking_ticker_task is not None:
@@ -480,9 +480,12 @@ async def stop_thinking(
                 _stdout.write("\n")
                 _stdout.flush()
             else:
-                # Clean final line: just timer, no phase/hint
-                _write_thinking_line(elapsed)
-                _stdout.write("\n")
+                # Clean final line: just "Thinking... Ns" — no phase, no hint.
+                _thinking_phase = ""
+                gold = "\033[38;2;197;160;89m"
+                timer_c = "\033[38;2;107;114;128m"
+                rst = "\033[0m"
+                _stdout.write(f"\r\033[2K{gold}Thinking...{rst} {timer_c}{elapsed:.0f}s{rst}\n")
                 _stdout.flush()
     return elapsed
 
