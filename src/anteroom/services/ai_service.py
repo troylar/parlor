@@ -213,20 +213,95 @@ class AIService:
         last_transient_error: Exception | None = None
 
         for attempt in range(max_attempts):
+            # Check cancel before (re-)entering create() — avoids blocking on a stale cancel
+            if cancel_event and cancel_event.is_set():
+                return
+
             try:
                 yield {"event": "phase", "data": {"phase": "connecting"}}
-                stream = await self.client.chat.completions.create(**kwargs)
+
+                # --- Cancel-aware create() with hard timeout ---
+                # The bare `await create()` is not interruptible by cancel_event and
+                # httpx per-read timeouts can reset, so we race the create task against
+                # cancel_event and a hard request_timeout deadline.
+                create_coro = self.client.chat.completions.create(**kwargs)
+                create_task = asyncio.ensure_future(create_coro)
+                wait_tasks: list[asyncio.Future[Any]] = [create_task]
+
+                if cancel_event:
+                    cancel_wait = asyncio.ensure_future(cancel_event.wait())
+                    wait_tasks.append(cancel_wait)
+                else:
+                    cancel_wait = None
+
+                try:
+                    done, _pending = await asyncio.wait(
+                        wait_tasks,
+                        timeout=float(self.config.request_timeout),
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                except Exception:
+                    create_task.cancel()
+                    if cancel_wait:
+                        cancel_wait.cancel()
+                    raise
+
+                if not done:
+                    # Hard timeout exceeded — create() never returned
+                    create_task.cancel()
+                    if cancel_wait:
+                        cancel_wait.cancel()
+                    logger.warning(
+                        "API create() timed out after %ds (attempt %d/%d)",
+                        self.config.request_timeout,
+                        attempt + 1,
+                        max_attempts,
+                    )
+                    raise _FirstTokenTimeoutError()
+
+                if cancel_wait and cancel_wait in done:
+                    # User pressed Escape during connecting — clean exit
+                    create_task.cancel()
+                    logger.info("Cancelled during connecting phase")
+                    return
+
+                # create() completed — clean up cancel_wait
+                if cancel_wait:
+                    cancel_wait.cancel()
+
+                stream = create_task.result()
                 yield {"event": "phase", "data": {"phase": "waiting"}}
 
-                # --- First-token timeout ---
+                # --- First-token timeout (cancel-aware) ---
                 stream_iter = stream.__aiter__()
                 first_chunk: Any = None
+
+                first_token_task = asyncio.ensure_future(stream_iter.__anext__())
+                ft_wait_tasks: list[asyncio.Future[Any]] = [first_token_task]
+
+                if cancel_event:
+                    ft_cancel_wait = asyncio.ensure_future(cancel_event.wait())
+                    ft_wait_tasks.append(ft_cancel_wait)
+                else:
+                    ft_cancel_wait = None
+
                 try:
-                    first_chunk = await asyncio.wait_for(
-                        stream_iter.__anext__(),
+                    ft_done, _ = await asyncio.wait(
+                        ft_wait_tasks,
                         timeout=float(self.config.first_token_timeout),
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                except asyncio.TimeoutError:
+                except Exception:
+                    first_token_task.cancel()
+                    if ft_cancel_wait:
+                        ft_cancel_wait.cancel()
+                    raise
+
+                if not ft_done:
+                    # First-token timeout
+                    first_token_task.cancel()
+                    if ft_cancel_wait:
+                        ft_cancel_wait.cancel()
                     logger.warning(
                         "No first token within %ds (attempt %d/%d)",
                         self.config.first_token_timeout,
@@ -239,6 +314,31 @@ class AIService:
                     except Exception:
                         pass
                     raise _FirstTokenTimeoutError()
+
+                if ft_cancel_wait and ft_cancel_wait in ft_done:
+                    # User cancelled during first-token wait
+                    first_token_task.cancel()
+                    try:
+                        if hasattr(stream, "close"):
+                            await stream.close()
+                    except Exception:
+                        pass
+                    return
+
+                if ft_cancel_wait:
+                    ft_cancel_wait.cancel()
+
+                try:
+                    first_chunk = first_token_task.result()
+                except StopAsyncIteration:
+                    # Stream ended immediately (empty response)
+                    try:
+                        if hasattr(stream, "close"):
+                            await stream.close()
+                    except Exception:
+                        pass
+                    yield {"event": "done", "data": {}}
+                    return
 
                 # --- Stream with full request_timeout (first chunk already received) ---
                 current_tool_calls: dict[int, dict[str, Any]] = {}

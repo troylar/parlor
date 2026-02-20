@@ -1567,6 +1567,262 @@ class TestRetryableFlag:
         assert error_events[0]["data"]["retryable"] is False
 
 
+class TestCancelAwareCreate:
+    """Tests for cancel-aware create() and first-token timeout (#244, #246)."""
+
+    @pytest.mark.asyncio
+    async def test_create_hard_timeout_fires_before_httpx(self):
+        """create() blocked longer than request_timeout must trigger retry via _FirstTokenTimeoutError."""
+
+        config = _make_config(request_timeout=1, retry_max_attempts=0)
+        service = _make_service(config)
+
+        # create() hangs forever — simulates httpx per-read timeout not firing
+        async def hanging_create(**kwargs):
+            await asyncio.sleep(999)
+
+        service.client.chat.completions.create = AsyncMock(side_effect=hanging_create)
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        # Should get a timeout error (not hang forever)
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_create_returns_cleanly(self):
+        """Escape during connecting phase must exit cleanly with no error events."""
+        cancel_event = asyncio.Event()
+
+        config = _make_config(request_timeout=60)
+        service = _make_service(config)
+
+        # create() hangs — user presses Escape while waiting
+        async def hanging_create(**kwargs):
+            await asyncio.sleep(999)
+
+        service.client.chat.completions.create = AsyncMock(side_effect=hanging_create)
+
+        events = []
+
+        async def _consume():
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}], cancel_event=cancel_event):
+                events.append(event)
+
+        task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.05)  # let it enter the create() wait
+        cancel_event.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+        # No error events — clean exit
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 0
+        # No retry events
+        retry_events = [e for e in events if e["event"] == "retrying"]
+        assert len(retry_events) == 0
+        # connecting phase was emitted
+        phase_events = [e for e in events if e["event"] == "phase"]
+        assert any(p["data"]["phase"] == "connecting" for p in phase_events)
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_create_does_not_retry(self):
+        """Cancel during connecting must NOT trigger retry loop — only one create() call."""
+        cancel_event = asyncio.Event()
+
+        config = _make_config(request_timeout=60, retry_max_attempts=3)
+        service = _make_service(config)
+
+        call_count = 0
+
+        async def hanging_create(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(999)
+
+        service.client.chat.completions.create = AsyncMock(side_effect=hanging_create)
+
+        async def _consume():
+            async for _ in service.stream_chat([{"role": "user", "content": "hi"}], cancel_event=cancel_event):
+                pass
+
+        task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.05)
+        cancel_event.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+        assert call_count == 1, "Cancel during create should not trigger retries"
+
+    @pytest.mark.asyncio
+    async def test_first_token_timeout_cancel_aware(self):
+        """Cancel during first-token wait must exit cleanly (no error, no retry)."""
+        cancel_event = asyncio.Event()
+
+        class HangingFirstTokenStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                await asyncio.sleep(999)  # never yields first token
+                yield  # pragma: no cover
+
+            async def close(self):
+                pass
+
+        config = _make_config(request_timeout=60, first_token_timeout=60)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(return_value=HangingFirstTokenStream())
+
+        events = []
+
+        async def _consume():
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}], cancel_event=cancel_event):
+                events.append(event)
+
+        task = asyncio.create_task(_consume())
+        await asyncio.sleep(0.05)
+        cancel_event.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 0
+        retry_events = [e for e in events if e["event"] == "retrying"]
+        assert len(retry_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_cancel_check_at_loop_top_prevents_reentry(self):
+        """cancel_event set between retry attempts must prevent re-entering create()."""
+        from openai import APITimeoutError
+
+        cancel_event = asyncio.Event()
+        config = _make_config(retry_max_attempts=3, retry_backoff_base=0.01)
+        service = _make_service(config)
+
+        call_count = 0
+
+        async def create_that_fails(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise APITimeoutError(request=MagicMock())
+            # Should never get here if cancel prevents reentry
+            await asyncio.sleep(999)
+
+        service.client.chat.completions.create = AsyncMock(side_effect=create_that_fails)
+
+        events = []
+
+        async def set_cancel_during_backoff():
+            # Wait for the retrying event, then set cancel
+            while not any(e["event"] == "retrying" for e in events):
+                await asyncio.sleep(0.01)
+            cancel_event.set()
+
+        with patch.object(service, "_build_client"):
+            setter = asyncio.create_task(set_cancel_during_backoff())
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}], cancel_event=cancel_event):
+                events.append(event)
+            await setter
+
+        # Only 1 create() call — cancel prevented the second attempt
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_create_timeout_with_retries_recovers(self):
+        """create() timeout on first attempt, successful on retry."""
+
+        class GoodStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content="hello", tool_calls=None), finish_reason=None)]
+                )
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        config = _make_config(request_timeout=1, retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+
+        call_count = 0
+
+        async def create_hangs_then_works(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                await asyncio.sleep(999)  # hang on first attempt
+            return GoodStream()
+
+        service.client.chat.completions.create = AsyncMock(side_effect=create_hangs_then_works)
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        assert any(e["event"] == "retrying" for e in events)
+        assert any(e["event"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_cancel_event_already_set_skips_create(self):
+        """If cancel_event is already set before stream_chat, no create() call is made."""
+        cancel_event = asyncio.Event()
+        cancel_event.set()
+
+        config = _make_config()
+        service = _make_service(config)
+
+        call_count = 0
+
+        async def counting_create(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return MagicMock()
+
+        service.client.chat.completions.create = AsyncMock(side_effect=counting_create)
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}], cancel_event=cancel_event):
+            events.append(event)
+
+        assert call_count == 0, "Pre-set cancel should skip create() entirely"
+        assert len(events) == 0
+
+    @pytest.mark.asyncio
+    async def test_empty_stream_after_create_yields_done(self):
+        """Stream that ends immediately after create() (StopAsyncIteration) yields done event."""
+
+        class EmptyStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                return
+                yield  # pragma: no cover
+
+            async def close(self):
+                pass
+
+        config = _make_config()
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(return_value=EmptyStream())
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        done_events = [e for e in events if e["event"] == "done"]
+        assert len(done_events) == 1
+
+
 class TestCancelEventSkipsRetryableError:
     """When cancel_event is already set, retryable error handlers must return cleanly."""
 
