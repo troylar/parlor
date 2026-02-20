@@ -34,6 +34,18 @@ dependencies = [
     "argon2-cffi>=23.1.0",
     "sqlite-vec>=0.1.6",
     "urllib3>=2.6.3",
+    # Transitive dependency floors for CVE remediation (see #194)
+    "aiohttp>=3.12.14",
+    "requests>=2.32.4",
+    "protobuf>=6.33.5",
+    "filelock>=3.20.3",
+    "h2>=4.3.0",
+    "pynacl>=1.6.2",
+    "authlib>=1.6.6",
+    "marshmallow>=4.1.2",
+    "wheel>=0.46.2",
+    # pillow>=12.1.1 needed for CVE-2026-25990, but fastembed 0.7.4 caps pillow<12.0.
+    # Deferred until fastembed updates its constraint.
 ]
 
 [project.optional-dependencies]

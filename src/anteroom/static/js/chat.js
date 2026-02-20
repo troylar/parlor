@@ -397,7 +397,7 @@ const Chat = (() => {
                 'dl', 'dt', 'dd', 'kbd', 'var', 'samp', 'abbr', 'mark',
             ],
             ALLOWED_ATTR: [
-                'href', 'src', 'alt', 'title', 'class', 'id',
+                'href', 'src', 'alt', 'title', 'class',
                 'target', 'rel', 'open', 'colspan', 'rowspan',
             ],
             ALLOW_DATA_ATTR: false,
@@ -537,7 +537,8 @@ const Chat = (() => {
             await App.loadConversation(newConv.id);
             await Sidebar.refresh();
         } catch (err) {
-            alert('Fork failed: ' + err.message);
+            console.error('[debug] fork failed', err.message);
+            showToast('Fork failed. Check the console for details.');
         }
     }
 
@@ -601,7 +602,8 @@ const Chat = (() => {
             }
             showToast(summary);
         } catch (err) {
-            alert('Rewind failed: ' + err.message);
+            console.error('[debug] rewind failed', err.message);
+            showToast('Rewind failed. Check the console for details.');
         }
     }
 
@@ -729,7 +731,8 @@ const Chat = (() => {
             await streamChatResponse(conversationId, body, headers);
 
         } catch (err) {
-            alert('Edit failed: ' + err.message);
+            console.error('[debug] edit failed', err.message);
+            showToast('Edit failed. Check the console for details.');
         }
     }
 

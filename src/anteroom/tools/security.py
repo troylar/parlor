@@ -94,10 +94,22 @@ _HARD_BLOCK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Direct eval/exec of base64 (common evasion technique)
     (re.compile(r"\bbase64\b.*\|\s*(ba)?sh\b"), "base64 decode piped to shell"),
     (re.compile(r"\bbase64\b.*\|\s*sudo\b"), "base64 decode piped to sudo"),
-    # Python/perl/ruby one-liner evasion
+    # Python/perl/ruby one-liner evasion (covers both -e and -c flags)
     (
-        re.compile(r"\b(python|python3|perl|ruby)\s+-[a-zA-Z]*e\s+.*\bos\.(system|popen|exec)\b"),
+        re.compile(r"\b(python|python3|perl|ruby)\s+-[a-zA-Z]*[ec]\s+.*\bos\.(system|popen|exec)\b"),
         "scripted shell escape",
+    ),
+    (
+        re.compile(r"\b(python|python3|perl|ruby)\s+-[a-zA-Z]*[ec]\s+.*\b(subprocess|__import__)\b"),
+        "scripted shell escape",
+    ),
+    # Secure-erase commands (shred/srm are always destructive; wipe requires flags to reduce false positives)
+    (re.compile(r"\b(shred|srm)\b", re.IGNORECASE), "secure file erasure"),
+    (re.compile(r"\bwipe\s+-", re.IGNORECASE), "secure file erasure (wipe)"),
+    # File zeroing via truncate (-s 0, --size=0, --size 0)
+    (
+        re.compile(r"\btruncate\s+(-s\s*0|--size[= ]0)\b", re.IGNORECASE),
+        "file zeroing (truncate -s 0)",
     ),
     # sudo rm
     (re.compile(r"\bsudo\s+rm\b"), "sudo rm"),

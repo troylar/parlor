@@ -31,7 +31,20 @@ const Canvas = (() => {
 
     function _mdToHtml(md) {
         if (!md) return '';
-        return DOMPurify.sanitize(marked.parse(md));
+        return DOMPurify.sanitize(marked.parse(md), {
+            ALLOWED_TAGS: [
+                'p', 'br', 'strong', 'em', 'code', 'pre', 'blockquote',
+                'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+                'hr', 'del', 'details', 'summary', 'span', 'div', 'sup', 'sub',
+                'dl', 'dt', 'dd', 'kbd', 'var', 'samp', 'abbr', 'mark',
+            ],
+            ALLOWED_ATTR: [
+                'href', 'src', 'alt', 'title', 'class',
+                'target', 'rel', 'open', 'colspan', 'rowspan',
+            ],
+            ALLOW_DATA_ATTR: false,
+        });
     }
 
     function _getMarkdown() {

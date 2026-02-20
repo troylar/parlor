@@ -585,6 +585,55 @@ class TestSanitizeCommand:
         _, error = sanitize_command("echo myrmdir is not a real command")
         assert error is None
 
+    def test_blocked_shred(self) -> None:
+        _, error = sanitize_command("shred -vfz /dev/sda")
+        assert error is not None
+        assert "secure file erasure" in error.lower() or "blocked" in error.lower()
+
+    def test_blocked_wipe(self) -> None:
+        _, error = sanitize_command("wipe -r /tmp/sensitive")
+        assert error is not None
+
+    def test_blocked_srm(self) -> None:
+        _, error = sanitize_command("srm -sz secret.key")
+        assert error is not None
+
+    def test_blocked_truncate_zero(self) -> None:
+        _, error = sanitize_command("truncate -s 0 /var/log/auth.log")
+        assert error is not None
+
+    def test_blocked_truncate_long_flag(self) -> None:
+        _, error = sanitize_command("truncate --size=0 /var/log/auth.log")
+        assert error is not None
+
+    def test_blocked_truncate_long_flag_space(self) -> None:
+        _, error = sanitize_command("truncate --size 0 /var/log/auth.log")
+        assert error is not None
+
+    def test_safe_wipe_word_not_blocked(self) -> None:
+        """'wipe' without flags (e.g. in English prose) should not trigger."""
+        _, error = sanitize_command("echo wipe the table clean")
+        assert error is None, "The word 'wipe' in prose should not trigger the block"
+
+    def test_blocked_python_c_os_system(self) -> None:
+        _, error = sanitize_command("python3 -c \"import os; os.system('rm -rf /')\"")
+        assert error is not None
+
+    def test_blocked_python_c_subprocess(self) -> None:
+        _, error = sanitize_command("python3 -c \"import subprocess; subprocess.run('rm -rf /', shell=True)\"")
+        assert error is not None
+
+    def test_safe_truncate_nonzero_passes(self) -> None:
+        _, error = sanitize_command("truncate -s 100M bigfile.dat")
+        assert error is None, "truncate with non-zero size should not be blocked"
+
+    def test_safe_shredder_word_not_blocked(self) -> None:
+        """Ensure word boundary works — 'shredder' should not trigger."""
+        # shred has \b boundary so 'shredder' should still match since shred is a prefix
+        # Actually \bshred\b will NOT match 'shredder' because of the word boundary
+        _, error = sanitize_command("echo shredder is a TMNT character")
+        assert error is None, "The word 'shredder' should not trigger the shred block"
+
 
 class TestReadFileTool:
     @pytest.mark.asyncio

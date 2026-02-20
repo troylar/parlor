@@ -8,6 +8,12 @@ const Sources = (() => {
     let _selectedFile = null;
     let _createType = 'text';
     let _isEditing = false;
+
+    function _escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
     let _viewMode = 'sources'; // sources | groups
     let _groups = [];
     let _currentGroup = null;
@@ -350,17 +356,17 @@ const Sources = (() => {
             <div class="sources-create-form">
                 <div class="setting-group">
                     <label for="source-edit-title">Title</label>
-                    <input type="text" id="source-edit-title" value="${DOMPurify.sanitize(source.title || '')}" autocomplete="off">
+                    <input type="text" id="source-edit-title" value="${_escapeHtml(source.title || '')}" autocomplete="off">
                 </div>
                 ${source.type === 'text' || source.type === 'file' ? `
                 <div class="setting-group">
                     <label for="source-edit-content">Content</label>
-                    <textarea id="source-edit-content" rows="12">${DOMPurify.sanitize(source.content || '')}</textarea>
+                    <textarea id="source-edit-content" rows="12">${_escapeHtml(source.content || '')}</textarea>
                 </div>` : ''}
                 ${source.type === 'url' ? `
                 <div class="setting-group">
                     <label for="source-edit-url">URL</label>
-                    <input type="url" id="source-edit-url" value="${DOMPurify.sanitize(source.url || '')}" autocomplete="off">
+                    <input type="url" id="source-edit-url" value="${_escapeHtml(source.url || '')}" autocomplete="off">
                 </div>` : ''}
                 <div class="sources-create-actions">
                     <button class="btn-modal-cancel" id="source-edit-cancel-btn">Cancel</button>
@@ -543,7 +549,9 @@ const Sources = (() => {
             file: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>',
             url: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
         };
-        return `<span class="source-type-badge source-type-${DOMPurify.sanitize(type)}">${icons[type] || ''} ${DOMPurify.sanitize(type)}</span>`;
+        const allowed = ['text', 'file', 'url'];
+        const safe = allowed.includes(type) ? type : 'text';
+        return `<span class="source-type-badge source-type-${safe}">${icons[safe] || ''} ${_escapeHtml(safe)}</span>`;
     }
 
     function _formatBytes(bytes) {

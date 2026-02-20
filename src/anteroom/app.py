@@ -363,6 +363,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "This allows man-in-the-middle attacks. Only use for development."
         )
 
+    bind_host = config.app.host if hasattr(config.app, "host") else "127.0.0.1"
+    if not config.app.tls and bind_host not in ("127.0.0.1", "localhost", "::1"):
+        security_logger.warning(
+            "TLS is disabled but bind_host is '%s' (not localhost). "
+            "Session cookies will lack the Secure flag, transmitting credentials "
+            "in cleartext. Set 'app.tls: true' in config.yaml for non-localhost deployments.",
+            bind_host,
+        )
+
     app = FastAPI(
         title="Anteroom",
         version="0.5.3",

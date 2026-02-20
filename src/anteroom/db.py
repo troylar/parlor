@@ -551,7 +551,11 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
     )
 
     # Add user_id / user_display_name columns to all entity tables
+    # DDL cannot use parameterized placeholders for identifiers in SQLite;
+    # table names are validated against this hardcoded set before interpolation.
+    allowed_entity_tables = {"conversations", "messages", "projects", "folders", "tags"}
     for table in ("conversations", "messages", "projects", "folders", "tags"):
+        assert table in allowed_entity_tables, f"Unexpected table in migration: {table}"
         table_cursor = conn.execute(f"PRAGMA table_info({table})")
         table_cols = {row[1] for row in table_cursor.fetchall()}
         if "user_id" not in table_cols:
@@ -712,9 +716,12 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         pass
 
     # Add status column to embedding metadata tables for skip/fail tracking
-    embedding_tables = {"message_embeddings", "source_chunk_embeddings"}
+    # DDL cannot use parameterized placeholders for identifiers in SQLite;
+    # table names are validated against this hardcoded constant before interpolation.
+    allowed_embedding_tables = {"message_embeddings", "source_chunk_embeddings"}
+    embedding_tables = allowed_embedding_tables
     for emb_table in embedding_tables:
-        assert emb_table in embedding_tables  # guard: DDL cannot be parameterized in SQLite
+        assert emb_table in allowed_embedding_tables, f"Unexpected table in migration: {emb_table}"
         emb_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         if emb_table in emb_tables:
             emb_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({emb_table})").fetchall()}

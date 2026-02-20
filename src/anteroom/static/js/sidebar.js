@@ -388,7 +388,7 @@ const Sidebar = (() => {
             }
             await refresh();
         } catch (e) {
-            console.error('Failed to create tag:', e);
+            console.error('[debug] failed to create tag');
         }
     }
 
@@ -466,7 +466,7 @@ const Sidebar = (() => {
                     await App.api(`/api/conversations/${conversationId}/copy?target_db=${encodeURIComponent(db.name)}`
                         , { method: 'POST' });
                 } catch (err) {
-                    console.error('Copy failed:', err);
+                    console.error('[debug] copy failed');
                 }
             });
             dropdown.appendChild(item);
@@ -513,7 +513,7 @@ const Sidebar = (() => {
             });
             await refresh();
         } catch (e) {
-            console.error('Failed to create folder:', e);
+            console.error('[debug] failed to create folder');
         }
     }
 
