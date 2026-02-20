@@ -520,9 +520,9 @@ async def thinking_countdown(
     Returns ``True`` if countdown completed (caller should retry),
     ``False`` if ``cancel_event`` fired (caller should give up).
     """
-    elapsed = time.monotonic() - _thinking_start if _thinking_start else 0.0
     remaining = int(delay)
     while remaining > 0:
+        elapsed = time.monotonic() - _thinking_start if _thinking_start else 0.0
         if _repl_mode and _stdout:
             _write_thinking_line(elapsed, error_msg=error_msg, countdown=remaining)
         try:
