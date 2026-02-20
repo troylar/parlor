@@ -780,6 +780,8 @@ async def _run_one_shot(
                     thinking = True
             elif event.kind == "phase":
                 renderer.set_thinking_phase(event.data.get("phase", ""))
+            elif event.kind == "retrying":
+                renderer.set_retrying(event.data)
             elif event.kind == "token":
                 if not thinking:
                     renderer.start_thinking()
@@ -1762,6 +1764,8 @@ async def _run_repl(
                             thinking = True
                     elif event.kind == "phase":
                         renderer.set_thinking_phase(event.data.get("phase", ""))
+                    elif event.kind == "retrying":
+                        renderer.set_retrying(event.data)
                     elif event.kind == "token":
                         if not thinking:
                             renderer.start_thinking()
@@ -1833,6 +1837,9 @@ async def _run_repl(
                     renderer.stop_thinking()
                 renderer.render_response_end()
             finally:
+                if thinking:
+                    renderer.stop_thinking()
+                    thinking = False
                 if not _has_pending_work():
                     agent_busy.clear()
                     session.app.invalidate()

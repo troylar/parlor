@@ -13,6 +13,10 @@ ai:
   system_prompt: "You are a helpful assistant."
   verify_ssl: true                            # SSL cert verification (default: true)
   request_timeout: 120                        # API request timeout in seconds (default: 120, clamped 10–600)
+  connect_timeout: 5                           # TCP connect timeout in seconds (default: 5, clamped 1–30)
+  first_token_timeout: 30                      # Max wait for first token after connect (default: 30, clamped 5–120)
+  retry_max_attempts: 3                        # Retries on transient errors; 0 disables (default: 3, clamped 0–10)
+  retry_backoff_base: 1.0                      # Exponential backoff base in seconds (default: 1.0, clamped 0.1–30.0)
 
 app:
   host: "127.0.0.1"      # Bind address
@@ -91,7 +95,11 @@ embeddings:
 | `model` | string | `gpt-4` | Default model name |
 | `system_prompt` | string | `You are a helpful assistant.` | System prompt for all conversations |
 | `verify_ssl` | boolean | `true` | Verify SSL certificates when connecting to the API |
-| `request_timeout` | integer | `120` | Per-request timeout in seconds for API calls (clamped 10–600); env: `AI_CHAT_REQUEST_TIMEOUT` |
+| `request_timeout` | integer | `120` | Overall stream timeout in seconds (clamped 10–600); env: `AI_CHAT_REQUEST_TIMEOUT` |
+| `connect_timeout` | integer | `5` | TCP connect timeout in seconds (clamped 1–30); env: `AI_CHAT_CONNECT_TIMEOUT` |
+| `first_token_timeout` | integer | `30` | Max seconds to wait for first token after connect (clamped 5–120); env: `AI_CHAT_FIRST_TOKEN_TIMEOUT` |
+| `retry_max_attempts` | integer | `3` | Retries on transient errors (timeout, connection); 0 disables (clamped 0–10); env: `AI_CHAT_RETRY_MAX_ATTEMPTS` |
+| `retry_backoff_base` | float | `1.0` | Exponential backoff base delay in seconds (clamped 0.1–30.0); env: `AI_CHAT_RETRY_BACKOFF_BASE` |
 
 ### app
 

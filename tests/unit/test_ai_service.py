@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from anteroom.config import AIConfig
-from anteroom.services.ai_service import AIService
+from anteroom.services.ai_service import AIService, _StreamTimeoutError
 
 
 def _make_config(**overrides) -> AIConfig:
@@ -19,6 +19,7 @@ def _make_config(**overrides) -> AIConfig:
         "model": "gpt-4",
         "request_timeout": 120,
         "verify_ssl": True,
+        "retry_max_attempts": 0,  # disable retry by default in tests
     }
     defaults.update(overrides)
     return AIConfig(**defaults)
@@ -35,13 +36,21 @@ class TestClientConfiguration:
             assert isinstance(http_client, httpx.AsyncClient)
             assert http_client.timeout.read == 60.0
 
-    def test_connect_timeout_is_10s(self):
-        """Connect timeout must be fixed at 10s regardless of request_timeout."""
+    def test_connect_timeout_uses_config(self):
+        """Connect timeout must use config.connect_timeout (default 5s)."""
         config = _make_config(request_timeout=300)
         with patch("anteroom.services.ai_service.AsyncOpenAI") as mock_openai:
             AIService(config)
             http_client = mock_openai.call_args[1]["http_client"]
-            assert http_client.timeout.connect == 10.0
+            assert http_client.timeout.connect == 5.0
+
+    def test_connect_timeout_custom(self):
+        """Connect timeout must honor custom config value."""
+        config = _make_config(connect_timeout=8)
+        with patch("anteroom.services.ai_service.AsyncOpenAI") as mock_openai:
+            AIService(config)
+            http_client = mock_openai.call_args[1]["http_client"]
+            assert http_client.timeout.connect == 8.0
 
     def test_verify_ssl_true_by_default(self):
         """SSL verification must be enabled by default — AsyncClient built with verify=True."""
@@ -85,8 +94,6 @@ class TestTimeoutErrorHandling:
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
         assert error_events[0]["data"]["code"] == "timeout"
-        assert "30s" in error_events[0]["data"]["message"]
-        assert "request_timeout" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
     async def test_client_rebuilt_after_stream_chat_timeout(self):
@@ -105,6 +112,7 @@ class TestTimeoutErrorHandling:
         with patch.object(service, "_build_client") as mock_build:
             async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
                 pass
+            # With retry_max_attempts=0, only 1 attempt, 1 rebuild
             assert mock_build.call_count == 1
 
     @pytest.mark.asyncio
@@ -406,8 +414,7 @@ class TestIterStream:
 
     @pytest.mark.asyncio
     async def test_total_timeout_fires_on_stalled_stream(self):
-        """Total timeout must raise APITimeoutError when deadline expires during a stall."""
-        from openai import APITimeoutError
+        """Total timeout must raise _StreamTimeoutError when deadline expires during a stall."""
 
         async def _stalled_gen():
             yield "first_chunk"
@@ -415,7 +422,7 @@ class TestIterStream:
             yield "never_reached"
 
         result = []
-        with pytest.raises(APITimeoutError):
+        with pytest.raises(_StreamTimeoutError):
             async for chunk in AIService._iter_stream(_stalled_gen(), cancel_event=None, total_timeout=0.1):
                 result.append(chunk)
 
@@ -424,13 +431,12 @@ class TestIterStream:
     @pytest.mark.asyncio
     async def test_total_timeout_fires_before_any_chunk(self):
         """Total timeout must fire even if the stream never produces a single chunk."""
-        from openai import APITimeoutError
 
         async def _forever_stalled():
             await asyncio.sleep(999)
             yield "never"
 
-        with pytest.raises(APITimeoutError):
+        with pytest.raises(_StreamTimeoutError):
             async for _ in AIService._iter_stream(_forever_stalled(), cancel_event=None, total_timeout=0.1):
                 pass
 
@@ -519,8 +525,6 @@ class TestIterStream:
     @pytest.mark.asyncio
     async def test_deadline_already_expired_at_loop_entry(self):
         """If deadline expires between chunks, timeout fires at the top of the loop."""
-        from openai import APITimeoutError
-
         call_count = 0
 
         async def _slow_chunks():
@@ -533,7 +537,7 @@ class TestIterStream:
             yield "second"
 
         result = []
-        with pytest.raises(APITimeoutError):
+        with pytest.raises(_StreamTimeoutError):
             async for chunk in AIService._iter_stream(_slow_chunks(), cancel_event=None, total_timeout=0.1):
                 result.append(chunk)
 
@@ -569,8 +573,6 @@ class TestIterStream:
     @pytest.mark.asyncio
     async def test_aclose_called_on_timeout(self):
         """Stream aclose() must be called when total timeout fires for resource cleanup."""
-        from openai import APITimeoutError
-
         aclose_called = asyncio.Event()
 
         class TrackingStream:
@@ -582,7 +584,7 @@ class TestIterStream:
                 aclose_called.set()
 
         stream = TrackingStream()
-        with pytest.raises(APITimeoutError):
+        with pytest.raises(_StreamTimeoutError):
             async for _ in AIService._iter_stream(stream, cancel_event=None, total_timeout=0.1):
                 pass
 
@@ -687,24 +689,39 @@ class TestStreamChatWithIterStream:
         assert token_events[0]["data"]["content"] == "hello"
 
     @pytest.mark.asyncio
-    async def test_stream_chat_total_timeout_yields_error(self):
-        """stream_chat must yield a timeout error when _iter_stream total timeout fires."""
+    async def test_stream_chat_mid_stream_timeout_yields_error_no_retry(self):
+        """Mid-stream timeout (_StreamTimeoutError) must yield error and NOT retry."""
+        first_chunk = MagicMock()
+        first_chunk.choices = [MagicMock()]
+        first_chunk.choices[0].delta = MagicMock()
+        first_chunk.choices[0].delta.content = "hi"
+        first_chunk.choices[0].delta.tool_calls = None
+        first_chunk.choices[0].finish_reason = None
 
         class MockStream:
             def __aiter__(self):
                 return self._gen().__aiter__()
 
             async def _gen(self):
-                await asyncio.sleep(999)
+                yield first_chunk
+                await asyncio.sleep(999)  # stall mid-stream
                 yield MagicMock()
 
-        config = _make_config(request_timeout=1)
+        config = _make_config(request_timeout=1, first_token_timeout=30, retry_max_attempts=3)
         service = AIService.__new__(AIService)
         service.config = config
         service._token_provider = None
 
+        call_count = 0
+        original_stream = MockStream()
+
+        async def fake_create(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original_stream
+
         mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=MockStream())
+        mock_client.chat.completions.create = AsyncMock(side_effect=fake_create)
         service.client = mock_client
 
         events = []
@@ -715,6 +732,11 @@ class TestStreamChatWithIterStream:
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
         assert error_events[0]["data"]["code"] == "timeout"
+        # Mid-stream timeout must NOT trigger retry — only 1 API call
+        assert call_count == 1
+        # No retrying events emitted
+        retry_events = [e for e in events if e["event"] == "retrying"]
+        assert len(retry_events) == 0
 
 
 class TestBuildClientCleanup:
@@ -1096,3 +1118,295 @@ class TestStreamChatPhaseEvents:
         phase_events = [e for e in events if e["event"] == "phase"]
         assert len(phase_events) >= 1
         assert phase_events[0]["data"]["phase"] == "connecting"
+
+
+class TestRetryWithExponentialBackoff:
+    """Tests for transient error retry with exponential backoff (#209)."""
+
+    @pytest.mark.asyncio
+    async def test_retry_succeeds_on_second_attempt_after_timeout(self):
+        """stream_chat should retry after APITimeoutError and succeed on 2nd attempt."""
+        from openai import APITimeoutError
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content="hello", tool_calls=None), finish_reason=None)]
+                )
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        config = _make_config(retry_max_attempts=2, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=[APITimeoutError(request=MagicMock()), MockStream()]
+        )
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        assert any(e["event"] == "retrying" for e in events)
+        assert any(e["event"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_retry_succeeds_on_second_attempt_after_connection_error(self):
+        """stream_chat should retry after APIConnectionError and succeed on 2nd attempt."""
+        from openai import APIConnectionError
+
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        config = _make_config(retry_max_attempts=2, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=[APIConnectionError(request=MagicMock()), MockStream()]
+        )
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        assert any(e["event"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_all_retries_exhausted_yields_error(self):
+        """When all retry attempts are exhausted, an error event must be yielded."""
+        from openai import APITimeoutError
+
+        config = _make_config(retry_max_attempts=2, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_retrying_event_contains_attempt_info(self):
+        """Retrying events must contain attempt number, max_attempts, and delay."""
+        from openai import APITimeoutError
+
+        config = _make_config(retry_max_attempts=2, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        retry_events = [e for e in events if e["event"] == "retrying"]
+        assert len(retry_events) == 2  # 2 retries before final error
+        assert retry_events[0]["data"]["attempt"] == 2
+        assert retry_events[1]["data"]["attempt"] == 3
+
+    @pytest.mark.asyncio
+    async def test_auth_error_not_retried(self):
+        """AuthenticationError must NOT be retried — it's not transient."""
+        from openai import AuthenticationError
+
+        config = _make_config(retry_max_attempts=3, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=AuthenticationError(message="bad key", response=MagicMock(status_code=401), body={})
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert not any(e["event"] == "retrying" for e in events)
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "auth_failed"
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_not_retried(self):
+        """RateLimitError must NOT be retried — user should wait."""
+        from openai import RateLimitError
+
+        config = _make_config(retry_max_attempts=3, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=RateLimitError(message="rate limited", response=MagicMock(status_code=429), body={})
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert not any(e["event"] == "retrying" for e in events)
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "rate_limit"
+
+    @pytest.mark.asyncio
+    async def test_retry_disabled_when_max_attempts_zero(self):
+        """retry_max_attempts=0 must disable retry entirely."""
+        from openai import APITimeoutError
+
+        config = _make_config(retry_max_attempts=0, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        assert not any(e["event"] == "retrying" for e in events)
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_build_client_called_on_each_retry(self):
+        """_build_client must be called on each transient error to reset the connection pool."""
+        from openai import APITimeoutError
+
+        config = _make_config(retry_max_attempts=2, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+
+        with patch.object(service, "_build_client") as mock_build:
+            async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+                pass
+            # 1 initial attempt + 2 retries = 3 total _build_client calls
+            assert mock_build.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_first_token_timeout_triggers_retry(self):
+        """When no first token arrives within first_token_timeout, retry should be triggered."""
+
+        class HangingStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                await asyncio.sleep(999)  # never yields
+                yield  # pragma: no cover
+
+            async def close(self):
+                pass
+
+        class GoodStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(choices=[MagicMock(delta=MagicMock(content="hi", tool_calls=None), finish_reason=None)])
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content=None, tool_calls=None), finish_reason="stop")]
+                )
+
+            async def close(self):
+                pass
+
+        config = _make_config(first_token_timeout=1, retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=[HangingStream(), GoodStream()])
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        assert any(e["event"] == "retrying" for e in events)
+        assert any(e["event"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_first_token_timeout_all_retries_exhausted(self):
+        """When first-token timeout exhausts all retries, yield specific error."""
+
+        class HangingStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                await asyncio.sleep(999)
+                yield  # pragma: no cover
+
+            async def close(self):
+                pass
+
+        config = _make_config(first_token_timeout=1, retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=[HangingStream(), HangingStream()])
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "timeout"
+        assert "first_token_timeout" in error_events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_connection_error_all_retries_exhausted(self):
+        """When connection error exhausts all retries, yield connection_error."""
+        from openai import APIConnectionError
+
+        config = _make_config(retry_max_attempts=1, retry_backoff_base=0.01, base_url="http://dead-host:1234/v1")
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=APIConnectionError(request=MagicMock()))
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "connection_error"
+        assert "dead-host:1234" in error_events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_retry_backoff_exits_immediately(self):
+        """Setting cancel_event during retry backoff must stop the retry loop."""
+        from openai import APITimeoutError
+
+        config = _make_config(retry_max_attempts=3, retry_backoff_base=10.0)  # long backoff
+        service = _make_service(config)
+        service.client.chat.completions.create = AsyncMock(side_effect=APITimeoutError(request=MagicMock()))
+        cancel_event = asyncio.Event()
+
+        async def set_cancel_soon():
+            await asyncio.sleep(0.05)
+            cancel_event.set()
+
+        events = []
+        with patch.object(service, "_build_client"):
+            task = asyncio.create_task(set_cancel_soon())
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}], cancel_event=cancel_event):
+                events.append(event)
+            await task
+
+        # Should have 1 retrying event then exit (not all 3 retries)
+        retry_events = [e for e in events if e["event"] == "retrying"]
+        assert len(retry_events) == 1
+        assert not any(e["event"] == "error" for e in events)
