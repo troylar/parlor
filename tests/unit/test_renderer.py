@@ -985,6 +985,88 @@ class TestThinkingTicker:
             r._stdout = None
 
 
+class TestFirstThinkingNewline:
+    """Regression tests for first thinking indicator blank line (#249).
+
+    start_thinking(newline=True) must write \\n + Thinking... as a single
+    atomic write so prompt_toolkit's cursor teardown cannot interleave.
+    """
+
+    @pytest.mark.asyncio
+    async def test_newline_true_writes_atomic_line(self) -> None:
+        """newline=True writes \\n + erase + Thinking... in one write call."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        try:
+            start_thinking(newline=True)
+            output = buf.getvalue()
+            # Must contain Thinking... text
+            assert "Thinking..." in output
+            # Must start with \n for visual separation
+            assert output.startswith("\n")
+            # The \n and Thinking... must be in the same write (atomic)
+            assert "\n\r\033[2K" in output
+        finally:
+            stop_thinking_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_newline_false_no_leading_newline(self) -> None:
+        """Default (newline=False) writes no leading \\n — for retries."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        try:
+            start_thinking(newline=False)
+            output = buf.getvalue()
+            assert "Thinking..." in output
+            # Must NOT start with \n (retry overwrites in-place)
+            assert not output.startswith("\n")
+        finally:
+            stop_thinking_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_newline_default_is_false(self) -> None:
+        """start_thinking() without keyword defaults to no leading newline."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        try:
+            start_thinking()
+            output = buf.getvalue()
+            assert "Thinking..." in output
+            assert not output.startswith("\n")
+        finally:
+            stop_thinking_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+    def test_newline_ignored_in_non_repl_mode(self) -> None:
+        """In non-repl mode, newline=True has no effect (Rich Status used)."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = False
+        r._stdout = None
+        try:
+            start_thinking(newline=True)
+            # Should use Rich Status, not raw ANSI write
+            assert r._spinner is not None
+        finally:
+            stop_thinking_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+
 class TestThinkingPhases:
     """Tests for lifecycle phase tracking in the thinking indicator (#203)."""
 

@@ -349,8 +349,14 @@ async def _thinking_ticker() -> None:
         return
 
 
-def start_thinking() -> None:
-    """Show a spinner with timer while AI is generating."""
+def start_thinking(*, newline: bool = False) -> None:
+    """Show a spinner with timer while AI is generating.
+
+    In REPL mode, pass ``newline=True`` on the first call per user message
+    so the visual separator and "Thinking..." text are written as a single
+    atomic write, preventing prompt_toolkit's cursor teardown from
+    interleaving between them (#249).  Retry calls should omit it.
+    """
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
     _flush_dedup()
@@ -367,7 +373,14 @@ def start_thinking() -> None:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
-        _write_thinking_line(0.0)
+        if newline and _stdout:
+            # Atomic \n + Thinking... prevents prompt_toolkit race (#249).
+            gold = "\033[38;2;197;160;89m"
+            rst = "\033[0m"
+            _stdout.write(f"\n\r\033[2K{gold}Thinking...{rst}")
+            _stdout.flush()
+        else:
+            _write_thinking_line(0.0)
         _spinner = None
     else:
         _spinner = Status(f"[{GOLD}]Thinking...[/]", console=console, spinner="dots12")

@@ -1707,8 +1707,9 @@ async def _run_repl(
                     is_first_message = False
                 continue
 
-            # Visual separation between input and response
-            renderer.render_newline()
+            # Visual separation is handled by start_thinking() which writes
+            # \n + Thinking... as a single atomic write to avoid a race with
+            # prompt_toolkit's cursor teardown on the first message (#249).
 
             # Expand file references
             expanded = _expand_file_references(
@@ -1808,7 +1809,7 @@ async def _run_repl(
 
                         if event.kind == "thinking":
                             if not thinking:
-                                renderer.start_thinking()
+                                renderer.start_thinking(newline=True)
                                 thinking = True
                         elif event.kind == "phase":
                             renderer.set_thinking_phase(event.data.get("phase", ""))
@@ -1816,7 +1817,7 @@ async def _run_repl(
                             renderer.set_retrying(event.data)
                         elif event.kind == "token":
                             if not thinking:
-                                renderer.start_thinking()
+                                renderer.start_thinking(newline=True)
                                 thinking = True
                             renderer.render_token(event.data["content"])
                             renderer.increment_thinking_tokens()
