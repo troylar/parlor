@@ -36,7 +36,25 @@ class AIService:
         self._build_client()
 
     def _build_client(self) -> None:
-        """Build (or rebuild) the AsyncOpenAI client with the current API key."""
+        """Build (or rebuild) the AsyncOpenAI client with the current API key.
+
+        Closes the old client's HTTP connection pool to prevent resource leaks.
+        """
+        old_client = getattr(self, "client", None)
+        if old_client is not None:
+            try:
+                old_http = getattr(old_client, "_client", None)
+                if old_http and hasattr(old_http, "close"):
+                    # Schedule async close without blocking; best-effort cleanup
+                    try:
+                        loop = asyncio.get_running_loop()
+                        task = loop.create_task(old_http.close())
+                        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                    except RuntimeError:
+                        pass  # No running loop (e.g. during __init__)
+            except Exception:
+                logger.debug("Failed to close old HTTP client", exc_info=True)
+
         api_key = self._resolve_api_key()
         timeout = httpx.Timeout(
             connect=10.0,
@@ -74,6 +92,86 @@ class AIService:
             logger.exception("Token refresh failed")
             return False
 
+    @staticmethod
+    async def _iter_stream(
+        stream_iter: Any,
+        cancel_event: asyncio.Event | None,
+        total_timeout: float,
+    ) -> AsyncGenerator[Any, None]:
+        """Iterate an async stream with cancel-awareness and a hard total timeout.
+
+        Yields chunks from the stream. Stops if:
+        - cancel_event is set (user pressed Escape / disconnected)
+        - total_timeout seconds elapse since iteration started
+        - the stream is exhausted (StopAsyncIteration)
+        """
+        deadline = asyncio.get_running_loop().time() + total_timeout
+
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                logger.warning("Stream deadline exceeded before next chunk (%.0fs)", total_timeout)
+                try:
+                    await stream_iter.aclose()
+                except Exception:
+                    pass
+                raise APITimeoutError(request=None)  # type: ignore[arg-type]
+
+            next_chunk = asyncio.ensure_future(stream_iter.__anext__())
+            wait_tasks: list[asyncio.Future[Any]] = [next_chunk]
+
+            if cancel_event:
+                cancel_wait = asyncio.ensure_future(cancel_event.wait())
+                wait_tasks.append(cancel_wait)
+            else:
+                cancel_wait = None
+
+            try:
+                done, _pending = await asyncio.wait(
+                    wait_tasks,
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            except Exception:
+                next_chunk.cancel()
+                if cancel_wait:
+                    cancel_wait.cancel()
+                raise
+
+            if not done:
+                # Timeout with no completion
+                next_chunk.cancel()
+                if cancel_wait:
+                    cancel_wait.cancel()
+                logger.warning("Stream wait timed out after %.0fs total", total_timeout)
+                try:
+                    await stream_iter.aclose()
+                except Exception:
+                    pass
+                raise APITimeoutError(request=None)  # type: ignore[arg-type]
+
+            # Cancel was triggered
+            if cancel_wait and cancel_wait in done:
+                next_chunk.cancel()
+                try:
+                    await stream_iter.aclose()
+                except Exception:
+                    pass
+                return
+
+            # Stream produced a chunk (or ended)
+            if cancel_wait and cancel_wait not in done:
+                cancel_wait.cancel()
+
+            try:
+                chunk = next_chunk.result()
+            except StopAsyncIteration:
+                if cancel_wait:
+                    cancel_wait.cancel()
+                return
+
+            yield chunk
+
     async def stream_chat(
         self,
         messages: list[dict[str, Any]],
@@ -99,65 +197,66 @@ class AIService:
             stream = await self.client.chat.completions.create(**kwargs)
 
             current_tool_calls: dict[int, dict[str, Any]] = {}
+            stream_iter = stream.__aiter__()
+            total_timeout = float(self.config.request_timeout)
 
-            async for chunk in stream:
-                if cancel_event and cancel_event.is_set():
-                    await stream.close()
-                    yield {"event": "done", "data": {}}
-                    return
+            try:
+                async for chunk in self._iter_stream(stream_iter, cancel_event, total_timeout):
+                    choice = chunk.choices[0] if chunk.choices else None
+                    if not choice:
+                        continue
 
-                choice = chunk.choices[0] if chunk.choices else None
-                if not choice:
-                    continue
+                    delta = choice.delta
 
-                delta = choice.delta
+                    if delta.content:
+                        yield {"event": "token", "data": {"content": delta.content}}
 
-                if delta.content:
-                    yield {"event": "token", "data": {"content": delta.content}}
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in current_tool_calls:
+                                current_tool_calls[idx] = {
+                                    "id": tc.id or "",
+                                    "function_name": "",
+                                    "arguments": "",
+                                }
+                            if tc.id:
+                                current_tool_calls[idx]["id"] = tc.id
+                            if tc.function and tc.function.name:
+                                current_tool_calls[idx]["function_name"] = tc.function.name
+                            if tc.function and tc.function.arguments:
+                                current_tool_calls[idx]["arguments"] += tc.function.arguments
+                                yield {
+                                    "event": "tool_call_args_delta",
+                                    "data": {
+                                        "index": idx,
+                                        "tool_name": current_tool_calls[idx]["function_name"],
+                                        "delta": tc.function.arguments,
+                                    },
+                                }
 
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in current_tool_calls:
-                            current_tool_calls[idx] = {
-                                "id": tc.id or "",
-                                "function_name": "",
-                                "arguments": "",
-                            }
-                        if tc.id:
-                            current_tool_calls[idx]["id"] = tc.id
-                        if tc.function and tc.function.name:
-                            current_tool_calls[idx]["function_name"] = tc.function.name
-                        if tc.function and tc.function.arguments:
-                            current_tool_calls[idx]["arguments"] += tc.function.arguments
+                    if choice.finish_reason == "tool_calls":
+                        for _idx, tc_data in sorted(current_tool_calls.items()):
+                            try:
+                                args = json.loads(tc_data["arguments"])
+                            except json.JSONDecodeError:
+                                args = {}
                             yield {
-                                "event": "tool_call_args_delta",
+                                "event": "tool_call",
                                 "data": {
-                                    "index": idx,
-                                    "tool_name": current_tool_calls[idx]["function_name"],
-                                    "delta": tc.function.arguments,
+                                    "id": tc_data["id"],
+                                    "function_name": tc_data["function_name"],
+                                    "arguments": args,
                                 },
                             }
+                        return
 
-                if choice.finish_reason == "tool_calls":
-                    for _idx, tc_data in sorted(current_tool_calls.items()):
-                        try:
-                            args = json.loads(tc_data["arguments"])
-                        except json.JSONDecodeError:
-                            args = {}
-                        yield {
-                            "event": "tool_call",
-                            "data": {
-                                "id": tc_data["id"],
-                                "function_name": tc_data["function_name"],
-                                "arguments": args,
-                            },
-                        }
-                    return
-
-                if choice.finish_reason == "stop":
-                    yield {"event": "done", "data": {}}
-                    return
+                    if choice.finish_reason == "stop":
+                        yield {"event": "done", "data": {}}
+                        return
+            finally:
+                if hasattr(stream, "close"):
+                    await stream.close()
 
         except AuthenticationError:
             if self._try_refresh_token():
