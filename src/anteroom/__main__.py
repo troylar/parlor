@@ -8,6 +8,7 @@ import errno
 import socket
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -237,8 +238,6 @@ def _run_web(config, config_path: Path) -> None:
                     webbrowser.open(url)
                     return
             except OSError:
-                import time
-
                 time.sleep(0.1)
 
     browser_host = "127.0.0.1" if config.app.host in ("0.0.0.0", "::") else config.app.host
@@ -252,11 +251,19 @@ def _run_web(config, config_path: Path) -> None:
     try:
         uvicorn.run(app, host=config.app.host, port=config.app.port, log_level="info", **ssl_kwargs)
     except OSError as e:
-        if e.errno in (errno.EADDRINUSE, errno.EADDRNOTAVAIL):
+        if e.errno == errno.EADDRINUSE:
             port = config.app.port
+            alt = port + 1 if port < 65535 else port - 1
             print(f"\nPort {port} is already in use.", file=sys.stderr)
-            print(f"Try a different port with: aroom --port {port + 1}", file=sys.stderr)
-            print(f"  Or set env var: AI_CHAT_PORT={port + 1}", file=sys.stderr)
+            print(f"Try a different port with: aroom --port {alt}", file=sys.stderr)
+            print(f"  Or set env var: AI_CHAT_PORT={alt}", file=sys.stderr)
+            sys.exit(1)
+        if e.errno == errno.EADDRNOTAVAIL:
+            print(
+                f"\nAddress {config.app.host}:{config.app.port} is not available on this host.",
+                file=sys.stderr,
+            )
+            print("Check the host binding in your config (app.host).", file=sys.stderr)
             sys.exit(1)
         raise
 

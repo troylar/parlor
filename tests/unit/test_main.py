@@ -78,6 +78,49 @@ class TestPortInUse:
         captured = capsys.readouterr()
         assert "Port 9090 is already in use" in captured.err
 
+    def test_addr_not_avail_shows_host_message(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """EADDRNOTAVAIL should show a host-related message, not port-in-use."""
+        from anteroom.__main__ import _run_web
+
+        config = _make_config(port=8080)
+
+        with (
+            patch(_PATCHES[0]),
+            patch(_PATCHES[1], return_value=MagicMock()),
+            patch(
+                "anteroom.__main__.uvicorn.run",
+                side_effect=OSError(errno.EADDRNOTAVAIL, "Cannot assign requested address"),
+            ),
+            patch("anteroom.__main__.threading.Thread") as mock_thread,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            mock_thread.return_value = MagicMock()
+            _run_web(config, Path("/tmp/config.yaml"))
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "not available" in captured.err
+        assert "app.host" in captured.err
+
+    def test_port_65535_suggests_lower(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Port 65535 conflict should suggest 65534, not 65536."""
+        from anteroom.__main__ import _run_web
+
+        config = _make_config(port=65535)
+
+        with (
+            patch(_PATCHES[0]),
+            patch(_PATCHES[1], return_value=MagicMock()),
+            patch("anteroom.__main__.uvicorn.run", side_effect=OSError(errno.EADDRINUSE, "Address already in use")),
+            patch("anteroom.__main__.threading.Thread") as mock_thread,
+            pytest.raises(SystemExit),
+        ):
+            mock_thread.return_value = MagicMock()
+            _run_web(config, Path("/tmp/config.yaml"))
+
+        captured = capsys.readouterr()
+        assert "--port 65534" in captured.err
+
     def test_other_oserror_reraises(self) -> None:
         """OSError with a different errno must not be swallowed."""
         from anteroom.__main__ import _run_web

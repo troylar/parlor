@@ -433,7 +433,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     tls_raw = app_raw.get("tls", False)
     tls_enabled = str(tls_raw).lower() not in ("false", "0", "no")
 
-    port_raw = app_raw.get("port") or os.environ.get("AI_CHAT_PORT", 8080)
+    port_raw = app_raw.get("port") if "port" in app_raw else os.environ.get("AI_CHAT_PORT", 8080)
     try:
         port_val = int(port_raw)
     except (ValueError, TypeError):
