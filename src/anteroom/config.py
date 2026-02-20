@@ -433,9 +433,15 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     tls_raw = app_raw.get("tls", False)
     tls_enabled = str(tls_raw).lower() not in ("false", "0", "no")
 
+    port_raw = app_raw.get("port") if "port" in app_raw else os.environ.get("AI_CHAT_PORT", 8080)
+    try:
+        port_val = int(port_raw)
+    except (ValueError, TypeError):
+        port_val = 8080
+    port_val = max(1, min(65535, port_val))
     app_settings = AppSettings(
         host=app_raw.get("host", "127.0.0.1"),
-        port=int(app_raw.get("port", 8080)),
+        port=port_val,
         data_dir=data_dir,
         tls=tls_enabled,
     )

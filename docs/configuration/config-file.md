@@ -98,7 +98,7 @@ embeddings:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `host` | string | `127.0.0.1` | Bind address for the web server |
-| `port` | integer | `8080` | Port for the web server |
+| `port` | integer | `8080` | Port for the web server; env: `AI_CHAT_PORT` |
 | `data_dir` | string | `~/.anteroom` | Directory for database, attachments, config |
 | `tls` | boolean | `false` | Enable HTTPS with self-signed certificate |
 

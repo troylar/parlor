@@ -13,7 +13,7 @@ Anteroom is configured through a YAML file with environment variable overrides.
 | SSL verification | `ai.verify_ssl` | `AI_CHAT_VERIFY_SSL` | `true` |
 | Request timeout | `ai.request_timeout` | `AI_CHAT_REQUEST_TIMEOUT` | `120` |
 | Host | `app.host` | --- | `127.0.0.1` |
-| Port | `app.port` | --- | `8080` |
+| Port | `app.port` | `AI_CHAT_PORT` | `8080` |
 | Data directory | `app.data_dir` | --- | `~/.anteroom` |
 | TLS | `app.tls` | --- | `false` |
 | Built-in tools | `cli.builtin_tools` | --- | `true` |
