@@ -9,15 +9,15 @@ INSTRUCTION_FILENAME = "ANTEROOM.md"
 _LEGACY_INSTRUCTION_FILENAME = "PARLOR.md"
 
 
-def find_project_instructions(start_dir: str | None = None) -> str | None:
-    """Walk up from start_dir to find the nearest ANTEROOM.md (or PARLOR.md fallback)."""
+def find_project_instructions_path(start_dir: str | None = None) -> tuple[Path, str] | None:
+    """Walk up from start_dir to find the nearest ANTEROOM.md. Returns (path, content) or None."""
     current = Path(start_dir or os.getcwd()).resolve()
     while True:
         for filename in (INSTRUCTION_FILENAME, _LEGACY_INSTRUCTION_FILENAME):
             candidate = current / filename
             if candidate.is_file():
                 try:
-                    return candidate.read_text(encoding="utf-8")
+                    return candidate, candidate.read_text(encoding="utf-8")
                 except OSError:
                     return None
         parent = current.parent
@@ -25,6 +25,14 @@ def find_project_instructions(start_dir: str | None = None) -> str | None:
             break
         current = parent
     return None
+
+
+def find_project_instructions(start_dir: str | None = None) -> str | None:
+    """Walk up from start_dir to find the nearest ANTEROOM.md (or PARLOR.md fallback)."""
+    result = find_project_instructions_path(start_dir)
+    if result is None:
+        return None
+    return result[1]
 
 
 def find_global_instructions() -> str | None:
