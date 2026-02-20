@@ -348,7 +348,7 @@ class TestBadRequestErrorHandling:
 
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
-        assert "Invalid request parameters" in error_events[0]["data"]["message"]
+        assert error_events[0]["data"]["message"] == "AI request error"
 
 
 class TestGenericExceptionHandling:

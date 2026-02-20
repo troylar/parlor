@@ -336,7 +336,7 @@ class AIService:
                     logger.exception("AI bad request error")
                     yield {
                         "event": "error",
-                        "data": {"message": f"AI request error: {e.message}", "retryable": False},
+                        "data": {"message": "AI request error", "retryable": False},
                     }
                 return
             except RateLimitError as e:
@@ -381,7 +381,7 @@ class AIService:
                             "attempt": attempt + 2,  # next attempt number (1-indexed)
                             "max_attempts": max_attempts,
                             "delay": delay,
-                            "reason": type(e).__name__,
+                            "reason": "transient_error",
                         },
                     }
                     # Sleep with cancel awareness
