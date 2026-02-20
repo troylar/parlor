@@ -17,6 +17,8 @@ class SafetyVerdict:
     tool_name: str
     details: dict[str, str] = field(default_factory=dict)
     hard_denied: bool = False
+    is_hard_blocked: bool = False
+    hard_block_description: str = ""
 
 
 _DEFAULT_DESTRUCTIVE_PATTERNS: list[re.Pattern[str]] = [

@@ -7,6 +7,7 @@ from typing import Any, Callable, Coroutine
 
 from ..config import SafetyConfig
 from .safety import SafetyVerdict, check_bash_command, check_write_path
+from .security import check_hard_block
 from .tiers import ToolTier as ToolTier
 from .tiers import get_tool_tier, parse_approval_mode, should_require_approval
 
@@ -120,7 +121,7 @@ class ToolRegistry:
             if tool_name == "bash":
                 verdict = check_bash_command(arguments.get("command", ""), custom_patterns=config.custom_patterns)
                 if verdict.needs_approval:
-                    return verdict
+                    return self._enrich_with_hard_block(verdict, arguments)
             if tool_name == "write_file":
                 verdict = check_write_path(
                     arguments.get("path", ""), self._working_dir or ".", sensitive_paths=config.sensitive_paths
@@ -134,12 +135,13 @@ class ToolRegistry:
 
         # Tier-based approval required — return generic verdict for the tool
         if tool_name == "bash":
-            return SafetyVerdict(
+            verdict = SafetyVerdict(
                 needs_approval=True,
                 reason=f"Tool '{tool_name}' requires approval (mode: {config.approval_mode})",
                 tool_name=tool_name,
                 details={"command": arguments.get("command", "")},
             )
+            return self._enrich_with_hard_block(verdict, arguments)
 
         if tool_name == "write_file":
             return SafetyVerdict(
@@ -157,6 +159,17 @@ class ToolRegistry:
             details={},
         )
 
+    @staticmethod
+    def _enrich_with_hard_block(verdict: SafetyVerdict, arguments: dict[str, Any]) -> SafetyVerdict:
+        """Check if a bash command matches a hard-block pattern and enrich the verdict."""
+        command = arguments.get("command", "")
+        description = check_hard_block(command)
+        if description:
+            verdict.is_hard_blocked = True
+            verdict.hard_block_description = description
+            verdict.reason = f"DESTRUCTIVE command ({description}): {command}"
+        return verdict
+
     async def call_tool(
         self,
         name: str,
@@ -169,6 +182,7 @@ class ToolRegistry:
 
         verdict = self.check_safety(name, arguments)
         approval_decision = "auto"
+        user_approved_hard_block = False
         if verdict and verdict.needs_approval:
             if verdict.hard_denied:
                 logger.warning("Tool hard-denied by config: %s", name)
@@ -177,9 +191,14 @@ class ToolRegistry:
                     "safety_blocked": True,
                     "_approval_decision": "hard_denied",
                 }
+            # Hard-blocked commands with no approval channel: block silently
+            # (safety net for auto mode / unattended agents).
             callback = confirm_callback or self._confirm_callback
             if callback is None:
-                logger.warning("Safety gate blocked (no approval channel): %s", verdict.reason)
+                if verdict.is_hard_blocked:
+                    logger.info("Hard-block safety net (no approval channel): %s", verdict.hard_block_description)
+                else:
+                    logger.warning("Safety gate blocked (no approval channel): %s", verdict.reason)
                 return {
                     "error": "Operation blocked: no approval channel available",
                     "safety_blocked": True,
@@ -189,8 +208,13 @@ class ToolRegistry:
             if not confirmed:
                 return {"error": "Operation denied by user", "exit_code": -1, "_approval_decision": "denied"}
             approval_decision = "allowed_once"
+            if verdict.is_hard_blocked:
+                user_approved_hard_block = True
 
-        result = await handler(**arguments)
+        extra_kwargs: dict[str, Any] = {}
+        if user_approved_hard_block:
+            extra_kwargs["_bypass_hard_block"] = True
+        result = await handler(**arguments, **extra_kwargs)
         result["_approval_decision"] = approval_decision
         return result
 

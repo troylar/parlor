@@ -635,6 +635,115 @@ class TestSanitizeCommand:
         assert error is None, "The word 'shredder' should not trigger the shred block"
 
 
+class TestHardBlockUX:
+    """Tests for #222: hard-block patterns checked before approval prompt."""
+
+    def test_check_safety_sets_is_hard_blocked_for_rm_rf(self) -> None:
+        from anteroom.config import SafetyConfig
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(), working_dir="/tmp")
+        verdict = reg.check_safety("bash", {"command": "rm -rf /tmp/junk"})
+        assert verdict is not None
+        assert verdict.needs_approval is True
+        assert verdict.is_hard_blocked is True
+        assert verdict.hard_block_description != ""
+        assert "DESTRUCTIVE" in verdict.reason
+
+    def test_check_safety_not_hard_blocked_for_simple_rm(self) -> None:
+        from anteroom.config import SafetyConfig
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(), working_dir="/tmp")
+        verdict = reg.check_safety("bash", {"command": "rm single_file.txt"})
+        assert verdict is not None
+        assert verdict.needs_approval is True
+        assert verdict.is_hard_blocked is False
+
+    @pytest.mark.asyncio
+    async def test_hard_block_approved_executes_command(self) -> None:
+        from anteroom.config import SafetyConfig
+        from anteroom.tools.safety import SafetyVerdict
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(), working_dir="/tmp")
+
+        callback_verdicts: list[SafetyVerdict] = []
+
+        async def allow(verdict: SafetyVerdict) -> bool:
+            callback_verdicts.append(verdict)
+            return True
+
+        reg.set_confirm_callback(allow)
+        result = await reg.call_tool("bash", {"command": "rm -rf /tmp/nonexistent_test_dir_222"})
+        # Command should execute (not blocked), even though it matches hard-block pattern
+        assert result.get("safety_blocked") is not True
+        assert "Blocked" not in result.get("error", "")
+        assert result["_approval_decision"] == "allowed_once"
+        # Verify the callback received the escalated verdict
+        assert len(callback_verdicts) == 1
+        assert callback_verdicts[0].is_hard_blocked is True
+
+    @pytest.mark.asyncio
+    async def test_hard_block_denied_blocks_command(self) -> None:
+        from anteroom.config import SafetyConfig
+        from anteroom.tools.safety import SafetyVerdict
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(), working_dir="/tmp")
+
+        async def deny(verdict: SafetyVerdict) -> bool:
+            return False
+
+        reg.set_confirm_callback(deny)
+        result = await reg.call_tool("bash", {"command": "rm -rf /tmp/test"})
+        assert "denied" in result.get("error", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_hard_block_no_callback_blocks_silently(self) -> None:
+        from anteroom.config import SafetyConfig
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(), working_dir="/tmp")
+        # No callback set — simulates auto mode / unattended agent
+        result = await reg.call_tool("bash", {"command": "rm -rf /tmp/test"})
+        assert result.get("safety_blocked") is True
+        assert "no approval channel" in result.get("error", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_sanitize_command_still_blocks_without_bypass(self) -> None:
+        """Regression: sanitize_command still works as last line of defense."""
+        from anteroom.tools import bash
+
+        bash.set_working_dir("/tmp")
+        result = await bash.handle(command="rm -rf /tmp/test")
+        assert "Blocked" in result.get("error", "")
+
+    @pytest.mark.asyncio
+    async def test_bypass_hard_block_skips_sanitize(self) -> None:
+        """When _bypass_hard_block=True, sanitize_command is skipped."""
+        from anteroom.tools import bash
+
+        bash.set_working_dir("/tmp")
+        result = await bash.handle(command="rm -rf /tmp/nonexistent_test_dir_222", _bypass_hard_block=True)
+        # Should not be blocked by sanitize_command
+        assert "Blocked" not in result.get("error", "")
+
+    @pytest.mark.asyncio
+    async def test_null_bytes_blocked_even_with_bypass(self) -> None:
+        """Null byte check is never bypassable, even with _bypass_hard_block=True."""
+        from anteroom.tools import bash
+
+        bash.set_working_dir("/tmp")
+        result = await bash.handle(command="rm\x00 -rf /", _bypass_hard_block=True)
+        assert "null" in result.get("error", "").lower()
+
+
 class TestReadFileTool:
     @pytest.mark.asyncio
     async def test_read_file(self) -> None:

@@ -39,10 +39,16 @@ def set_working_dir(d: str) -> None:
     _working_dir = d
 
 
-async def handle(command: str, timeout: int = _DEFAULT_TIMEOUT, **_: Any) -> dict[str, Any]:
-    command, error = sanitize_command(command)
-    if error:
-        return {"error": error, "exit_code": -1}
+async def handle(
+    command: str, timeout: int = _DEFAULT_TIMEOUT, _bypass_hard_block: bool = False, **_: Any
+) -> dict[str, Any]:
+    # Null byte check runs unconditionally — never bypassable.
+    if "\x00" in command:
+        return {"error": "Command contains null bytes", "exit_code": -1}
+    if not _bypass_hard_block:
+        command, error = sanitize_command(command)
+        if error:
+            return {"error": error, "exit_code": -1}
 
     timeout = min(max(1, timeout), 600)
     try:

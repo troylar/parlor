@@ -2,11 +2,13 @@
 
 Implements path validation and input sanitization per OWASP ASVS V5.
 
-IMPORTANT: sanitize_command() is the LAST LINE OF DEFENSE. It hard-blocks
-catastrophic commands at the handler level, regardless of approval mode,
-allowed_tools, session permissions, or any other config. It cannot be
-bypassed by any user configuration. The safety.py pattern detection and
-tier-based approval system are the primary gates; this is the nuclear option.
+Hard-block patterns (catastrophic commands like rm -rf, fork bombs, disk
+wipes) are checked BEFORE the approval prompt via check_hard_block().
+In interactive mode, the user sees an escalated warning and can choose
+to proceed. In auto mode (no approval channel), hard-blocked commands
+are silently blocked as a safety net. sanitize_command() remains as the
+last line of defense at the handler level for any code path that doesn't
+go through call_tool().
 """
 
 from __future__ import annotations
@@ -121,12 +123,32 @@ def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
+def check_hard_block(command: str) -> str | None:
+    """Check whether a command matches a hard-block pattern.
+
+    Returns the pattern description if matched, None otherwise.
+    This is a pure check — no side effects, no logging.
+    """
+    if not command or not command.strip():
+        return None
+
+    normalized = _normalize_whitespace(command)
+
+    for pattern, description in _HARD_BLOCK_PATTERNS:
+        if pattern.search(normalized):
+            return description
+
+    return None
+
+
 def sanitize_command(command: str) -> tuple[str, str | None]:
     """Hard-block validation for shell commands.
 
     Returns (command, error_message).
     This is the last line of defense — it runs at the handler level AFTER
-    all approval checks. It cannot be bypassed by any configuration.
+    all approval checks. It cannot be bypassed by any configuration
+    unless the caller explicitly opted out via the _bypass_hard_block flag
+    (only set by call_tool() after explicit user approval).
     Only blocks catastrophic patterns; less dangerous commands are gated
     by the approval system in safety.py/tiers.py.
     """
@@ -134,14 +156,9 @@ def sanitize_command(command: str) -> tuple[str, str | None]:
     if "\x00" in command:
         return "", "Command contains null bytes"
 
-    if not command.strip():
-        return command, None
-
-    normalized = _normalize_whitespace(command)
-
-    for pattern, description in _HARD_BLOCK_PATTERNS:
-        if pattern.search(normalized):
-            logger.warning("HARD BLOCKED dangerous command (%s): %s", description, command[:100])
-            return "", f"Blocked: {description}"
+    description = check_hard_block(command)
+    if description:
+        logger.info("Hard-block pattern matched (%s): %s", description, command[:100])
+        return "", f"Blocked: {description}"
 
     return command, None
