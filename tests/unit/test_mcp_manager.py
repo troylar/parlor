@@ -591,6 +591,42 @@ class TestMcpManagerShutdown:
         assert "server" not in mgr._exit_stacks
 
     @pytest.mark.asyncio()
+    async def test_shutdown_logs_errors_at_debug_not_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Shutdown errors should be logged at DEBUG, not WARNING, to avoid noisy tracebacks on Ctrl+C."""
+        import logging
+
+        mgr = McpManager([])
+        stack = AsyncMock(spec=AsyncExitStack)
+        stack.aclose = AsyncMock(side_effect=RuntimeError("Attempted to exit a cancel scope"))
+        mgr._exit_stacks = {"clickup": stack}
+        mgr._sessions = {"clickup": AsyncMock()}
+
+        with caplog.at_level(logging.DEBUG, logger="anteroom.services.mcp_manager"):
+            await mgr.shutdown()
+
+        shutdown_records = [r for r in caplog.records if "clickup" in r.message and "shutdown" in r.message]
+        assert shutdown_records, "Expected a log record mentioning 'clickup' and 'shutdown'"
+        assert all(r.levelno == logging.DEBUG for r in shutdown_records), (
+            f"Expected DEBUG level, got: {[r.levelname for r in shutdown_records]}"
+        )
+        warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING and "clickup" in r.message]
+        assert not warning_records, f"Unexpected WARNING+ records: {warning_records}"
+
+    @pytest.mark.asyncio()
+    async def test_shutdown_suppresses_cancelled_error(self) -> None:
+        """CancelledError during shutdown (common on Ctrl+C) should not propagate."""
+        mgr = McpManager([])
+        stack = AsyncMock(spec=AsyncExitStack)
+        stack.aclose = AsyncMock(side_effect=asyncio.CancelledError())
+        mgr._exit_stacks = {"time": stack}
+        mgr._sessions = {"time": AsyncMock()}
+
+        await mgr.shutdown()
+
+        stack.aclose.assert_awaited_once()
+        assert mgr._exit_stacks == {}
+
+    @pytest.mark.asyncio()
     @pytest.mark.skipif(
         sys.version_info < (3, 12),
         reason="asyncio.wait_for propagates KeyboardInterrupt at the event loop level on <3.12",

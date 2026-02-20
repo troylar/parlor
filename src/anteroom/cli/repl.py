@@ -669,56 +669,59 @@ async def run_cli(
         if convs:
             resume_conversation_id = convs[0]["id"]
 
-    if prompt:
-        await _run_one_shot(
-            config=config,
-            db=db,
-            ai_service=ai_service,
-            tool_executor=tool_executor,
-            tools_openai=tools_openai_or_none,
-            extra_system_prompt=extra_system_prompt,
-            prompt=prompt,
-            working_dir=working_dir,
-            resume_conversation_id=resume_conversation_id,
-            cancel_event_ref=_active_cancel_event,
-        )
-    else:
-        git_branch = _detect_git_branch()
-        build_date = renderer._get_build_date()
-        with renderer.startup_step("Checking for updates..."):
-            latest_version = await _check_for_update(__version__)
-        renderer.render_welcome(
-            model=config.ai.model,
-            tool_count=len(all_tool_names),
-            instructions_loaded=instructions is not None,
-            working_dir=working_dir,
-            git_branch=git_branch,
-            version=__version__,
-            build_date=build_date,
-        )
-        if latest_version:
-            renderer.render_update_available(__version__, latest_version)
-        await _run_repl(
-            config=config,
-            db=db,
-            ai_service=ai_service,
-            tool_executor=tool_executor,
-            tools_openai=tools_openai_or_none,
-            extra_system_prompt=extra_system_prompt,
-            all_tool_names=all_tool_names,
-            working_dir=working_dir,
-            resume_conversation_id=resume_conversation_id,
-            skill_registry=skill_registry,
-            mcp_manager=mcp_manager,
-            tool_registry=tool_registry,
-            cancel_event_ref=_active_cancel_event,
-            subagent_limiter=_subagent_limiter,
-        )
-
-    # Cleanup
-    if mcp_manager:
-        await mcp_manager.shutdown()
-    db.close()
+    try:
+        if prompt:
+            await _run_one_shot(
+                config=config,
+                db=db,
+                ai_service=ai_service,
+                tool_executor=tool_executor,
+                tools_openai=tools_openai_or_none,
+                extra_system_prompt=extra_system_prompt,
+                prompt=prompt,
+                working_dir=working_dir,
+                resume_conversation_id=resume_conversation_id,
+                cancel_event_ref=_active_cancel_event,
+            )
+        else:
+            git_branch = _detect_git_branch()
+            build_date = renderer._get_build_date()
+            with renderer.startup_step("Checking for updates..."):
+                latest_version = await _check_for_update(__version__)
+            renderer.render_welcome(
+                model=config.ai.model,
+                tool_count=len(all_tool_names),
+                instructions_loaded=instructions is not None,
+                working_dir=working_dir,
+                git_branch=git_branch,
+                version=__version__,
+                build_date=build_date,
+            )
+            if latest_version:
+                renderer.render_update_available(__version__, latest_version)
+            await _run_repl(
+                config=config,
+                db=db,
+                ai_service=ai_service,
+                tool_executor=tool_executor,
+                tools_openai=tools_openai_or_none,
+                extra_system_prompt=extra_system_prompt,
+                all_tool_names=all_tool_names,
+                working_dir=working_dir,
+                resume_conversation_id=resume_conversation_id,
+                skill_registry=skill_registry,
+                mcp_manager=mcp_manager,
+                tool_registry=tool_registry,
+                cancel_event_ref=_active_cancel_event,
+                subagent_limiter=_subagent_limiter,
+            )
+    finally:
+        if mcp_manager:
+            try:
+                await mcp_manager.shutdown()
+            except BaseException:
+                pass
+        db.close()
 
 
 async def _run_one_shot(

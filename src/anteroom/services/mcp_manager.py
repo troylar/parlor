@@ -409,11 +409,11 @@ class McpManager:
             try:
                 await asyncio.wait_for(stack.aclose(), timeout=5.0)
             except (KeyboardInterrupt, SystemExit) as e:
-                logger.warning(f"Error closing exit stack for '{name}'", exc_info=True)
+                logger.debug("Error closing exit stack for '%s' during shutdown", name, exc_info=True)
                 if saved_interrupt is None:
                     saved_interrupt = e
             except BaseException:
-                logger.warning(f"Error closing exit stack for '{name}'", exc_info=True)
+                logger.debug("Error closing exit stack for '%s' during shutdown", name, exc_info=True)
         self._exit_stacks.clear()
         self._sessions.clear()
         self._server_tools.clear()
