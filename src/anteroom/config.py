@@ -242,6 +242,8 @@ class AIConfig:
     api_key_command: str = ""
     request_timeout: int = 120  # seconds; overall stream timeout
     connect_timeout: int = 5  # seconds; TCP connect timeout
+    write_timeout: int = 30  # seconds; time to send request body
+    pool_timeout: int = 10  # seconds; wait for free connection from pool
     first_token_timeout: int = 30  # seconds; max wait for first token after connect
     chunk_stall_timeout: int = 30  # seconds; max silence between chunks mid-stream
     retry_max_attempts: int = 3  # retries on transient errors (0 = disabled)
@@ -420,6 +422,18 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         connect_timeout = 5
 
     try:
+        _raw_write = ai_raw.get("write_timeout", os.environ.get("AI_CHAT_WRITE_TIMEOUT", 30))
+        write_timeout = max(5, min(120, int(_raw_write)))
+    except (ValueError, TypeError):
+        write_timeout = 30
+
+    try:
+        _raw_pool = ai_raw.get("pool_timeout", os.environ.get("AI_CHAT_POOL_TIMEOUT", 10))
+        pool_timeout = max(1, min(60, int(_raw_pool)))
+    except (ValueError, TypeError):
+        pool_timeout = 10
+
+    try:
         _raw_first_token = ai_raw.get("first_token_timeout", os.environ.get("AI_CHAT_FIRST_TOKEN_TIMEOUT", 30))
         first_token_timeout = max(5, min(120, int(_raw_first_token)))
     except (ValueError, TypeError):
@@ -468,6 +482,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         verify_ssl=verify_ssl,
         request_timeout=request_timeout,
         connect_timeout=connect_timeout,
+        write_timeout=write_timeout,
+        pool_timeout=pool_timeout,
         first_token_timeout=first_token_timeout,
         chunk_stall_timeout=chunk_stall_timeout,
         retry_max_attempts=retry_max_attempts,

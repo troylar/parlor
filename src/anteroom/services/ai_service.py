@@ -67,8 +67,8 @@ class AIService:
         timeout = httpx.Timeout(
             connect=float(self.config.connect_timeout),
             read=float(self.config.request_timeout),
-            write=30.0,
-            pool=10.0,
+            write=float(self.config.write_timeout),
+            pool=float(self.config.pool_timeout),
         )
         # SECURITY-REVIEW: verify=False only when user explicitly sets verify_ssl: false in config
         new_http_client = httpx.AsyncClient(
