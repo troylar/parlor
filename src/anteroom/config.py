@@ -597,11 +597,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     except (ValueError, TypeError):
         tool_output_max_chars = 2000
     try:
-        file_reference_max_chars = max(1000, int(cli_raw.get("file_reference_max_chars", 100_000)))
+        file_reference_max_chars = max(1000, min(10_000_000, int(cli_raw.get("file_reference_max_chars", 100_000))))
     except (ValueError, TypeError):
         file_reference_max_chars = 100_000
     try:
-        model_context_window = max(1000, int(cli_raw.get("model_context_window", 128_000)))
+        model_context_window = max(1000, min(2_000_000, int(cli_raw.get("model_context_window", 128_000))))
     except (ValueError, TypeError):
         model_context_window = 128_000
 
