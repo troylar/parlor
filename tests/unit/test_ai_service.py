@@ -1903,3 +1903,118 @@ class TestCancelEventSkipsRetryableError:
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
         assert error_events[0]["data"]["retryable"] is True
+
+
+class TestAPIStatusErrorHandling:
+    """Tests for APIStatusError handling in stream_chat (#250)."""
+
+    @pytest.mark.asyncio
+    async def test_server_error_500_retried(self):
+        """5xx APIStatusError must be retried like other transient errors."""
+        from openai import APIStatusError
+
+        config = _make_config(retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError("Internal Server Error", response=mock_response, body=None)
+        )
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        retry_events = [e for e in events if e["event"] == "retrying"]
+        assert len(retry_events) == 1
+        assert retry_events[0]["data"]["reason"] == "transient_error"
+
+    @pytest.mark.asyncio
+    async def test_server_error_502_retried(self):
+        """502 Bad Gateway must be retried as a transient server error."""
+        from openai import APIStatusError
+
+        config = _make_config(retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError("Bad Gateway", response=mock_response, body=None)
+        )
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        retry_events = [e for e in events if e["event"] == "retrying"]
+        assert len(retry_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_server_error_exhausts_retries(self):
+        """When 5xx errors exhaust all retries, yield retryable api_error."""
+        from openai import APIStatusError
+
+        config = _make_config(retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError("Internal Server Error", response=mock_response, body=None)
+        )
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "api_error"
+        assert error_events[0]["data"]["retryable"] is True
+        assert "500" in error_events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_client_4xx_not_retried(self):
+        """4xx errors (not already caught as specific subclasses) must not be retried."""
+        from openai import APIStatusError
+
+        config = _make_config(retry_max_attempts=3, retry_backoff_base=0.01)
+        service = _make_service(config)
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError("Not Found", response=mock_response, body=None)
+        )
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "api_error"
+        assert error_events[0]["data"]["retryable"] is False
+        assert "404" in error_events[0]["data"]["message"]
+        # No retry events should exist
+        assert not any(e["event"] == "retrying" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_server_error_rebuilds_client(self):
+        """5xx APIStatusError must trigger _build_client to reset the connection pool."""
+        from openai import APIStatusError
+
+        config = _make_config(retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError("Service Unavailable", response=mock_response, body=None)
+        )
+
+        with patch.object(service, "_build_client") as mock_build:
+            async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+                pass
+            assert mock_build.call_count >= 1
