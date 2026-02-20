@@ -33,7 +33,7 @@ These principles guide every feature decision. New features must align with at l
 OWASP ASVS Level 2. HttpOnly cookies, CSRF protection, parameterized queries, path traversal prevention — these aren't add-ons, they're the foundation. Every feature ships secure by default. Enterprise security teams should be able to audit the codebase and find nothing to object to.
 
 ### 3. Lean over sprawling
-Do fewer things well. Every feature must earn its place. Anteroom is highly configurable for power users — shareable configs, per-project settings, global defaults — but every option has a sensible default. A fresh install works out of the box. Complexity in the codebase is a bug; configurability for the user is a feature. The distinction: internal complexity bad, user control good.
+Do fewer things well. Every feature must earn its place. Anteroom is maximally configurable — every timeout, threshold, limit, and behavioral knob should be a config field with a sensible default. Zero configuration must always work; power users who want to tune behavior should never hit a hardcoded value they can't change. Shareable configs, per-project settings, global defaults. Complexity in the codebase is a bug; configurability for the user is a feature. The distinction: internal complexity bad, user control good.
 
 ### 4. Two interfaces, one engine
 The web UI and CLI share the same agent loop, storage, and tools. Features work in both interfaces or have a clear reason why they don't. The CLI is not a second-class citizen — for many users, it's the primary interface.

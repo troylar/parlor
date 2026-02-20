@@ -19,10 +19,12 @@ class AgentEvent:
     data: dict[str, Any]
 
 
-_TOOL_OUTPUT_TRUNCATE_CHARS = 2000
+_DEFAULT_TOOL_OUTPUT_MAX_CHARS = 2000
 
 
-def _truncate_large_tool_outputs(messages: list[dict[str, Any]]) -> bool:
+def _truncate_large_tool_outputs(
+    messages: list[dict[str, Any]], max_chars: int = _DEFAULT_TOOL_OUTPUT_MAX_CHARS
+) -> bool:
     """Truncate oversized tool result messages and append a retry hint. Returns True if any were truncated."""
     truncated_any = False
     tool_call_names: dict[str, str] = {}
@@ -39,14 +41,14 @@ def _truncate_large_tool_outputs(messages: list[dict[str, Any]]) -> bool:
         if msg.get("role") != "tool":
             continue
         content = msg.get("content", "")
-        if len(content) <= _TOOL_OUTPUT_TRUNCATE_CHARS:
+        if len(content) <= max_chars:
             continue
 
         tc_id = msg.get("tool_call_id", "")
         tool_name = tool_call_names.get(tc_id, "unknown tool")
         original_len = len(content)
         msg["content"] = (
-            content[:_TOOL_OUTPUT_TRUNCATE_CHARS]
+            content[:max_chars]
             + f"\n\n... [TRUNCATED — original output was {original_len:,} chars from '{tool_name}'. "
             f"The output exceeded the context window. "
             f"You MUST retry this tool call with more constrained parameters "
@@ -205,6 +207,7 @@ async def run_agent_loop(
     max_iterations: int = 50,
     message_queue: asyncio.Queue[dict[str, Any]] | None = None,
     narration_cadence: int = 0,
+    tool_output_max_chars: int = _DEFAULT_TOOL_OUTPUT_MAX_CHARS,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -266,7 +269,7 @@ async def run_agent_loop(
             iteration -= 1  # don't count the failed attempt
 
             # Strategy 1: truncate oversized tool outputs and let the AI retry with smaller params
-            if _truncate_large_tool_outputs(messages):
+            if _truncate_large_tool_outputs(messages, max_chars=tool_output_max_chars):
                 yield AgentEvent(
                     kind="token",
                     data={
