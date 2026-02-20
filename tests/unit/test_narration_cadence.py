@@ -245,3 +245,49 @@ class TestNarrationCadence:
         assert any("Found" in t or "writing" in t for t in token_contents), (
             f"Expected narration token from cross-iteration cadence. Got: {token_contents}"
         )
+
+    @pytest.mark.asyncio
+    async def test_narration_skipped_when_cancelled(self):
+        """Narration must not fire when cancel_event is set (#253)."""
+        import asyncio
+
+        call_count = 0
+        # Round 1: 2 tool calls (hits cadence=2), Round 2: final text
+        rounds = [
+            _make_stream_events(tool_calls=[_tc("t1", "bash"), _tc("t2", "read_file")]),
+            _make_stream_events(content="Done."),
+        ]
+
+        async def stream_chat(messages, tools=None, cancel_event=None, extra_system_prompt=None):
+            nonlocal call_count
+            idx = call_count
+            call_count += 1
+            for evt in rounds[idx]:
+                yield evt
+
+        service = AsyncMock()
+        service.stream_chat = stream_chat
+
+        cancel = asyncio.Event()
+
+        async def tool_executor(name, args):
+            # Set cancel after tools run — before narration would fire
+            cancel.set()
+            return {"output": "ok"}
+
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=service,
+                messages=[{"role": "user", "content": "do stuff"}],
+                tool_executor=tool_executor,
+                tools_openai=[],
+                narration_cadence=2,
+                cancel_event=cancel,
+            )
+        )
+
+        # Should be 1 API call (tool round), NOT 2 (no narration round)
+        assert call_count == 1, f"Expected 1 API call (cancel should skip narration), got {call_count}"
+        # Should end with a done event (from cancel path)
+        done_events = [e for e in events if e.kind == "done"]
+        assert len(done_events) >= 1

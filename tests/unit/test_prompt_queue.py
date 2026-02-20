@@ -110,6 +110,29 @@ class TestExecuteTool:
         assert result == {"error": "Cancelled by user"}
 
     @pytest.mark.asyncio
+    async def test_cancelled_tool_has_bounded_timeout(self):
+        """Cancelled tool that ignores CancelledError must not hang (#253)."""
+        cancel = asyncio.Event()
+
+        async def stubborn_executor(name: str, args: dict) -> dict:
+            """Executor that catches CancelledError and keeps running."""
+            try:
+                await asyncio.sleep(999)
+            except asyncio.CancelledError:
+                # Stubbornly keep running after cancel
+                await asyncio.sleep(999)
+            return {}
+
+        cancel.set()  # pre-set cancel
+        tc = _tc("tc1", "stubborn_tool")
+        # This should complete within the 5s timeout, not hang for 999s
+        result_tc, result, status = await asyncio.wait_for(
+            _execute_tool(tc, stubborn_executor, cancel),
+            timeout=10.0,
+        )
+        assert status == "cancelled"
+
+    @pytest.mark.asyncio
     async def test_error_returns_error_status(self):
         """Exception in executor is caught and returned as error."""
 

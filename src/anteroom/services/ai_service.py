@@ -409,7 +409,10 @@ class AIService:
                             return
                 finally:
                     if hasattr(stream, "close"):
-                        await stream.close()
+                        try:
+                            await asyncio.wait_for(stream.close(), timeout=2.0)
+                        except (asyncio.TimeoutError, Exception):
+                            pass  # Don't let slow stream cleanup block cancellation
 
                 # If we get here without returning, the stream ended without finish_reason
                 return

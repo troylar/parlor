@@ -178,8 +178,8 @@ async def _execute_tool(
             for p in pending:
                 p.cancel()
                 try:
-                    await p
-                except asyncio.CancelledError:
+                    await asyncio.wait_for(p, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
             if exec_task in done:
                 return tc, exec_task.result(), "success"
@@ -380,7 +380,12 @@ async def run_agent_loop(
         # Enforce narration cadence: inject an ephemeral prompt to force a progress update.
         # The injected message is removed from history immediately after the narration response
         # so it does not pollute the conversation context for subsequent tool calls.
-        if narration_cadence > 0 and total_tool_calls > 0 and total_tool_calls % narration_cadence == 0:
+        if (
+            narration_cadence > 0
+            and total_tool_calls > 0
+            and total_tool_calls % narration_cadence == 0
+            and not (cancel_event and cancel_event.is_set())
+        ):
             yield AgentEvent(kind="thinking", data={})
             narration_idx = len(messages)
             messages.append({"role": "user", "content": _NARRATION_PROMPT})
