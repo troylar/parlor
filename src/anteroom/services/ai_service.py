@@ -10,6 +10,7 @@ from typing import Any, AsyncGenerator
 import httpx
 from openai import (
     APIConnectionError,
+    APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
     AuthenticationError,
@@ -462,6 +463,50 @@ class AIService:
                     },
                 }
                 return
+            except APIStatusError as e:
+                # APIStatusError covers HTTP errors not caught above (5xx, 404, etc.).
+                # Must be AFTER AuthenticationError, BadRequestError, RateLimitError
+                # which are subclasses of APIStatusError.
+                if e.status_code >= 500:
+                    # Server errors (500, 502, 503, etc.) are transient — retry
+                    last_transient_error = e
+                    logger.warning("API server error %d (attempt %d/%d)", e.status_code, attempt + 1, max_attempts)
+                    self._build_client()
+                    if attempt < max_attempts - 1:
+                        delay = self.config.retry_backoff_base * (2**attempt)
+                        yield {
+                            "event": "retrying",
+                            "data": {
+                                "attempt": attempt + 2,
+                                "max_attempts": max_attempts,
+                                "delay": delay,
+                                "reason": "transient_error",
+                            },
+                        }
+                        if cancel_event:
+                            try:
+                                await asyncio.wait_for(cancel_event.wait(), timeout=delay)
+                                return
+                            except asyncio.TimeoutError:
+                                pass
+                        else:
+                            await asyncio.sleep(delay)
+                        continue
+                    # Last attempt exhausted — fall through to yield error
+                else:
+                    # Client errors (4xx not already caught) — non-retryable
+                    logger.warning("API client error %d: %s", e.status_code, type(e).__name__)
+                    if cancel_event and cancel_event.is_set():
+                        return  # user cancelled — don't emit error
+                    yield {
+                        "event": "error",
+                        "data": {
+                            "message": f"API error (HTTP {e.status_code})",
+                            "code": "api_error",
+                            "retryable": False,
+                        },
+                    }
+                    return
             except _StreamTimeoutError:
                 logger.warning("Stream timed out mid-response after first token")
                 self._build_client()
@@ -539,6 +584,15 @@ class AIService:
                 "data": {
                     "message": f"Cannot connect to API ({max_attempts} attempts)",
                     "code": "connection_error",
+                    "retryable": True,
+                },
+            }
+        elif isinstance(last_transient_error, APIStatusError):
+            yield {
+                "event": "error",
+                "data": {
+                    "message": f"API server error (HTTP {last_transient_error.status_code}, {max_attempts} attempts)",
+                    "code": "api_error",
                     "retryable": True,
                 },
             }
