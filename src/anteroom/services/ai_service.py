@@ -23,6 +23,10 @@ from .token_provider import TokenProvider, TokenProviderError
 logger = logging.getLogger(__name__)
 
 
+class _FirstTokenTimeoutError(Exception):
+    """Raised when the first token does not arrive within first_token_timeout."""
+
+
 def create_ai_service(config: AIConfig) -> "AIService":
     """Factory: create an AIService with TokenProvider if api_key_command is configured."""
     provider = TokenProvider(config.api_key_command) if config.api_key_command else None
@@ -57,7 +61,7 @@ class AIService:
 
         api_key = self._resolve_api_key()
         timeout = httpx.Timeout(
-            connect=10.0,
+            connect=float(self.config.connect_timeout),
             read=float(self.config.request_timeout),
             write=30.0,
             pool=10.0,
@@ -193,140 +197,223 @@ class AIService:
         if tools:
             kwargs["tools"] = tools
 
-        try:
-            yield {"event": "phase", "data": {"phase": "connecting"}}
-            stream = await self.client.chat.completions.create(**kwargs)
-            yield {"event": "phase", "data": {"phase": "waiting"}}
+        max_attempts = max(1, self.config.retry_max_attempts + 1)  # +1: first attempt is not a "retry"
+        last_transient_error: Exception | None = None
 
-            current_tool_calls: dict[int, dict[str, Any]] = {}
-            stream_iter = stream.__aiter__()
-            total_timeout = float(self.config.request_timeout)
-
+        for attempt in range(max_attempts):
             try:
-                async for chunk in self._iter_stream(stream_iter, cancel_event, total_timeout):
-                    choice = chunk.choices[0] if chunk.choices else None
-                    if not choice:
-                        continue
+                yield {"event": "phase", "data": {"phase": "connecting"}}
+                stream = await self.client.chat.completions.create(**kwargs)
+                yield {"event": "phase", "data": {"phase": "waiting"}}
 
-                    delta = choice.delta
+                # --- First-token timeout ---
+                stream_iter = stream.__aiter__()
+                first_chunk: Any = None
+                try:
+                    first_chunk = await asyncio.wait_for(
+                        stream_iter.__anext__(),
+                        timeout=float(self.config.first_token_timeout),
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "No first token within %ds (attempt %d/%d)",
+                        self.config.first_token_timeout,
+                        attempt + 1,
+                        max_attempts,
+                    )
+                    try:
+                        if hasattr(stream, "close"):
+                            await stream.close()
+                    except Exception:
+                        pass
+                    raise _FirstTokenTimeoutError()
 
-                    if delta.content:
-                        yield {"event": "token", "data": {"content": delta.content}}
+                # --- Stream with full request_timeout (first chunk already received) ---
+                current_tool_calls: dict[int, dict[str, Any]] = {}
+                total_timeout = float(self.config.request_timeout)
 
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in current_tool_calls:
-                                current_tool_calls[idx] = {
-                                    "id": tc.id or "",
-                                    "function_name": "",
-                                    "arguments": "",
-                                }
-                            if tc.id:
-                                current_tool_calls[idx]["id"] = tc.id
-                            if tc.function and tc.function.name:
-                                current_tool_calls[idx]["function_name"] = tc.function.name
-                            if tc.function and tc.function.arguments:
-                                current_tool_calls[idx]["arguments"] += tc.function.arguments
+                async def _prepended_stream() -> AsyncGenerator[Any, None]:
+                    """Yield the first chunk, then remaining chunks via _iter_stream."""
+                    yield first_chunk
+                    async for c in AIService._iter_stream(stream_iter, cancel_event, total_timeout):
+                        yield c
+
+                try:
+                    async for chunk in _prepended_stream():
+                        choice = chunk.choices[0] if chunk.choices else None
+                        if not choice:
+                            continue
+
+                        delta = choice.delta
+
+                        if delta.content:
+                            yield {"event": "token", "data": {"content": delta.content}}
+
+                        if delta.tool_calls:
+                            for tc in delta.tool_calls:
+                                idx = tc.index
+                                if idx not in current_tool_calls:
+                                    current_tool_calls[idx] = {
+                                        "id": tc.id or "",
+                                        "function_name": "",
+                                        "arguments": "",
+                                    }
+                                if tc.id:
+                                    current_tool_calls[idx]["id"] = tc.id
+                                if tc.function and tc.function.name:
+                                    current_tool_calls[idx]["function_name"] = tc.function.name
+                                if tc.function and tc.function.arguments:
+                                    current_tool_calls[idx]["arguments"] += tc.function.arguments
+                                    yield {
+                                        "event": "tool_call_args_delta",
+                                        "data": {
+                                            "index": idx,
+                                            "tool_name": current_tool_calls[idx]["function_name"],
+                                            "delta": tc.function.arguments,
+                                        },
+                                    }
+
+                        if choice.finish_reason == "tool_calls":
+                            for _idx, tc_data in sorted(current_tool_calls.items()):
+                                try:
+                                    args = json.loads(tc_data["arguments"])
+                                except json.JSONDecodeError:
+                                    args = {}
                                 yield {
-                                    "event": "tool_call_args_delta",
+                                    "event": "tool_call",
                                     "data": {
-                                        "index": idx,
-                                        "tool_name": current_tool_calls[idx]["function_name"],
-                                        "delta": tc.function.arguments,
+                                        "id": tc_data["id"],
+                                        "function_name": tc_data["function_name"],
+                                        "arguments": args,
                                     },
                                 }
+                            return
 
-                    if choice.finish_reason == "tool_calls":
-                        for _idx, tc_data in sorted(current_tool_calls.items()):
-                            try:
-                                args = json.loads(tc_data["arguments"])
-                            except json.JSONDecodeError:
-                                args = {}
-                            yield {
-                                "event": "tool_call",
-                                "data": {
-                                    "id": tc_data["id"],
-                                    "function_name": tc_data["function_name"],
-                                    "arguments": args,
-                                },
-                            }
-                        return
+                        if choice.finish_reason == "stop":
+                            yield {"event": "done", "data": {}}
+                            return
+                finally:
+                    if hasattr(stream, "close"):
+                        await stream.close()
 
-                    if choice.finish_reason == "stop":
-                        yield {"event": "done", "data": {}}
-                        return
-            finally:
-                if hasattr(stream, "close"):
-                    await stream.close()
+                # If we get here without returning, the stream ended without finish_reason
+                return
 
-        except AuthenticationError:
-            if self._try_refresh_token():
-                logger.info("Retrying request with refreshed token")
-                async for event in self.stream_chat(messages, tools, cancel_event, extra_system_prompt):
-                    yield event
-            else:
-                logger.error("Authentication failed and token refresh unavailable")
+            except AuthenticationError:
+                if self._try_refresh_token():
+                    logger.info("Retrying request with refreshed token")
+                    async for event in self.stream_chat(messages, tools, cancel_event, extra_system_prompt):
+                        yield event
+                else:
+                    logger.error("Authentication failed and token refresh unavailable")
+                    yield {
+                        "event": "error",
+                        "data": {
+                            "message": "Authentication failed. Check your API key or api_key_command.",
+                            "code": "auth_failed",
+                        },
+                    }
+                return
+            except BadRequestError as e:
+                body = getattr(e, "body", {}) or {}
+                err_code = body.get("error", {}).get("code", "") if isinstance(body, dict) else ""
+                if err_code == "context_length_exceeded" or "context_length" in str(e).lower():
+                    logger.warning("Context length exceeded: %s", e)
+                    yield {
+                        "event": "error",
+                        "data": {
+                            "message": "Conversation too long for model context window.",
+                            "code": "context_length_exceeded",
+                        },
+                    }
+                else:
+                    logger.exception("AI bad request error")
+                    yield {"event": "error", "data": {"message": f"AI request error: {e.message}"}}
+                return
+            except RateLimitError as e:
+                logger.warning("Rate limited by AI provider: %s", e)
                 yield {
                     "event": "error",
                     "data": {
-                        "message": "Authentication failed. Check your API key or api_key_command.",
-                        "code": "auth_failed",
+                        "message": "AI provider rate limit reached. Please wait a moment and try again.",
+                        "code": "rate_limit",
                     },
                 }
-        except BadRequestError as e:
-            body = getattr(e, "body", {}) or {}
-            err_code = body.get("error", {}).get("code", "") if isinstance(body, dict) else ""
-            if err_code == "context_length_exceeded" or "context_length" in str(e).lower():
-                logger.warning("Context length exceeded: %s", e)
-                yield {
-                    "event": "error",
-                    "data": {
-                        "message": "Conversation too long for model context window.",
-                        "code": "context_length_exceeded",
-                    },
-                }
-            else:
-                logger.exception("AI bad request error")
-                yield {"event": "error", "data": {"message": f"AI request error: {e.message}"}}
-        except APITimeoutError:
-            logger.warning("AI request timed out after %ds", self.config.request_timeout)
-            self._build_client()
+                return
+            except (APITimeoutError, APIConnectionError, _FirstTokenTimeoutError) as e:
+                last_transient_error = e
+                self._build_client()
+
+                if attempt < max_attempts - 1:
+                    delay = self.config.retry_backoff_base * (2**attempt)
+                    logger.warning(
+                        "Transient error (attempt %d/%d): %s. Retrying in %.1fs...",
+                        attempt + 1,
+                        max_attempts,
+                        type(e).__name__,
+                        delay,
+                    )
+                    yield {
+                        "event": "retrying",
+                        "data": {
+                            "attempt": attempt + 2,  # next attempt number (1-indexed)
+                            "max_attempts": max_attempts,
+                            "delay": delay,
+                            "reason": type(e).__name__,
+                        },
+                    }
+                    # Sleep with cancel awareness
+                    if cancel_event:
+                        try:
+                            await asyncio.wait_for(cancel_event.wait(), timeout=delay)
+                            return  # cancelled during retry wait
+                        except asyncio.TimeoutError:
+                            pass  # delay elapsed, proceed with retry
+                    else:
+                        await asyncio.sleep(delay)
+                    continue
+                # Last attempt exhausted — fall through to yield error
+            except Exception:
+                logger.exception("AI stream error")
+                yield {"event": "error", "data": {"message": "An internal error occurred"}}
+                return
+
+        # All retries exhausted — yield appropriate error for the last transient error
+        if isinstance(last_transient_error, APITimeoutError):
             yield {
                 "event": "error",
                 "data": {
                     "message": (
-                        f"AI request timed out after {self.config.request_timeout}s. "
+                        f"AI request timed out after {max_attempts} attempts. "
                         "The API may be slow or unreachable. Try again, or increase "
                         "`ai.request_timeout` in your config."
                     ),
                     "code": "timeout",
                 },
             }
-        except RateLimitError as e:
-            logger.warning("Rate limited by AI provider: %s", e)
-            yield {
-                "event": "error",
-                "data": {
-                    "message": "AI provider rate limit reached. Please wait a moment and try again.",
-                    "code": "rate_limit",
-                },
-            }
-        except APIConnectionError:
-            logger.warning("Cannot connect to API at %s", self.config.base_url)
-            self._build_client()
+        elif isinstance(last_transient_error, _FirstTokenTimeoutError):
             yield {
                 "event": "error",
                 "data": {
                     "message": (
-                        f"Cannot connect to API at {self.config.base_url}. Check the URL and your network connection."
+                        f"No response from API within {self.config.first_token_timeout}s "
+                        f"after {max_attempts} attempts. The API may be overloaded. "
+                        "Try again, or increase `ai.first_token_timeout` in your config."
+                    ),
+                    "code": "timeout",
+                },
+            }
+        elif isinstance(last_transient_error, APIConnectionError):
+            yield {
+                "event": "error",
+                "data": {
+                    "message": (
+                        f"Cannot connect to API at {self.config.base_url} "
+                        f"after {max_attempts} attempts. Check the URL and your network connection."
                     ),
                     "code": "connection_error",
                 },
             }
-        except Exception:
-            logger.exception("AI stream error")
-            yield {"event": "error", "data": {"message": "An internal error occurred"}}
 
     async def generate_title(self, user_message: str) -> str:
         try:

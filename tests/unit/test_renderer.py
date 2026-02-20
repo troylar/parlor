@@ -29,6 +29,7 @@ from anteroom.cli.renderer import (
     render_tool_call_end,
     render_tool_call_start,
     save_turn_history,
+    set_retrying,
     set_thinking_phase,
     set_tool_dedup,
     set_verbosity,
@@ -989,6 +990,7 @@ class TestThinkingPhases:
         r._thinking_phase = ""
         r._thinking_tokens = 0
         r._last_chunk_time = 0
+        r._retrying_info = {}
         set_verbosity(Verbosity.DETAILED)
 
     def teardown_method(self) -> None:
@@ -997,6 +999,7 @@ class TestThinkingPhases:
         r._thinking_phase = ""
         r._thinking_tokens = 0
         r._last_chunk_time = 0
+        r._retrying_info = {}
         set_verbosity(Verbosity.COMPACT)
 
     def test_set_thinking_phase_connecting(self) -> None:
@@ -1437,3 +1440,74 @@ class TestThinkingTickerPhases:
             r._stdout = None
             r._thinking_phase = ""
             r._thinking_tokens = 0
+
+
+class TestRetryingPhase:
+    """Tests for retrying phase display in the thinking indicator (#209)."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._last_chunk_time = 0
+        r._retrying_info = {}
+        set_verbosity(Verbosity.DETAILED)
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._last_chunk_time = 0
+        r._retrying_info = {}
+        set_verbosity(Verbosity.COMPACT)
+
+    def test_set_retrying_updates_phase(self) -> None:
+        """set_retrying must set _thinking_phase to 'retrying'."""
+        import anteroom.cli.renderer as r
+
+        set_retrying({"attempt": 2, "max_attempts": 3, "delay": 1.0})
+        assert r._thinking_phase == "retrying"
+
+    def test_set_retrying_stores_info(self) -> None:
+        """set_retrying must store the retry data."""
+        import anteroom.cli.renderer as r
+
+        data = {"attempt": 2, "max_attempts": 4, "delay": 2.0}
+        set_retrying(data)
+        assert r._retrying_info == data
+
+    def test_phase_suffix_retrying(self) -> None:
+        """_phase_suffix must show 'retrying (N/M)' for retrying phase."""
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = "retrying"
+        r._retrying_info = {"attempt": 2, "max_attempts": 3}
+        result = _phase_suffix(5.0)
+        assert result == "retrying (2/3)"
+
+    def test_phase_suffix_retrying_compact_hidden(self) -> None:
+        """_phase_suffix must return empty string in COMPACT mode."""
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.COMPACT)
+        r._thinking_phase = "retrying"
+        r._retrying_info = {"attempt": 2, "max_attempts": 3}
+        result = _phase_suffix(5.0)
+        assert result == ""
+
+    def test_start_thinking_resets_retrying_info(self) -> None:
+        """start_thinking must clear _retrying_info."""
+        import anteroom.cli.renderer as r
+
+        r._retrying_info = {"attempt": 2, "max_attempts": 3}
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        try:
+            start_thinking()
+            assert r._retrying_info == {}
+        finally:
+            stop_thinking()
+            r._repl_mode = False
+            r._stdout = None

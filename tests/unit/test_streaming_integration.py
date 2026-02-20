@@ -126,6 +126,8 @@ class TestAiServiceToolCallArgsDelta:
         config = MagicMock()
         config.model = "test-model"
         config.system_prompt = None
+        config.retry_max_attempts = 0
+        config.first_token_timeout = 30
 
         with patch.object(AIService, "_build_client"):
             service = AIService(config)
@@ -175,6 +177,8 @@ class TestAiServiceToolCallArgsDelta:
         config = MagicMock()
         config.model = "test-model"
         config.system_prompt = None
+        config.retry_max_attempts = 0
+        config.first_token_timeout = 30
 
         with patch.object(AIService, "_build_client"):
             service = AIService(config)

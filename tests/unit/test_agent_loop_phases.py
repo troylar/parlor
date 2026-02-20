@@ -156,3 +156,32 @@ class TestAgentLoopPhaseForwarding:
         # (no phase-related messages stored)
         for msg in messages:
             assert "phase" not in str(msg.get("content", "")).lower() or msg["role"] == "user"
+
+    @pytest.mark.asyncio
+    async def test_retrying_events_forwarded(self) -> None:
+        """Retrying events from stream_chat must be forwarded as AgentEvent(kind='retrying')."""
+        ai_service = _make_ai_service()
+
+        async def fake_stream_chat(messages: Any, **kwargs: Any):
+            yield {"event": "phase", "data": {"phase": "connecting"}}
+            yield {"event": "retrying", "data": {"attempt": 2, "max_attempts": 3, "delay": 1.0}}
+            yield {"event": "phase", "data": {"phase": "connecting"}}
+            yield {"event": "phase", "data": {"phase": "waiting"}}
+            yield {"event": "token", "data": {"content": "hello"}}
+            yield {"event": "done", "data": {}}
+
+        ai_service.stream_chat = fake_stream_chat
+
+        events: list[AgentEvent] = []
+        async for event in run_agent_loop(
+            ai_service=ai_service,
+            messages=[{"role": "user", "content": "hi"}],
+            tool_executor=AsyncMock(),
+            tools_openai=None,
+        ):
+            events.append(event)
+
+        retry_events = [e for e in events if e.kind == "retrying"]
+        assert len(retry_events) == 1
+        assert retry_events[0].data["attempt"] == 2
+        assert retry_events[0].data["max_attempts"] == 3

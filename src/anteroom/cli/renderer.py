@@ -336,13 +336,14 @@ async def _thinking_ticker() -> None:
 def start_thinking() -> None:
     """Show a spinner with timer while AI is generating."""
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
-    global _thinking_phase, _thinking_tokens, _last_chunk_time
+    global _thinking_phase, _thinking_tokens, _last_chunk_time, _retrying_info
     _flush_dedup()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
     _thinking_phase = ""
     _thinking_tokens = 0
     _last_chunk_time = 0
+    _retrying_info = {}
     _last_spinner_update = _thinking_start
     if _repl_mode:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
@@ -426,11 +427,21 @@ def stop_thinking() -> float:
     return elapsed
 
 
+_retrying_info: dict[str, Any] = {}
+
+
 def set_thinking_phase(phase: str) -> None:
     """Update the current lifecycle phase displayed by the thinking ticker."""
     global _thinking_phase, _last_chunk_time
     _thinking_phase = phase
     _last_chunk_time = time.monotonic()
+
+
+def set_retrying(data: dict[str, Any]) -> None:
+    """Update retry state displayed by the thinking ticker."""
+    global _thinking_phase, _retrying_info
+    _retrying_info = data
+    _thinking_phase = "retrying"
 
 
 def increment_thinking_tokens() -> None:
@@ -465,6 +476,10 @@ def _phase_suffix(elapsed: float) -> str:
             stall_secs = now - _last_chunk_time
             return f"stalled {stall_secs:.0f}s"
         return f"streaming ({_thinking_tokens} tokens)"
+    if phase == "retrying":
+        attempt = _retrying_info.get("attempt", 2)
+        max_attempts = _retrying_info.get("max_attempts", 3)
+        return f"retrying ({attempt}/{max_attempts})"
     return phase
 
 

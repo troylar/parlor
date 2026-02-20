@@ -240,7 +240,11 @@ class AIConfig:
     user_system_prompt: str = ""
     verify_ssl: bool = True
     api_key_command: str = ""
-    request_timeout: int = 120  # seconds; connect + per-chunk read timeout
+    request_timeout: int = 120  # seconds; overall stream timeout
+    connect_timeout: int = 5  # seconds; TCP connect timeout
+    first_token_timeout: int = 30  # seconds; max wait for first token after connect
+    retry_max_attempts: int = 3  # retries on transient errors (0 = disabled)
+    retry_backoff_base: float = 1.0  # seconds; base for exponential backoff
     narration_cadence: int = 5  # progress updates every N tool calls; 0 = disabled
 
 
@@ -401,6 +405,30 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         request_timeout = 120
 
     try:
+        _raw_connect = ai_raw.get("connect_timeout", os.environ.get("AI_CHAT_CONNECT_TIMEOUT", 5))
+        connect_timeout = max(1, min(30, int(_raw_connect)))
+    except (ValueError, TypeError):
+        connect_timeout = 5
+
+    try:
+        _raw_first_token = ai_raw.get("first_token_timeout", os.environ.get("AI_CHAT_FIRST_TOKEN_TIMEOUT", 30))
+        first_token_timeout = max(5, min(120, int(_raw_first_token)))
+    except (ValueError, TypeError):
+        first_token_timeout = 30
+
+    try:
+        _raw_retry_attempts = ai_raw.get("retry_max_attempts", os.environ.get("AI_CHAT_RETRY_MAX_ATTEMPTS", 3))
+        retry_max_attempts = max(0, min(10, int(_raw_retry_attempts)))
+    except (ValueError, TypeError):
+        retry_max_attempts = 3
+
+    try:
+        _raw_retry_backoff = ai_raw.get("retry_backoff_base", os.environ.get("AI_CHAT_RETRY_BACKOFF_BASE", 1.0))
+        retry_backoff_base = max(0.1, min(30.0, float(_raw_retry_backoff)))
+    except (ValueError, TypeError):
+        retry_backoff_base = 1.0
+
+    try:
         narration_cadence = int(ai_raw.get("narration_cadence", os.environ.get("AI_CHAT_NARRATION_CADENCE", 5)))
         narration_cadence = max(0, narration_cadence)
     except (ValueError, TypeError):
@@ -424,6 +452,10 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         user_system_prompt=user_system_prompt,
         verify_ssl=verify_ssl,
         request_timeout=request_timeout,
+        connect_timeout=connect_timeout,
+        first_token_timeout=first_token_timeout,
+        retry_max_attempts=retry_max_attempts,
+        retry_backoff_base=retry_backoff_base,
         narration_cadence=narration_cadence,
     )
 
