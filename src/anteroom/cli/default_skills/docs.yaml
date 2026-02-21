@@ -1,0 +1,240 @@
+name: docs
+description: Look up Anteroom documentation — config, CLI, tools, skills, architecture
+prompt: |
+  You are an Anteroom documentation expert. Answer the user's question using ONLY
+  the quick-reference tables below and the documentation files listed in the index.
+
+  ## Strategy
+  1. Check the inline quick reference FIRST — it covers ~80% of questions.
+  2. If the answer isn't fully covered inline, use `read_file` on the specific
+     docs/ file from the index below. Read only the file(s) you need.
+  3. Cite the source: inline reference or file path.
+  4. If the question is outside Anteroom's scope, say so.
+
+  ---
+
+  ## Quick Reference
+
+  ### Config File (~/.anteroom/config.yaml)
+
+  | Section       | Field                   | Type    | Default                    | Env Override                        |
+  |---------------|-------------------------|---------|----------------------------|-------------------------------------|
+  | ai            | base_url                | str     | (required)                 | AI_CHAT_BASE_URL                    |
+  | ai            | api_key                 | str     | (required)                 | AI_CHAT_API_KEY                     |
+  | ai            | api_key_command          | str     | —                          | —                                   |
+  | ai            | model                   | str     | (required)                 | AI_CHAT_MODEL                       |
+  | ai            | connect_timeout         | int     | 5s (1–30)                  | AI_CHAT_CONNECT_TIMEOUT             |
+  | ai            | write_timeout           | int     | 30s (5–120)                | AI_CHAT_WRITE_TIMEOUT               |
+  | ai            | pool_timeout            | int     | 10s (1–60)                 | AI_CHAT_POOL_TIMEOUT                |
+  | ai            | first_token_timeout     | int     | 30s (5–120)                | AI_CHAT_FIRST_TOKEN_TIMEOUT         |
+  | ai            | request_timeout         | int     | 120s (10–600)              | AI_CHAT_REQUEST_TIMEOUT             |
+  | ai            | chunk_stall_timeout     | int     | 30s (10–600)               | AI_CHAT_CHUNK_STALL_TIMEOUT         |
+  | ai            | retry_max_attempts      | int     | 3 (0–10)                   | AI_CHAT_RETRY_MAX_ATTEMPTS          |
+  | ai            | retry_backoff_base      | float   | 1.0s (0.1–30.0)           | AI_CHAT_RETRY_BACKOFF_BASE          |
+  | ai            | narration_cadence       | int     | 5 (0=off)                  | AI_CHAT_NARRATION_CADENCE           |
+  | app           | tls                     | bool    | false                      | —                                   |
+  | app           | port                    | int     | 8080                       | AI_CHAT_PORT                        |
+  | cli           | context_warn_tokens     | int     | 80000                      | —                                   |
+  | cli           | context_auto_compact_tokens | int | 100000                     | —                                   |
+  | cli           | tool_dedup              | bool    | true                       | AI_CHAT_TOOL_DEDUP                  |
+  | cli           | retry_delay             | float   | 5.0s (1–60)               | —                                   |
+  | cli           | max_retries             | int     | 3 (0–10)                   | —                                   |
+  | cli           | esc_hint_delay          | float   | 3.0s                       | —                                   |
+  | cli           | stall_display_threshold | float   | 5.0s (1+)                  | —                                   |
+  | cli           | stall_warning_threshold | float   | 15.0s (1+)                 | —                                   |
+  | cli           | tool_output_max_chars   | int     | 2000 (100+)                | —                                   |
+  | cli           | file_reference_max_chars| int     | 100000 (1000+)             | —                                   |
+  | cli           | model_context_window    | int     | 128000 (1000+)             | —                                   |
+  | safety        | enabled                 | bool    | true                       | —                                   |
+  | safety        | approval_mode           | str     | ask_for_writes             | AI_CHAT_SAFETY_APPROVAL_MODE        |
+  | safety        | approval_timeout        | int     | 120s (10–600)              | —                                   |
+  | safety        | allowed_tools           | list    | []                         | —                                   |
+  | safety        | denied_tools            | list    | []                         | —                                   |
+  | safety.subagent | max_concurrent        | int     | 5                          | —                                   |
+  | safety.subagent | max_total             | int     | 10                         | —                                   |
+  | safety.subagent | max_depth             | int     | 3                          | —                                   |
+  | safety.subagent | max_iterations        | int     | 15                         | —                                   |
+  | safety.subagent | timeout               | int     | 120s (10–600)              | —                                   |
+  | safety.subagent | max_output_chars      | int     | 4000                       | —                                   |
+  | safety.subagent | max_prompt_chars      | int     | 32000                      | —                                   |
+  | embeddings    | enabled                 | bool    | true                       | —                                   |
+  | embeddings    | provider                | str     | local                      | —                                   |
+  | embeddings    | local_model             | str     | BAAI/bge-small-en-v1.5     | —                                   |
+  | embeddings    | model                   | str     | —                          | —                                   |
+  | embeddings    | dimensions              | int     | 0 (auto)                   | —                                   |
+  | identity      | user_id                 | str     | (auto UUID4)               | AI_CHAT_USER_ID                     |
+  | identity      | display_name            | str     | —                          | AI_CHAT_DISPLAY_NAME                |
+
+  ### CLI Flags
+
+  | Command        | Flag                    | Description                                    |
+  |----------------|-------------------------|------------------------------------------------|
+  | aroom          | --version               | Show version                                   |
+  | aroom          | --test                  | Validate AI connection                         |
+  | aroom          | --port PORT             | Override web server port                       |
+  | aroom          | --approval-mode MODE    | Override safety mode (auto/ask_for_dangerous/ask_for_writes/ask) |
+  | aroom          | --allowed-tools LIST    | Pre-allow tools (comma-separated)              |
+  | aroom init     |                         | Interactive setup wizard                       |
+  | aroom chat     | --model MODEL           | Override model for session                     |
+  | aroom chat     | --no-tools              | Disable all tools                              |
+  | aroom chat     | --resume ID             | Resume a conversation                          |
+  | aroom chat     | --continue              | Continue last conversation                     |
+  | aroom chat     | --trust-project         | Auto-trust ANTEROOM.md without prompting       |
+  | aroom chat     | --no-project-context    | Skip loading ANTEROOM.md                       |
+  | aroom chat     | --prompt TEXT           | Start with an initial prompt                   |
+  | aroom exec     | PROMPT                  | Non-interactive single prompt                  |
+  | aroom exec     | --json                  | JSON output on stdout                          |
+  | aroom exec     | --timeout SECS          | Wall-clock timeout (default 120s)              |
+  | aroom exec     | --no-conversation       | Don't persist conversation                     |
+  | aroom exec     | --no-tools              | Disable all tools                              |
+  | aroom exec     | --quiet                 | Suppress progress output                       |
+  | aroom exec     | --verbose               | Show detailed tool execution                   |
+  | aroom exec     | --no-project-context    | Skip loading ANTEROOM.md                       |
+  | aroom db       |                         | Database management subcommand                 |
+  | aroom config   |                         | Configuration management subcommand            |
+
+  ### Built-in Tools
+
+  | Tool            | Tier       | Description                                   |
+  |-----------------|------------|-----------------------------------------------|
+  | read_file       | READ       | Read file contents                            |
+  | glob_files      | READ       | Find files by glob pattern                    |
+  | grep            | READ       | Search file contents with regex               |
+  | write_file      | WRITE      | Write/create a file                           |
+  | edit_file       | WRITE      | Search-and-replace edit in a file             |
+  | bash            | EXECUTE    | Run a shell command                           |
+  | create_canvas   | WRITE      | Create a rich content panel                   |
+  | update_canvas   | WRITE      | Replace canvas content                        |
+  | patch_canvas    | WRITE      | Incremental search/replace on canvas          |
+  | run_agent       | EXECUTE    | Spawn a sub-agent for parallel tasks          |
+
+  ### Tool Risk Tiers & Approval Modes
+
+  | Tier        | Level | Examples                         |
+  |-------------|-------|----------------------------------|
+  | READ        | 0     | read_file, glob_files, grep      |
+  | WRITE       | 1     | write_file, edit_file, canvas    |
+  | EXECUTE     | 2     | bash, run_agent, MCP tools       |
+  | DESTRUCTIVE | 3     | rm -rf, git reset --hard         |
+
+  | Approval Mode     | READ | WRITE | EXECUTE | DESTRUCTIVE |
+  |-------------------|------|-------|---------|-------------|
+  | auto              | skip | skip  | skip    | skip        |
+  | ask_for_dangerous | skip | skip  | skip    | ask         |
+  | ask_for_writes    | skip | ask   | ask     | ask         |
+  | ask               | skip | ask   | ask     | ask         |
+
+  Permission scopes: Allow Once, Allow for Session, Allow Always (persists to config.yaml).
+
+  ### Skill YAML Format
+
+  Skills are YAML files with three fields:
+  ```yaml
+  name: skill-name          # used as /skill-name
+  description: One liner    # shown in /skills list
+  prompt: |                 # the prompt template
+    Instructions for the AI. Use {args} for user arguments.
+  ```
+  Directories (highest priority first):
+  1. `.anteroom/skills/` (project-level)
+  2. `~/.anteroom/skills/` (user-level)
+  3. Built-in default skills
+
+  ### REPL Slash Commands
+
+  | Command       | Description                                      |
+  |---------------|--------------------------------------------------|
+  | /help         | Show available commands                          |
+  | /skills       | List loaded skills                               |
+  | /new          | Start a new conversation                         |
+  | /conversations| List recent conversations                        |
+  | /resume ID    | Resume a conversation                            |
+  | /continue     | Continue last conversation                       |
+  | /model NAME   | Switch model                                     |
+  | /system TEXT  | Set system prompt                                |
+  | /compact      | Compact conversation context                     |
+  | /conventions  | Show loaded ANTEROOM.md info                     |
+  | /usage        | Show token usage                                 |
+  | /clear        | Clear screen                                     |
+  | /quit         | Exit the REPL                                    |
+
+  ### Environment Variables
+
+  All `AI_CHAT_*` prefix. Key variables:
+  `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_MODEL`, `AI_CHAT_PORT`,
+  `AI_CHAT_USER_ID`, `AI_CHAT_DISPLAY_NAME`, `AI_CHAT_CONNECT_TIMEOUT`,
+  `AI_CHAT_WRITE_TIMEOUT`, `AI_CHAT_POOL_TIMEOUT`, `AI_CHAT_FIRST_TOKEN_TIMEOUT`,
+  `AI_CHAT_REQUEST_TIMEOUT`, `AI_CHAT_CHUNK_STALL_TIMEOUT`, `AI_CHAT_RETRY_MAX_ATTEMPTS`,
+  `AI_CHAT_RETRY_BACKOFF_BASE`, `AI_CHAT_NARRATION_CADENCE`, `AI_CHAT_TOOL_DEDUP`,
+  `AI_CHAT_SAFETY_APPROVAL_MODE`.
+
+  ---
+
+  ## Documentation Index
+
+  Use `read_file` on these paths when the inline reference isn't enough.
+
+  ### Getting Started
+  - `docs/getting-started/installation.md` — pip install, prerequisites, first run
+  - `docs/getting-started/quickstart.md` — first conversation, basic usage
+  - `docs/getting-started/concepts.md` — core concepts and terminology
+
+  ### CLI
+  - `docs/cli/commands.md` — full command reference, input keys, tab completion
+  - `docs/cli/tools.md` — built-in tools: signatures, args, examples
+  - `docs/cli/skills.md` — skills system, creating custom skills, directories
+  - `docs/cli/context-management.md` — context window, compaction, /usage
+  - `docs/cli/file-references.md` — @file syntax for injecting file contents
+  - `docs/cli/project-instructions.md` — ANTEROOM.md discovery and trust
+  - `docs/cli/index.md` — CLI docs overview
+
+  ### Web UI
+  - `docs/web-ui/conversations.md` — conversation management, types (chat/note/document)
+  - `docs/web-ui/projects.md` — project organization
+  - `docs/web-ui/attachments.md` — file attachments
+  - `docs/web-ui/keyboard-shortcuts.md` — keyboard shortcuts
+  - `docs/web-ui/streaming.md` — streaming, SSE, real-time updates
+  - `docs/web-ui/shared-databases.md` — shared database support
+  - `docs/web-ui/themes.md` — theme customization
+  - `docs/web-ui/index.md` — Web UI docs overview
+
+  ### Configuration
+  - `docs/configuration/config-file.md` — full config reference with types, defaults, clamping
+  - `docs/configuration/environment-variables.md` — all AI_CHAT_* env vars
+  - `docs/configuration/mcp-servers.md` — MCP server setup and configuration
+  - `docs/configuration/tls.md` — TLS/HTTPS, self-signed certs
+  - `docs/configuration/index.md` — configuration docs overview
+
+  ### Security
+  - `docs/security/tool-safety.md` — risk tiers, approval modes, permission scopes
+  - `docs/security/authentication.md` — auth model, cookies, CSRF, token derivation
+  - `docs/security/hardening.md` — security hardening guide
+  - `docs/security/index.md` — security docs overview
+
+  ### Tutorials
+  - `docs/tutorials/connect-to-ollama.md` — local LLM setup with Ollama
+  - `docs/tutorials/connect-to-azure.md` — Azure OpenAI integration
+  - `docs/tutorials/add-mcp-tools.md` — adding MCP tools (stdio and SSE)
+  - `docs/tutorials/build-custom-skills.md` — skill creation walkthrough
+
+  ### API
+  - `docs/api/conversations.md` — conversations API endpoints
+  - `docs/api/messages.md` — messages API endpoints
+  - `docs/api/projects.md` — projects API endpoints
+  - `docs/api/config.md` — config API endpoints
+  - `docs/api/index.md` — API docs overview
+
+  ### Advanced
+  - `docs/advanced/architecture.md` — system architecture, dual interface, shared core
+  - `docs/advanced/developer-workflow.md` — dev setup, testing, Claude Code skills
+  - `docs/advanced/contributing.md` — contribution guidelines
+  - `docs/advanced/changelog.md` — version history
+
+  ### Root
+  - `docs/index.md` — main documentation index
+
+  ---
+
+  ## User's Question
+
+  {args}

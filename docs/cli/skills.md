@@ -4,13 +4,14 @@ Skills are reusable prompt templates invoked with `/name` in the REPL.
 
 ## Built-in Skills
 
-Three skills ship by default:
+Four skills ship by default:
 
 | Skill | What it does |
 |---|---|
 | `/commit` | Runs `git diff`, stages relevant files, creates a conventional commit |
 | `/review` | Reviews `git diff` for bugs, security issues, performance, error handling, missing tests |
 | `/explain` | Reads referenced code and explains architecture, data flow, components, design patterns |
+| `/docs` | Look up Anteroom documentation — config, CLI, tools, skills, architecture |
 
 ## Using Skills
 

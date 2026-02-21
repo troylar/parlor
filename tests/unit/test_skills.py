@@ -117,6 +117,7 @@ class TestSkillRegistry:
             assert "commit" in names
             assert "review" in names
             assert "explain" in names
+            assert "docs" in names
 
     def test_load_warnings_for_invalid_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
