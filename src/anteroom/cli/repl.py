@@ -27,7 +27,13 @@ from ..services.rewind import collect_file_paths
 from ..services.rewind import rewind_conversation as rewind_service
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
-from .instructions import find_global_instructions, find_project_instructions_path
+from .instructions import (
+    CONVENTIONS_TOKEN_WARNING_THRESHOLD,
+    discover_conventions,
+    estimate_tokens,
+    find_global_instructions,
+    find_project_instructions_path,
+)
 from .renderer import CHROME, GOLD, MUTED
 from .skills import SkillRegistry
 
@@ -572,6 +578,13 @@ async def _load_instructions_with_trust(
                 data_dir=data_dir,
             )
             if trusted_content is not None:
+                tokens = estimate_tokens(trusted_content)
+                if tokens > CONVENTIONS_TOKEN_WARNING_THRESHOLD:
+                    renderer.console.print(
+                        f"  [yellow]Warning: ANTEROOM.md is ~{tokens:,} tokens "
+                        f"(threshold: {CONVENTIONS_TOKEN_WARNING_THRESHOLD:,}). "
+                        f"Large files reduce prompt effectiveness.[/yellow]\n"
+                    )
                 parts.append(f"# Project Instructions\n{trusted_content}")
 
     if not parts:
@@ -1150,6 +1163,7 @@ async def _run_repl(
         "delete",
         "rewind",
         "compact",
+        "conventions",
         "tools",
         "skills",
         "mcp",
@@ -1322,6 +1336,8 @@ async def _run_repl(
                 (desc, "           List loaded skills\n"),
                 (cmd, "  /mcp"),
                 (desc, "              Show MCP server status\n"),
+                (cmd, "  /conventions"),
+                (desc, "      Show loaded ANTEROOM.md conventions\n"),
                 (cmd, "  /verbose"),
                 (desc, "          Cycle: compact > detailed > verbose\n"),
                 (cmd, "  /detail"),
@@ -1463,6 +1479,30 @@ async def _run_repl(
                     continue
                 elif cmd == "/tools":
                     renderer.render_tools(all_tool_names)
+                    continue
+                elif cmd == "/conventions":
+                    info = discover_conventions(working_dir)
+                    if info.source == "none":
+                        renderer.console.print(
+                            f"[{CHROME}]No conventions file found.[/{CHROME}]\n"
+                            f"  [{MUTED}]Create ANTEROOM.md in your project root to define conventions.[/{MUTED}]\n"
+                        )
+                    else:
+                        label = "Project" if info.source == "project" else "Global"
+                        renderer.console.print(f"\n[bold]{label} conventions:[/bold] {info.path}")
+                        renderer.console.print(f"  [{MUTED}]~{info.estimated_tokens:,} tokens[/{MUTED}]")
+                        if info.warning:
+                            renderer.console.print(f"  [yellow]{info.warning}[/yellow]")
+                        renderer.console.print()
+                        lines = (info.content or "").splitlines()
+                        preview = lines[:50]
+                        for line in preview:
+                            renderer.console.print(f"  {line}")
+                        if len(lines) > 50:
+                            renderer.console.print(
+                                f"\n  [{MUTED}]... {len(lines) - 50} more lines. View full file: {info.path}[/{MUTED}]"
+                            )
+                        renderer.console.print()
                     continue
                 elif cmd == "/help":
                     await _show_help_dialog()

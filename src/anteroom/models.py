@@ -79,6 +79,14 @@ class AppConfigResponse(BaseModel):
     identity: dict | None = None
 
 
+class ConventionsResponse(BaseModel):
+    path: str | None = None
+    content: str | None = None
+    source: str  # "project", "global", or "none"
+    estimated_tokens: int = 0
+    warning: str | None = None
+
+
 class ConversationUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     model: str | None = Field(default=None, max_length=200)

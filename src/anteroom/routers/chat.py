@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from ..cli.instructions import load_instructions
 from ..config import build_runtime_context
 from ..models import ChatRequest
 from ..services import storage
@@ -459,6 +460,12 @@ async def chat(conversation_id: str, request: Request):
         tls_enabled=request.app.state.config.app.tls,
     )
     extra_system_prompt = runtime_ctx + ("\n\n" + project_instructions if project_instructions else "")
+
+    # Load ANTEROOM.md conventions (global + project) from the filesystem.
+    # No trust gating needed — the server operator controls the filesystem.
+    file_instructions = load_instructions()
+    if file_instructions:
+        extra_system_prompt += "\n\n" + file_instructions
 
     tools_openai: list[dict[str, Any]] = list(tool_registry.get_openai_tools())
     if mcp_manager:

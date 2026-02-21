@@ -12,7 +12,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from ..models import AppConfigResponse, ConnectionValidation, DatabaseAdd, McpServerStatus, McpTool
+from ..cli.instructions import discover_conventions
+from ..models import AppConfigResponse, ConnectionValidation, ConventionsResponse, DatabaseAdd, McpServerStatus, McpTool
 from ..services.ai_service import create_ai_service
 from ..tools.path_utils import safe_resolve_pathlib
 
@@ -60,6 +61,18 @@ async def get_config(request: Request) -> AppConfigResponse:
         },
         mcp_servers=mcp_statuses,
         identity=identity_data,
+    )
+
+
+@router.get("/config/conventions")
+async def get_conventions() -> ConventionsResponse:
+    info = discover_conventions()
+    return ConventionsResponse(
+        path=str(info.path) if info.path else None,
+        content=info.content,
+        source=info.source,
+        estimated_tokens=info.estimated_tokens,
+        warning=info.warning,
     )
 
 
