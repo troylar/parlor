@@ -11,12 +11,10 @@ logger = logging.getLogger(__name__)
 
 INSTRUCTION_FILENAME = "ANTEROOM.md"
 _HIDDEN_INSTRUCTION_FILENAME = ".anteroom.md"
-_LEGACY_INSTRUCTION_FILENAME = "PARLOR.md"
 
 _SEARCH_FILENAMES = (
     _HIDDEN_INSTRUCTION_FILENAME,
     INSTRUCTION_FILENAME,
-    _LEGACY_INSTRUCTION_FILENAME,
 )
 
 CONVENTIONS_TOKEN_WARNING_THRESHOLD = 4000
@@ -53,7 +51,7 @@ def find_project_instructions_path(start_dir: str | None = None) -> tuple[Path, 
     """Walk up from start_dir to find the nearest ANTEROOM.md. Returns (path, content) or None.
 
     Search order at each directory level:
-      .anteroom.md > ANTEROOM.md > PARLOR.md (legacy)
+      .anteroom.md > ANTEROOM.md
     """
     current = Path(start_dir or os.getcwd()).resolve()
     while True:
@@ -72,7 +70,7 @@ def find_project_instructions_path(start_dir: str | None = None) -> tuple[Path, 
 
 
 def find_project_instructions(start_dir: str | None = None) -> str | None:
-    """Walk up from start_dir to find the nearest ANTEROOM.md (or PARLOR.md fallback)."""
+    """Walk up from start_dir to find the nearest ANTEROOM.md."""
     result = find_project_instructions_path(start_dir)
     if result is None:
         return None
@@ -80,7 +78,7 @@ def find_project_instructions(start_dir: str | None = None) -> str | None:
 
 
 def find_global_instructions() -> str | None:
-    """Load ~/.anteroom/ANTEROOM.md (or ~/.parlor/PARLOR.md fallback) if it exists."""
+    """Load ~/.anteroom/ANTEROOM.md if it exists."""
     from ..config import _resolve_data_dir
 
     data_dir = _resolve_data_dir()

@@ -137,8 +137,8 @@ class TestDetectGitBranch:
 class TestInstructions:
     def test_find_project_instructions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            parlor_md = Path(tmpdir) / "PARLOR.md"
-            parlor_md.write_text("# Project Instructions\nDo things.")
+            anteroom_md = Path(tmpdir) / "ANTEROOM.md"
+            anteroom_md.write_text("# Project Instructions\nDo things.")
             result = find_project_instructions(tmpdir)
             assert result is not None
             assert "Project Instructions" in result
@@ -150,8 +150,8 @@ class TestInstructions:
 
     def test_load_instructions_project_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            parlor_md = Path(tmpdir) / "PARLOR.md"
-            parlor_md.write_text("project instructions")
+            anteroom_md = Path(tmpdir) / "ANTEROOM.md"
+            anteroom_md.write_text("project instructions")
             result = load_instructions(tmpdir)
             assert result is not None
             assert "project instructions" in result

@@ -30,7 +30,7 @@ class TestEstimateTokens:
 
 
 class TestSearchOrder:
-    """Verify .anteroom.md > ANTEROOM.md > PARLOR.md priority."""
+    """Verify .anteroom.md > ANTEROOM.md priority."""
 
     def test_hidden_file_takes_priority(self, tmp_path: Path):
         (tmp_path / ".anteroom.md").write_text("hidden")
@@ -41,22 +41,18 @@ class TestSearchOrder:
         assert path.name == ".anteroom.md"
         assert content == "hidden"
 
-    def test_anteroom_md_over_parlor(self, tmp_path: Path):
+    def test_anteroom_md_found(self, tmp_path: Path):
         (tmp_path / "ANTEROOM.md").write_text("anteroom")
-        (tmp_path / "PARLOR.md").write_text("parlor")
         result = find_project_instructions_path(str(tmp_path))
         assert result is not None
         path, content = result
         assert path.name == "ANTEROOM.md"
         assert content == "anteroom"
 
-    def test_parlor_md_fallback(self, tmp_path: Path):
+    def test_parlor_md_not_recognized(self, tmp_path: Path):
         (tmp_path / "PARLOR.md").write_text("legacy")
         result = find_project_instructions_path(str(tmp_path))
-        assert result is not None
-        path, content = result
-        assert path.name == "PARLOR.md"
-        assert content == "legacy"
+        assert result is None
 
     def test_no_file_returns_none(self, tmp_path: Path):
         result = find_project_instructions_path(str(tmp_path))
