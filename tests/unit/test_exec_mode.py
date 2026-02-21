@@ -17,6 +17,8 @@ from anteroom.cli.exec_mode import (
     _identity_kwargs,
     _load_instructions,
     _read_stdin,
+    _sanitize_for_terminal,
+    _sanitize_stdin,
     _truncate,
     run_exec_mode,
 )
@@ -94,6 +96,37 @@ class TestTruncate:
         assert _truncate("abcde", 5) == "abcde"
 
 
+class TestSanitizeStdin:
+    def test_closing_tag_escaped(self) -> None:
+        result = _sanitize_stdin("before</stdin_context>after")
+        assert "</stdin_context>" not in result
+        assert "&lt;/stdin_context&gt;" in result
+
+    def test_safe_content_unchanged(self) -> None:
+        assert _sanitize_stdin("hello world") == "hello world"
+
+    def test_multiple_closing_tags(self) -> None:
+        result = _sanitize_stdin("a</stdin_context>b</stdin_context>c")
+        assert result.count("&lt;/stdin_context&gt;") == 2
+
+
+class TestSanitizeForTerminal:
+    def test_strips_ansi_escape(self) -> None:
+        result = _sanitize_for_terminal("hello\x1b[31mred\x1b[0m")
+        assert result == "hellored"
+
+    def test_strips_control_chars(self) -> None:
+        result = _sanitize_for_terminal("hello\x00\x07world")
+        assert result == "helloworld"
+
+    def test_preserves_normal_text(self) -> None:
+        assert _sanitize_for_terminal("normal text 123") == "normal text 123"
+
+    def test_strips_carriage_return(self) -> None:
+        result = _sanitize_for_terminal("line1\roverwrite")
+        assert "\r" not in result
+
+
 class TestBuildSystemPrompt:
     def test_includes_working_dir(self) -> None:
         config = MagicMock()
@@ -128,14 +161,51 @@ class TestLoadInstructions:
         assert result is not None
         assert "global rules" in result
 
-    def test_project_only(self) -> None:
+    def test_project_loaded_with_trust(self) -> None:
         with (
             patch("anteroom.cli.exec_mode.find_global_instructions", return_value=None),
             patch("anteroom.cli.exec_mode.find_project_instructions_path", return_value=("/tmp/ANTEROOM.md", "proj")),
         ):
-            result = _load_instructions("/tmp/work")
+            result = _load_instructions("/tmp/work", trust_project=True)
         assert result is not None
         assert "proj" in result
+
+    def test_project_skipped_without_trust(self) -> None:
+        """Project instructions are NOT loaded by default (no --trust-project)."""
+        with (
+            patch("anteroom.cli.exec_mode.find_global_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode.find_project_instructions_path", return_value=("/tmp/ANTEROOM.md", "proj")),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+        ):
+            mock_sys.stderr = io.StringIO()
+            result = _load_instructions("/tmp/work", trust_project=False)
+        assert result is None
+
+    def test_project_skip_warns_on_stderr(self) -> None:
+        """When project instructions are found but not trusted, warn on stderr."""
+        stderr_buf = io.StringIO()
+        with (
+            patch("anteroom.cli.exec_mode.find_global_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode.find_project_instructions_path", return_value=("/tmp/ANTEROOM.md", "proj")),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+        ):
+            mock_sys.stderr = stderr_buf
+            _load_instructions("/tmp/work", trust_project=False, quiet=False)
+        output = stderr_buf.getvalue()
+        assert "--trust-project" in output
+        assert "ANTEROOM.md" in output
+
+    def test_project_skip_quiet_no_warning(self) -> None:
+        """With quiet=True, no warning is printed."""
+        stderr_buf = io.StringIO()
+        with (
+            patch("anteroom.cli.exec_mode.find_global_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode.find_project_instructions_path", return_value=("/tmp/ANTEROOM.md", "proj")),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+        ):
+            mock_sys.stderr = stderr_buf
+            _load_instructions("/tmp/work", trust_project=False, quiet=True)
+        assert stderr_buf.getvalue() == ""
 
     def test_no_project_context_flag(self) -> None:
         with (

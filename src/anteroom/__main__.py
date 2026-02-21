@@ -347,6 +347,7 @@ def _run_exec(
     quiet: bool = False,
     verbose: bool = False,
     no_project_context: bool = False,
+    trust_project: bool = False,
 ) -> None:
     """Launch non-interactive exec mode."""
     if model:
@@ -368,6 +369,7 @@ def _run_exec(
                 quiet=quiet,
                 verbose=verbose,
                 no_project_context=no_project_context,
+                trust_project=trust_project,
             )
         )
         sys.exit(exit_code)
@@ -456,6 +458,11 @@ def main() -> None:
     exec_parser.add_argument("-q", "--quiet", action="store_true", help="Suppress all stderr progress")
     exec_parser.add_argument("-v", "--verbose", action="store_true", help="Show full tool call detail on stderr")
     exec_parser.add_argument("--no-project-context", action="store_true", help="Skip loading ANTEROOM.md")
+    exec_parser.add_argument(
+        "--trust-project",
+        action="store_true",
+        help="Trust and load the project's ANTEROOM.md (skipped by default in exec mode)",
+    )
 
     # `aroom db` subcommand
     db_parser = subparsers.add_parser("db", help="Manage shared databases")
@@ -559,6 +566,7 @@ def main() -> None:
             quiet=args.quiet,
             verbose=args.verbose,
             no_project_context=args.no_project_context,
+            trust_project=args.trust_project,
         )
     else:
         _run_web(config, config_path)

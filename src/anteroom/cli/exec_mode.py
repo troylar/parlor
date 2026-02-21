@@ -35,6 +35,21 @@ _STDIN_WRAPPER = (
 _EXIT_CODE_TIMEOUT = 124
 
 
+def _sanitize_stdin(content: str) -> str:
+    """Escape closing XML tags to prevent stdin content from breaking the wrapper."""
+    return content.replace("</stdin_context>", "&lt;/stdin_context&gt;")
+
+
+def _sanitize_for_terminal(text: str) -> str:
+    """Strip ANSI escape sequences and control characters from text before printing to stderr."""
+    import re
+
+    # Strip ANSI escape sequences first (before individual control chars)
+    text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
+    # Strip remaining control characters (keep \n and \t for readability)
+    return re.sub(r"[\x00-\x08\x0b-\x0d\x0e-\x1f\x7f]", "", text)
+
+
 def _identity_kwargs(config: AppConfig) -> dict[str, str | None]:
     if config.identity:
         return {"user_id": config.identity.user_id, "user_display_name": config.identity.display_name}
@@ -74,6 +89,8 @@ def _build_system_prompt(
 def _load_instructions(
     working_dir: str,
     no_project_context: bool = False,
+    trust_project: bool = False,
+    quiet: bool = False,
     data_dir: Any = None,
 ) -> str | None:
     parts: list[str] = []
@@ -85,10 +102,16 @@ def _load_instructions(
     if not no_project_context:
         result = find_project_instructions_path(working_dir)
         if result is not None:
-            _file_path, content = result
-            # Exec mode auto-trusts project instructions (--trust-project is implicit
-            # for non-interactive use; the operator controls the filesystem)
-            parts.append(f"# Project Instructions\n{content}")
+            file_path, content = result
+            if trust_project:
+                parts.append(f"# Project Instructions\n{content}")
+            else:
+                if not quiet:
+                    print(
+                        f"Warning: skipping project instructions at {file_path} "
+                        "(use --trust-project to load in exec mode)",
+                        file=sys.stderr,
+                    )
 
     if not parts:
         return None
@@ -111,9 +134,13 @@ async def run_exec_mode(
     quiet: bool = False,
     verbose: bool = False,
     no_project_context: bool = False,
+    trust_project: bool = False,
 ) -> int:
     """Run a prompt non-interactively and return an exit code."""
     working_dir = os.getcwd()
+
+    # Detect TTY before reading stdin (stdin.isatty() is only reliable before read)
+    has_tty = sys.stdin.isatty()
 
     # Warn on auto-approval mode
     if config.safety.approval_mode == "auto" and not quiet:
@@ -128,7 +155,7 @@ async def run_exec_mode(
     # Build the full prompt
     full_prompt = prompt
     if stdin_content:
-        full_prompt = _STDIN_WRAPPER.format(content=stdin_content) + "\n\n" + prompt
+        full_prompt = _STDIN_WRAPPER.format(content=_sanitize_stdin(stdin_content)) + "\n\n" + prompt
 
     # Init DB
     db_path = config.app.data_dir / "chat.db"
@@ -157,17 +184,16 @@ async def run_exec_mode(
     # Safety configuration
     from ..tools.safety import SafetyVerdict
 
-    has_tty = sys.stdin.isatty() if stdin_content is None else False
-
     async def _exec_confirm(verdict: SafetyVerdict) -> bool:
+        safe_name = _sanitize_for_terminal(verdict.tool_name)
         if not has_tty:
             # No interactive terminal — fail closed
             if not quiet:
-                print(f"Tool '{verdict.tool_name}' requires approval but no TTY available — denied", file=sys.stderr)
+                print(f"Tool '{safe_name}' requires approval but no TTY available — denied", file=sys.stderr)
             return False
         # Interactive TTY — simple y/n prompt
         try:
-            answer = input(f"Allow {verdict.tool_name}? [y/N] ")
+            answer = input(f"Allow {safe_name}? [y/N] ")
             return answer.strip().lower() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
             return False
@@ -203,10 +229,12 @@ async def run_exec_mode(
                 tools_openai.extend(mcp_tools)
     tools_openai_or_none = tools_openai if tools_openai else None
 
-    # Load instructions (auto-trust for non-interactive)
+    # Load instructions (require --trust-project for project ANTEROOM.md)
     instructions = _load_instructions(
         working_dir,
         no_project_context=no_project_context,
+        trust_project=trust_project,
+        quiet=quiet,
         data_dir=config.app.data_dir,
     )
     mcp_statuses = mcp_manager.get_server_statuses() if mcp_manager else None
