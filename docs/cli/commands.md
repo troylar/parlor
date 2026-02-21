@@ -122,7 +122,9 @@ Replays the last turn's tool calls with full input arguments and output. Useful 
 
 ## CLI Flags
 
-### --approval-mode
+### Global Flags (work in chat and exec modes)
+
+#### --approval-mode
 
 Override the safety approval mode for this session:
 
@@ -131,15 +133,68 @@ aroom --approval-mode auto                 # Skip all approvals
 aroom --approval-mode ask_for_dangerous    # Only prompt for destructive commands
 aroom --approval-mode ask_for_writes       # Prompt for write+execute+destructive (default)
 aroom --approval-mode auto chat            # Works with subcommands
+aroom --approval-mode auto exec "task"     # Works with exec
 ```
 
-### --allowed-tools
+#### --allowed-tools
 
 Pre-allow specific tools to skip approval prompts for this session:
 
 ```bash
 aroom --allowed-tools bash,write_file      # Auto-approve bash and write_file
 aroom --allowed-tools bash chat            # Works with subcommands
+aroom --allowed-tools bash exec "task"     # Works with exec
+```
+
+### Exec Mode Flags
+
+#### --json
+
+Output structured JSON instead of plain text to stdout. Includes response text, tool calls, and exit code:
+
+```bash
+aroom exec "summarize results" --json
+```
+
+#### --no-conversation
+
+Skip saving the conversation to the database. Tool audit logs are still retained for compliance:
+
+```bash
+aroom exec "run analysis" --no-conversation
+```
+
+#### --no-tools
+
+Disable all built-in and MCP tools (direct AI reasoning only):
+
+```bash
+aroom exec "explain concepts" --no-tools
+```
+
+#### --timeout
+
+Set wall-clock timeout in seconds (default 120, clamped 10-600). Returns exit code 124 on timeout:
+
+```bash
+aroom exec "train model" --timeout 300     # 5 minutes
+```
+
+#### --quiet / --verbose
+
+Control feedback on stderr:
+
+```bash
+aroom exec "task" --quiet                  # Suppress all stderr progress
+aroom exec "task" --verbose                # Show full tool call details
+```
+
+#### --no-project-context
+
+Skip loading project-level ANTEROOM.md instructions:
+
+```bash
+aroom exec "task" --no-project-context
 ```
 
 ## Input

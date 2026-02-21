@@ -60,7 +60,8 @@ ai:
 ```bash
 aroom --test       # Verify connection
 aroom              # Web UI at http://127.0.0.1:8080
-aroom chat         # Terminal CLI
+aroom chat         # Terminal CLI (interactive REPL)
+aroom exec "task"  # Execute a task (non-interactive, for scripting/CI)
 aroom --version    # Show version
 ```
 
@@ -86,6 +87,17 @@ aroom chat                          # Interactive REPL
 aroom chat "explain main.py"        # One-shot mode
 aroom chat -c                       # Continue last conversation
 aroom chat --model gpt-4o "hello"   # Override model
+```
+
+### CLI Exec
+
+Non-interactive exec mode for scripting, CI/CD pipelines, and automation. Execute a task and get JSON output with no approval prompts or interactive features. Perfect for embedding Anteroom in shell scripts, GitHub Actions, or other automation workflows.
+
+```bash
+aroom exec "summarize test_results.txt" --json      # JSON output for parsing
+aroom exec "run tests" --timeout 300 --quiet        # CI/CD with timeout
+aroom exec "generate report" --no-tools             # Disable tool use
+aroom exec "refactor code" --no-conversation        # Skip persistence
 ```
 
 ### Shared Core

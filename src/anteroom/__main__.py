@@ -336,6 +336,60 @@ def _run_chat(
                 raise
 
 
+def _run_exec(
+    config,
+    prompt: str,
+    output_json: bool = False,
+    no_conversation: bool = False,
+    no_tools: bool = False,
+    model: str | None = None,
+    timeout: float = 120.0,
+    quiet: bool = False,
+    verbose: bool = False,
+    no_project_context: bool = False,
+    trust_project: bool = False,
+) -> None:
+    """Launch non-interactive exec mode."""
+    if model:
+        config.ai.model = model
+
+    timeout = max(10.0, min(timeout, 600.0))
+
+    from .cli.exec_mode import run_exec_mode
+
+    try:
+        exit_code = asyncio.run(
+            run_exec_mode(
+                config,
+                prompt=prompt,
+                output_json=output_json,
+                no_conversation=no_conversation,
+                no_tools=no_tools,
+                timeout=timeout,
+                quiet=quiet,
+                verbose=verbose,
+                no_project_context=no_project_context,
+                trust_project=trust_project,
+            )
+        )
+        sys.exit(exit_code)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        sys.exit(130)
+    except BaseException as e:
+        if type(e).__name__ in ("ExceptionGroup", "BaseExceptionGroup"):
+            exceptions = getattr(e, "exceptions", ())
+            _suppressed = (KeyboardInterrupt, asyncio.CancelledError)
+            if all(isinstance(exc, _suppressed) for exc in exceptions):
+                sys.exit(130)
+            else:
+                raise
+        err_name = type(e).__name__
+        if "APIConnectionError" in err_name or "ConnectError" in err_name:
+            print(f"Cannot connect to API at {config.ai.base_url}.", file=sys.stderr)
+            sys.exit(1)
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="aroom", description="Anteroom - your gateway to AI conversation")
     subparsers = parser.add_subparsers(dest="command")
@@ -389,6 +443,29 @@ def main() -> None:
         action="store_true",
         help="Skip loading project-level ANTEROOM.md entirely",
     )
+    # `aroom exec` subcommand
+    exec_parser = subparsers.add_parser("exec", help="Non-interactive exec mode for scripting and CI")
+    exec_parser.add_argument("prompt", help="Prompt to execute")
+    exec_parser.add_argument("--json", dest="output_json", action="store_true", help="Output structured JSON")
+    exec_parser.add_argument(
+        "--no-conversation",
+        action="store_true",
+        help="Skip user/assistant message persistence (tool audit always retained)",
+    )
+    exec_parser.add_argument("--no-tools", action="store_true", help="Disable all tool use")
+    exec_parser.add_argument("-m", "--model", dest="exec_model", default=None, help="Override AI model")
+    exec_parser.add_argument(
+        "--timeout", type=float, default=120.0, help="Wall-clock timeout in seconds (default: 120, exit code 124)"
+    )
+    exec_parser.add_argument("-q", "--quiet", action="store_true", help="Suppress all stderr progress")
+    exec_parser.add_argument("-v", "--verbose", action="store_true", help="Show full tool call detail on stderr")
+    exec_parser.add_argument("--no-project-context", action="store_true", help="Skip loading ANTEROOM.md")
+    exec_parser.add_argument(
+        "--trust-project",
+        action="store_true",
+        help="Trust and load the project's ANTEROOM.md (skipped by default in exec mode)",
+    )
+
     # `aroom db` subcommand
     db_parser = subparsers.add_parser("db", help="Manage shared databases")
     db_parser.add_argument("db_action", choices=["create", "list", "connect"], help="Database action")
@@ -478,6 +555,20 @@ def main() -> None:
             model=args.model,
             trust_project=args.trust_project,
             no_project_context=args.no_project_context,
+        )
+    elif args.command == "exec":
+        _run_exec(
+            config,
+            prompt=args.prompt,
+            output_json=args.output_json,
+            no_conversation=args.no_conversation,
+            no_tools=args.no_tools,
+            model=args.exec_model,
+            timeout=args.timeout,
+            quiet=args.quiet,
+            verbose=args.verbose,
+            no_project_context=args.no_project_context,
+            trust_project=args.trust_project,
         )
     else:
         _run_web(config, config_path)

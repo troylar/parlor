@@ -308,3 +308,86 @@ class TestPortEnvVar:
             config = load_config()
 
         assert config.app.port == 8080
+
+
+# ---------------------------------------------------------------------------
+# Exec subcommand dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestExecDispatch:
+    def test_exec_dispatches_to_run_exec(self) -> None:
+        """'aroom exec' dispatches to _run_exec with correct args."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_exec") as mock_run_exec,
+        ):
+            config = _make_config()
+            config.safety.approval_mode = "ask_for_writes"
+            config.safety.allowed_tools = []
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "exec", "say hello"]):
+                main()
+
+        mock_run_exec.assert_called_once()
+        _, kwargs = mock_run_exec.call_args
+        assert kwargs["prompt"] == "say hello"
+
+    def test_exec_json_flag(self) -> None:
+        """'aroom exec --json' passes output_json=True."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_exec") as mock_run_exec,
+        ):
+            config = _make_config()
+            config.safety.approval_mode = "ask_for_writes"
+            config.safety.allowed_tools = []
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "exec", "--json", "test"]):
+                main()
+
+        mock_run_exec.assert_called_once()
+        _, kwargs = mock_run_exec.call_args
+        assert kwargs["output_json"] is True
+
+    def test_exec_timeout_flag(self) -> None:
+        """'aroom exec --timeout 60' passes timeout=60.0."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_exec") as mock_run_exec,
+        ):
+            config = _make_config()
+            config.safety.approval_mode = "ask_for_writes"
+            config.safety.allowed_tools = []
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "exec", "--timeout", "60", "prompt"]):
+                main()
+
+        mock_run_exec.assert_called_once()
+        _, kwargs = mock_run_exec.call_args
+        assert kwargs["timeout"] == 60.0
+
+    def test_exec_does_not_dispatch_to_web(self) -> None:
+        """'aroom exec' must not fall through to _run_web."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_exec") as mock_run_exec,
+            patch("anteroom.__main__._run_web") as mock_run_web,
+        ):
+            config = _make_config()
+            config.safety.approval_mode = "ask_for_writes"
+            config.safety.allowed_tools = []
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "exec", "hello"]):
+                main()
+
+        mock_run_exec.assert_called_once()
+        mock_run_web.assert_not_called()
