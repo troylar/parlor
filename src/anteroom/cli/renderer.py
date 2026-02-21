@@ -551,6 +551,15 @@ async def thinking_countdown(
     Returns ``True`` if countdown completed (caller should retry),
     ``False`` if ``cancel_event`` fired (caller should give up).
     """
+    global _thinking_ticker_task
+    # Stop the background ticker so it doesn't race with countdown writes (#245)
+    if _thinking_ticker_task is not None:
+        _thinking_ticker_task.cancel()
+        try:
+            await _thinking_ticker_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _thinking_ticker_task = None
     remaining = int(delay)
     while remaining > 0:
         elapsed = time.monotonic() - _thinking_start if _thinking_start else 0.0

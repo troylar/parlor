@@ -2018,6 +2018,36 @@ class TestThinkingCountdown:
         r._repl_mode = False
         r._stdout = None
 
+    @pytest.mark.asyncio
+    async def test_countdown_stops_ticker_to_prevent_race(self) -> None:
+        """Ticker task is cancelled before countdown writes, preventing stale lines (#245)."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        r._thinking_start = time.monotonic() - 2.0
+
+        # Simulate a running ticker task
+        async def fake_ticker() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                return
+
+        task = asyncio.create_task(fake_ticker())
+        r._thinking_ticker_task = task
+
+        cancel = asyncio.Event()
+        result = await thinking_countdown(1.0, cancel, "Stream timed out")
+        assert result is True
+        # Ticker must be stopped and cleared during countdown
+        assert r._thinking_ticker_task is None
+        assert task.done()
+        r._repl_mode = False
+        r._stdout = None
+
 
 class TestStreamingCharsInPhaseDisplay:
     """Integration tests: streaming chars display across the full pipeline (#221)."""
