@@ -17,6 +17,7 @@ from ..services.agent_loop import run_agent_loop
 from ..services.ai_service import create_ai_service
 from ..services.embeddings import get_effective_dimensions
 from ..tools import ToolRegistry, register_default_tools
+from ..tools.subagent import SubagentLimiter
 from .instructions import (
     find_global_instructions,
     find_project_instructions_path,
@@ -33,10 +34,13 @@ _STDIN_WRAPPER = (
 )
 
 _EXIT_CODE_TIMEOUT = 124
+_MAX_OUTPUT_CHARS = 10_000_000  # 10 MB cap on accumulated output to prevent OOM
+_MAX_STDIN_CHARS = 10_000_000  # 10 MB cap on piped stdin
 
 
 def _sanitize_stdin(content: str) -> str:
-    """Escape closing XML tags to prevent stdin content from breaking the wrapper."""
+    """Escape XML tags that could break or spoof the stdin_context wrapper."""
+    content = content.replace("<stdin_context>", "&lt;stdin_context&gt;")
     return content.replace("</stdin_context>", "&lt;/stdin_context&gt;")
 
 
@@ -44,8 +48,10 @@ def _sanitize_for_terminal(text: str) -> str:
     """Strip ANSI escape sequences and control characters from text before printing to stderr."""
     import re
 
-    # Strip ANSI escape sequences first (before individual control chars)
+    # Strip ANSI CSI sequences (e.g. \x1b[31m)
     text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
+    # Strip OSC sequences (e.g. \x1b]0;title\x07 or \x1b]0;title\x1b\\)
+    text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
     # Strip remaining control characters (keep \n and \t for readability)
     return re.sub(r"[\x00-\x08\x0b-\x0d\x0e-\x1f\x7f]", "", text)
 
@@ -59,9 +65,16 @@ def _identity_kwargs(config: AppConfig) -> dict[str, str | None]:
 def _read_stdin() -> str | None:
     if sys.stdin.isatty():
         return None
-    content = sys.stdin.read()
+    try:
+        content = sys.stdin.read(_MAX_STDIN_CHARS + 1)
+    except UnicodeDecodeError:
+        logger.warning("Stdin contains binary data — skipping")
+        return None
     if not content.strip():
         return None
+    if len(content) > _MAX_STDIN_CHARS:
+        content = content[:_MAX_STDIN_CHARS]
+        logger.warning("Stdin truncated to %d characters", _MAX_STDIN_CHARS)
     return content
 
 
@@ -179,7 +192,7 @@ async def run_exec_mode(
         except Exception as e:
             logger.warning("Failed to start MCP servers: %s", e)
             if not quiet:
-                print(f"MCP startup failed: {e}", file=sys.stderr)
+                print(f"MCP startup failed: {type(e).__name__}", file=sys.stderr)
 
     # Safety configuration
     from ..tools.safety import SafetyVerdict
@@ -201,8 +214,41 @@ async def run_exec_mode(
     tool_registry.set_safety_config(config.safety, working_dir=working_dir)
     tool_registry.set_confirm_callback(_exec_confirm)
 
+    # Sub-agent support
+    sa_config = config.safety.subagent
+    subagent_limiter = SubagentLimiter(
+        max_concurrent=sa_config.max_concurrent,
+        max_total=sa_config.max_total,
+    )
+    _subagent_counter = 0
+
+    async def _exec_event_sink(agent_id: str, event: Any) -> None:
+        """Minimal event sink for sub-agents: log to stderr in non-quiet mode."""
+        kind = event.kind if hasattr(event, "kind") else event.get("kind", "")
+        if not quiet:
+            if kind == "subagent_start":
+                print(f"[subagent] {agent_id} started", file=sys.stderr)
+            elif kind == "subagent_end":
+                print(f"[subagent] {agent_id} finished", file=sys.stderr)
+
     # Build tool executor
     async def tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        nonlocal _subagent_counter
+        if tool_name == "run_agent":
+            _subagent_counter += 1
+            arguments = {
+                **arguments,
+                "_ai_service": ai_service,
+                "_tool_registry": tool_registry,
+                "_mcp_manager": mcp_manager,
+                "_cancel_event": cancel_event,
+                "_depth": 0,
+                "_agent_id": f"agent-{_subagent_counter}",
+                "_event_sink": _exec_event_sink,
+                "_limiter": subagent_limiter,
+                "_confirm_callback": _exec_confirm,
+                "_config": sa_config,
+            }
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
         if mcp_manager:
@@ -248,11 +294,16 @@ async def run_exec_mode(
 
     ai_service = create_ai_service(config.ai)
 
-    # Create conversation for persistence (unless --no-conversation)
+    # Create conversation for persistence
+    # Even with --no-conversation, we create a minimal audit conversation for tool call tracking.
     id_kw = _identity_kwargs(config)
-    conv = None
-    if not no_conversation:
-        conv = storage.create_conversation(db, title=f"exec: {prompt[:80]}", **id_kw)
+    persist_messages = not no_conversation
+    conv = storage.create_conversation(
+        db,
+        title=f"exec: {prompt[:80]}" if persist_messages else f"exec-audit: {prompt[:40]}",
+        **id_kw,
+    )
+    if persist_messages:
         storage.create_message(db, conv["id"], "user", full_prompt, **id_kw)
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": full_prompt}]
@@ -269,6 +320,7 @@ async def run_exec_mode(
     # Run the agent loop with a wall-clock timeout
     exit_code = 0
     output_chunks: list[str] = []
+    output_total_chars = 0
     tool_calls_log: list[dict[str, Any]] = []
     assistant_msg_id: str | None = None
 
@@ -286,7 +338,9 @@ async def run_exec_mode(
                 tool_output_max_chars=config.cli.tool_output_max_chars,
             ):
                 if event.kind == "token":
-                    output_chunks.append(event.data["content"])
+                    if output_total_chars < _MAX_OUTPUT_CHARS:
+                        output_chunks.append(event.data["content"])
+                        output_total_chars += len(event.data["content"])
                     if not output_json and not quiet:
                         # Stream tokens to stdout in text mode
                         sys.stdout.write(event.data["content"])
@@ -321,8 +375,12 @@ async def run_exec_mode(
                         name = event.data.get("tool_name", "")
                         print(f"[tool] {name} → {status}", file=sys.stderr)
 
-                    # Audit: always write tool calls to DB
-                    if conv and assistant_msg_id:
+                    # Audit: always write tool calls to DB (even with --no-conversation)
+                    if not assistant_msg_id:
+                        # Create stub message for audit if tool calls arrive before assistant_message
+                        msg = storage.create_message(db, conv["id"], "assistant", "[exec audit]", **id_kw)
+                        assistant_msg_id = msg["id"]
+                    if assistant_msg_id:
                         try:
                             tc_record = storage.create_tool_call(
                                 db,
@@ -339,13 +397,18 @@ async def run_exec_mode(
                                 status=event.data.get("status", "success"),
                             )
                         except Exception as e:
-                            logger.debug("Failed to persist tool call: %s", e)
+                            logger.warning("Failed to persist tool call: %s", e)
 
                 elif event.kind == "assistant_message":
                     content = event.data.get("content", "")
-                    if conv and content:
-                        msg = storage.create_message(db, conv["id"], "assistant", content, **id_kw)
-                        assistant_msg_id = msg["id"]
+                    if content:
+                        if persist_messages:
+                            msg = storage.create_message(db, conv["id"], "assistant", content, **id_kw)
+                            assistant_msg_id = msg["id"]
+                        elif not assistant_msg_id:
+                            # Audit-only: create a stub message so tool_calls have a parent
+                            msg = storage.create_message(db, conv["id"], "assistant", "[exec audit]", **id_kw)
+                            assistant_msg_id = msg["id"]
 
                 elif event.kind == "error":
                     error_msg = event.data.get("message", "Unknown error")
@@ -369,9 +432,13 @@ async def run_exec_mode(
     # Output
     final_output = "".join(output_chunks)
     if output_json:
+        # Redact tool arguments by default to avoid leaking secrets; include in verbose mode
+        json_tool_calls = tool_calls_log
+        if not verbose:
+            json_tool_calls = [{k: v for k, v in tc.items() if k != "arguments"} for tc in tool_calls_log]
         result = {
             "output": final_output,
-            "tool_calls": tool_calls_log,
+            "tool_calls": json_tool_calls,
             "model": config.ai.model,
             "exit_code": exit_code,
         }

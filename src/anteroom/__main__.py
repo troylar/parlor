@@ -448,7 +448,9 @@ def main() -> None:
     exec_parser.add_argument("prompt", help="Prompt to execute")
     exec_parser.add_argument("--json", dest="output_json", action="store_true", help="Output structured JSON")
     exec_parser.add_argument(
-        "--no-conversation", action="store_true", help="Skip conversation persistence (tool audit retained)"
+        "--no-conversation",
+        action="store_true",
+        help="Skip user/assistant message persistence (tool audit always retained)",
     )
     exec_parser.add_argument("--no-tools", action="store_true", help="Disable all tool use")
     exec_parser.add_argument("-m", "--model", dest="exec_model", default=None, help="Override AI model")

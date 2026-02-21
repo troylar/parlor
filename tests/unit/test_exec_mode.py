@@ -41,6 +41,13 @@ def _make_config(tmp_path: Path) -> MagicMock:
     config.app.data_dir = tmp_path / "data"
     config.identity = None
     config.safety.approval_mode = "ask_for_writes"
+    config.safety.subagent.max_concurrent = 5
+    config.safety.subagent.max_total = 10
+    config.safety.subagent.max_depth = 3
+    config.safety.subagent.max_iterations = 15
+    config.safety.subagent.timeout = 120
+    config.safety.subagent.max_output_chars = 4000
+    config.safety.subagent.max_prompt_chars = 32000
     config.mcp_servers = []
     config.cli.max_tool_iterations = 50
     config.cli.tool_output_max_chars = 2000
@@ -84,6 +91,23 @@ class TestReadStdin:
             mock_sys.stdin.read.return_value = "hello world"
             assert _read_stdin() == "hello world"
 
+    def test_binary_stdin_returns_none(self) -> None:
+        with patch("anteroom.cli.exec_mode.sys") as mock_sys:
+            mock_sys.stdin.isatty.return_value = False
+            mock_sys.stdin.read.side_effect = UnicodeDecodeError("utf-8", b"", 0, 1, "invalid")
+            assert _read_stdin() is None
+
+    def test_oversized_stdin_truncated(self) -> None:
+        from anteroom.cli.exec_mode import _MAX_STDIN_CHARS
+
+        big_content = "x" * (_MAX_STDIN_CHARS + 100)
+        with patch("anteroom.cli.exec_mode.sys") as mock_sys:
+            mock_sys.stdin.isatty.return_value = False
+            mock_sys.stdin.read.return_value = big_content
+            result = _read_stdin()
+        assert result is not None
+        assert len(result) == _MAX_STDIN_CHARS
+
 
 class TestTruncate:
     def test_short_text_unchanged(self) -> None:
@@ -101,6 +125,16 @@ class TestSanitizeStdin:
         result = _sanitize_stdin("before</stdin_context>after")
         assert "</stdin_context>" not in result
         assert "&lt;/stdin_context&gt;" in result
+
+    def test_opening_tag_escaped(self) -> None:
+        result = _sanitize_stdin("before<stdin_context>after")
+        assert "<stdin_context>" not in result
+        assert "&lt;stdin_context&gt;" in result
+
+    def test_both_tags_escaped(self) -> None:
+        result = _sanitize_stdin("<stdin_context>injected</stdin_context>")
+        assert "<stdin_context>" not in result
+        assert "</stdin_context>" not in result
 
     def test_safe_content_unchanged(self) -> None:
         assert _sanitize_stdin("hello world") == "hello world"
@@ -125,6 +159,14 @@ class TestSanitizeForTerminal:
     def test_strips_carriage_return(self) -> None:
         result = _sanitize_for_terminal("line1\roverwrite")
         assert "\r" not in result
+
+    def test_strips_osc_sequence(self) -> None:
+        result = _sanitize_for_terminal("before\x1b]0;evil title\x07after")
+        assert result == "beforeafter"
+
+    def test_strips_osc_with_st_terminator(self) -> None:
+        result = _sanitize_for_terminal("before\x1b]0;title\x1b\\after")
+        assert result == "beforeafter"
 
 
 class TestBuildSystemPrompt:
@@ -452,7 +494,8 @@ class TestRunExecMode:
         assert code == 124
 
     @pytest.mark.asyncio
-    async def test_no_conversation_skips_persistence(self, tmp_path: Path) -> None:
+    async def test_no_conversation_creates_audit_only(self, tmp_path: Path) -> None:
+        """--no-conversation still creates an audit conversation but skips user message."""
         config = _make_config(tmp_path)
         events = [FakeEvent("token", {"content": "ok"}), FakeEvent("done", {})]
 
@@ -480,11 +523,64 @@ class TestRunExecMode:
             mock_reg.get_openai_tools.return_value = []
             mock_reg.list_tools.return_value = []
             mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
 
             code = await run_exec_mode(config, prompt="test", no_conversation=True)
 
         assert code == 0
-        mock_storage.create_conversation.assert_not_called()
+        # Audit conversation is created, but no user message
+        mock_storage.create_conversation.assert_called_once()
+        title_arg = mock_storage.create_conversation.call_args
+        assert "exec-audit" in title_arg[1].get("title", title_arg[0][1] if len(title_arg[0]) > 1 else "")
+        # No user message created (only audit stub if needed)
+        user_calls = [c for c in mock_storage.create_message.call_args_list if len(c[0]) > 2 and c[0][2] == "user"]
+        assert len(user_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_conversation_tool_audit_persisted(self, tmp_path: Path) -> None:
+        """With --no-conversation, tool calls are still persisted for audit."""
+        config = _make_config(tmp_path)
+        events = [
+            FakeEvent("tool_call_start", {"id": "tc1", "tool_name": "bash", "arguments": {"command": "ls"}}),
+            FakeEvent("tool_call_end", {"id": "tc1", "tool_name": "bash", "status": "success", "output": "ok"}),
+            FakeEvent("done", {}),
+        ]
+
+        async def _fake_loop(**kw: Any) -> Any:
+            for e in events:
+                yield e
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="sys"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = MagicMock()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = []
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m-stub"}
+            mock_storage.create_tool_call.return_value = {"id": "tc-1"}
+
+            code = await run_exec_mode(config, prompt="test", no_conversation=True)
+
+        assert code == 0
+        # A stub message and tool call were persisted
+        mock_storage.create_tool_call.assert_called_once()
+        mock_storage.update_tool_call.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_no_tools_skips_registration(self, tmp_path: Path) -> None:
@@ -662,6 +758,57 @@ class TestRunExecMode:
         assert parsed["tool_calls"][0]["status"] == "success"
 
     @pytest.mark.asyncio
+    async def test_json_output_redacts_args_by_default(self, tmp_path: Path) -> None:
+        """JSON output omits tool arguments unless --verbose is set."""
+        config = _make_config(tmp_path)
+        events = [
+            FakeEvent("tool_call_start", {"id": "tc1", "tool_name": "bash", "arguments": {"command": "secret"}}),
+            FakeEvent("tool_call_end", {"id": "tc1", "tool_name": "bash", "status": "success", "output": "ok"}),
+            FakeEvent("done", {}),
+        ]
+
+        async def _fake_loop(**kw: Any) -> Any:
+            for e in events:
+                yield e
+
+        captured_json: list[str] = []
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="sys"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = MagicMock()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = []
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
+
+            def _cap(*a: Any, **kw: Any) -> None:
+                if kw.get("file") is not mock_sys.stderr and a:
+                    captured_json.append(str(a[0]))
+
+            with patch("builtins.print", side_effect=_cap):
+                code = await run_exec_mode(config, prompt="test", output_json=True)
+
+        assert code == 0
+        parsed = json.loads(captured_json[0])
+        # Arguments should be redacted in non-verbose mode
+        assert "arguments" not in parsed["tool_calls"][0]
+
+    @pytest.mark.asyncio
     async def test_auto_approval_warns_on_stderr(self, tmp_path: Path) -> None:
         config = _make_config(tmp_path)
         config.safety.approval_mode = "auto"
@@ -705,6 +852,69 @@ class TestRunExecMode:
 
         assert code == 0
         assert any("auto" in s.lower() for s in stderr_output)
+
+
+class TestSubagentWiring:
+    """Test that sub-agent context is injected into run_agent tool calls."""
+
+    @pytest.mark.asyncio
+    async def test_run_agent_gets_subagent_context(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        captured_args: list[dict[str, Any]] = []
+        events = [FakeEvent("done", {})]
+
+        async def _fake_loop(**kw: Any) -> Any:
+            # Invoke the tool_executor to check run_agent wiring
+            executor = kw.get("tool_executor")
+            if executor:
+                try:
+                    await executor("run_agent", {"prompt": "test"})
+                except Exception:
+                    pass  # Expected since registry mock won't handle it fully
+            for e in events:
+                yield e
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="sys"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = MagicMock()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = ["run_agent"]
+            mock_reg.has_tool.return_value = True
+
+            async def _capture_call(name: str, args: dict[str, Any], **kw: Any) -> dict[str, Any]:
+                captured_args.append(args)
+                return {"output": "done"}
+
+            mock_reg.call_tool.side_effect = _capture_call
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
+
+            await run_exec_mode(config, prompt="test")
+
+        assert len(captured_args) == 1
+        args = captured_args[0]
+        assert "_ai_service" in args
+        assert "_limiter" in args
+        assert "_cancel_event" in args
+        assert "_confirm_callback" in args
+        assert "_config" in args
+        assert args["_agent_id"] == "agent-1"
+        assert args["_depth"] == 0
 
 
 class TestExecConfirmCallback:
