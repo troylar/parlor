@@ -1207,6 +1207,10 @@ class StatusBar:
         self.model = model
         self.conv_id = conv_id
         self.version = version
+        self.git_branch: str = ""
+        self.venv: str = ""
+        self.context_tokens: int = 0
+        self.context_max: int = 128_000
         self.thinking = False
         self.thinking_elapsed: float = 0.0
         self.tool_calls: int = 0
@@ -1256,6 +1260,11 @@ class StatusBar:
     def set_subagent_count(self, count: int) -> None:
         self.subagent_count = count
 
+    def set_context(self, tokens: int, max_tokens: int = 0) -> None:
+        self.context_tokens = tokens
+        if max_tokens > 0:
+            self.context_max = max_tokens
+
     def set_canvas(self, title: str | None) -> None:
         self.canvas_title = title
 
@@ -1272,39 +1281,58 @@ class StatusBar:
         self.plan_step_desc = ""
 
     def get_toolbar_text(self) -> str:
-        """Build the status bar text content."""
-        parts: list[str] = []
+        """Build the status bar text content.
+
+        Layout: [activity] | [persistent context]
+        Activity (left): thinking, tool calls, subagents, plan progress, canvas
+        Persistent (right): version, model, branch, venv, context usage
+        """
+        activity: list[str] = []
 
         if self.plan_active and self.plan_total > 0:
             pct = int((self.plan_step / self.plan_total) * 100)
-            parts.append(f"Plan: {self.plan_step}/{self.plan_total} ({pct}%)")
+            activity.append(f"Plan: {self.plan_step}/{self.plan_total} ({pct}%)")
             if self.plan_step_desc:
-                parts.append(self.plan_step_desc)
+                activity.append(self.plan_step_desc)
 
         if self.thinking:
             elapsed_str = f"{self.thinking_elapsed:.0f}s" if self.thinking_elapsed else ""
-            parts.append(f"Thinking... {elapsed_str}".strip())
+            activity.append(f"Thinking... {elapsed_str}".strip())
 
         if self.tool_calls > 0:
-            parts.append(f"{self.tool_calls} tool call{'s' if self.tool_calls != 1 else ''}")
+            activity.append(f"{self.tool_calls} tool call{'s' if self.tool_calls != 1 else ''}")
 
         if self.subagent_count > 0:
-            parts.append(f"{self.subagent_count} sub-agent{'s' if self.subagent_count != 1 else ''}")
+            activity.append(f"{self.subagent_count} sub-agent{'s' if self.subagent_count != 1 else ''}")
 
         if self.canvas_title:
-            parts.append(f"Canvas: {self.canvas_title}")
+            activity.append(f"Canvas: {self.canvas_title}")
 
-        if not parts:
-            idle_parts = []
-            if self.version:
-                idle_parts.append(f"anteroom v{self.version}")
-            if self.model:
-                idle_parts.append(self.model)
-            if self.conv_id:
-                idle_parts.append(f"Conv: {self.conv_id[:8]}")
-            return " | ".join(idle_parts) if idle_parts else ""
+        # Persistent context — always shown
+        ctx: list[str] = []
+        if self.model:
+            ctx.append(self.model)
+        if self.git_branch:
+            ctx.append(f"\u2387 {self.git_branch}")
+        if self.venv:
+            ctx.append(f"\u24e5 {self.venv}")
+        if self.context_tokens > 0 and self.context_max > 0:
+            pct = min(100, int((self.context_tokens / self.context_max) * 100))
+            ctx.append(f"ctx: {self.context_tokens // 1000}k/{self.context_max // 1000}k ({pct}%)")
 
-        return " | ".join(parts)
+        if activity:
+            left = " | ".join(activity)
+            right = " | ".join(ctx) if ctx else ""
+            return f"{left}  \u2502  {right}" if right else left
+
+        # Idle: show version + context
+        idle: list[str] = []
+        if self.version:
+            idle.append(f"anteroom v{self.version}")
+        idle.extend(ctx)
+        if self.conv_id:
+            idle.append(f"Conv: {self.conv_id[:8]}")
+        return " | ".join(idle) if idle else ""
 
 
 _status_bar: StatusBar | None = None

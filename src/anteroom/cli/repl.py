@@ -1280,6 +1280,14 @@ async def _run_repl(
             conv_id="",
             version=__version__,
         )
+        # Detect git branch and venv once at startup
+        _branch = _detect_git_branch()
+        if _branch:
+            _sb.git_branch = _branch
+        _venv_name = os.environ.get("VIRTUAL_ENV", "")
+        if _venv_name:
+            _sb.venv = os.path.basename(_venv_name)
+        _sb.context_max = config.cli.model_context_window
 
         def _get_toolbar() -> str:
             sb = renderer.get_status_bar()
@@ -2341,12 +2349,14 @@ async def _run_repl(
                                 thinking = False
                             if _sb_turn is not None:
                                 _sb_turn.clear_thinking()
-                                _sb_turn.invalidate()
                             if not cancel_event.is_set():
                                 renderer.save_turn_history()
                                 renderer.render_response_end()
                                 renderer.render_newline()
                                 context_tokens = _estimate_tokens(ai_messages)
+                                if _sb_turn is not None:
+                                    _sb_turn.set_context(context_tokens)
+                                    _sb_turn.invalidate()
                                 renderer.render_context_footer(
                                     current_tokens=context_tokens,
                                     max_context=config.cli.model_context_window,

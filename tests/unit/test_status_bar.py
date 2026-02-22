@@ -11,6 +11,10 @@ class TestStatusBarInit:
         assert sb.model == ""
         assert sb.conv_id == ""
         assert sb.version == ""
+        assert sb.git_branch == ""
+        assert sb.venv == ""
+        assert sb.context_tokens == 0
+        assert sb.context_max == 128_000
         assert sb.thinking is False
         assert sb.thinking_elapsed == 0.0
         assert sb.tool_calls == 0
@@ -45,6 +49,32 @@ class TestStatusBarIdleText:
         text = sb.get_toolbar_text()
         assert "gpt-4o" in text
         assert "anteroom" not in text
+
+    def test_idle_shows_branch(self) -> None:
+        sb = StatusBar(model="gpt-4o", version="1.0")
+        sb.git_branch = "main"
+        text = sb.get_toolbar_text()
+        assert "\u2387 main" in text
+        assert "gpt-4o" in text
+
+    def test_idle_shows_venv(self) -> None:
+        sb = StatusBar(model="gpt-4o")
+        sb.venv = "myenv"
+        text = sb.get_toolbar_text()
+        assert "\u24e5 myenv" in text
+
+    def test_idle_shows_context(self) -> None:
+        sb = StatusBar()
+        sb.context_tokens = 50_000
+        sb.context_max = 128_000
+        text = sb.get_toolbar_text()
+        assert "ctx: 50k/128k (39%)" in text
+
+    def test_idle_context_zero_hidden(self) -> None:
+        sb = StatusBar(model="gpt-4o")
+        # context_tokens defaults to 0, should not show ctx
+        text = sb.get_toolbar_text()
+        assert "ctx:" not in text
 
 
 class TestStatusBarThinking:
@@ -170,6 +200,32 @@ class TestStatusBarPlan:
         assert "Plan" not in text
 
 
+class TestStatusBarContext:
+    def test_set_context(self) -> None:
+        sb = StatusBar()
+        sb.set_context(50_000, 200_000)
+        assert sb.context_tokens == 50_000
+        assert sb.context_max == 200_000
+
+    def test_set_context_tokens_only(self) -> None:
+        sb = StatusBar()
+        sb.set_context(30_000)
+        assert sb.context_tokens == 30_000
+        assert sb.context_max == 128_000  # default preserved
+
+    def test_set_context_zero_max_preserves(self) -> None:
+        sb = StatusBar()
+        sb.context_max = 64_000
+        sb.set_context(10_000, 0)
+        assert sb.context_max == 64_000
+
+    def test_context_percentage_capped(self) -> None:
+        sb = StatusBar()
+        sb.set_context(150_000, 100_000)
+        text = sb.get_toolbar_text()
+        assert "(100%)" in text
+
+
 class TestStatusBarCombined:
     def test_thinking_and_tool_calls(self) -> None:
         sb = StatusBar()
@@ -189,12 +245,28 @@ class TestStatusBarCombined:
         assert "Plan: 1/3" in text
         assert "Thinking..." in text
 
-    def test_active_state_hides_idle(self) -> None:
+    def test_active_with_persistent_context(self) -> None:
         sb = StatusBar(model="gpt-4o", version="1.0.0")
+        sb.git_branch = "main"
         sb.set_thinking(True)
         text = sb.get_toolbar_text()
+        # Activity side should have thinking
+        assert "Thinking..." in text
+        # Persistent context should still show model and branch
+        assert "gpt-4o" in text
+        assert "\u2387 main" in text
+        # Version shows only in idle, not in active mode
         assert "anteroom" not in text
-        assert "gpt-4o" not in text
+        # Separator between activity and context
+        assert "\u2502" in text
+
+    def test_active_without_context(self) -> None:
+        sb = StatusBar()
+        sb.set_thinking(True)
+        text = sb.get_toolbar_text()
+        assert "Thinking..." in text
+        # No separator when no persistent context
+        assert "\u2502" not in text
 
 
 class TestStatusBarInvalidate:
