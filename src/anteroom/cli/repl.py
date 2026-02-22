@@ -1906,9 +1906,7 @@ async def _run_repl(
                             _exit_plan_mode()
                             renderer.console.print(f"[{CHROME}]Planning mode off. Full tools restored.[/{CHROME}]\n")
                     else:
-                        renderer.console.print(
-                            f"[{CHROME}]Usage: /plan [on|approve|status|edit|off][/{CHROME}]\n"
-                        )
+                        renderer.console.print(f"[{CHROME}]Usage: /plan [on|approve|status|edit|off][/{CHROME}]\n")
                     continue
                 elif cmd == "/verbose":
                     new_v = renderer.cycle_verbosity()
