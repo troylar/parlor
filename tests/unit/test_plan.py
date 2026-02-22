@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from anteroom.cli.plan import (
     PLAN_MODE_ALLOWED_TOOLS,
     build_planning_system_prompt,
@@ -16,7 +18,7 @@ from anteroom.cli.plan import (
 class TestPlanFilePath:
     def test_returns_correct_path(self, tmp_path: Path) -> None:
         result = get_plan_file_path(tmp_path, "conv-123")
-        assert result == tmp_path / "plans" / "conv-123.md"
+        assert result == (tmp_path / "plans" / "conv-123.md").resolve()
 
     def test_creates_plans_directory(self, tmp_path: Path) -> None:
         plans_dir = tmp_path / "plans"
@@ -28,6 +30,14 @@ class TestPlanFilePath:
         get_plan_file_path(tmp_path, "first")
         get_plan_file_path(tmp_path, "second")
         assert (tmp_path / "plans").is_dir()
+
+    def test_rejects_path_traversal(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Invalid conversation_id"):
+            get_plan_file_path(tmp_path, "../../etc/evil")
+
+    def test_rejects_parent_traversal(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Invalid conversation_id"):
+            get_plan_file_path(tmp_path, "../outside")
 
 
 class TestReadPlan:

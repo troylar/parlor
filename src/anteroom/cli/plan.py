@@ -18,10 +18,16 @@ PLAN_MODE_ALLOWED_TOOLS = frozenset(
 
 
 def get_plan_file_path(data_dir: Path, conversation_id: str) -> Path:
-    """Return the plan file path for a conversation, creating the plans/ dir."""
+    """Return the plan file path for a conversation, creating the plans/ dir.
+
+    Raises ValueError if conversation_id contains path traversal.
+    """
     plans_dir = data_dir / "plans"
     plans_dir.mkdir(parents=True, exist_ok=True)
-    return plans_dir / f"{conversation_id}.md"
+    plan_path = (plans_dir / f"{conversation_id}.md").resolve()
+    if not str(plan_path).startswith(str(plans_dir.resolve())):
+        raise ValueError("Invalid conversation_id")
+    return plan_path
 
 
 def build_planning_system_prompt(plan_file_path: Path) -> str:

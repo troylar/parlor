@@ -80,13 +80,14 @@ Full-featured ChatGPT-style interface with conversations, projects, folders, tag
 
 ### CLI Chat
 
-An agentic terminal REPL with built-in tools (read/write/edit files, bash, glob, grep, canvas, run_agent), MCP integration, sub-agent orchestration for parallel task execution, skills system, safety approval prompts for destructive operations, and Rich markdown rendering. Type while the AI works --- messages queue automatically.
+An agentic terminal REPL with built-in tools (read/write/edit files, bash, glob, grep, canvas, run_agent), MCP integration, sub-agent orchestration for parallel task execution, skills system, safety approval prompts for destructive operations, planning mode for multi-step tasks (explore with constraints, write a plan, then approve for execution), and Rich markdown rendering. Type while the AI works --- messages queue automatically.
 
 ```bash
 aroom chat                          # Interactive REPL
 aroom chat "explain main.py"        # One-shot mode
 aroom chat -c                       # Continue last conversation
 aroom chat --model gpt-4o "hello"   # Override model
+aroom chat --plan                   # Planning mode: explore, write plan, then approve
 ```
 
 ### CLI Exec
