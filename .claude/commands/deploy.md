@@ -308,11 +308,20 @@ After the GitHub Release is created, update `docs/advanced/changelog.md` with a 
    - Condense to 1-3 concise bullet points per section (one line each, max ~150 chars)
    - Omit empty sections. If no user-facing sections exist, use: `*Maintenance release — see GitHub Release for details.*`
 
-3. Prepend a new entry to `docs/advanced/changelog.md` after the header block (after the intro paragraph, before the first `---`):
-   ```markdown
-   ---
+3. The changelog groups releases by date. Check if today's date already has a `## <date>` header (e.g., `## February 22, 2026`). Use the format `## Month D, YYYY`.
 
-   ## vX.Y.Z — YYYY-MM-DD
+   - **If today's date header exists**: Insert the new `### vX.Y.Z` entry directly after the date header (before the first existing `###` under that date).
+   - **If today's date header does NOT exist**: Insert a new date section after the intro paragraph (before the first `---`):
+     ```markdown
+     ---
+
+     ## Month D, YYYY
+
+     ```
+
+   Then add the version entry under the date header:
+   ```markdown
+   ### vX.Y.Z
 
    **New:**
 

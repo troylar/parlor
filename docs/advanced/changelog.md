@@ -2,9 +2,12 @@
 
 Release highlights for every Anteroom version. For full details including developer notes and upgrade instructions, see the linked GitHub Release.
 
+
 ---
 
-## v1.24.6 — 2026-02-22
+## February 22, 2026
+
+### v1.24.6
 
 **Fixed:**
 
@@ -13,9 +16,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.24.6)
 
----
-
-## v1.24.5 — 2026-02-22
+### v1.24.5
 
 **Improved:**
 
@@ -25,9 +26,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.24.5)
 
----
-
-## v1.24.4 — 2026-02-22
+### v1.24.4
 
 **New:**
 
@@ -36,9 +35,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.24.4)
 
----
-
-## v1.24.3 — 2026-02-22
+### v1.24.3
 
 **Improved:**
 
@@ -46,9 +43,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.24.3)
 
----
-
-## v1.24.2 — 2026-02-22
+### v1.24.2
 
 **Fixed:**
 
@@ -62,17 +57,13 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.24.2)
 
----
-
-## v1.24.1 — 2026-02-22
+### v1.24.1
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.24.1)
 
----
-
-## v1.24.0 — 2026-02-22
+### v1.24.0
 
 **New:**
 
@@ -82,9 +73,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.24.0)
 
----
-
-## v1.23.0 — 2026-02-22
+### v1.23.0
 
 **New:**
 
@@ -94,9 +83,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.23.0)
 
----
-
-## v1.22.1 — 2026-02-22
+### v1.22.1
 
 **New:**
 
@@ -109,9 +96,12 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.22.1)
 
+
 ---
 
-## v1.22.0 — 2026-02-21
+## February 21, 2026
+
+### v1.22.0
 
 **New:**
 
@@ -120,9 +110,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.22.0)
 
----
-
-## v1.21.0 — 2026-02-21
+### v1.21.0
 
 **New:**
 
@@ -131,9 +119,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.21.0)
 
----
-
-## v1.20.1 — 2026-02-21
+### v1.20.1
 
 **Fixed:**
 
@@ -141,9 +127,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.20.1)
 
----
-
-## v1.20.0 — 2026-02-21
+### v1.20.0
 
 **New:**
 
@@ -157,9 +141,12 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.20.0)
 
+
 ---
 
-## v1.19.0 — 2026-02-20
+## February 20, 2026
+
+### v1.19.0
 
 **New:**
 
@@ -169,9 +156,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.19.0)
 
----
-
-## v1.18.4 — 2026-02-20
+### v1.18.4
 
 **Fixed:**
 
@@ -179,9 +164,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.18.4)
 
----
-
-## v1.18.3 — 2026-02-20
+### v1.18.3
 
 **Fixed:**
 
@@ -189,9 +172,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.18.3)
 
----
-
-## v1.18.2 — 2026-02-20
+### v1.18.2
 
 **Fixed:**
 
@@ -199,9 +180,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.18.2)
 
----
-
-## v1.18.1 — 2026-02-20
+### v1.18.1
 
 **Fixed:**
 
@@ -211,9 +190,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.18.1)
 
----
-
-## v1.18.0 — 2026-02-20
+### v1.18.0
 
 **New:**
 
@@ -228,9 +205,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.18.0)
 
----
-
-## v1.17.1 — 2026-02-20
+### v1.17.1
 
 **Fixed:**
 
@@ -239,9 +214,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.17.1)
 
----
-
-## v1.17.0 — 2026-02-20
+### v1.17.0
 
 **New:**
 
@@ -256,9 +229,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.17.0)
 
----
-
-## v1.16.3 — 2026-02-20
+### v1.16.3
 
 **Fixed:**
 
@@ -266,9 +237,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.16.3)
 
----
-
-## v1.16.2 — 2026-02-20
+### v1.16.2
 
 **Fixed:**
 
@@ -278,9 +247,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.16.2)
 
----
-
-## v1.16.1 — 2026-02-20
+### v1.16.1
 
 **Fixed:**
 
@@ -289,9 +256,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.16.1)
 
----
-
-## v1.16.0 — 2026-02-20
+### v1.16.0
 
 **New:**
 
@@ -301,9 +266,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.16.0)
 
----
-
-## v1.15.0 — 2026-02-20
+### v1.15.0
 
 **New:**
 
@@ -313,9 +276,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.15.0)
 
----
-
-## v1.14.11 — 2026-02-20
+### v1.14.11
 
 **Fixed:**
 
@@ -323,9 +284,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.11)
 
----
-
-## v1.14.10 — 2026-02-20
+### v1.14.10
 
 **New:**
 
@@ -339,17 +298,13 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.10)
 
----
-
-## v1.14.9 — 2026-02-20
+### v1.14.9
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.9)
 
----
-
-## v1.14.8 — 2026-02-20
+### v1.14.8
 
 **Fixed:**
 
@@ -357,17 +312,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.8)
 
----
-
-## v1.14.7 — 2026-02-20
+### v1.14.7
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.7)
 
+
 ---
 
-## v1.14.6 — 2026-02-19
+## February 19, 2026
+
+### v1.14.6
 
 **Fixed:**
 
@@ -375,9 +331,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.6)
 
----
-
-## v1.14.5 — 2026-02-19
+### v1.14.5
 
 **Fixed:**
 
@@ -385,9 +339,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.5)
 
----
-
-## v1.14.4 — 2026-02-19
+### v1.14.4
 
 **New:**
 
@@ -395,9 +347,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.4)
 
----
-
-## v1.14.3 — 2026-02-19
+### v1.14.3
 
 **Fixed:**
 
@@ -405,9 +355,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.3)
 
----
-
-## v1.14.2 — 2026-02-19
+### v1.14.2
 
 **Fixed:**
 
@@ -415,9 +363,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.2)
 
----
-
-## v1.14.1 — 2026-02-19
+### v1.14.1
 
 **Fixed:**
 
@@ -426,9 +372,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.1)
 
----
-
-## v1.14.0 — 2026-02-19
+### v1.14.0
 
 **New:**
 
@@ -438,9 +382,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.14.0)
 
----
-
-## v1.13.0 — 2026-02-19
+### v1.13.0
 
 **New:**
 
@@ -450,9 +392,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.13.0)
 
----
-
-## v1.12.3 — 2026-02-19
+### v1.12.3
 
 **Fixed:**
 
@@ -460,9 +400,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.12.3)
 
----
-
-## v1.12.2 — 2026-02-19
+### v1.12.2
 
 **Fixed:**
 
@@ -470,9 +408,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.12.2)
 
----
-
-## v1.12.1 — 2026-02-19
+### v1.12.1
 
 **Fixed:**
 
@@ -482,9 +418,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.12.1)
 
----
-
-## v1.12.0 — 2026-02-19
+### v1.12.0
 
 **New:**
 
@@ -494,9 +428,12 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.12.0)
 
+
 ---
 
-## v1.11.0 — 2026-02-18
+## February 18, 2026
+
+### v1.11.0
 
 **New:**
 
@@ -506,9 +443,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.11.0)
 
----
-
-## v1.10.2 — 2026-02-18
+### v1.10.2
 
 **Fixed:**
 
@@ -516,9 +451,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.10.2)
 
----
-
-## v1.10.0 — 2026-02-18
+### v1.10.0
 
 **New:**
 
@@ -528,9 +461,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.10.0)
 
----
-
-## v1.9.4 — 2026-02-18
+### v1.9.4
 
 **Fixed:**
 
@@ -538,9 +469,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.9.4)
 
----
-
-## v1.9.3 — 2026-02-18
+### v1.9.3
 
 **Fixed:**
 
@@ -550,9 +479,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.9.3)
 
----
-
-## v1.9.2 — 2026-02-18
+### v1.9.2
 
 **Fixed:**
 
@@ -561,9 +488,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.9.2)
 
----
-
-## v1.9.1 — 2026-02-18
+### v1.9.1
 
 **Improved:**
 
@@ -571,9 +496,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.9.1)
 
----
-
-## v1.9.0 — 2026-02-18
+### v1.9.0
 
 **New:**
 
@@ -583,9 +506,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.9.0)
 
----
-
-## v1.8.0 — 2026-02-18
+### v1.8.0
 
 **New:**
 
@@ -595,9 +516,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.8.0)
 
----
-
-## v1.7.0 — 2026-02-18
+### v1.7.0
 
 **Fixed:**
 
@@ -607,9 +526,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.7.0)
 
----
-
-## v1.6.0 — 2026-02-18
+### v1.6.0
 
 **New:**
 
@@ -619,9 +536,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.6.0)
 
----
-
-## v1.5.1 — 2026-02-18
+### v1.5.1
 
 **Improved:**
 
@@ -629,9 +544,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.5.1)
 
----
-
-## v1.5.0 — 2026-02-18
+### v1.5.0
 
 **New:**
 
@@ -641,17 +554,13 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.5.0)
 
----
-
-## v1.4.11 — 2026-02-18
+### v1.4.11
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.11)
 
----
-
-## v1.4.10 — 2026-02-18
+### v1.4.10
 
 **Fixed:**
 
@@ -661,9 +570,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.10)
 
----
-
-## v1.4.9 — 2026-02-18
+### v1.4.9
 
 **New:**
 
@@ -677,9 +584,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.9)
 
----
-
-## v1.4.8 — 2026-02-18
+### v1.4.8
 
 **Fixed:**
 
@@ -689,9 +594,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.8)
 
----
-
-## v1.4.7 — 2026-02-18
+### v1.4.7
 
 **Fixed:**
 
@@ -699,9 +602,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.7)
 
----
-
-## v1.4.6 — 2026-02-18
+### v1.4.6
 
 **Fixed:**
 
@@ -709,9 +610,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.6)
 
----
-
-## v1.4.5 — 2026-02-18
+### v1.4.5
 
 **Improved:**
 
@@ -721,9 +620,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.5)
 
----
-
-## v1.4.4 — 2026-02-18
+### v1.4.4
 
 **Fixed:**
 
@@ -731,9 +628,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.4)
 
----
-
-## v1.4.3 — 2026-02-18
+### v1.4.3
 
 **Fixed:**
 
@@ -743,17 +638,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.3)
 
+
 ---
 
-## v1.4.2 — 2026-02-17
+## February 17, 2026
+
+### v1.4.2
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.2)
 
----
-
-## v1.4.1 — 2026-02-17
+### v1.4.1
 
 **Fixed:**
 
@@ -766,9 +662,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.1)
 
----
-
-## v1.4.0 — 2026-02-17
+### v1.4.0
 
 **New:**
 
@@ -778,9 +672,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.4.0)
 
----
-
-## v1.3.1 — 2026-02-17
+### v1.3.1
 
 **Fixed:**
 
@@ -789,9 +681,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.3.1)
 
----
-
-## v1.3.0 — 2026-02-17
+### v1.3.0
 
 **New:**
 
@@ -807,9 +697,12 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.3.0)
 
+
 ---
 
-## v1.2.0 — 2026-02-16
+## February 16, 2026
+
+### v1.2.0
 
 **New:**
 
@@ -819,9 +712,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.2.0)
 
----
-
-## v1.1.0 — 2026-02-16
+### v1.1.0
 
 **New:**
 
@@ -831,49 +722,42 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.1.0)
 
+
 ---
 
-## v0.9.1 — 2026-02-15
+## February 15, 2026
+
+### v0.9.1
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.9.1)
 
----
-
-## v0.9.0 — 2026-02-15
+### v0.9.0
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.9.0)
 
----
-
-## v0.8.3 — 2026-02-15
+### v0.8.3
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.8.3)
 
----
-
-## v0.8.2 — 2026-02-15
+### v0.8.2
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.8.2)
 
----
-
-## v0.8.1 — 2026-02-15
+### v0.8.1
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.8.1)
 
----
-
-## v0.8.0 — 2026-02-15
+### v0.8.0
 
 **New:**
 
@@ -883,9 +767,7 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.8.0)
 
----
-
-## v0.7.2 — 2026-02-15
+### v0.7.2
 
 **Fixed:**
 
@@ -893,33 +775,30 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.7.2)
 
----
-
-## v0.7.1 — 2026-02-15
+### v0.7.1
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.7.1)
 
+
 ---
 
-## v0.7.0 — 2026-02-14
+## February 14, 2026
+
+### v0.7.0
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.7.0)
 
----
-
-## v0.6.9 — 2026-02-14
+### v0.6.9
 
 *Maintenance release — see GitHub Release for details.*
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v0.6.9)
 
----
-
-## v0.6.8 — 2026-02-14
+### v0.6.8
 
 *Maintenance release — see GitHub Release for details.*
 
