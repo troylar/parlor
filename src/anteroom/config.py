@@ -299,6 +299,7 @@ class CliConfig:
     tool_output_max_chars: int = 2000  # max chars per tool result before truncation
     file_reference_max_chars: int = 100_000  # max chars from @file references
     model_context_window: int = 128_000  # model context window size for usage bar
+    status_bar: bool = True  # show persistent status bar at bottom of terminal
     planning: PlanningConfig = field(default_factory=PlanningConfig)
 
 
@@ -613,6 +614,10 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     except (ValueError, TypeError):
         model_context_window = 128_000
 
+    status_bar_env = os.environ.get("AI_CHAT_STATUS_BAR")
+    status_bar_raw = status_bar_env if status_bar_env is not None else cli_raw.get("status_bar", True)
+    status_bar = str(status_bar_raw).lower() not in ("false", "0", "no", "off")
+
     planning_raw = cli_raw.get("planning", {})
     if not isinstance(planning_raw, dict):
         planning_raw = {}
@@ -644,6 +649,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         tool_output_max_chars=tool_output_max_chars,
         file_reference_max_chars=file_reference_max_chars,
         model_context_window=model_context_window,
+        status_bar=status_bar,
         planning=planning_config,
     )
 

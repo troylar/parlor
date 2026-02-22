@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from enum import Enum
 from typing import Any
 
@@ -345,6 +346,9 @@ async def _thinking_ticker() -> None:
                     _spinner.update(label)
                 elif _repl_mode:
                     _write_thinking_line(elapsed)
+                if _status_bar is not None:
+                    _status_bar.thinking_elapsed = elapsed
+                    _status_bar.invalidate()
     except asyncio.CancelledError:
         return
 
@@ -1189,6 +1193,160 @@ def render_verbosity_change(v: Verbosity) -> None:
 # ---------------------------------------------------------------------------
 
 _active_subagents: dict[str, dict[str, Any]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Status bar — persistent bottom toolbar in prompt_toolkit
+# ---------------------------------------------------------------------------
+
+
+class StatusBar:
+    """Manages state for the CLI status bar (prompt_toolkit bottom_toolbar)."""
+
+    def __init__(self, model: str = "", conv_id: str = "", version: str = "") -> None:
+        self.model = model
+        self.conv_id = conv_id
+        self.version = version
+        self.git_branch: str = ""
+        self.venv: str = ""
+        self.context_tokens: int = 0
+        self.context_max: int = 128_000
+        self.thinking = False
+        self.thinking_elapsed: float = 0.0
+        self.tool_calls: int = 0
+        self.subagent_count: int = 0
+        self.canvas_title: str | None = None
+        self.plan_active: bool = False
+        self.plan_step: int = 0
+        self.plan_total: int = 0
+        self.plan_step_desc: str = ""
+        self._invalidate_cb: Callable[[], None] | None = None
+
+    def set_invalidate_callback(self, cb: Callable[[], None]) -> None:
+        self._invalidate_cb = cb
+
+    def invalidate(self) -> None:
+        if self._invalidate_cb is not None:
+            try:
+                self._invalidate_cb()
+            except Exception:
+                pass
+
+    def set_idle_info(self, model: str = "", conv_id: str = "", version: str = "") -> None:
+        if model:
+            self.model = model
+        if conv_id:
+            self.conv_id = conv_id
+        if version:
+            self.version = version
+
+    def set_thinking(self, active: bool) -> None:
+        self.thinking = active
+        if not active:
+            self.thinking_elapsed = 0.0
+
+    def clear_thinking(self) -> None:
+        self.thinking = False
+        self.thinking_elapsed = 0.0
+
+    def increment_tool_calls(self) -> None:
+        self.tool_calls += 1
+
+    def reset_turn(self) -> None:
+        self.tool_calls = 0
+        self.thinking = False
+        self.thinking_elapsed = 0.0
+
+    def set_subagent_count(self, count: int) -> None:
+        self.subagent_count = count
+
+    def set_context(self, tokens: int, max_tokens: int = 0) -> None:
+        self.context_tokens = tokens
+        if max_tokens > 0:
+            self.context_max = max_tokens
+
+    def set_canvas(self, title: str | None) -> None:
+        self.canvas_title = title
+
+    def set_plan_progress(self, step: int, total: int, description: str = "") -> None:
+        self.plan_active = True
+        self.plan_step = step
+        self.plan_total = total
+        self.plan_step_desc = description
+
+    def clear_plan(self) -> None:
+        self.plan_active = False
+        self.plan_step = 0
+        self.plan_total = 0
+        self.plan_step_desc = ""
+
+    def get_toolbar_text(self) -> str:
+        """Build the status bar text content.
+
+        Layout: [activity] | [persistent context]
+        Activity (left): thinking, tool calls, subagents, plan progress, canvas
+        Persistent (right): version, model, branch, venv, context usage
+        """
+        activity: list[str] = []
+
+        if self.plan_active and self.plan_total > 0:
+            pct = int((self.plan_step / self.plan_total) * 100)
+            activity.append(f"Plan: {self.plan_step}/{self.plan_total} ({pct}%)")
+            if self.plan_step_desc:
+                activity.append(self.plan_step_desc)
+
+        if self.thinking:
+            elapsed_str = f"{self.thinking_elapsed:.0f}s" if self.thinking_elapsed else ""
+            activity.append(f"Thinking... {elapsed_str}".strip())
+
+        if self.tool_calls > 0:
+            activity.append(f"{self.tool_calls} tool call{'s' if self.tool_calls != 1 else ''}")
+
+        if self.subagent_count > 0:
+            activity.append(f"{self.subagent_count} sub-agent{'s' if self.subagent_count != 1 else ''}")
+
+        if self.canvas_title:
+            activity.append(f"Canvas: {self.canvas_title}")
+
+        # Persistent context — always shown
+        ctx: list[str] = []
+        if self.model:
+            ctx.append(self.model)
+        if self.git_branch:
+            ctx.append(f"\u2387 {self.git_branch}")
+        if self.venv:
+            ctx.append(f"\u24e5 {self.venv}")
+        if self.context_tokens > 0 and self.context_max > 0:
+            pct = min(100, int((self.context_tokens / self.context_max) * 100))
+            ctx.append(f"ctx: {self.context_tokens // 1000}k/{self.context_max // 1000}k ({pct}%)")
+
+        if activity:
+            left = " | ".join(activity)
+            right = " | ".join(ctx) if ctx else ""
+            return f"{left}  \u2502  {right}" if right else left
+
+        # Idle: show version + context
+        idle: list[str] = []
+        if self.version:
+            idle.append(f"anteroom v{self.version}")
+        idle.extend(ctx)
+        if self.conv_id:
+            idle.append(f"Conv: {self.conv_id[:8]}")
+        return " | ".join(idle) if idle else ""
+
+
+_status_bar: StatusBar | None = None
+
+
+def init_status_bar(model: str = "", conv_id: str = "", version: str = "") -> StatusBar:
+    """Create and store the global status bar instance."""
+    global _status_bar
+    _status_bar = StatusBar(model=model, conv_id=conv_id, version=version)
+    return _status_bar
+
+
+def get_status_bar() -> StatusBar | None:
+    return _status_bar
 
 
 def clear_subagent_state() -> None:

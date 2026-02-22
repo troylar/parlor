@@ -708,12 +708,18 @@ async def run_cli(
             renderer.render_subagent_start(
                 agent_id, data.get("prompt", ""), data.get("model", ""), data.get("depth", 1)
             )
+            _sb_ev = renderer.get_status_bar()
+            if _sb_ev is not None:
+                _sb_ev.set_subagent_count(len(renderer._active_subagents))
         elif kind == "tool_call_start":
             renderer.render_subagent_tool(agent_id, data.get("tool_name", ""), data.get("arguments"))
         elif kind == "subagent_end":
             renderer.render_subagent_end(
                 agent_id, data.get("elapsed_seconds", 0), data.get("tool_calls", []), data.get("error")
             )
+            _sb_ev = renderer.get_status_bar()
+            if _sb_ev is not None:
+                _sb_ev.set_subagent_count(len(renderer._active_subagents))
 
     async def tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         nonlocal _subagent_counter
@@ -1262,8 +1268,39 @@ async def _run_repl(
             "completion-menu.completion.current": f"bg:{GOLD} #1a1a2e",
             "completion-menu.meta.completion": f"bg:#1a1a2e {MUTED}",
             "completion-menu.meta.completion.current": f"bg:{GOLD} #1a1a2e",
+            "bottom-toolbar": "bg:#1a3a5c #d0d0d0",
         }
     )
+
+    # Status bar — persistent bottom toolbar showing live context.
+    # _toolbar_hidden: set True while agent runs so prompt_toolkit renders
+    # an empty toolbar (avoids stacking artifacts from raw ANSI writes).
+    _toolbar_fn = None
+    _toolbar_hidden = [False]
+    if config.cli.status_bar:
+        _sb = renderer.init_status_bar(
+            model=config.ai.model,
+            conv_id="",
+            version=__version__,
+        )
+        # Detect git branch and venv once at startup
+        _branch = _detect_git_branch()
+        if _branch:
+            _sb.git_branch = _branch
+        _venv_name = os.environ.get("VIRTUAL_ENV", "")
+        if _venv_name:
+            _sb.venv = os.path.basename(_venv_name)
+        _sb.context_max = config.cli.model_context_window
+
+        def _get_toolbar() -> str:
+            if _toolbar_hidden[0]:
+                return ""
+            sb = renderer.get_status_bar()
+            if sb is None:
+                return ""
+            return f" {sb.get_toolbar_text()}"
+
+        _toolbar_fn = _get_toolbar
 
     session: PromptSession[str] = PromptSession(
         history=FileHistory(str(history_path)),
@@ -1273,6 +1310,7 @@ async def _run_repl(
         completer=completer,
         reserve_space_for_menu=4,
         style=_repl_style,
+        bottom_toolbar=_toolbar_fn,
     )
 
     _patch_completion_menu_position()
@@ -1301,6 +1339,11 @@ async def _run_repl(
         conv = storage.create_conversation(db, **id_kw)
         ai_messages: list[dict[str, Any]] = []
         is_first_message = True
+
+    # Update status bar with conversation ID
+    _sb_init = renderer.get_status_bar()
+    if _sb_init is not None:
+        _sb_init.conv_id = conv["id"]
 
     async def _show_help_dialog() -> None:
         """Show help in a floating dialog that doesn't disturb scrollback."""
@@ -1394,6 +1437,13 @@ async def _run_repl(
     exit_flag = asyncio.Event()
     _current_cancel_event: list[asyncio.Event | None] = [None]
 
+    # Now that agent_busy exists, wire the status bar invalidate callback.
+    # Guard: only invalidate when agent is idle — during execution, raw ANSI
+    # writes bypass prompt_toolkit, and invalidating causes toolbar stacking.
+    _sb_wire = renderer.get_status_bar()
+    if _sb_wire is not None:
+        _sb_wire.set_invalidate_callback(lambda: session.app.invalidate() if not agent_busy.is_set() else None)
+
     # Escape cancels the agent loop (only active during streaming).
     # prompt_toolkit's key processor handles the Escape timeout (~100ms)
     # to distinguish bare Escape from escape sequences (arrow keys, etc.).
@@ -1433,6 +1483,7 @@ async def _run_repl(
                 renderer.console.print(f"[{CHROME}]Message queued[/{CHROME}]")
 
             await input_queue.put(text)
+            _toolbar_hidden[0] = True
             agent_busy.set()
 
     def _has_pending_work() -> bool:
@@ -1452,6 +1503,7 @@ async def _run_repl(
             get_editor,
             get_plan_file_path,
             parse_plan_command,
+            parse_plan_steps,
             read_plan,
         )
 
@@ -1507,6 +1559,7 @@ async def _run_repl(
             # If agent_busy was set (by _collect_input) but we're back here waiting
             # for input, clear it so the prompt renders as gold (idle).
             if agent_busy.is_set() and not _has_pending_work():
+                _toolbar_hidden[0] = False
                 agent_busy.clear()
                 session.app.invalidate()
 
@@ -1533,6 +1586,10 @@ async def _run_repl(
                     is_first_message = conv_type == "chat"
                     if _plan_active[0]:
                         _apply_plan_mode(conv["id"])
+                    _sb_new = renderer.get_status_bar()
+                    if _sb_new is not None:
+                        _sb_new.conv_id = conv["id"]
+                        _sb_new.invalidate()
                     type_label = f" ({conv_type})" if conv_type != "chat" else ""
                     renderer.console.print(f"[{CHROME}]New conversation started{type_label}[/{CHROME}]\n")
                     continue
@@ -1589,6 +1646,10 @@ async def _run_repl(
                         ai_messages = _load_conversation_messages(db, conv["id"])
                         is_first_message = False
                         _show_resume_info(db, conv, ai_messages)
+                        _sb_last = renderer.get_status_bar()
+                        if _sb_last is not None:
+                            _sb_last.conv_id = conv["id"]
+                            _sb_last.invalidate()
                     else:
                         renderer.console.print(f"[{CHROME}]No previous conversations[/{CHROME}]\n")
                     continue
@@ -1816,6 +1877,10 @@ async def _run_repl(
                     current_model = new_model
                     ai_service = create_ai_service(config.ai)
                     ai_service.config.model = new_model
+                    _sb_model = renderer.get_status_bar()
+                    if _sb_model is not None:
+                        _sb_model.model = new_model
+                        _sb_model.invalidate()
                     renderer.console.print(f"[{CHROME}]Switched to model: {new_model}[/{CHROME}]\n")
                     continue
                 elif cmd == "/plan":
@@ -1845,6 +1910,13 @@ async def _run_repl(
                             else:
                                 _exit_plan_mode(plan_content=content)
                                 delete_plan(_plan_file[0])
+                                # Update status bar with plan steps
+                                _sb_plan = renderer.get_status_bar()
+                                if _sb_plan is not None:
+                                    steps = parse_plan_steps(content)
+                                    if steps:
+                                        _sb_plan.set_plan_progress(0, len(steps), steps[0] if steps else "")
+                                    _sb_plan.invalidate()
                                 renderer.console.print(
                                     "[green]Plan approved.[/green] Full tools restored.\n"
                                     f"  [{MUTED}]Plan injected into context. "
@@ -1921,6 +1993,10 @@ async def _run_repl(
                             renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
                         else:
                             _exit_plan_mode()
+                            _sb_off = renderer.get_status_bar()
+                            if _sb_off is not None:
+                                _sb_off.clear_plan()
+                                _sb_off.invalidate()
                             renderer.console.print(f"[{CHROME}]Planning mode off. Full tools restored.[/{CHROME}]\n")
                         continue
                     else:
@@ -1968,6 +2044,10 @@ async def _run_repl(
                         ai_messages = _load_conversation_messages(db, conv["id"])
                         is_first_message = False
                         _show_resume_info(db, conv, ai_messages)
+                        _sb_resume = renderer.get_status_bar()
+                        if _sb_resume is not None:
+                            _sb_resume.conv_id = conv["id"]
+                            _sb_resume.invalidate()
                     else:
                         renderer.render_error(f"Conversation not found: {resolved_id}")
                     continue
@@ -2107,6 +2187,10 @@ async def _run_repl(
             _add_signal_handler(loop, signal.SIGINT, cancel_event.set)
 
             agent_busy.set()
+            _toolbar_hidden[0] = True
+            _sb_turn = renderer.get_status_bar()
+            if _sb_turn is not None:
+                _sb_turn.reset_turn()
 
             thinking = False
             user_attempt = 0
@@ -2172,6 +2256,8 @@ async def _run_repl(
                             if not thinking:
                                 renderer.start_thinking(newline=True)
                                 thinking = True
+                            if _sb_turn is not None:
+                                _sb_turn.set_thinking(True)
                         elif event.kind == "phase":
                             renderer.set_thinking_phase(event.data.get("phase", ""))
                         elif event.kind == "retrying":
@@ -2194,6 +2280,10 @@ async def _run_repl(
                                 total_elapsed += await renderer.stop_thinking()
                                 thinking = False
                             renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
+                            if _sb_turn is not None:
+                                _sb_turn.increment_tool_calls()
+                                _sb_turn.clear_thinking()
+                                _sb_turn.invalidate()
                         elif event.kind == "tool_call_end":
                             renderer.render_tool_call_end(
                                 event.data["tool_name"], event.data["status"], event.data["output"]
@@ -2267,11 +2357,16 @@ async def _run_repl(
                             elif thinking:
                                 total_elapsed += await renderer.stop_thinking()
                                 thinking = False
+                            if _sb_turn is not None:
+                                _sb_turn.clear_thinking()
                             if not cancel_event.is_set():
                                 renderer.save_turn_history()
                                 renderer.render_response_end()
                                 renderer.render_newline()
                                 context_tokens = _estimate_tokens(ai_messages)
+                                if _sb_turn is not None:
+                                    _sb_turn.set_context(context_tokens)
+                                    _sb_turn.invalidate()
                                 renderer.render_context_footer(
                                     current_tokens=context_tokens,
                                     max_context=config.cli.model_context_window,
@@ -2303,6 +2398,7 @@ async def _run_repl(
                     renderer.stop_thinking_sync()
                     thinking = False
                 if not _has_pending_work():
+                    _toolbar_hidden[0] = False
                     agent_busy.clear()
                     session.app.invalidate()
                 _current_cancel_event[0] = None

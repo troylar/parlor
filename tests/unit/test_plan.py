@@ -13,6 +13,7 @@ from anteroom.cli.plan import (
     get_editor,
     get_plan_file_path,
     parse_plan_command,
+    parse_plan_steps,
     read_plan,
 )
 
@@ -175,6 +176,56 @@ class TestParsePlanCommand:
         sub, prompt = parse_plan_command("/plan Build a REST API")
         assert sub is None
         assert prompt == "Build a REST API"
+
+
+class TestParsePlanSteps:
+    def test_extracts_numbered_steps(self) -> None:
+        content = (
+            "## Overview\nSome overview.\n\n"
+            "## Implementation Steps\n"
+            "1. Create the module\n"
+            "2. Add tests\n"
+            "3. Run lint\n\n"
+            "## Test Strategy\nTest stuff."
+        )
+        steps = parse_plan_steps(content)
+        assert steps == ["Create the module", "Add tests", "Run lint"]
+
+    def test_empty_when_no_steps_section(self) -> None:
+        content = "## Overview\nJust an overview.\n\n## Test Strategy\nTests."
+        assert parse_plan_steps(content) == []
+
+    def test_stops_at_next_heading(self) -> None:
+        content = "## Implementation Steps\n1. Step one\n2. Step two\n## Test Strategy\n3. This is not a step\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Step one", "Step two"]
+
+    def test_skips_non_numbered_lines(self) -> None:
+        content = "## Implementation Steps\nSome preamble text\n1. First step\n- A bullet point\n2. Second step\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["First step", "Second step"]
+
+    def test_skips_empty_step_text(self) -> None:
+        content = "## Implementation Steps\n1. \n2. Real step\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Real step"]
+
+    def test_case_insensitive_heading(self) -> None:
+        content = "## implementation steps\n1. Do something\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Do something"]
+
+    def test_handles_double_digit_steps(self) -> None:
+        lines = ["## Implementation Steps"]
+        for i in range(1, 12):
+            lines.append(f"{i}. Step {i}")
+        content = "\n".join(lines)
+        steps = parse_plan_steps(content)
+        assert len(steps) == 11
+        assert steps[10] == "Step 11"
+
+    def test_empty_content(self) -> None:
+        assert parse_plan_steps("") == []
 
 
 class TestPlanModeAllowedTools:
