@@ -6,7 +6,6 @@ import asyncio
 import ipaddress
 import logging
 import os
-import re
 import shutil
 import socket
 from contextlib import AsyncExitStack
@@ -27,8 +26,6 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
 ]
-
-_SHELL_META_RE = re.compile(r"[;&|`$(){}!<>\n\r]")
 
 
 def _validate_sse_url(url: str) -> None:
@@ -56,13 +53,6 @@ def _validate_sse_url(url: str) -> None:
                         raise ValueError(f"Hostname '{hostname}' resolves to blocked IP: {sockaddr[0]}")
         except socket.gaierror:
             raise ValueError(f"Cannot resolve hostname: {hostname}")
-
-
-def _validate_tool_args(arguments: dict[str, Any]) -> None:
-    """Reject tool arguments containing shell metacharacters in string values."""
-    for key, value in arguments.items():
-        if isinstance(value, str) and _SHELL_META_RE.search(value):
-            raise ValueError(f"Tool argument '{key}' contains disallowed characters")
 
 
 def _validate_command(command: str) -> None:
@@ -362,12 +352,21 @@ class McpManager:
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         server_name = self._tool_to_server.get(tool_name)
         if not server_name or server_name not in self._sessions:
-            raise ValueError(f"Tool '{tool_name}' not found in any connected MCP server")
+            available = list(self._sessions.keys())
+            raise ValueError(
+                f"MCP tool '{tool_name}' not available. "
+                f"Connected servers: {', '.join(available) if available else '(none)'}"
+            )
 
-        _validate_tool_args(arguments)
-
+        # SECURITY-REVIEW: MCP tool arguments are JSON-serialized over stdio/SSE and never
+        # passed to a shell. Input validation for shell injection belongs in tools/safety.py
+        # (the bash tool boundary), not here. Removed _validate_tool_args per #291.
         session = self._sessions[server_name]
-        result = await session.call_tool(tool_name, arguments)
+        try:
+            result = await session.call_tool(tool_name, arguments)
+        except Exception as e:
+            logger.error("MCP tool '%s' on server '%s' failed: %s", tool_name, server_name, e, exc_info=True)
+            raise ValueError(f"MCP server '{server_name}' returned an error for tool '{tool_name}'") from e
 
         if hasattr(result, "content"):
             contents = []

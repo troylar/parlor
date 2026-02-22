@@ -10,19 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from anteroom.config import McpServerConfig
-from anteroom.services.mcp_manager import McpManager, _validate_tool_args
-
-
-class TestValidateToolArgs:
-    def test_rejects_shell_metacharacters(self) -> None:
-        with pytest.raises(ValueError, match="disallowed characters"):
-            _validate_tool_args({"cmd": "ls; rm -rf /"})
-
-    def test_accepts_clean_args(self) -> None:
-        _validate_tool_args({"path": "/home/user/file.txt", "count": "5"})
-
-    def test_accepts_non_string_values(self) -> None:
-        _validate_tool_args({"count": 5, "flag": True, "items": ["a", "b"]})
+from anteroom.services.mcp_manager import McpManager
 
 
 class TestMcpManagerInit:
@@ -158,6 +146,87 @@ class TestMcpManagerToolMap:
 
         assert mgr.get_all_tools() == []
         assert mgr._tool_to_server == {}
+
+
+class TestMcpManagerCallTool:
+    """Tests for call_tool error handling and argument passthrough."""
+
+    @pytest.mark.asyncio()
+    async def test_multiline_args_accepted(self) -> None:
+        """MCP tool args with newlines (e.g. Jira descriptions) must not be rejected."""
+        mgr = McpManager([])
+        mgr._tool_to_server = {"update_issue": "jira"}
+
+        mock_session = AsyncMock()
+        mock_result = AsyncMock()
+        mock_result.content = [AsyncMock(text="OK")]
+        mock_session.call_tool = AsyncMock(return_value=mock_result)
+        mgr._sessions = {"jira": mock_session}
+
+        result = await mgr.call_tool(
+            "update_issue",
+            {
+                "description": "Line 1\nLine 2\nLine 3\r\nLine 4",
+                "summary": "Test with special chars: $100 & (parens) {braces}",
+            },
+        )
+        assert result == {"content": "OK"}
+        mock_session.call_tool.assert_awaited_once()
+
+    @pytest.mark.asyncio()
+    async def test_tool_not_found_lists_connected_servers(self) -> None:
+        """Error for missing tool should list connected servers."""
+        mgr = McpManager([])
+        mgr._sessions = {"jira": AsyncMock(), "slack": AsyncMock()}
+
+        with pytest.raises(ValueError, match="MCP tool 'nonexistent' not available") as exc_info:
+            await mgr.call_tool("nonexistent", {})
+
+        msg = str(exc_info.value)
+        assert "jira" in msg
+        assert "slack" in msg
+
+    @pytest.mark.asyncio()
+    async def test_tool_not_found_no_servers(self) -> None:
+        """Error for missing tool with no connected servers shows (none)."""
+        mgr = McpManager([])
+        mgr._sessions = {}
+
+        with pytest.raises(ValueError, match=r"\(none\)"):
+            await mgr.call_tool("anything", {})
+
+    @pytest.mark.asyncio()
+    async def test_server_error_includes_context(self) -> None:
+        """Server-side errors should include server name and tool name."""
+        mgr = McpManager([])
+        mgr._tool_to_server = {"broken_tool": "my-server"}
+
+        mock_session = AsyncMock()
+        mock_session.call_tool = AsyncMock(side_effect=RuntimeError("connection reset"))
+        mgr._sessions = {"my-server": mock_session}
+
+        with pytest.raises(ValueError, match="MCP server 'my-server'") as exc_info:
+            await mgr.call_tool("broken_tool", {"arg": "value"})
+
+        msg = str(exc_info.value)
+        assert "broken_tool" in msg
+        assert "connection reset" not in msg  # raw exception not exposed to caller
+
+    @pytest.mark.asyncio()
+    async def test_server_error_chains_original(self) -> None:
+        """Server-side errors should chain the original exception."""
+        mgr = McpManager([])
+        mgr._tool_to_server = {"my_tool": "srv"}
+
+        original = RuntimeError("original error")
+        mock_session = AsyncMock()
+        mock_session.call_tool = AsyncMock(side_effect=original)
+        mgr._sessions = {"srv": mock_session}
+
+        with pytest.raises(ValueError) as exc_info:
+            await mgr.call_tool("my_tool", {})
+
+        assert exc_info.value.__cause__ is original
 
 
 class TestMcpManagerFailedConnection:

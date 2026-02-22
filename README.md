@@ -123,7 +123,7 @@ Both interfaces share the same agent loop, storage layer, and SQLite database. C
 | **Input** | DOMPurify, UUID validation, filename sanitization |
 | **Rate Limiting** | 120 req/min per IP |
 | **Tool Safety** | Destructive action approvals (CLI + Web UI), configurable patterns, sensitive path blocking |
-| **MCP Safety** | SSRF protection, shell metacharacter rejection |
+| **MCP Safety** | SSRF protection, server-side error handling |
 
 Full details in [SECURITY.md](SECURITY.md).
 
