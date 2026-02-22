@@ -87,11 +87,11 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             return await _handle_streaming(ai_service, kwargs)
         else:
             return await _handle_non_streaming(ai_service, kwargs)
-    except Exception as e:
+    except Exception:
         logger.exception("Proxy upstream error")
         return JSONResponse(
             status_code=502,
-            content={"error": {"message": f"Upstream API error: {type(e).__name__}"}},
+            content={"error": {"message": "Upstream API error"}},
         )
 
 

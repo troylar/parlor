@@ -175,7 +175,7 @@ class TestChatCompletions:
             json={"messages": [{"role": "user", "content": "Hi"}]},
         )
         assert resp.status_code == 502
-        assert "Upstream API error" in resp.json()["error"]["message"]
+        assert resp.json()["error"]["message"] == "Upstream API error"
 
     @patch("anteroom.routers.proxy.create_ai_service")
     def test_streaming_returns_sse(self, mock_create: MagicMock) -> None:

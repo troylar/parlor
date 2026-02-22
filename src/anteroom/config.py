@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import stat
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 _BUILTIN_TOOL_DESCRIPTIONS: dict[str, str] = {
     "read_file": "Read file contents with line numbers. Use this instead of bash cat/head/tail.",
@@ -780,9 +783,16 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     proxy_origins_raw = proxy_raw.get("allowed_origins", [])
     if not isinstance(proxy_origins_raw, list):
         proxy_origins_raw = []
+    proxy_origins: list[str] = []
+    for o in proxy_origins_raw:
+        origin = str(o).rstrip("/")
+        if origin == "*" or not origin.startswith(("http://", "https://")):
+            logger.warning("Ignoring invalid proxy allowed_origin: %s", origin)
+            continue
+        proxy_origins.append(origin)
     proxy_config = ProxyConfig(
         enabled=proxy_enabled,
-        allowed_origins=[str(o) for o in proxy_origins_raw],
+        allowed_origins=proxy_origins,
     )
 
     return AppConfig(
