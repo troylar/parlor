@@ -111,7 +111,7 @@ If main had NOT moved, CI from the prior push is still valid — check that exis
 #### 3d. Evaluate check results
 
 - **All checks pass**: proceed to merge
-- **Only non-required checks fail** (e.g., `security/snyk (troylar)`): proceed with `--admin` — log which checks were bypassed and why
+- **Only non-required checks fail** (e.g., informational SAST scans): proceed with `--admin` — log which checks were bypassed and why
 - **Required checks fail** (tests, lint): abort and show the failure URL. Do not proceed.
 
 #### 3e. Merge (worktree-aware)

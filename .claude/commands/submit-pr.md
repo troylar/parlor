@@ -180,6 +180,28 @@ This is a **warning** (non-blocking). Report format:
 
 If `pyproject.toml` was not changed, skip with ⏭️.
 
+**H — Semgrep SAST scan:**
+
+First check if semgrep is available:
+```bash
+which semgrep 2>/dev/null
+```
+
+If not installed, skip with ⏭️ and emit: `⚠️ semgrep not installed — install with: pip install anteroom[dev]`
+
+If installed, run:
+```bash
+semgrep scan --config p/python --config p/security-audit --json src/ 2>&1
+```
+
+Parse the JSON output. Count findings by severity (error, warning, info).
+
+This is **blocking** — if any error-severity findings are found, abort. Warning-severity findings are non-blocking but reported. Report format:
+```
+🔒 SAST (Semgrep): ✅ no findings / ❌ N error findings, M warnings
+   rule-id: description (src/path/file.py:line)
+```
+
 ### Step 4: Test Coverage for New Code
 
 Check that new or modified Python source files have corresponding unit tests.
@@ -331,6 +353,7 @@ Display the full validation results locally in the chat:
   Vulnerabilities: ✅ / ❌ N vulnerabilities found
   Outdated:        ✅ / ⚠️ N packages outdated
   New Deps:        ✅ / ⚠️ N new deps to review / ⏭️ no pyproject.toml changes
+  SAST (Semgrep):  ✅ / ❌ N findings / ⏭️ not installed
 
 🧪 Test Coverage
   Test Files:     ✅ / ❌ N new modules missing tests
@@ -366,6 +389,7 @@ Details:
 - Tests, lint, or format fail
 - Security issues found
 - Known vulnerabilities found by pip-audit
+- Semgrep error-severity SAST findings
 - Missing test files for new modules
 - POOR test thoroughness
 
@@ -487,6 +511,7 @@ gh pr view --json number,url,title
   📌 Status:   <ready | draft>
   🧪 Checks:   ✅ lint, format, tests, types
   📦 Deps:     ✅ / ❌ N vulns / ⚠️ N outdated, N new to review
+  🔒 SAST:     ✅ / ❌ N Semgrep findings / ⏭️ not installed
   🔒 Security: ✅ / ⚠️ N issues
   📖 Docs:     ✅ up to date / ✅ N fixes committed / ⚠️ N need manual review
   🎯 Vision:   ✅ supports <principles>

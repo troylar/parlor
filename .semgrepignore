@@ -1,0 +1,6 @@
+tests/
+docs/
+*.md
+dist/
+build/
+*.egg-info/

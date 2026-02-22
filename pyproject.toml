@@ -60,6 +60,7 @@ dev = [
     "ruff>=0.4.0",
     "mypy>=1.8.0",
     "pip-audit>=2.7.0",
+    "semgrep>=1.68.0",
 ]
 
 [project.scripts]

@@ -120,7 +120,7 @@ The deploy skill handles branch protection automatically:
 
 - Rebases the feature branch on `origin/main` before merge
 - Waits for all CI checks to resolve
-- If only non-required checks fail (e.g., Snyk false positives), merges with `--admin`
+- If only non-required checks fail (e.g., informational SAST scans), merges with `--admin`
 - If required checks fail (tests, lint), aborts
 
 ## The `/code-review` Skill

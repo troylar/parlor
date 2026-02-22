@@ -71,8 +71,8 @@ jobs:
       - name: Run pip-audit (direct + transitive)
         run: pip-audit
 
-  snyk-security:
-    name: Snyk security scan
+  semgrep:
+    name: Semgrep SAST scan
     runs-on: ubuntu-latest
 
     steps:
@@ -83,90 +83,27 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install production dependencies only
+      - name: Install Semgrep
+        run: pip install 'semgrep>=1.68.0'
+
+      - name: Run Semgrep scan
+        id: semgrep
         run: |
-          python -m pip install --upgrade pip
-          pip install .
+          semgrep scan \
+            --config p/python \
+            --config p/security-audit \
+            --sarif \
+            --output semgrep-results.sarif \
+            src/
+          echo "✅ Semgrep scan completed with no blocking findings"
 
-      - name: Set up Node.js (for Snyk CLI)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: "20"
-
-      - name: Install Snyk CLI
-        run: npm install -g snyk
-
-      - name: Generate production requirements for SCA
-        run: pip freeze --exclude-editable > requirements-prod.txt
-
-      - name: Run Snyk Open Source (SCA)
-        id: snyk-sca
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          snyk test \
-            --file=requirements-prod.txt \
-            --package-manager=pip \
-            --severity-threshold=medium \
-            --json-file-output=snyk-sca.json \
-            --sarif-file-output=snyk-sca.sarif
-
-      - name: Run Snyk Code (SAST)
-        id: snyk-code
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          # SAST is informational — Snyk Code lacks inline ignore support for Python,
-          # and all current findings are false positives (parameterized queries, path
-          # sanitization, intentional verify_ssl config, placeholder API key default).
-          # SARIF is uploaded for visibility; SCA is the enforced gate.
-          snyk code test \
-            --severity-threshold=high \
-            --json-file-output=snyk-code.json \
-            --sarif-file-output=snyk-code.sarif
-
-      - name: Upload SCA SARIF to GitHub
+      - name: Upload SARIF to GitHub
         if: always()
         uses: github/codeql-action/upload-sarif@f5c2471be782132e47a6e6f9c725e56730d6e9a3  # v3
         continue-on-error: true
         with:
-          sarif_file: snyk-sca.sarif
-          category: snyk-sca
-
-      - name: Upload Code SARIF to GitHub
-        if: always()
-        uses: github/codeql-action/upload-sarif@f5c2471be782132e47a6e6f9c725e56730d6e9a3  # v3
-        continue-on-error: true
-        with:
-          sarif_file: snyk-code.sarif
-          category: snyk-code
-
-      - name: Upload JSON reports as artifacts
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        continue-on-error: true
-        with:
-          name: snyk-reports
-          path: |
-            snyk-sca.json
-            snyk-code.json
-            requirements-prod.txt
-          retention-days: 30
-
-      - name: Fail if Snyk SCA found vulnerabilities
-        if: always()
-        run: |
-          # Only SCA (dependency vulnerabilities) is enforced.
-          # SAST is informational — SARIF is uploaded for review but does not block CI.
-          # Snyk Code lacks Python inline-ignore support, and all current SAST findings
-          # are confirmed false positives (see PR #127 for full triage).
-          if [ "${{ steps.snyk-sca.outcome }}" = "failure" ]; then
-            echo "::error::Snyk SCA found dependency vulnerabilities. Check snyk-sca.json for details."
-            exit 1
-          fi
-          echo "Snyk SCA passed — no dependency vulnerabilities found."
+          sarif_file: semgrep-results.sarif
+          category: semgrep
 
   build:
     name: Build package

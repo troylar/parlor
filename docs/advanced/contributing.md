@@ -55,7 +55,8 @@ GitHub Actions runs on every push and PR:
 - Ruff lint + format check
 - pytest with coverage
 - pip-audit for dependency vulnerabilities
-- Snyk SCA + SAST scans
+- Semgrep SAST scan (p/python + p/security-audit rulesets)
+- CodeQL deep semantic analysis
 
 ## Tech Stack
 
