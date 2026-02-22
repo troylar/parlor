@@ -1449,6 +1449,7 @@ async def _run_repl(
             PLAN_MODE_ALLOWED_TOOLS,
             build_planning_system_prompt,
             delete_plan,
+            get_editor,
             get_plan_file_path,
             read_plan,
         )
@@ -1871,6 +1872,33 @@ async def _run_repl(
                         else:
                             renderer.console.print(f"[{CHROME}]Planning mode: off[/{CHROME}]")
                         renderer.console.print()
+                    elif sub == "edit":
+                        if not _plan_active[0]:
+                            renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
+                            continue
+                        if _plan_file[0] is None:
+                            renderer.console.print(f"[{CHROME}]No plan file path set[/{CHROME}]\n")
+                            continue
+                        edit_args = user_input.split(maxsplit=2)
+                        edit_instruction = edit_args[2] if len(edit_args) > 2 else ""
+                        if edit_instruction:
+                            user_input = f"Revise the plan based on this feedback: {edit_instruction}"
+                        else:
+                            content = read_plan(_plan_file[0])
+                            if not content:
+                                renderer.console.print(
+                                    f"[{CHROME}]No plan file yet — the AI needs to write it first.[/{CHROME}]\n"
+                                )
+                                continue
+                            import subprocess
+
+                            editor = get_editor()
+                            subprocess.call([editor, str(_plan_file[0])])
+                            renderer.console.print(
+                                "Plan updated. Use [bold]/plan status[/bold] to review, "
+                                "[bold]/plan approve[/bold] to execute.\n"
+                            )
+                            continue
                     elif sub == "off":
                         if not _plan_active[0]:
                             renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
@@ -1878,7 +1906,9 @@ async def _run_repl(
                             _exit_plan_mode()
                             renderer.console.print(f"[{CHROME}]Planning mode off. Full tools restored.[/{CHROME}]\n")
                     else:
-                        renderer.console.print(f"[{CHROME}]Usage: /plan [on|approve|status|off][/{CHROME}]\n")
+                        renderer.console.print(
+                            f"[{CHROME}]Usage: /plan [on|approve|status|edit|off][/{CHROME}]\n"
+                        )
                     continue
                 elif cmd == "/verbose":
                     new_v = renderer.cycle_verbosity()

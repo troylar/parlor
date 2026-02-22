@@ -10,6 +10,7 @@ from anteroom.cli.plan import (
     PLAN_MODE_ALLOWED_TOOLS,
     build_planning_system_prompt,
     delete_plan,
+    get_editor,
     get_plan_file_path,
     read_plan,
 )
@@ -94,6 +95,28 @@ class TestBuildPlanningSystemPrompt:
         path = tmp_path / "plans" / "conv-123.md"
         result = build_planning_system_prompt(path)
         assert "/plan approve" in result
+
+
+class TestGetEditor:
+    def test_visual_takes_priority(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VISUAL", "code")
+        monkeypatch.setenv("EDITOR", "nano")
+        assert get_editor() == "code"
+
+    def test_editor_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("VISUAL", raising=False)
+        monkeypatch.setenv("EDITOR", "nano")
+        assert get_editor() == "nano"
+
+    def test_vi_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("VISUAL", raising=False)
+        monkeypatch.delenv("EDITOR", raising=False)
+        assert get_editor() == "vi"
+
+    def test_empty_visual_falls_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VISUAL", "")
+        monkeypatch.setenv("EDITOR", "nano")
+        assert get_editor() == "nano"
 
 
 class TestPlanModeAllowedTools:

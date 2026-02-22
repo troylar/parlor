@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # Tools allowed during plan mode — read-only exploration plus write_file for the plan itself
@@ -57,6 +58,11 @@ def read_plan(plan_file_path: Path) -> str | None:
     if not plan_file_path.exists():
         return None
     return plan_file_path.read_text(encoding="utf-8")
+
+
+def get_editor() -> str:
+    """Resolve the user's preferred editor: $VISUAL > $EDITOR > vi."""
+    return os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
 
 
 def delete_plan(plan_file_path: Path) -> None:
