@@ -1316,11 +1316,6 @@ async def _run_repl(
 
     session.default_buffer.on_text_changed += _on_buffer_change
 
-    # Wire status bar invalidation to prompt_toolkit redraw
-    _sb_wire = renderer.get_status_bar()
-    if _sb_wire is not None:
-        _sb_wire.set_invalidate_callback(lambda: session.app.invalidate())
-
     current_model = config.ai.model
 
     if resume_conversation_id:
@@ -1436,6 +1431,13 @@ async def _run_repl(
     agent_busy = asyncio.Event()  # set while agent loop is running
     exit_flag = asyncio.Event()
     _current_cancel_event: list[asyncio.Event | None] = [None]
+
+    # Now that agent_busy exists, wire the status bar invalidate callback.
+    # Guard: only invalidate when agent is idle — during execution, raw ANSI
+    # writes bypass prompt_toolkit, and invalidating causes toolbar stacking.
+    _sb_wire = renderer.get_status_bar()
+    if _sb_wire is not None:
+        _sb_wire.set_invalidate_callback(lambda: session.app.invalidate() if not agent_busy.is_set() else None)
 
     # Escape cancels the agent loop (only active during streaming).
     # prompt_toolkit's key processor handles the Escape timeout (~100ms)
