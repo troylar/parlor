@@ -174,7 +174,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "base-uri 'self'; "
             "form-action 'self'"
         )
-        if request.url.path.startswith("/api/"):
+        if request.url.path.startswith("/api/") or request.url.path.startswith("/v1/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Pragma"] = "no-cache"
         elif request.url.path.endswith((".js", ".css")):
@@ -280,7 +280,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if not path.startswith("/api/"):
+        if not (path.startswith("/api/") or path.startswith("/v1/")):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"
@@ -394,6 +394,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         f"{scheme}://127.0.0.1:{config.app.port}",
         f"{scheme}://localhost:{config.app.port}",
     }
+    if config.proxy.enabled and config.proxy.allowed_origins:
+        for origin in config.proxy.allowed_origins:
+            _allowed_origins.add(origin)
     app.state._allowed_origins = _allowed_origins
     app.add_middleware(
         CORSMiddleware,
@@ -432,6 +435,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(search.router, prefix="/api")
     app.include_router(approvals.router, prefix="/api")
     app.include_router(sources.router, prefix="/api")
+
+    if config.proxy.enabled:
+        from .routers import proxy
+
+        app.include_router(proxy.router, prefix="/v1")
+        logger.info("OpenAI-compatible proxy enabled at /v1/")
 
     @app.post("/api/logout")
     async def logout():

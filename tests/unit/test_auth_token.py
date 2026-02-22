@@ -354,6 +354,9 @@ class TestPartialIdentityEdgeCase:
         config.mcp_servers = []
         config.embeddings = MagicMock()
         config.embeddings.enabled = False
+        config.proxy = MagicMock()
+        config.proxy.enabled = False
+        config.proxy.allowed_origins = []
 
         # Partial identity: has user_id but empty private_key
         partial_identity = MagicMock(spec=UserIdentity)
