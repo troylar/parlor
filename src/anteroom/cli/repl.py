@@ -1272,8 +1272,11 @@ async def _run_repl(
         }
     )
 
-    # Status bar — persistent bottom toolbar showing live context
+    # Status bar — persistent bottom toolbar showing live context.
+    # _toolbar_hidden: set True while agent runs so prompt_toolkit renders
+    # an empty toolbar (avoids stacking artifacts from raw ANSI writes).
     _toolbar_fn = None
+    _toolbar_hidden = [False]
     if config.cli.status_bar:
         _sb = renderer.init_status_bar(
             model=config.ai.model,
@@ -1290,6 +1293,8 @@ async def _run_repl(
         _sb.context_max = config.cli.model_context_window
 
         def _get_toolbar() -> str:
+            if _toolbar_hidden[0]:
+                return ""
             sb = renderer.get_status_bar()
             if sb is None:
                 return ""
@@ -1478,6 +1483,7 @@ async def _run_repl(
                 renderer.console.print(f"[{CHROME}]Message queued[/{CHROME}]")
 
             await input_queue.put(text)
+            _toolbar_hidden[0] = True
             agent_busy.set()
 
     def _has_pending_work() -> bool:
@@ -1553,6 +1559,7 @@ async def _run_repl(
             # If agent_busy was set (by _collect_input) but we're back here waiting
             # for input, clear it so the prompt renders as gold (idle).
             if agent_busy.is_set() and not _has_pending_work():
+                _toolbar_hidden[0] = False
                 agent_busy.clear()
                 session.app.invalidate()
 
@@ -2180,6 +2187,7 @@ async def _run_repl(
             _add_signal_handler(loop, signal.SIGINT, cancel_event.set)
 
             agent_busy.set()
+            _toolbar_hidden[0] = True
             _sb_turn = renderer.get_status_bar()
             if _sb_turn is not None:
                 _sb_turn.reset_turn()
@@ -2390,6 +2398,7 @@ async def _run_repl(
                     renderer.stop_thinking_sync()
                     thinking = False
                 if not _has_pending_work():
+                    _toolbar_hidden[0] = False
                     agent_busy.clear()
                     session.app.invalidate()
                 _current_cancel_event[0] = None
