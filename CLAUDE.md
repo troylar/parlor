@@ -106,7 +106,7 @@ This project uses Claude Code skills (`.claude/commands/`) and auto-loaded rules
 
 **Skills** (invoke with `/command`): `/ideate`, `/new-issue`, `/start-work`, `/commit`, `/submit-pr`, `/pr-check`, `/code-review`, `/deploy`, `/write-docs`, `/dev-help`, `/next`, `/triage`, `/cleanup`, `/docs`. Run `/dev-help` for a full guide.
 
-**Rules** (auto-loaded every session): commit format, issue requirement, output formatting, product vision alignment, security patterns, test requirements.
+**Rules** (auto-loaded every session): commit format, issue requirement, output formatting, product vision alignment, security patterns, test requirements, feature parity.
 
 ### Deployment
 
