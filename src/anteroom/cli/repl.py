@@ -1902,6 +1902,20 @@ async def _run_repl(
                                 "[bold]/plan approve[/bold] to execute.\n"
                             )
                             continue
+                    elif sub == "reject":
+                        if not _plan_active[0]:
+                            renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
+                            continue
+                        reject_parts = user_input.split(maxsplit=2)
+                        if len(reject_parts) < 3 or not reject_parts[2].strip():
+                            renderer.console.print(f"[{CHROME}]Usage: /plan reject <reason for rejection>[/{CHROME}]\n")
+                            continue
+                        reason = reject_parts[2].strip()
+                        user_input = (
+                            f"The plan has been rejected. Reason: {reason}\n\n"
+                            "Please revise the plan based on this feedback and write the updated "
+                            "plan to the same plan file. Keep exploring if you need more information."
+                        )
                     elif sub == "off":
                         if not _plan_active[0]:
                             renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
@@ -1913,7 +1927,8 @@ async def _run_repl(
                         # Inline prompt mode: /plan <prompt text>
                         if not inline_prompt:
                             renderer.console.print(
-                                f"[{CHROME}]Usage: /plan [on|approve|status|edit|off] or /plan <prompt>[/{CHROME}]\n"
+                                f"[{CHROME}]Usage: /plan [on|approve|status|edit|reject|off]"
+                                f" or /plan <prompt>[/{CHROME}]\n"
                             )
                             continue
                         if not _plan_active[0]:
