@@ -208,6 +208,7 @@ async def run_agent_loop(
     message_queue: asyncio.Queue[dict[str, Any]] | None = None,
     narration_cadence: int = 0,
     tool_output_max_chars: int = _DEFAULT_TOOL_OUTPUT_MAX_CHARS,
+    auto_plan_threshold: int = 0,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -217,6 +218,7 @@ async def run_agent_loop(
     context_recovery_attempts = 0
     max_context_recoveries = 2  # truncate once, compact once
     total_tool_calls = 0
+    auto_plan_suggested = False
 
     while iteration < max_iterations:
         iteration += 1
@@ -376,6 +378,16 @@ async def run_agent_loop(
         if cancel_event and cancel_event.is_set():
             yield AgentEvent(kind="done", data={})
             return
+
+        # Auto-plan suggestion: one-shot event when tool calls cross the threshold.
+        if (
+            auto_plan_threshold > 0
+            and not auto_plan_suggested
+            and total_tool_calls >= auto_plan_threshold
+            and not (cancel_event and cancel_event.is_set())
+        ):
+            auto_plan_suggested = True
+            yield AgentEvent(kind="auto_plan_suggest", data={"tool_calls": total_tool_calls})
 
         # Enforce narration cadence: inject an ephemeral prompt to force a progress update.
         # The injected message is removed from history immediately after the narration response

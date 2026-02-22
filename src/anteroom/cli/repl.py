@@ -1451,6 +1451,7 @@ async def _run_repl(
             delete_plan,
             get_editor,
             get_plan_file_path,
+            parse_plan_command,
             read_plan,
         )
 
@@ -1818,8 +1819,7 @@ async def _run_repl(
                     renderer.console.print(f"[{CHROME}]Switched to model: {new_model}[/{CHROME}]\n")
                     continue
                 elif cmd == "/plan":
-                    parts = user_input.split()
-                    sub = parts[1].lower() if len(parts) >= 2 else "on"
+                    sub, inline_prompt = parse_plan_command(user_input)
                     if sub in ("on", "start"):
                         if _plan_active[0]:
                             renderer.console.print(f"[{CHROME}]Already in planning mode[/{CHROME}]\n")
@@ -1829,6 +1829,7 @@ async def _run_repl(
                                 f"[yellow]Planning mode active.[/yellow] The AI will explore and write a plan.\n"
                                 f"  [{MUTED}]Use /plan approve to execute, /plan off to exit.[/{MUTED}]\n"
                             )
+                        continue
                     elif sub == "approve":
                         if not _plan_active[0]:
                             renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
@@ -1849,6 +1850,7 @@ async def _run_repl(
                                     f"  [{MUTED}]Plan injected into context. "
                                     f"Send a message to start.[/{MUTED}]\n"
                                 )
+                        continue
                     elif sub == "status":
                         if _plan_active[0]:
                             renderer.console.print("[yellow]Planning mode: active[/yellow]")
@@ -1872,6 +1874,7 @@ async def _run_repl(
                         else:
                             renderer.console.print(f"[{CHROME}]Planning mode: off[/{CHROME}]")
                         renderer.console.print()
+                        continue
                     elif sub == "edit":
                         if not _plan_active[0]:
                             renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
@@ -1905,9 +1908,20 @@ async def _run_repl(
                         else:
                             _exit_plan_mode()
                             renderer.console.print(f"[{CHROME}]Planning mode off. Full tools restored.[/{CHROME}]\n")
+                        continue
                     else:
-                        renderer.console.print(f"[{CHROME}]Usage: /plan [on|approve|status|edit|off][/{CHROME}]\n")
-                    continue
+                        # Inline prompt mode: /plan <prompt text>
+                        if not inline_prompt:
+                            renderer.console.print(
+                                f"[{CHROME}]Usage: /plan"
+                                f" [on|approve|status|edit|off] or /plan <prompt>[/{CHROME}]\n"
+                            )
+                            continue
+                        if not _plan_active[0]:
+                            _apply_plan_mode(conv["id"])
+                            renderer.console.print("[yellow]Planning mode active.[/yellow]\n")
+                        user_input = inline_prompt
+                        # Fall through to agent loop — do NOT continue
                 elif cmd == "/verbose":
                     new_v = renderer.cycle_verbosity()
                     renderer.render_verbosity_change(new_v)
@@ -2120,6 +2134,11 @@ async def _run_repl(
                         message_queue=msg_queue,
                         narration_cadence=ai_service.config.narration_cadence,
                         tool_output_max_chars=config.cli.tool_output_max_chars,
+                        auto_plan_threshold=(
+                            config.cli.planning.auto_threshold_tools
+                            if not _plan_active[0] and config.cli.planning.auto_mode != "off"
+                            else 0
+                        ),
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(
@@ -2165,6 +2184,30 @@ async def _run_repl(
                             renderer.render_tool_call_end(
                                 event.data["tool_name"], event.data["status"], event.data["output"]
                             )
+                        elif event.kind == "auto_plan_suggest":
+                            _auto_mode = config.cli.planning.auto_mode
+                            if _auto_mode == "auto" and not _plan_active[0]:
+                                if thinking:
+                                    total_elapsed += await renderer.stop_thinking()
+                                    thinking = False
+                                renderer.console.print(
+                                    "\n[yellow]Complex task detected "
+                                    f"({event.data['tool_calls']} tool calls). "
+                                    "Switching to planning mode...[/yellow]\n"
+                                )
+                                cancel_event.set()
+                                _apply_plan_mode(conv["id"])
+                            elif _auto_mode == "suggest" and not _plan_active[0]:
+                                if thinking:
+                                    total_elapsed += await renderer.stop_thinking()
+                                    thinking = False
+                                renderer.console.print(
+                                    f"\n[yellow]This task looks complex "
+                                    f"({event.data['tool_calls']} tool calls). "
+                                    f"Consider using /plan for better results.[/yellow]\n"
+                                )
+                                renderer.start_thinking(newline=True)
+                                thinking = True
                         elif event.kind == "assistant_message":
                             if event.data["content"]:
                                 storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)

@@ -781,6 +781,7 @@ async def chat(conversation_id: str, request: Request):
             )
 
         try:
+            _planning_cfg = request.app.state.config.cli.planning
             async for agent_event in run_agent_loop(
                 ai_service=ai_service,
                 messages=ai_messages,
@@ -790,6 +791,9 @@ async def chat(conversation_id: str, request: Request):
                 extra_system_prompt=extra_system_prompt,
                 message_queue=_message_queues.get(conversation_id),
                 narration_cadence=ai_service.config.narration_cadence,
+                auto_plan_threshold=(
+                    _planning_cfg.auto_threshold_tools if not plan_mode and _planning_cfg.auto_mode != "off" else 0
+                ),
             ):
                 kind = agent_event.kind
                 data = agent_event.data

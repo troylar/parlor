@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+_PLAN_SUBCOMMANDS = frozenset({"on", "start", "approve", "status", "edit", "off"})
+
 # Tools allowed during plan mode — read-only exploration plus write_file for the plan itself
 PLAN_MODE_ALLOWED_TOOLS = frozenset(
     {
@@ -69,3 +71,22 @@ def delete_plan(plan_file_path: Path) -> None:
     """Delete the plan file if it exists."""
     if plan_file_path.exists():
         plan_file_path.unlink()
+
+
+def parse_plan_command(user_input: str) -> tuple[str | None, str | None]:
+    """Parse a /plan command into (subcommand, inline_prompt).
+
+    Returns:
+        (subcommand, None) for known subcommands like "on", "approve", etc.
+        (None, prompt_text) for inline prompts like "/plan build a REST API".
+        ("on", None) when no arguments are given (default behavior).
+    """
+    parts = user_input.split()
+    if len(parts) < 2:
+        return ("on", None)
+    candidate = parts[1].lower()
+    if candidate in _PLAN_SUBCOMMANDS:
+        return (candidate, None)
+    # Everything after "/plan " is the inline prompt
+    prompt = user_input.split(maxsplit=1)[1] if len(user_input.split(maxsplit=1)) > 1 else ""
+    return (None, prompt if prompt else None)

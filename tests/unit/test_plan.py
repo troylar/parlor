@@ -12,6 +12,7 @@ from anteroom.cli.plan import (
     delete_plan,
     get_editor,
     get_plan_file_path,
+    parse_plan_command,
     read_plan,
 )
 
@@ -117,6 +118,64 @@ class TestGetEditor:
         monkeypatch.setenv("VISUAL", "")
         monkeypatch.setenv("EDITOR", "nano")
         assert get_editor() == "nano"
+
+
+class TestParsePlanCommand:
+    def test_no_args_defaults_to_on(self) -> None:
+        sub, prompt = parse_plan_command("/plan")
+        assert sub == "on"
+        assert prompt is None
+
+    def test_known_subcommand_on(self) -> None:
+        sub, prompt = parse_plan_command("/plan on")
+        assert sub == "on"
+        assert prompt is None
+
+    def test_known_subcommand_start(self) -> None:
+        sub, prompt = parse_plan_command("/plan start")
+        assert sub == "start"
+        assert prompt is None
+
+    def test_known_subcommand_approve(self) -> None:
+        sub, prompt = parse_plan_command("/plan approve")
+        assert sub == "approve"
+        assert prompt is None
+
+    def test_known_subcommand_status(self) -> None:
+        sub, prompt = parse_plan_command("/plan status")
+        assert sub == "status"
+        assert prompt is None
+
+    def test_known_subcommand_off(self) -> None:
+        sub, prompt = parse_plan_command("/plan off")
+        assert sub == "off"
+        assert prompt is None
+
+    def test_known_subcommand_edit(self) -> None:
+        sub, prompt = parse_plan_command("/plan edit")
+        assert sub == "edit"
+        assert prompt is None
+
+    def test_known_subcommand_case_insensitive(self) -> None:
+        sub, prompt = parse_plan_command("/plan APPROVE")
+        assert sub == "approve"
+        assert prompt is None
+
+    def test_inline_prompt_single_word(self) -> None:
+        sub, prompt = parse_plan_command("/plan refactor")
+        assert sub is None
+        assert prompt == "refactor"
+
+    def test_inline_prompt_multi_word(self) -> None:
+        sub, prompt = parse_plan_command("/plan build a REST API for user auth")
+        assert sub is None
+        assert prompt == "build a REST API for user auth"
+
+    def test_inline_prompt_preserves_case(self) -> None:
+        sub, prompt = parse_plan_command("/plan Build a REST API")
+        assert sub is None
+        assert prompt == "Build a REST API"
+
 
 
 class TestPlanModeAllowedTools:
