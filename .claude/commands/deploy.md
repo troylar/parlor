@@ -315,12 +315,15 @@ After the GitHub Release is created, update `docs/advanced/changelog.md` with a 
    ## vX.Y.Z — YYYY-MM-DD
 
    **New:**
+
    - Feature highlight (#issue)
 
    **Fixed:**
+
    - Bug fix highlight (#issue)
 
    **Improved:**
+
    - Improvement highlight (#issue)
 
    [GitHub Release](https://github.com/troylar/anteroom/releases/tag/vX.Y.Z)
