@@ -285,6 +285,11 @@ class PlanningConfig:
 
 
 @dataclass
+class SkillsConfig:
+    auto_invoke: bool = True  # let the AI auto-invoke skills from natural language
+
+
+@dataclass
 class CliConfig:
     builtin_tools: bool = True
     max_tool_iterations: int = 50
@@ -300,6 +305,7 @@ class CliConfig:
     file_reference_max_chars: int = 100_000  # max chars from @file references
     model_context_window: int = 128_000  # model context window size for usage bar
     planning: PlanningConfig = field(default_factory=PlanningConfig)
+    skills: SkillsConfig = field(default_factory=SkillsConfig)
 
 
 @dataclass
@@ -630,6 +636,12 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         auto_mode=planning_auto_mode,
     )
 
+    skills_raw = cli_raw.get("skills", {})
+    if not isinstance(skills_raw, dict):
+        skills_raw = {}
+    skills_auto_invoke = str(skills_raw.get("auto_invoke", "true")).lower() not in ("false", "0", "no")
+    skills_config = SkillsConfig(auto_invoke=skills_auto_invoke)
+
     cli_config = CliConfig(
         builtin_tools=cli_raw.get("builtin_tools", True),
         max_tool_iterations=int(cli_raw.get("max_tool_iterations", 50)),
@@ -645,6 +657,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         file_reference_max_chars=file_reference_max_chars,
         model_context_window=model_context_window,
         planning=planning_config,
+        skills=skills_config,
     )
 
     identity_raw = raw.get("identity", {})

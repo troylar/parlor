@@ -715,8 +715,24 @@ async def run_cli(
                 agent_id, data.get("elapsed_seconds", 0), data.get("tool_calls", []), data.get("error")
             )
 
+    # Mutable ref so tool_executor can queue skill prompts into the per-turn msg_queue
+    _active_msg_queue: list[asyncio.Queue[dict[str, Any]] | None] = [None]
+
     async def tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         nonlocal _subagent_counter
+        if tool_name == "invoke_skill":
+            skill_name = arguments.get("skill_name", "")
+            skill = skill_registry.get(skill_name) if skill_registry else None
+            if not skill:
+                return {"error": f"Unknown skill: {skill_name}"}
+            args = arguments.get("args", "")
+            prompt = skill.prompt
+            if args:
+                prompt = f"{prompt}\n\nAdditional context: {args}"
+            queue = _active_msg_queue[0]
+            if queue is not None:
+                await queue.put({"role": "user", "content": prompt})
+            return {"status": "skill_invoked", "skill": skill_name}
         if tool_name == "run_agent":
             _subagent_counter += 1
             arguments = {
@@ -759,6 +775,12 @@ async def run_cli(
 
     tools_openai_or_none = tools_openai if tools_openai else None
 
+    # Load skills (before system prompt so skill descriptions can be injected)
+    skill_registry = SkillRegistry()
+    skill_registry.load(working_dir)
+    for warn in skill_registry.load_warnings:
+        renderer.console.print(f"[yellow]Skill warning:[/yellow] {warn}")
+
     # Load ANTEROOM.md instructions (with trust gating for project-level files)
     instructions = await _load_instructions_with_trust(
         working_dir,
@@ -774,6 +796,26 @@ async def run_cli(
         builtin_tools=tool_registry.list_tools(),
         mcp_servers=mcp_statuses,
     )
+
+    # Inject skill catalog into system prompt so the AI knows about available skills
+    skill_descs = skill_registry.get_skill_descriptions()
+    if skill_descs:
+        skill_lines = [
+            "\n<available_skills>",
+            "The following skills are available. When the user's request clearly matches a skill, "
+            "use the invoke_skill tool to run it.",
+        ]
+        for name, desc in skill_descs:
+            skill_lines.append(f"- {name}: {desc}")
+        skill_lines.append("</available_skills>")
+        extra_system_prompt += "\n".join(skill_lines)
+
+    # Add invoke_skill tool definition if auto-invoke is enabled
+    if config.cli.skills.auto_invoke:
+        invoke_def = skill_registry.get_invoke_skill_definition()
+        if invoke_def:
+            tools_openai.append(invoke_def)
+            tools_openai_or_none = tools_openai if tools_openai else None
 
     ai_service = create_ai_service(config.ai)
 
@@ -793,12 +835,6 @@ async def run_cli(
     all_tool_names = tool_registry.list_tools()
     if mcp_manager:
         all_tool_names.extend(t["name"] for t in mcp_manager.get_all_tools())
-
-    # Load skills
-    skill_registry = SkillRegistry()
-    skill_registry.load(working_dir)
-    for warn in skill_registry.load_warnings:
-        renderer.console.print(f"[yellow]Skill warning:[/yellow] {warn}")
 
     # Resolve conversation to continue
     resume_conversation_id: str | None = None
@@ -860,6 +896,7 @@ async def run_cli(
                 cancel_event_ref=_active_cancel_event,
                 subagent_limiter=_subagent_limiter,
                 plan_mode=plan_mode,
+                skill_msg_queue_ref=_active_msg_queue,
             )
     finally:
         if mcp_manager:
@@ -1099,6 +1136,7 @@ async def _run_repl(
     cancel_event_ref: list[asyncio.Event | None] | None = None,
     subagent_limiter: Any = None,
     plan_mode: bool = False,
+    skill_msg_queue_ref: list[asyncio.Queue[dict[str, Any]] | None] | None = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -2092,6 +2130,8 @@ async def _run_repl(
 
             # Build message queue for queued follow-ups during agent loop
             msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            if skill_msg_queue_ref is not None:
+                skill_msg_queue_ref[0] = msg_queue
 
             # Stream response
             renderer.clear_turn_history()

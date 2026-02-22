@@ -140,3 +140,46 @@ class TestSkillRegistry:
             reg = SkillRegistry()
             reg.load(tmpdir)
             assert len(reg.load_warnings) == 0
+
+    def test_get_skill_descriptions_returns_all(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = self._make_registry(tmpdir)
+            descs = reg.get_skill_descriptions()
+            names = [name for name, _ in descs]
+            # Includes user skills and default skills
+            assert "commit" in names
+            assert "review" in names
+            # Each entry is (name, description)
+            for name, desc in descs:
+                assert isinstance(name, str)
+                assert isinstance(desc, str)
+
+    def test_get_skill_descriptions_empty_registry(self) -> None:
+        reg = SkillRegistry()
+        assert reg.get_skill_descriptions() == []
+
+    def test_get_invoke_skill_definition_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = self._make_registry(tmpdir)
+            defn = reg.get_invoke_skill_definition()
+            assert defn is not None
+            assert defn["type"] == "function"
+            func = defn["function"]
+            assert func["name"] == "invoke_skill"
+            params = func["parameters"]
+            assert "skill_name" in params["properties"]
+            assert "args" in params["properties"]
+            assert params["properties"]["skill_name"]["type"] == "string"
+
+    def test_get_invoke_skill_definition_enum_matches_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = self._make_registry(tmpdir)
+            defn = reg.get_invoke_skill_definition()
+            assert defn is not None
+            enum_values = defn["function"]["parameters"]["properties"]["skill_name"]["enum"]
+            skill_names = [s.name for s in reg.list_skills()]
+            assert sorted(enum_values) == sorted(skill_names)
+
+    def test_get_invoke_skill_definition_empty_registry(self) -> None:
+        reg = SkillRegistry()
+        assert reg.get_invoke_skill_definition() is None
