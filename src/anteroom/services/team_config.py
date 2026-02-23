@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 _SAFE_DOT_PATH = re.compile(r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*){0,3}$")
 _MAX_ENFORCE_DEPTH = 4
 
-_TEAM_DIR_FILENAME = ".anteroom/team.yaml"
+_TEAM_DIR_FILENAMES = (".anteroom/team.yaml", ".claude/team.yaml")
 _TEAM_FLAT_FILENAME = "anteroom.team.yaml"
 
 
@@ -88,7 +88,7 @@ def _walk_up_for_team_config(start: str | Path | None = None) -> Path | None:
     current = Path(start or os.getcwd()).resolve()
     home = Path.home().resolve()
     while True:
-        for relative in (_TEAM_DIR_FILENAME, _TEAM_FLAT_FILENAME):
+        for relative in (*_TEAM_DIR_FILENAMES, _TEAM_FLAT_FILENAME):
             candidate = current / relative
             try:
                 if candidate.is_file():

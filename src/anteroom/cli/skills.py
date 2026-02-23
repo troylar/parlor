@@ -69,7 +69,7 @@ def _skill_dirs(working_dir: str | None = None) -> list[Path]:
     dirs = [data_dir / "skills"]
     current = Path(working_dir or os.getcwd()).resolve()
     while True:
-        for dirname in (".anteroom", ".parlor"):
+        for dirname in (".anteroom", ".claude", ".parlor"):
             project_dir = current / dirname / "skills"
             if project_dir.is_dir():
                 dirs.append(project_dir)
