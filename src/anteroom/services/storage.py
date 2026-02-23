@@ -1701,6 +1701,12 @@ def save_source_file(
         except UnicodeDecodeError:
             pass
 
+    # Try binary document extraction (PDF, DOCX) if text decode didn't apply
+    if content is None:
+        from anteroom.services.document_extractor import extract_text
+
+        content = extract_text(data, mime_type)
+
     now = _now()
     db.execute(
         "INSERT INTO sources (id, type, title, content, mime_type, filename, storage_path,"
@@ -2080,6 +2086,16 @@ def create_source_from_attachment(
             except (UnicodeDecodeError, OSError):
                 pass
 
+        # Try binary document extraction (PDF, DOCX) if text decode didn't apply
+        if content is None:
+            try:
+                from anteroom.services.document_extractor import extract_text
+
+                file_data = full_path.read_bytes()
+                content = extract_text(file_data, mime)
+            except OSError:
+                pass
+
     content_hash = None
     if content:
         content_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -2148,8 +2164,13 @@ def search_similar_source_chunks(
     embedding: list[float],
     limit: int = 20,
     source_id: str | None = None,
+    project_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Search for semantically similar source chunks using vec0 cosine similarity."""
+    """Search for semantically similar source chunks using vec0 cosine similarity.
+
+    When *project_id* is given, results are filtered to sources linked to that
+    project (direct, group, or tag-filter linkage via ``project_sources``).
+    """
     from ..db import has_vec_support
 
     raw_conn = db._conn if hasattr(db, "_conn") else db
@@ -2158,6 +2179,10 @@ def search_similar_source_chunks(
 
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     embedding_bytes = _validate_embedding(embedding)
+
+    # Over-fetch when project filtering so we still return enough results
+    # after post-filter (KNN is computed before the JOIN).
+    fetch_limit = limit * 3 if project_id else limit
 
     if source_id:
         rows = db.execute_fetchall(
@@ -2171,7 +2196,7 @@ def search_similar_source_chunks(
             FROM knn
             LEFT JOIN source_chunks sc ON sc.id = knn.chunk_id
             """,
-            (embedding_bytes, limit, source_id),
+            (embedding_bytes, fetch_limit, source_id),
         )
     else:
         rows = db.execute_fetchall(
@@ -2185,10 +2210,10 @@ def search_similar_source_chunks(
             FROM knn
             LEFT JOIN source_chunks sc ON sc.id = knn.chunk_id
             """,
-            (embedding_bytes, limit),
+            (embedding_bytes, fetch_limit),
         )
 
-    return [
+    results = [
         {
             "chunk_id": dict(r)["chunk_id"],
             "source_id": dict(r)["source_id"],
@@ -2198,3 +2223,9 @@ def search_similar_source_chunks(
         }
         for r in rows
     ]
+
+    if project_id:
+        project_source_ids = {s["id"] for s in get_project_sources(db, project_id)}
+        results = [r for r in results if r["source_id"] in project_source_ids]
+
+    return results[:limit]

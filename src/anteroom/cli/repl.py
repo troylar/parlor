@@ -1598,6 +1598,48 @@ async def _run_repl(
                             )
                         renderer.console.print()
                     continue
+                elif cmd == "/upload":
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) < 2 or not parts[1].strip():
+                        renderer.console.print(f"[{CHROME}]Usage: /upload <path>[/{CHROME}]\n")
+                        continue
+                    upload_path = Path(parts[1].strip()).expanduser().resolve()
+                    if not upload_path.is_file():
+                        renderer.console.print(f"[{CHROME}]File not found: {upload_path}[/{CHROME}]\n")
+                        continue
+                    try:
+                        import mimetypes
+
+                        import filetype as _ft
+
+                        file_data = upload_path.read_bytes()
+                        guess = _ft.guess(file_data)
+                        mime = guess.mime if guess else (mimetypes.guess_type(str(upload_path))[0] or "text/plain")
+                        source = storage.save_source_file(
+                            db,
+                            title=upload_path.name,
+                            filename=upload_path.name,
+                            mime_type=mime,
+                            data=file_data,
+                            data_dir=config.app.data_dir,
+                            user_id=config.identity.user_id if config.identity else None,
+                            user_display_name=config.identity.display_name
+                            if config.identity and hasattr(config.identity, "display_name")
+                            else None,
+                        )
+                        renderer.console.print(
+                            f"[{CHROME}]Uploaded {upload_path.name} → source {source['id'][:8]}…[/{CHROME}]"
+                        )
+                        if source.get("content"):
+                            renderer.console.print(
+                                f"  [{MUTED}]{mime}, {len(source['content']):,} chars extracted[/{MUTED}]"
+                            )
+                        else:
+                            renderer.console.print(f"  [{MUTED}]{mime}, stored (no text extracted)[/{MUTED}]")
+                        renderer.console.print()
+                    except Exception as exc:
+                        renderer.console.print(f"[{CHROME}]Upload failed: {exc}[/{CHROME}]\n")
+                    continue
                 elif cmd == "/help":
                     await _show_help_dialog()
                     continue

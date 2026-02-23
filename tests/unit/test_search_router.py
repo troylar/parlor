@@ -220,3 +220,61 @@ class TestAutoModeFallback:
             resp = client.get("/api/search?q=test&mode=auto")
             assert resp.status_code == 200
             assert resp.json()["mode"] == "keyword"
+
+
+class TestProjectScopedSearch:
+    """Verify project_id parameter passes through to storage calls (#179)."""
+
+    def test_semantic_search_passes_project_id(self) -> None:
+        service = AsyncMock()
+        service.embed = AsyncMock(return_value=[0.1] * 384)
+        app = _make_app(vec_enabled=True, embedding_service=service)
+
+        with patch("anteroom.routers.search.storage") as mock_storage:
+            mock_storage.search_similar_messages.return_value = []
+            mock_storage.search_similar_source_chunks.return_value = []
+            mock_storage.get_conversation.return_value = None
+            client = TestClient(app)
+            resp = client.get("/api/search/semantic?q=test&project_id=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+            assert resp.status_code == 200
+            mock_storage.search_similar_source_chunks.assert_called_once()
+            call_kwargs = mock_storage.search_similar_source_chunks.call_args
+            assert call_kwargs.kwargs.get("project_id") == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    def test_semantic_search_invalid_project_id(self) -> None:
+        service = AsyncMock()
+        service.embed = AsyncMock(return_value=[0.1] * 384)
+        app = _make_app(vec_enabled=True, embedding_service=service)
+
+        client = TestClient(app)
+        resp = client.get("/api/search/semantic?q=test&project_id=not-a-uuid")
+        assert resp.status_code == 400
+
+    def test_unified_search_passes_project_id(self) -> None:
+        service = AsyncMock()
+        service.embed = AsyncMock(return_value=[0.1] * 384)
+        app = _make_app(vec_enabled=True, embedding_service=service)
+
+        with patch("anteroom.routers.search.storage") as mock_storage:
+            mock_storage.search_similar_messages.return_value = []
+            mock_storage.search_similar_source_chunks.return_value = []
+            client = TestClient(app)
+            resp = client.get("/api/search?q=test&mode=semantic&project_id=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+            assert resp.status_code == 200
+            call_kwargs = mock_storage.search_similar_source_chunks.call_args
+            assert call_kwargs.kwargs.get("project_id") == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    def test_semantic_search_no_project_id_passes_none(self) -> None:
+        service = AsyncMock()
+        service.embed = AsyncMock(return_value=[0.1] * 384)
+        app = _make_app(vec_enabled=True, embedding_service=service)
+
+        with patch("anteroom.routers.search.storage") as mock_storage:
+            mock_storage.search_similar_messages.return_value = []
+            mock_storage.search_similar_source_chunks.return_value = []
+            mock_storage.get_conversation.return_value = None
+            client = TestClient(app)
+            resp = client.get("/api/search/semantic?q=test")
+            assert resp.status_code == 200
+            call_kwargs = mock_storage.search_similar_source_chunks.call_args
+            assert call_kwargs.kwargs.get("project_id") is None

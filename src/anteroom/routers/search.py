@@ -26,6 +26,7 @@ async def semantic_search(
     q: str = Query(..., min_length=1),
     limit: int = Query(default=20, ge=1, le=100),
     conversation_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """Search messages by semantic similarity."""
     if conversation_id:
@@ -33,6 +34,12 @@ async def semantic_search(
             uuid_mod.UUID(conversation_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid conversation_id format")
+
+    if project_id:
+        try:
+            uuid_mod.UUID(project_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid project_id format")
 
     embedding_service = getattr(request.app.state, "embedding_service", None)
     if not embedding_service:
@@ -69,7 +76,7 @@ async def semantic_search(
         conversations.append({"conversation_id": conv_id, "title": title, "type": conv_type, "messages": messages})
 
     # Also search source chunks
-    source_results = storage.search_similar_source_chunks(db, query_embedding, limit=limit)
+    source_results = storage.search_similar_source_chunks(db, query_embedding, limit=limit, project_id=project_id)
     source_grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in source_results:
         source_grouped[r["source_id"]].append(
@@ -97,6 +104,7 @@ async def unified_search(
     mode: str = Query(default="auto", pattern="^(auto|keyword|semantic)$"),
     limit: int = Query(default=20, ge=1, le=100),
     type: str | None = Query(default=None, pattern="^(chat|note|document)$"),
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """Unified search: auto selects semantic if available, falls back to keyword."""
     db = _get_db(request)
@@ -115,7 +123,9 @@ async def unified_search(
         query_embedding = await embedding_service.embed(q)
         if query_embedding is not None:
             results = storage.search_similar_messages(db, query_embedding, limit=limit)
-            source_results = storage.search_similar_source_chunks(db, query_embedding, limit=limit)
+            source_results = storage.search_similar_source_chunks(
+                db, query_embedding, limit=limit, project_id=project_id
+            )
             return {
                 "mode": "semantic",
                 "results": [

@@ -516,3 +516,80 @@ class TestValidateUpload:
         # (e.g., claiming image/png but providing content with no magic bytes)
         with pytest.raises(ValueError, match="Cannot verify file content type"):
             _validate_upload("image/png", b"\x00" * 200, "fake.png")
+
+
+class TestSaveSourceFileExtraction:
+    """Verify that save_source_file calls document_extractor for binary MIME types (#179)."""
+
+    def test_pdf_extraction_populates_content(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        pdf_data = b"%PDF-1.4 " + b"\x00" * 100
+
+        with patch("anteroom.services.storage._validate_upload"):
+            with patch("anteroom.services.document_extractor.extract_text", return_value="Extracted PDF text"):
+                source = save_source_file(db, "test.pdf", "test.pdf", "application/pdf", pdf_data, tmp_path)
+
+        assert source["content"] == "Extracted PDF text"
+        # Verify chunks were created from the extracted content
+        chunks = list_source_chunks(db, source["id"])
+        assert len(chunks) >= 1
+        assert chunks[0]["content"] == "Extracted PDF text"
+
+    def test_docx_extraction_populates_content(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        docx_data = b"PK\x03\x04" + b"\x00" * 100
+
+        with patch("anteroom.services.storage._validate_upload"):
+            with patch("anteroom.services.document_extractor.extract_text", return_value="DOCX content here"):
+                source = save_source_file(db, "doc.docx", "doc.docx", docx_mime, docx_data, tmp_path)
+
+        assert source["content"] == "DOCX content here"
+        chunks = list_source_chunks(db, source["id"])
+        assert len(chunks) >= 1
+
+    def test_extraction_returns_none_no_chunks(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        pdf_data = b"%PDF-1.4 " + b"\x00" * 100
+
+        with patch("anteroom.services.storage._validate_upload"):
+            with patch("anteroom.services.document_extractor.extract_text", return_value=None):
+                source = save_source_file(db, "empty.pdf", "empty.pdf", "application/pdf", pdf_data, tmp_path)
+
+        assert source["content"] is None
+        chunks = list_source_chunks(db, source["id"])
+        assert len(chunks) == 0
+
+    def test_text_files_still_decoded_directly(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        """Text files should still use UTF-8 decode, not the document extractor."""
+        from unittest.mock import patch
+
+        text_data = b"Hello, plain text."
+
+        with patch("anteroom.services.storage._validate_upload"):
+            with patch("anteroom.services.document_extractor.extract_text") as mock_extract:
+                source = save_source_file(db, "readme.txt", "readme.txt", "text/plain", text_data, tmp_path)
+
+        # extract_text should NOT have been called because UTF-8 decode succeeded
+        mock_extract.assert_not_called()
+        assert source["content"] == "Hello, plain text."
+
+
+class TestProjectScopedSourceSearch:
+    """Verify project_id filtering in search_similar_source_chunks (#179)."""
+
+    def test_search_without_project_returns_all(self, db: ThreadSafeConnection) -> None:
+        from anteroom.services.storage import search_similar_source_chunks
+
+        # Without vec support, returns empty — just verify the parameter is accepted
+        results = search_similar_source_chunks(db, [0.1] * 384, limit=10, project_id=None)
+        assert results == []
+
+    def test_search_with_project_id_accepted(self, db: ThreadSafeConnection) -> None:
+        from anteroom.services.storage import search_similar_source_chunks
+
+        results = search_similar_source_chunks(db, [0.1] * 384, limit=10, project_id="some-project-id")
+        assert results == []
