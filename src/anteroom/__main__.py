@@ -631,10 +631,11 @@ def main() -> None:
 
     # Configure logging early, before any module-level loggers are used.
     # Priority: --debug flag > AI_CHAT_LOG_LEVEL env var > default (WARNING)
+    _valid_log_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
     log_level_name = os.environ.get("AI_CHAT_LOG_LEVEL", "").upper()
     if args.debug:
         log_level = logging.DEBUG
-    elif log_level_name and hasattr(logging, log_level_name):
+    elif log_level_name in _valid_log_levels:
         log_level = getattr(logging, log_level_name)
     else:
         log_level = logging.WARNING
