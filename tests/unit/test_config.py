@@ -178,6 +178,75 @@ class TestLoadConfig:
         config = load_config(cfg_file)
         assert config.mcp_servers[0].timeout == 60.0
 
+    def test_mcp_server_tools_include_parsed(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {"base_url": "https://api.example.com", "api_key": "sk-test"},
+                "mcp_servers": [
+                    {
+                        "name": "jira",
+                        "transport": "stdio",
+                        "command": "npx",
+                        "tools": {"include": ["search_issues", "get_issue", "create_*"]},
+                    }
+                ],
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.mcp_servers[0].tools_include == ["search_issues", "get_issue", "create_*"]
+        assert config.mcp_servers[0].tools_exclude == []
+
+    def test_mcp_server_tools_exclude_parsed(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {"base_url": "https://api.example.com", "api_key": "sk-test"},
+                "mcp_servers": [
+                    {
+                        "name": "jira",
+                        "transport": "stdio",
+                        "command": "npx",
+                        "tools": {"exclude": ["bulk_*", "admin_*"]},
+                    }
+                ],
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.mcp_servers[0].tools_include == []
+        assert config.mcp_servers[0].tools_exclude == ["bulk_*", "admin_*"]
+
+    def test_mcp_server_tools_filter_defaults_to_empty(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {"base_url": "https://api.example.com", "api_key": "sk-test"},
+                "mcp_servers": [{"name": "jira", "transport": "stdio", "command": "npx"}],
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.mcp_servers[0].tools_include == []
+        assert config.mcp_servers[0].tools_exclude == []
+
+    def test_mcp_server_both_include_and_exclude_prefers_include(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {"base_url": "https://api.example.com", "api_key": "sk-test"},
+                "mcp_servers": [
+                    {
+                        "name": "jira",
+                        "transport": "stdio",
+                        "command": "npx",
+                        "tools": {"include": ["search"], "exclude": ["delete"]},
+                    }
+                ],
+            },
+        )
+        config = load_config(cfg_file)
+        assert config.mcp_servers[0].tools_include == ["search"]
+        assert config.mcp_servers[0].tools_exclude == []
+
     def test_nonexistent_config_file_raises(self, tmp_path: Path) -> None:
         missing = tmp_path / "does_not_exist.yaml"
         with pytest.raises(ValueError):

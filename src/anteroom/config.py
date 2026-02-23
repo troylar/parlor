@@ -267,6 +267,8 @@ class McpServerConfig:
     url: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     timeout: float = 30.0  # seconds; connection timeout per server
+    tools_include: list[str] = field(default_factory=list)  # allowlist; fnmatch patterns
+    tools_exclude: list[str] = field(default_factory=list)  # blocklist; fnmatch patterns
 
 
 @dataclass
@@ -538,6 +540,15 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         env: dict[str, str] = {}
         for k, v in env_raw.items():
             env[k] = os.path.expandvars(str(v))
+        tools_raw = srv.get("tools", {})
+        tools_include = [str(t) for t in tools_raw.get("include", [])] if isinstance(tools_raw, dict) else []
+        tools_exclude = [str(t) for t in tools_raw.get("exclude", [])] if isinstance(tools_raw, dict) else []
+        if tools_include and tools_exclude:
+            logger.warning(
+                "MCP server '%s': both tools.include and tools.exclude set; using include (ignoring exclude)",
+                srv.get("name", "?"),
+            )
+            tools_exclude = []
         mcp_servers.append(
             McpServerConfig(
                 name=srv["name"],
@@ -547,6 +558,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
                 url=srv.get("url"),
                 env=env,
                 timeout=float(srv.get("timeout", 30.0)),
+                tools_include=tools_include,
+                tools_exclude=tools_exclude,
             )
         )
 

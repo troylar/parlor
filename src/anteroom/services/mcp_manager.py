@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import ipaddress
 import logging
 import os
@@ -226,17 +227,30 @@ class McpManager:
             self._server_tools[config.name] = server_tools
             self._rebuild_tool_map()
 
-            tool_names = [t["name"] for t in server_tools]
+            total = len(server_tools)
+            allowed_tools = [t for t in server_tools if self._is_tool_allowed(t["name"], config.name)]
+            allowed_count = len(allowed_tools)
+            tool_names = [t["name"] for t in allowed_tools]
             self._server_status[config.name] = {
                 "status": "connected",
-                "tool_count": len(server_tools),
+                "tool_count": allowed_count,
+                "total_tool_count": total,
             }
-            logger.info(
-                "MCP server '%s' connected: %d tools (%s)",
-                config.name,
-                len(server_tools),
-                ", ".join(tool_names[:10]) + ("..." if len(tool_names) > 10 else ""),
-            )
+            if allowed_count < total:
+                logger.info(
+                    "MCP server '%s' connected: %d/%d tools (filtered) (%s)",
+                    config.name,
+                    allowed_count,
+                    total,
+                    ", ".join(tool_names[:10]) + ("..." if len(tool_names) > 10 else ""),
+                )
+            else:
+                logger.info(
+                    "MCP server '%s' connected: %d tools (%s)",
+                    config.name,
+                    total,
+                    ", ".join(tool_names[:10]) + ("..." if len(tool_names) > 10 else ""),
+                )
 
         except BaseException as e:
             # Close the exit stack to clean up any partially-entered async
@@ -280,11 +294,24 @@ class McpManager:
                 "error_message": error_msg,
             }
 
+    def _is_tool_allowed(self, tool_name: str, server_name: str) -> bool:
+        """Check if a tool passes the server's include/exclude filter."""
+        config = self._configs.get(server_name)
+        if not config:
+            return True
+        if config.tools_include:
+            return any(fnmatch.fnmatch(tool_name, pattern) for pattern in config.tools_include)
+        if config.tools_exclude:
+            return not any(fnmatch.fnmatch(tool_name, pattern) for pattern in config.tools_exclude)
+        return True
+
     def _rebuild_tool_map(self) -> None:
         """Rebuild _tool_to_server from _server_tools, warning on collisions."""
         self._tool_to_server.clear()
         for server_name, tools in self._server_tools.items():
             for tool in tools:
+                if not self._is_tool_allowed(tool["name"], server_name):
+                    continue
                 if tool["name"] in self._tool_to_server:
                     logger.warning(
                         "Tool name collision: '%s' from server '%s' shadows existing tool from '%s'",
@@ -352,6 +379,10 @@ class McpManager:
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         server_name = self._tool_to_server.get(tool_name)
         if not server_name or server_name not in self._sessions:
+            # Check if this tool exists but was filtered out
+            for sname, tools in self._server_tools.items():
+                if any(t["name"] == tool_name for t in tools):
+                    raise ValueError(f"MCP tool '{tool_name}' is filtered out by server '{sname}' tool configuration")
             available = list(self._sessions.keys())
             raise ValueError(
                 f"MCP tool '{tool_name}' not available. "
@@ -385,10 +416,12 @@ class McpManager:
         return self._tool_to_server.get(tool_name, "unknown")
 
     def get_all_tools(self) -> list[dict[str, Any]]:
-        """Flatten _server_tools into a single list."""
+        """Flatten _server_tools into a single list, respecting per-server filters."""
         tools: list[dict[str, Any]] = []
-        for server_tools in self._server_tools.values():
-            tools.extend(server_tools)
+        for server_name, server_tools in self._server_tools.items():
+            for tool in server_tools:
+                if self._is_tool_allowed(tool["name"], server_name):
+                    tools.append(tool)
         return tools
 
     def get_server_statuses(self) -> dict[str, dict[str, Any]]:
