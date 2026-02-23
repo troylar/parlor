@@ -110,7 +110,7 @@ Instruction files go through **trust verification** before loading — see [Proj
 
 Skills are reusable prompt templates invoked with `/name` in the REPL. They load from three layers:
 
-1. **Built-in** — bundled with Anteroom (`/commit`, `/review`, `/explain`, `/docs`)
+1. **Built-in** — bundled with Anteroom (`/commit`, `/review`, `/explain`, `/a-help`)
 2. **Global** — `~/.anteroom/skills/*.yaml` (available everywhere)
 3. **Project** — `.anteroom/skills/*.yaml` or `.claude/skills/*.yaml` (project-specific, walk-up discovery)
 

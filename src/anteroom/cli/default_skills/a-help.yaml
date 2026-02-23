@@ -1,5 +1,5 @@
-name: docs
-description: Look up Anteroom documentation — config, CLI, tools, skills, architecture
+name: a-help
+description: Look up Anteroom documentation — config layers, CLI, tools, skills, architecture
 prompt: |
   You are an Anteroom documentation expert. Answer the user's question using ONLY
   the quick-reference tables below and the documentation files listed in the index.
@@ -15,7 +15,96 @@ prompt: |
 
   ## Quick Reference
 
-  ### Config File (~/.anteroom/config.yaml)
+  ### Configuration Layers & Precedence
+
+  Anteroom loads configuration from multiple layers, merged in this order (later wins):
+
+  ```
+  defaults < team config < project config < personal config < env vars < CLI flags
+  ```
+
+  | Layer            | Location                                    | Purpose                                  |
+  |------------------|---------------------------------------------|------------------------------------------|
+  | Defaults         | Built into code                             | Sensible defaults, zero config works     |
+  | Team config      | `.anteroom/team.yaml` (walk-up discovery)   | Shared team settings, enforced values    |
+  | Project config   | `.anteroom/config.yaml` (walk-up, planned)  | Per-project MCP servers, tools, rules    |
+  | Personal config  | `~/.anteroom/config.yaml`                   | User-specific settings                   |
+  | Env vars         | `AI_CHAT_*` prefix                          | Override any non-enforced setting        |
+  | CLI flags        | `--port`, `--approval-mode`, etc.           | Session-level overrides                  |
+
+  **Walk-up discovery**: Anteroom searches from the current working directory upward through
+  parent directories until it finds a matching file. This is how team config, project
+  instructions (ANTEROOM.md), and skills directories are discovered.
+
+  **Deep merge**: nested config sections merge recursively — a project config that sets
+  `safety.approval_mode` doesn't wipe out the rest of `safety`. Scalar values from
+  higher-priority layers replace lower ones; lists and dicts merge.
+
+  ### Team Configuration
+
+  Team config is a shared YAML file (same schema as personal config) with optional
+  `enforce` and `required` lists.
+
+  **Discovery priority** (first match wins):
+  1. `--team-config /path` CLI flag
+  2. `AI_CHAT_TEAM_CONFIG` env var
+  3. `team_config_path` field in personal `~/.anteroom/config.yaml`
+  4. Walk up from cwd looking for `.anteroom/team.yaml`, `.claude/team.yaml`, or `anteroom.team.yaml`
+
+  **Merge**: team config is the base layer, personal config overlays on top.
+  **Enforcement**: fields listed in `enforce` are locked to team values — personal config, env vars, and CLI flags cannot override them.
+  **Trust**: SHA-256 hash verified; interactive mode prompts, non-interactive silently skips untrusted files.
+
+  **`enforce`** — locks values so they cannot be overridden by any higher layer:
+  ```yaml
+  enforce:
+    - ai.base_url
+    - ai.model
+    - safety.approval_mode
+  ```
+
+  **`required`** — declares keys that users must provide (with descriptions):
+  ```yaml
+  required:
+    - path: ai.api_key
+      description: "Your personal API key — request at https://internal.company.com/api-keys"
+    - path: identity.display_name
+      description: "Your display name for conversation attribution"
+  ```
+
+  - `enforce` locks a value; `required` demands a value exists (complementary, not both)
+  - Missing required keys trigger an interactive prompt on startup (CLI) or return a structured error (web UI / exec mode)
+  - Sensitive keys (containing `key`, `secret`, `password`, `token`) use masked input
+
+  **Team onboarding** — new team members bootstrap from team config:
+  ```bash
+  pip install anteroom
+  aroom init --team-config /path/to/team.yaml
+  ```
+  This loads the team config, skips prompts for enforced/provided fields, prompts only for
+  `required` keys, saves `team_config_path` in personal config, and runs a connection test.
+
+  Example team config (`.anteroom/team.yaml`):
+  ```yaml
+  ai:
+    base_url: https://api.company.com/v1
+    model: gpt-4-turbo
+  safety:
+    approval_mode: ask_for_writes
+  enforce:
+    - ai.base_url
+    - ai.model
+    - safety.approval_mode
+  required:
+    - path: ai.api_key
+      description: "Your personal API key — request at https://internal.company.com/api-keys"
+    - path: identity.display_name
+      description: "Your display name for conversation attribution"
+  ```
+
+  See `docs/configuration/team-config.md` for full documentation.
+
+  ### Personal Config File (~/.anteroom/config.yaml)
 
   | Section       | Field                   | Type    | Default                    | Env Override                        |
   |---------------|-------------------------|---------|----------------------------|-------------------------------------|
@@ -77,6 +166,7 @@ prompt: |
   | aroom          | --team-config PATH      | Explicit path to team config YAML              |
   | aroom          | --debug                 | Enable debug logging to stderr                 |
   | aroom init     |                         | Interactive setup wizard                       |
+  | aroom init     | --team-config PATH      | Bootstrap personal config from team config     |
   | aroom chat     | --model MODEL           | Override model for session                     |
   | aroom chat     | --no-tools              | Disable all tools                              |
   | aroom chat     | --resume ID             | Resume a conversation                          |
@@ -138,9 +228,20 @@ prompt: |
     Instructions for the AI. Use {args} for user arguments.
   ```
   Directories (highest priority first):
-  1. `.anteroom/skills/` (project-level)
-  2. `~/.anteroom/skills/` (user-level)
+  1. `.anteroom/skills/` or `.claude/skills/` (project-level, walk-up discovery)
+  2. `~/.anteroom/skills/` or `~/.claude/skills/` (user-level)
   3. Built-in default skills
+
+  ### Project Instructions (ANTEROOM.md)
+
+  Project-level instructions loaded automatically via walk-up discovery from cwd.
+
+  **Search filenames** (first match wins at each directory level):
+  `.anteroom.md` > `ANTEROOM.md` > `.claude.md` > `CLAUDE.md`
+
+  **Discovery**: walks up from cwd to filesystem root. Also loads global from `~/.anteroom/`.
+  **Trust**: SHA-256 hash verified before loading. Interactive mode prompts to trust/reject.
+  CLI flags: `--trust-project` (auto-trust), `--no-project-context` (skip entirely).
 
   ### REPL Slash Commands
 
@@ -170,42 +271,13 @@ prompt: |
   `AI_CHAT_RETRY_BACKOFF_BASE`, `AI_CHAT_NARRATION_CADENCE`, `AI_CHAT_TOOL_DEDUP`,
   `AI_CHAT_SAFETY_APPROVAL_MODE`, `AI_CHAT_TEAM_CONFIG`, `AI_CHAT_LOG_LEVEL`.
 
-  ### Team Configuration
-
-  Team config is a shared YAML file (same schema as personal config) with an optional
-  `enforce` list of dot-paths that lock settings so they cannot be overridden.
-
-  **Discovery priority** (first match wins):
-  1. `--team-config /path` CLI flag
-  2. `AI_CHAT_TEAM_CONFIG` env var
-  3. `team_config_path` field in personal `~/.anteroom/config.yaml`
-  4. Walk up from cwd looking for `.anteroom/team.yaml`, `.claude/team.yaml`, or `anteroom.team.yaml`
-
-  **Merge**: team config is the base layer, personal config overlays on top.
-  **Enforcement**: fields listed in `enforce` are locked to team values — personal config, env vars, and CLI flags cannot override them.
-  **Trust**: SHA-256 hash verified; interactive mode prompts, non-interactive silently skips untrusted files.
-
-  Example team config (`.anteroom/team.yaml`):
-  ```yaml
-  ai:
-    base_url: https://api.company.com/v1
-    model: gpt-4-turbo
-  safety:
-    approval_mode: ask_for_writes
-  enforce:
-    - ai.base_url
-    - ai.model
-    - safety.approval_mode
-  ```
-
-  See `docs/configuration/team-config.md` for full documentation.
-
   ### Directory Equivalence
 
   `.anteroom` and `.claude` directories are interchangeable throughout:
   - Instructions: `.anteroom.md` / `ANTEROOM.md` / `.claude.md` / `CLAUDE.md`
   - Skills: `.anteroom/skills/` / `.claude/skills/`
   - Team config: `.anteroom/team.yaml` / `.claude/team.yaml`
+  - Project config: `.anteroom/config.yaml` / `.claude/config.yaml` (planned)
   - Rules: `.anteroom/rules/` / `.claude/rules/`
 
   ---

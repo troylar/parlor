@@ -86,7 +86,7 @@ Anything typed after the skill name is appended to the prompt:
 
 ```
 you> /test just the auth tests
-you> /docs @src/services/agent_loop.py
+you> /a-help how does the agent loop work?
 you> /pr-review focus on the database changes
 ```
 

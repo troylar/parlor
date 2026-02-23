@@ -11,7 +11,7 @@ Four skills ship by default:
 | `/commit` | Runs `git diff`, stages relevant files, creates a conventional commit |
 | `/review` | Reviews `git diff` for bugs, security issues, performance, error handling, missing tests |
 | `/explain` | Reads referenced code and explains architecture, data flow, components, design patterns |
-| `/docs` | Look up Anteroom documentation — config, CLI, tools, skills, architecture |
+| `/a-help` | Look up Anteroom documentation — config layers, CLI, tools, skills, architecture |
 
 Built-in skills are bundled in the package at `cli/default_skills/`. They can be overridden by user-defined skills with the same name.
 
