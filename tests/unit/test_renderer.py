@@ -11,6 +11,8 @@ import pytest
 
 from anteroom.cli.renderer import (
     Verbosity,
+    _build_thinking_text,
+    _collapse_plan,
     _dedup_flush_label,
     _dedup_key_from_summary,
     _flush_dedup,
@@ -20,16 +22,21 @@ from anteroom.cli.renderer import (
     _output_summary,
     _phase_elapsed_str,
     _phase_suffix,
+    _plan_block_height,
     _render_inline_diff,
     _short_path,
+    _write_thinking_block,
     _write_thinking_line,
+    clear_plan,
     clear_turn_history,
     configure_thresholds,
     cycle_verbosity,
     flush_buffered_text,
+    get_plan_steps,
     get_verbosity,
     increment_streaming_chars,
     increment_thinking_tokens,
+    is_plan_visible,
     render_response_end,
     render_tool_call_end,
     render_tool_call_start,
@@ -38,11 +45,13 @@ from anteroom.cli.renderer import (
     set_thinking_phase,
     set_tool_dedup,
     set_verbosity,
+    start_plan,
     start_thinking,
     startup_step,
     stop_thinking,
     stop_thinking_sync,
     thinking_countdown,
+    update_plan_step,
 )
 
 
@@ -2597,3 +2606,261 @@ class TestConfigureThresholds:
         finally:
             r._ESC_HINT_DELAY = orig_esc
             r._MID_STREAM_STALL = orig_stall
+
+
+# ---------------------------------------------------------------------------
+# Plan checklist rendering (#166)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanChecklistState:
+    """Verify plan checklist state management."""
+
+    def setup_method(self) -> None:
+        clear_plan()
+
+    def teardown_method(self) -> None:
+        clear_plan()
+
+    def test_start_plan_initializes_steps(self) -> None:
+        start_plan(["Step 1", "Step 2", "Step 3"])
+        steps = get_plan_steps()
+        assert len(steps) == 3
+        assert all(s["status"] == "pending" for s in steps)
+        assert steps[0]["text"] == "Step 1"
+        assert is_plan_visible()
+
+    def test_update_plan_step_changes_status(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = False  # no output during test
+        start_plan(["A", "B"])
+        update_plan_step(0, "in_progress")
+        assert get_plan_steps()[0]["status"] == "in_progress"
+        update_plan_step(0, "complete")
+        assert get_plan_steps()[0]["status"] == "complete"
+
+    def test_update_plan_step_out_of_range_is_noop(self) -> None:
+        start_plan(["A"])
+        update_plan_step(5, "complete")  # no error
+        update_plan_step(-1, "complete")  # no error
+        assert get_plan_steps()[0]["status"] == "pending"
+
+    def test_clear_plan_resets_state(self) -> None:
+        start_plan(["A", "B"])
+        clear_plan()
+        assert not is_plan_visible()
+        assert get_plan_steps() == []
+
+    def test_plan_block_height_zero_when_no_plan(self) -> None:
+        assert _plan_block_height() == 0
+
+    def test_plan_block_height_with_steps(self) -> None:
+        start_plan(["A", "B", "C"])
+        assert _plan_block_height() == 4  # header + 3 steps
+
+
+class TestPlanChecklistRendering:
+    """Verify plan checklist ANSI output."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        self._orig_repl = r._repl_mode
+        self._orig_stdout = r._stdout
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        clear_plan()
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = self._orig_repl
+        r._stdout = self._orig_stdout
+        clear_plan()
+
+    def test_write_thinking_block_includes_plan_header(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["Read config", "Write tests"])
+        r._plan_written_lines = 0
+        _write_thinking_block(2.0)
+        output = r._stdout.getvalue()
+        assert "Plan" in output
+        assert "Read config" in output
+        assert "Write tests" in output
+        assert "Thinking" in output
+
+    def test_write_thinking_block_shows_step_status_icons(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["A", "B", "C"])
+        r._plan_written_lines = 0
+        update_plan_step(0, "complete")
+        update_plan_step(1, "in_progress")
+        # Reset output to capture fresh block
+        r._stdout = io.StringIO()
+        r._plan_written_lines = 0
+        _write_thinking_block(3.0)
+        output = r._stdout.getvalue()
+        # Check status indicators are present (unicode chars)
+        assert "\u2713" in output  # checkmark for complete
+        assert "\u2192" in output  # arrow for in_progress
+        assert "\u25cb" in output  # circle for pending
+
+    def test_write_thinking_line_delegates_to_block_when_plan_active(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["Step one"])
+        r._plan_written_lines = 0
+        _write_thinking_line(1.0)
+        output = r._stdout.getvalue()
+        assert "Plan" in output
+        assert "Step one" in output
+
+    def test_write_thinking_line_single_line_when_no_plan(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._stdout = io.StringIO()
+        _write_thinking_line(2.0)
+        output = r._stdout.getvalue()
+        assert "Thinking" in output
+        assert "Plan" not in output
+
+    def test_collapse_plan_shows_summary(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["A", "B"])
+        update_plan_step(0, "complete")
+        update_plan_step(1, "complete")
+        r._stdout = io.StringIO()
+        _collapse_plan()
+        output = r._stdout.getvalue()
+        assert "2/2" in output
+        assert "complete" in output
+        assert not is_plan_visible()
+
+    def test_collapse_plan_partial_completion(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["A", "B", "C"])
+        update_plan_step(0, "complete")
+        r._stdout = io.StringIO()
+        _collapse_plan()
+        output = r._stdout.getvalue()
+        assert "1/3" in output
+
+    def test_cursor_up_on_redraw(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["A", "B"])
+        r._plan_written_lines = 0
+        _write_thinking_block(1.0)
+        # After first write, plan_written_lines should be set
+        assert r._plan_written_lines == 3  # header + 2 steps
+        # Second write should include cursor-up
+        r._stdout = io.StringIO()
+        _write_thinking_block(2.0)
+        output = r._stdout.getvalue()
+        assert "\033[3A" in output  # cursor up 3 lines
+
+    def test_build_thinking_text_no_plan_dependency(self) -> None:
+        """_build_thinking_text returns plain thinking text."""
+        text = _build_thinking_text(5.0)
+        assert "Thinking" in text
+        assert "5s" in text
+
+
+class TestPlanChecklistWithThinking:
+    """Verify plan checklist integration with start/stop thinking."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        self._orig_repl = r._repl_mode
+        self._orig_stdout = r._stdout
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        clear_plan()
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = self._orig_repl
+        r._stdout = self._orig_stdout
+        r._thinking_start = 0
+        r._thinking_ticker_task = None
+        r._spinner = None
+        clear_plan()
+
+    def test_start_thinking_writes_plan_block(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["Read files", "Write code"])
+        r._stdout = io.StringIO()
+        start_thinking(newline=True)
+        output = r._stdout.getvalue()
+        assert "Plan" in output
+        assert "Read files" in output
+        # Clean up ticker
+        if r._thinking_ticker_task:
+            r._thinking_ticker_task.cancel()
+            r._thinking_ticker_task = None
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_with_collapse(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["A", "B"])
+        update_plan_step(0, "complete")
+        update_plan_step(1, "complete")
+        r._thinking_start = time.monotonic()
+        r._plan_written_lines = 3  # simulate block on screen
+        r._thinking_ticker_task = None
+        r._spinner = None
+        r._stdout = io.StringIO()
+        await stop_thinking(collapse_plan=True)
+        output = r._stdout.getvalue()
+        assert "2/2" in output
+
+    @pytest.mark.asyncio
+    async def test_stop_thinking_clears_plan_block(self) -> None:
+        import anteroom.cli.renderer as r
+
+        start_plan(["A"])
+        r._thinking_start = time.monotonic()
+        r._plan_written_lines = 2  # header + 1 step
+        r._thinking_ticker_task = None
+        r._spinner = None
+        r._stdout = io.StringIO()
+        await stop_thinking()
+        # Plan written lines should be reset
+        assert r._plan_written_lines == 0
+
+    def test_stop_thinking_sync_clears_plan_block(self) -> None:
+        """stop_thinking_sync() clears the plan block and resets written lines."""
+        import anteroom.cli.renderer as r
+
+        start_plan(["A", "B"])
+        r._thinking_start = time.monotonic()
+        r._plan_written_lines = 3  # header + 2 steps
+        r._thinking_ticker_task = None
+        r._spinner = None
+        r._stdout = io.StringIO()
+        stop_thinking_sync()
+        assert r._plan_written_lines == 0
+
+    def test_update_plan_step_triggers_redraw(self) -> None:
+        """update_plan_step() redraws the block when thinking is active."""
+        import anteroom.cli.renderer as r
+
+        start_plan(["First", "Second"])
+        r._thinking_start = time.monotonic()
+        r._plan_written_lines = 3  # simulate block on screen
+        r._stdout = io.StringIO()
+        update_plan_step(0, "complete")
+        output = r._stdout.getvalue()
+        # Should contain cursor-up and plan content
+        assert "\033[3A" in output
+        assert "First" in output
+        assert "\u2713" in output  # checkmark for complete

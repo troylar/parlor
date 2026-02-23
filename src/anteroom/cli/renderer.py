@@ -105,6 +105,99 @@ _tool_dedup_enabled: bool = True
 # Track whether we've started a tool call batch (for spacing)
 _tool_batch_active: bool = False
 
+# ---------------------------------------------------------------------------
+# Plan checklist state
+# ---------------------------------------------------------------------------
+
+_plan_steps: list[dict[str, str]] = []  # [{"text": "...", "status": "pending|in_progress|complete"}]
+_plan_visible: bool = False
+_plan_written_lines: int = 0  # lines currently on screen (for cursor-up on redraw)
+
+
+# ---------------------------------------------------------------------------
+# Plan checklist API
+# ---------------------------------------------------------------------------
+
+
+def start_plan(steps: list[str]) -> None:
+    """Initialize the plan checklist with step descriptions.
+
+    Call this when a plan is approved and execution begins.
+    The checklist is rendered above the thinking line during agentic runs.
+    """
+    global _plan_steps, _plan_visible, _plan_written_lines
+    _plan_steps = [{"text": s, "status": "pending"} for s in steps]
+    _plan_visible = True
+    _plan_written_lines = 0
+
+
+def update_plan_step(index: int, status: str) -> None:
+    """Update a plan step status: 'pending', 'in_progress', or 'complete'.
+
+    Triggers a redraw if the thinking block is currently displayed.
+    """
+    if not _plan_steps or index < 0 or index >= len(_plan_steps):
+        return
+    _plan_steps[index]["status"] = status
+    # Redraw if thinking block is on screen
+    if _repl_mode and _thinking_start and _stdout and _plan_written_lines > 0:
+        elapsed = time.monotonic() - _thinking_start
+        _write_thinking_block(elapsed)
+
+
+def clear_plan() -> None:
+    """Clear plan state entirely (e.g. on /plan off or new conversation)."""
+    global _plan_steps, _plan_visible, _plan_written_lines
+    _plan_steps = []
+    _plan_visible = False
+    _plan_written_lines = 0
+
+
+def _plan_block_height() -> int:
+    """Number of terminal lines the plan block occupies (0 if no plan)."""
+    if not _plan_visible or not _plan_steps:
+        return 0
+    return len(_plan_steps) + 1  # header line + one line per step
+
+
+def _collapse_plan() -> None:
+    """Replace the plan checklist with a one-line summary.
+
+    Called when the agentic run completes (done event).
+    """
+    global _plan_visible, _plan_written_lines
+    if not _plan_steps:
+        _plan_visible = False
+        _plan_written_lines = 0
+        return
+
+    completed = sum(1 for s in _plan_steps if s["status"] == "complete")
+    total = len(_plan_steps)
+
+    if _repl_mode and _stdout:
+        green = "\033[32m"
+        muted = "\033[38;2;139;139;139m"
+        rst = "\033[0m"
+        if completed == total:
+            line = f"  {green}\u2713 Plan: {completed}/{total} steps complete{rst}"
+        else:
+            line = f"  {muted}\u25cb Plan: {completed}/{total} steps complete{rst}"
+        _stdout.write(f"{line}\n")
+        _stdout.flush()
+
+    _plan_visible = False
+    _plan_written_lines = 0
+
+
+def get_plan_steps() -> list[dict[str, str]]:
+    """Return the current plan steps (for testing/inspection)."""
+    return list(_plan_steps)
+
+
+def is_plan_visible() -> bool:
+    """Return whether a plan checklist is currently active."""
+    return _plan_visible
+
 
 # ---------------------------------------------------------------------------
 # Verbosity
@@ -359,6 +452,7 @@ def start_thinking(*, newline: bool = False) -> None:
     """
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
+    global _plan_written_lines
     _flush_dedup()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
@@ -369,16 +463,24 @@ def start_thinking(*, newline: bool = False) -> None:
     _phase_start_time = _thinking_start
     _retrying_info = {}
     _last_spinner_update = _thinking_start
+    # Reset plan written lines — the block will be freshly written
+    _plan_written_lines = 0
     if _repl_mode:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
         if newline and _stdout:
-            # Atomic \n + Thinking... prevents prompt_toolkit race (#249).
+            # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
             gold = "\033[38;2;197;160;89m"
             rst = "\033[0m"
-            _stdout.write(f"\n\r\033[2K{gold}Thinking...{rst}")
-            _stdout.flush()
+            if _plan_visible and _plan_steps:
+                # Write newline then full plan + thinking block
+                _stdout.write("\n")
+                _stdout.flush()
+                _write_thinking_block(0.0)
+            else:
+                _stdout.write(f"\n\r\033[2K{gold}Thinking...{rst}")
+                _stdout.flush()
         else:
             _write_thinking_line(0.0)
         _spinner = None
@@ -397,6 +499,103 @@ def start_thinking(*, newline: bool = False) -> None:
         _thinking_ticker_task = None
 
 
+def _build_thinking_text(
+    elapsed: float,
+    *,
+    error_msg: str = "",
+    countdown: int = 0,
+    cancel_msg: str = "",
+) -> str:
+    """Build the thinking line text (without cursor/clear prefixes)."""
+    gold = "\033[38;2;197;160;89m"
+    timer_c = "\033[38;2;107;114;128m"
+    muted = "\033[38;2;139;139;139m"
+    err_c = "\033[38;2;205;107;107m"  # ERROR_RED #CD6B6B
+    rst = "\033[0m"
+
+    if elapsed < 0.5 and not error_msg and not cancel_msg:
+        return f"{gold}Thinking...{rst}"
+
+    timer = f"{timer_c}{elapsed:.0f}s{rst}"
+    if cancel_msg:
+        return f"{gold}Thinking...{rst} {timer}  {muted}{cancel_msg}{rst}"
+    if error_msg:
+        err_text = f"  {err_c}{error_msg}{rst}"
+        if countdown > 0:
+            retry_text = f" \u00b7 {muted}retrying in {countdown}s{rst}"
+            hint = f"  {muted}esc to give up{rst}"
+            return f"{gold}Thinking...{rst} {timer}{err_text}{retry_text}{hint}"
+        return f"{gold}Thinking...{rst} {timer}{err_text}"
+
+    hint = f"  {muted}esc to cancel{rst}" if elapsed >= _ESC_HINT_DELAY else ""
+    suffix = _phase_suffix(elapsed)
+    phase_text = f"  {muted}{suffix}{rst}" if suffix else ""
+    return f"{gold}Thinking...{rst} {timer}{phase_text}{hint}"
+
+
+def _write_thinking_block(
+    elapsed: float,
+    *,
+    error_msg: str = "",
+    countdown: int = 0,
+    cancel_msg: str = "",
+) -> None:
+    """Write the full thinking block: plan checklist (if active) + thinking line.
+
+    Uses cursor-up ANSI codes to redraw the block in place.
+    """
+    global _plan_written_lines
+    if not _stdout:
+        return
+
+    height = _plan_block_height()
+    thinking_text = _build_thinking_text(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
+
+    if height == 0:
+        # No plan — single-line thinking only
+        _stdout.write(f"\r\033[2K{thinking_text}")
+        _stdout.flush()
+        return
+
+    # Multi-line block: plan header + steps + thinking line
+    buf: list[str] = []
+
+    # Move cursor up to the top of the block (if we've written it before)
+    if _plan_written_lines > 0:
+        up = _plan_written_lines  # lines above the thinking line
+        buf.append(f"\033[{up}A")
+
+    # ANSI colors
+    green = "\033[32m"
+    gold_c = "\033[38;2;197;160;89m"
+    muted_c = "\033[38;2;139;139;139m"
+    rst = "\033[0m"
+
+    # Plan header
+    buf.append(f"\r\033[2K  {muted_c}\U0001f4cb Plan{rst}\n")
+
+    # Steps
+    for step in _plan_steps:
+        status = step["status"]
+        if status == "complete":
+            icon = f"{green}\u2713{rst}"
+            text_style = green
+        elif status == "in_progress":
+            icon = f"{gold_c}\u2192{rst}"
+            text_style = gold_c
+        else:
+            icon = f"{muted_c}\u25cb{rst}"
+            text_style = muted_c
+        buf.append(f"\r\033[2K    {icon} {text_style}{step['text']}{rst}\n")
+
+    # Thinking line (no trailing newline — cursor stays here)
+    buf.append(f"\r\033[2K{thinking_text}")
+
+    _stdout.write("".join(buf))
+    _stdout.flush()
+    _plan_written_lines = height  # remember how many plan lines we wrote
+
+
 def _write_thinking_line(
     elapsed: float,
     *,
@@ -406,41 +605,19 @@ def _write_thinking_line(
 ) -> None:
     """Overwrite the current line with Thinking + elapsed timer + phase status.
 
+    When a plan checklist is active, delegates to ``_write_thinking_block()``
+    to render the full plan + thinking block.
+
     Optional keyword args for special states:
     - ``error_msg``: pale-red inline error replacing phase text
     - ``countdown``: seconds remaining for auto-retry (shown after error_msg)
     - ``cancel_msg``: muted message like "cancelled" (user-initiated, not error)
     """
-    # ANSI color codes (inlined to avoid Rich overhead on raw fd writes)
-    gold = "\033[38;2;197;160;89m"
-    timer_c = "\033[38;2;107;114;128m"
-    muted = "\033[38;2;139;139;139m"
-    err_c = "\033[38;2;205;107;107m"  # ERROR_RED #CD6B6B
-    rst = "\033[0m"
+    if _plan_visible and _plan_steps:
+        _write_thinking_block(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
+        return
 
-    if elapsed < 0.5 and not error_msg and not cancel_msg:
-        text = f"\r\033[2K{gold}Thinking...{rst}"
-    else:
-        timer = f"{timer_c}{elapsed:.0f}s{rst}"
-        if cancel_msg:
-            # User-initiated cancel: muted "cancelled"
-            suffix_text = f"  {muted}{cancel_msg}{rst}"
-            text = f"\r\033[2K{gold}Thinking...{rst} {timer}{suffix_text}"
-        elif error_msg:
-            # System error: pale red error + optional countdown
-            err_text = f"  {err_c}{error_msg}{rst}"
-            if countdown > 0:
-                retry_text = f" · {muted}retrying in {countdown}s{rst}"
-                hint = f"  {muted}esc to give up{rst}"
-                text = f"\r\033[2K{gold}Thinking...{rst} {timer}{err_text}{retry_text}{hint}"
-            else:
-                text = f"\r\033[2K{gold}Thinking...{rst} {timer}{err_text}"
-        else:
-            # Normal: phase text + esc hint
-            hint = f"  {muted}esc to cancel{rst}" if elapsed >= _ESC_HINT_DELAY else ""
-            suffix = _phase_suffix(elapsed)
-            phase_text = f"  {muted}{suffix}{rst}" if suffix else ""
-            text = f"\r\033[2K{gold}Thinking...{rst} {timer}{phase_text}{hint}"
+    text = f"\r\033[2K{_build_thinking_text(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)}"
     if _stdout:
         _stdout.write(text)
         _stdout.flush()
@@ -472,6 +649,7 @@ async def stop_thinking(
     *,
     error_msg: str = "",
     cancel_msg: str = "",
+    collapse_plan: bool = False,
 ) -> float:
     """Stop the spinner, return elapsed seconds.
 
@@ -480,9 +658,10 @@ async def stop_thinking(
     Optional keyword args control the final thinking line:
     - ``error_msg``: pale-red inline error (system failure)
     - ``cancel_msg``: muted message (user-initiated cancel)
+    - ``collapse_plan``: if True, collapse the plan to a one-line summary
     - Neither: clean final line (just "Thinking... Ns")
     """
-    global _spinner, _thinking_ticker_task, _thinking_phase
+    global _spinner, _thinking_ticker_task, _thinking_phase, _plan_written_lines
     elapsed = 0.0
     # Await ticker termination to prevent race conditions
     if _thinking_ticker_task is not None:
@@ -499,6 +678,20 @@ async def stop_thinking(
     else:
         elapsed = time.monotonic() - _thinking_start
         if _repl_mode and _stdout:
+            # Clear the plan block if it's on screen
+            if _plan_written_lines > 0:
+                # Move cursor up to the top of the plan block
+                _stdout.write(f"\033[{_plan_written_lines}A")
+                # Clear all plan lines + thinking line
+                for _ in range(_plan_written_lines + 1):
+                    _stdout.write("\r\033[2K\n")
+                # Move back up one line (we wrote one too many \n)
+                _stdout.write("\033[1A")
+                _plan_written_lines = 0
+
+            if collapse_plan:
+                _collapse_plan()
+
             if error_msg:
                 _write_thinking_line(elapsed, error_msg=error_msg)
                 _stdout.write("\n")
@@ -523,7 +716,7 @@ def stop_thinking_sync() -> float:
 
     Does not await the ticker — use only when an event loop is unavailable.
     """
-    global _spinner, _thinking_ticker_task
+    global _spinner, _thinking_ticker_task, _plan_written_lines
     elapsed = 0.0
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
@@ -535,6 +728,13 @@ def stop_thinking_sync() -> float:
     else:
         elapsed = time.monotonic() - _thinking_start
         if _repl_mode and _stdout:
+            # Clear plan block if present
+            if _plan_written_lines > 0:
+                _stdout.write(f"\033[{_plan_written_lines}A")
+                for _ in range(_plan_written_lines + 1):
+                    _stdout.write("\r\033[2K\n")
+                _stdout.write("\033[1A")
+                _plan_written_lines = 0
             _stdout.write("\r\033[2K")
             _stdout.flush()
     return elapsed

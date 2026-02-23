@@ -13,6 +13,7 @@ from anteroom.cli.plan import (
     get_editor,
     get_plan_file_path,
     parse_plan_command,
+    parse_plan_steps,
     read_plan,
 )
 
@@ -199,3 +200,87 @@ class TestPlanModeAllowedTools:
         assert "create_canvas" not in PLAN_MODE_ALLOWED_TOOLS
         assert "update_canvas" not in PLAN_MODE_ALLOWED_TOOLS
         assert "patch_canvas" not in PLAN_MODE_ALLOWED_TOOLS
+
+
+class TestParsePlanSteps:
+    """Verify extraction of implementation steps from plan markdown (#166)."""
+
+    def test_numbered_steps(self) -> None:
+        content = (
+            "## Overview\nSome overview text.\n\n"
+            "## Implementation Steps\n"
+            "1. Read the config file\n"
+            "2. Check for existing tests\n"
+            "3. Write the new test cases\n\n"
+            "## Test Strategy\nTest stuff.\n"
+        )
+        steps = parse_plan_steps(content)
+        assert steps == [
+            "Read the config file",
+            "Check for existing tests",
+            "Write the new test cases",
+        ]
+
+    def test_bulleted_steps(self) -> None:
+        content = "## Implementation Steps\n- First do this\n- Then do that\n- Finally wrap up\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["First do this", "Then do that", "Finally wrap up"]
+
+    def test_asterisk_bullets(self) -> None:
+        content = "## Implementation Steps\n* Step A\n* Step B\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Step A", "Step B"]
+
+    def test_parenthesis_numbered(self) -> None:
+        content = "## Implementation Steps\n1) Do thing\n2) Do other thing\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Do thing", "Do other thing"]
+
+    def test_case_insensitive_heading(self) -> None:
+        content = "## implementation steps\n1. Lower case heading\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Lower case heading"]
+
+    def test_no_implementation_steps_section(self) -> None:
+        content = "## Overview\nNo steps here.\n## Test Strategy\nTests.\n"
+        assert parse_plan_steps(content) == []
+
+    def test_empty_content(self) -> None:
+        assert parse_plan_steps("") == []
+
+    def test_steps_stop_at_next_heading(self) -> None:
+        content = (
+            "## Implementation Steps\n"
+            "1. First step\n"
+            "2. Second step\n\n"
+            "## Test Strategy\n"
+            "1. This is a test item, not a step\n"
+        )
+        steps = parse_plan_steps(content)
+        assert steps == ["First step", "Second step"]
+
+    def test_indented_steps(self) -> None:
+        content = "## Implementation Steps\n  1. Indented step\n  2. Another\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Indented step", "Another"]
+
+    def test_steps_with_markdown_formatting(self) -> None:
+        content = "## Implementation Steps\n1. Add **bold** feature\n2. Fix `code` issue\n"
+        steps = parse_plan_steps(content)
+        assert steps == ["Add **bold** feature", "Fix `code` issue"]
+
+    def test_multiline_content_before_steps(self) -> None:
+        content = (
+            "# Big Plan\n\n"
+            "## Overview\nLots of text here.\nMore text.\n\n"
+            "## Files to Change\n- file1.py\n- file2.py\n\n"
+            "## Implementation Steps\n"
+            "1. Modify file1.py to add the new function\n"
+            "2. Update file2.py with the integration\n"
+            "3. Run tests\n\n"
+            "## Test Strategy\nAdd unit tests.\n"
+        )
+        steps = parse_plan_steps(content)
+        assert len(steps) == 3
+        assert steps[0] == "Modify file1.py to add the new function"
+        assert steps[2] == "Run tests"

@@ -1452,12 +1452,15 @@ async def _run_repl(
             get_editor,
             get_plan_file_path,
             parse_plan_command,
+            parse_plan_steps,
             read_plan,
         )
 
         _plan_active: list[bool] = [plan_mode]
         _plan_file: list[Path | None] = [None]
         _full_tools_backup: list[list[dict[str, Any]] | None] = [None]
+        _plan_checklist_steps: list[str] = []  # parsed step descriptions for live checklist
+        _plan_current_step: list[int] = [0]  # index of the step currently in progress
 
         def _apply_plan_mode(conv_id: str) -> None:
             nonlocal tools_openai, extra_system_prompt
@@ -1845,6 +1848,13 @@ async def _run_repl(
                             else:
                                 _exit_plan_mode(plan_content=content)
                                 delete_plan(_plan_file[0])
+                                # Parse implementation steps for live checklist
+                                steps = parse_plan_steps(content)
+                                _plan_checklist_steps.clear()
+                                _plan_checklist_steps.extend(steps)
+                                _plan_current_step[0] = 0
+                                if steps:
+                                    renderer.start_plan(steps)
                                 renderer.console.print(
                                     "[green]Plan approved.[/green] Full tools restored.\n"
                                     f"  [{MUTED}]Plan injected into context. "
@@ -2170,6 +2180,15 @@ async def _run_repl(
 
                         if event.kind == "thinking":
                             if not thinking:
+                                # Advance plan: if a step was in_progress, mark it complete
+                                # and move to the next step
+                                if _plan_checklist_steps and _plan_current_step[0] < len(_plan_checklist_steps):
+                                    idx = _plan_current_step[0]
+                                    if renderer.get_plan_steps() and idx < len(renderer.get_plan_steps()):
+                                        step_state = renderer.get_plan_steps()[idx]
+                                        if step_state.get("status") == "in_progress":
+                                            renderer.update_plan_step(idx, "complete")
+                                            _plan_current_step[0] = idx + 1
                                 renderer.start_thinking(newline=True)
                                 thinking = True
                         elif event.kind == "phase":
@@ -2193,6 +2212,10 @@ async def _run_repl(
                             if thinking:
                                 total_elapsed += await renderer.stop_thinking()
                                 thinking = False
+                            # Advance plan checklist: mark current step as in_progress
+                            if _plan_checklist_steps and _plan_current_step[0] < len(_plan_checklist_steps):
+                                idx = _plan_current_step[0]
+                                renderer.update_plan_step(idx, "in_progress")
                             renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
                         elif event.kind == "tool_call_end":
                             renderer.render_tool_call_end(
@@ -2261,12 +2284,26 @@ async def _run_repl(
                             else:
                                 renderer.render_error(error_msg)
                         elif event.kind == "done":
+                            # Mark any in-progress plan step as complete
+                            if _plan_checklist_steps and _plan_current_step[0] < len(_plan_checklist_steps):
+                                idx = _plan_current_step[0]
+                                if renderer.get_plan_steps() and idx < len(renderer.get_plan_steps()):
+                                    step_state = renderer.get_plan_steps()[idx]
+                                    if step_state.get("status") == "in_progress":
+                                        renderer.update_plan_step(idx, "complete")
+                            collapse = bool(_plan_checklist_steps)
                             if thinking and cancel_event.is_set():
-                                total_elapsed += await renderer.stop_thinking(cancel_msg="cancelled")
+                                total_elapsed += await renderer.stop_thinking(
+                                    cancel_msg="cancelled", collapse_plan=collapse
+                                )
                                 thinking = False
                             elif thinking:
-                                total_elapsed += await renderer.stop_thinking()
+                                total_elapsed += await renderer.stop_thinking(collapse_plan=collapse)
                                 thinking = False
+                            # Clear plan checklist state after collapsing
+                            if _plan_checklist_steps:
+                                _plan_checklist_steps.clear()
+                                _plan_current_step[0] = 0
                             if not cancel_event.is_set():
                                 renderer.save_turn_history()
                                 renderer.render_response_end()

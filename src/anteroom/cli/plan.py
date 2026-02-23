@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 _PLAN_SUBCOMMANDS = frozenset({"on", "start", "approve", "status", "edit", "off"})
@@ -71,6 +72,38 @@ def delete_plan(plan_file_path: Path) -> None:
     """Delete the plan file if it exists."""
     if plan_file_path.exists():
         plan_file_path.unlink()
+
+
+def parse_plan_steps(plan_content: str) -> list[str]:
+    """Extract implementation steps from a plan markdown file.
+
+    Looks for a section headed ``## Implementation Steps`` (case-insensitive)
+    and extracts numbered or bulleted list items from it.  Stops at the next
+    ``##`` heading or end of file.
+
+    Returns a list of step descriptions (stripped of leading numbers/bullets).
+    """
+    # Find the Implementation Steps section
+    pattern = re.compile(r"^##\s+Implementation\s+Steps\b", re.IGNORECASE | re.MULTILINE)
+    match = pattern.search(plan_content)
+    if not match:
+        return []
+
+    # Extract content from after the heading to the next ## heading
+    start = match.end()
+    next_heading = re.search(r"^##\s+", plan_content[start:], re.MULTILINE)
+    section = plan_content[start : start + next_heading.start()] if next_heading else plan_content[start:]
+
+    # Parse list items: "1. ...", "- ...", "* ...", "1) ..."
+    steps: list[str] = []
+    item_re = re.compile(r"^\s*(?:\d+[\.\)]\s+|[-*]\s+)(.+)", re.MULTILINE)
+    for m in item_re.finditer(section):
+        text = m.group(1).strip()
+        # Strip trailing markdown formatting like **bold**
+        if text:
+            steps.append(text)
+
+    return steps
 
 
 def parse_plan_command(user_input: str) -> tuple[str | None, str | None]:
