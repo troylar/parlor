@@ -5,6 +5,19 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## February 23, 2026
+
+### v1.28.0
+
+**New:**
+
+- **Per-server MCP tool filtering**: Control which tools each MCP server exposes using `tools_include`/`tools_exclude` with fnmatch glob patterns (#306)
+- **MCP tool warning threshold**: Warns when total MCP tools exceed a configurable limit (default 40) with per-server breakdown (#306)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.28.0)
+
+---
+
 ## February 22, 2026
 
 ### v1.27.0
