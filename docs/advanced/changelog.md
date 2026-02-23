@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 22, 2026
 
+### v1.26.1
+
+**Fixed:**
+
+- **Aggressive plan suggestions silenced**: Default `auto_mode` changed from `"suggest"` to `"off"` and threshold raised from 5 to 15 tool calls, eliminating noise on routine tasks (#302)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.26.1)
+
 ### v1.26.0
 
 **New:**
