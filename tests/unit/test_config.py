@@ -726,8 +726,8 @@ class TestPlanningConfig:
         cfg_file = _write_config(tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}})
         config = load_config(cfg_file)
         assert config.cli.planning.enabled is True
-        assert config.cli.planning.auto_threshold_tools == 5
-        assert config.cli.planning.auto_mode == "suggest"
+        assert config.cli.planning.auto_threshold_tools == 15
+        assert config.cli.planning.auto_mode == "off"
 
     def test_custom_values_from_yaml(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
@@ -761,7 +761,7 @@ class TestPlanningConfig:
             },
         )
         config = load_config(cfg_file)
-        assert config.cli.planning.auto_threshold_tools == 5
+        assert config.cli.planning.auto_threshold_tools == 15
 
     def test_empty_planning_section(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
@@ -773,8 +773,8 @@ class TestPlanningConfig:
         )
         config = load_config(cfg_file)
         assert config.cli.planning.enabled is True
-        assert config.cli.planning.auto_threshold_tools == 5
-        assert config.cli.planning.auto_mode == "suggest"
+        assert config.cli.planning.auto_threshold_tools == 15
+        assert config.cli.planning.auto_mode == "off"
 
     def test_auto_mode_off_from_yaml(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
@@ -798,7 +798,7 @@ class TestPlanningConfig:
         config = load_config(cfg_file)
         assert config.cli.planning.auto_mode == "auto"
 
-    def test_auto_mode_invalid_falls_back_to_suggest(self, tmp_path: Path) -> None:
+    def test_auto_mode_invalid_falls_back_to_off(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
             tmp_path,
             {
@@ -807,7 +807,7 @@ class TestPlanningConfig:
             },
         )
         config = load_config(cfg_file)
-        assert config.cli.planning.auto_mode == "suggest"
+        assert config.cli.planning.auto_mode == "off"
 
     def test_auto_threshold_zero_disables(self, tmp_path: Path) -> None:
         cfg_file = _write_config(

@@ -283,8 +283,8 @@ class AppSettings:
 @dataclass
 class PlanningConfig:
     enabled: bool = True
-    auto_threshold_tools: int = 5
-    auto_mode: str = "suggest"  # "off", "suggest", or "auto"
+    auto_threshold_tools: int = 15
+    auto_mode: str = "off"  # "off", "suggest", or "auto"
 
 
 @dataclass
@@ -628,12 +628,12 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         planning_raw = {}
     planning_enabled = str(planning_raw.get("enabled", "true")).lower() not in ("false", "0", "no")
     try:
-        planning_auto_threshold = max(0, int(planning_raw.get("auto_threshold_tools", 5)))
+        planning_auto_threshold = max(0, int(planning_raw.get("auto_threshold_tools", 15)))
     except (ValueError, TypeError):
-        planning_auto_threshold = 5
-    planning_auto_mode = str(planning_raw.get("auto_mode", "suggest")).lower()
+        planning_auto_threshold = 15
+    planning_auto_mode = str(planning_raw.get("auto_mode", "off")).lower()
     if planning_auto_mode not in ("off", "suggest", "auto"):
-        planning_auto_mode = "suggest"
+        planning_auto_mode = "off"
     planning_config = PlanningConfig(
         enabled=planning_enabled,
         auto_threshold_tools=planning_auto_threshold,
