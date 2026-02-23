@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 22, 2026
 
+### v1.25.0
+
+**New:**
+
+- **Inline diff rendering in CLI**: File edits and creations now show Claude Code-style color-coded diffs with line numbers, red/green backgrounds, and context collapsing (#281)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.25.0)
+
 ### v1.24.6
 
 **Fixed:**
