@@ -1,8 +1,9 @@
-"""Tests for __main__.py: port conflict handling, --port flag, browser deferral."""
+"""Tests for __main__.py: port conflict handling, --port flag, --debug flag, browser deferral."""
 
 from __future__ import annotations
 
 import errno
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -391,3 +392,140 @@ class TestExecDispatch:
 
         mock_run_exec.assert_called_once()
         mock_run_web.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# --debug flag and AI_CHAT_LOG_LEVEL
+# ---------------------------------------------------------------------------
+
+
+class TestDebugFlag:
+    def test_debug_flag_sets_logging_to_debug(self) -> None:
+        """--debug flag must configure root logger to DEBUG level."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+            patch("anteroom.__main__.logging.basicConfig") as mock_basic,
+        ):
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "--debug"]):
+                main()
+
+        mock_basic.assert_called_once()
+        assert mock_basic.call_args.kwargs["level"] == logging.DEBUG
+
+    def test_no_debug_flag_defaults_to_warning(self) -> None:
+        """Without --debug or env var, root logger defaults to WARNING."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+            patch("anteroom.__main__.logging.basicConfig") as mock_basic,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            # Ensure AI_CHAT_LOG_LEVEL is not set
+            import os
+
+            os.environ.pop("AI_CHAT_LOG_LEVEL", None)
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom"]):
+                main()
+
+        mock_basic.assert_called_once()
+        assert mock_basic.call_args.kwargs["level"] == logging.WARNING
+
+    def test_env_var_sets_log_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AI_CHAT_LOG_LEVEL=INFO must set root logger to INFO."""
+        from anteroom.__main__ import main
+
+        monkeypatch.setenv("AI_CHAT_LOG_LEVEL", "INFO")
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+            patch("anteroom.__main__.logging.basicConfig") as mock_basic,
+        ):
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom"]):
+                main()
+
+        mock_basic.assert_called_once()
+        assert mock_basic.call_args.kwargs["level"] == logging.INFO
+
+    def test_debug_flag_overrides_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--debug flag takes priority over AI_CHAT_LOG_LEVEL env var."""
+        from anteroom.__main__ import main
+
+        monkeypatch.setenv("AI_CHAT_LOG_LEVEL", "ERROR")
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+            patch("anteroom.__main__.logging.basicConfig") as mock_basic,
+        ):
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "--debug"]):
+                main()
+
+        mock_basic.assert_called_once()
+        assert mock_basic.call_args.kwargs["level"] == logging.DEBUG
+
+    def test_debug_flag_passes_to_run_web(self) -> None:
+        """--debug must be forwarded to _run_web for uvicorn log_level."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web") as mock_run_web,
+        ):
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            with patch("sys.argv", ["aroom", "--debug"]):
+                main()
+
+        mock_run_web.assert_called_once()
+        _, kwargs = mock_run_web.call_args
+        assert kwargs["debug"] is True
+
+    def test_uvicorn_debug_log_level(self) -> None:
+        """_run_web with debug=True must pass log_level='debug' to uvicorn."""
+        from anteroom.__main__ import _run_web
+
+        config = _make_config()
+
+        with (
+            patch(_PATCHES[0]),
+            patch(_PATCHES[1], return_value=MagicMock()),
+            patch("anteroom.__main__.uvicorn.run") as mock_uvicorn,
+            patch("anteroom.__main__.threading.Thread") as mock_thread,
+        ):
+            mock_thread.return_value = MagicMock()
+            _run_web(config, Path("/tmp/config.yaml"), debug=True)
+
+        mock_uvicorn.assert_called_once()
+        assert mock_uvicorn.call_args.kwargs.get("log_level") == "debug"
+
+    def test_uvicorn_default_log_level(self) -> None:
+        """_run_web without debug must pass log_level='info' to uvicorn."""
+        from anteroom.__main__ import _run_web
+
+        config = _make_config()
+
+        with (
+            patch(_PATCHES[0]),
+            patch(_PATCHES[1], return_value=MagicMock()),
+            patch("anteroom.__main__.uvicorn.run") as mock_uvicorn,
+            patch("anteroom.__main__.threading.Thread") as mock_thread,
+        ):
+            mock_thread.return_value = MagicMock()
+            _run_web(config, Path("/tmp/config.yaml"))
+
+        mock_uvicorn.assert_called_once()
+        assert mock_uvicorn.call_args.kwargs.get("log_level") == "info"

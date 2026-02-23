@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import errno
+import logging
+import os
 import socket
 import sys
 import threading
@@ -276,7 +278,7 @@ def _run_usage(
     print()
 
 
-def _run_web(config, config_path: Path) -> None:
+def _run_web(config, config_path: Path, *, debug: bool = False) -> None:
     """Launch the web UI server."""
     print(f"Config loaded from {config_path}")
     print(f"  AI endpoint: {config.ai.base_url}")
@@ -338,7 +340,13 @@ def _run_web(config, config_path: Path) -> None:
     browser_thread.start()
 
     try:
-        uvicorn.run(app, host=config.app.host, port=config.app.port, log_level="info", **ssl_kwargs)
+        uvicorn.run(
+            app,
+            host=config.app.host,
+            port=config.app.port,
+            log_level="debug" if debug else "info",
+            **ssl_kwargs,
+        )
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
             port = config.app.port
@@ -612,8 +620,30 @@ def main() -> None:
         default=None,
         help="Override port for web UI (e.g., --port 9090)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="Enable debug logging to stderr (useful for MCP troubleshooting)",
+    )
 
     args = parser.parse_args()
+
+    # Configure logging early, before any module-level loggers are used.
+    # Priority: --debug flag > AI_CHAT_LOG_LEVEL env var > default (WARNING)
+    log_level_name = os.environ.get("AI_CHAT_LOG_LEVEL", "").upper()
+    if args.debug:
+        log_level = logging.DEBUG
+    elif log_level_name and hasattr(logging, log_level_name):
+        log_level = getattr(logging, log_level_name)
+    else:
+        log_level = logging.WARNING
+    logging.basicConfig(
+        level=log_level,
+        stream=sys.stderr,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     if args.command == "init":
         _run_init(force=getattr(args, "force", False))
@@ -698,7 +728,7 @@ def main() -> None:
             trust_project=args.trust_project,
         )
     else:
-        _run_web(config, config_path)
+        _run_web(config, config_path, debug=args.debug)
 
 
 if __name__ == "__main__":
