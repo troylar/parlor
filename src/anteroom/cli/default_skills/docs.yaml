@@ -74,6 +74,8 @@ prompt: |
   | aroom          | --port PORT             | Override web server port                       |
   | aroom          | --approval-mode MODE    | Override safety mode (auto/ask_for_dangerous/ask_for_writes/ask) |
   | aroom          | --allowed-tools LIST    | Pre-allow tools (comma-separated)              |
+  | aroom          | --team-config PATH      | Explicit path to team config YAML              |
+  | aroom          | --debug                 | Enable debug logging to stderr                 |
   | aroom init     |                         | Interactive setup wizard                       |
   | aroom chat     | --model MODEL           | Override model for session                     |
   | aroom chat     | --no-tools              | Disable all tools                              |
@@ -166,7 +168,45 @@ prompt: |
   `AI_CHAT_WRITE_TIMEOUT`, `AI_CHAT_POOL_TIMEOUT`, `AI_CHAT_FIRST_TOKEN_TIMEOUT`,
   `AI_CHAT_REQUEST_TIMEOUT`, `AI_CHAT_CHUNK_STALL_TIMEOUT`, `AI_CHAT_RETRY_MAX_ATTEMPTS`,
   `AI_CHAT_RETRY_BACKOFF_BASE`, `AI_CHAT_NARRATION_CADENCE`, `AI_CHAT_TOOL_DEDUP`,
-  `AI_CHAT_SAFETY_APPROVAL_MODE`.
+  `AI_CHAT_SAFETY_APPROVAL_MODE`, `AI_CHAT_TEAM_CONFIG`, `AI_CHAT_LOG_LEVEL`.
+
+  ### Team Configuration
+
+  Team config is a shared YAML file (same schema as personal config) with an optional
+  `enforce` list of dot-paths that lock settings so they cannot be overridden.
+
+  **Discovery priority** (first match wins):
+  1. `--team-config /path` CLI flag
+  2. `AI_CHAT_TEAM_CONFIG` env var
+  3. `team_config_path` field in personal `~/.anteroom/config.yaml`
+  4. Walk up from cwd looking for `.anteroom/team.yaml`, `.claude/team.yaml`, or `anteroom.team.yaml`
+
+  **Merge**: team config is the base layer, personal config overlays on top.
+  **Enforcement**: fields listed in `enforce` are locked to team values — personal config, env vars, and CLI flags cannot override them.
+  **Trust**: SHA-256 hash verified; interactive mode prompts, non-interactive silently skips untrusted files.
+
+  Example team config (`.anteroom/team.yaml`):
+  ```yaml
+  ai:
+    base_url: https://api.company.com/v1
+    model: gpt-4-turbo
+  safety:
+    approval_mode: ask_for_writes
+  enforce:
+    - ai.base_url
+    - ai.model
+    - safety.approval_mode
+  ```
+
+  See `docs/configuration/team-config.md` for full documentation.
+
+  ### Directory Equivalence
+
+  `.anteroom` and `.claude` directories are interchangeable throughout:
+  - Instructions: `.anteroom.md` / `ANTEROOM.md` / `.claude.md` / `CLAUDE.md`
+  - Skills: `.anteroom/skills/` / `.claude/skills/`
+  - Team config: `.anteroom/team.yaml` / `.claude/team.yaml`
+  - Rules: `.anteroom/rules/` / `.claude/rules/`
 
   ---
 
@@ -202,6 +242,7 @@ prompt: |
   - `docs/configuration/config-file.md` — full config reference with types, defaults, clamping
   - `docs/configuration/environment-variables.md` — all AI_CHAT_* env vars
   - `docs/configuration/mcp-servers.md` — MCP server setup and configuration
+  - `docs/configuration/team-config.md` — shared team config with enforced settings
   - `docs/configuration/tls.md` — TLS/HTTPS, self-signed certs
   - `docs/configuration/index.md` — configuration docs overview
 
