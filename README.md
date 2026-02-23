@@ -146,7 +146,7 @@ echo "review this" | aroom exec - --quiet      # pipe stdin
 
 The AI reads files, edits code, runs commands, searches your codebase, and spawns parallel sub-agents &mdash; with safety gates at every step. Not a chatbot. A collaborator.
 
-**Built-in tools:** `read_file` `write_file` `edit_file` `bash` `glob_files` `grep` `create_canvas` `update_canvas` `patch_canvas` `run_agent`
+**Built-in tools:** `read_file` `write_file` `edit_file` `bash` `glob_files` `grep` `create_canvas` `update_canvas` `patch_canvas` `run_agent` `ask_user`
 
 ---
 

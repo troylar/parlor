@@ -59,7 +59,7 @@ async def handle(
             "error": "No interactive input available. Make your best judgment and proceed.",
         }
 
-    clean_options = [o for o in (options or []) if o and o.strip()]
+    clean_options = [o[:256] for o in (options or []) if o and o.strip()][:20]
     if not clean_options:
         clean_options = None
 
