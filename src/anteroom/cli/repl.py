@@ -743,19 +743,37 @@ async def run_cli(
     tool_registry.set_confirm_callback(_confirm_destructive)
 
     # Set up ask_user callback for mid-turn questions
-    async def _ask_user_callback(question: str) -> str:
+    async def _ask_user_callback(question: str, options: list[str] | None = None) -> str:
         await renderer.stop_thinking()
         renderer.console.print(f"\n[yellow bold]Question:[/yellow bold] {question}")
         try:
             from prompt_toolkit import PromptSession as _AskSession
 
             _ask_session = _AskSession()
-            answer = await _ask_session.prompt_async("  Answer: ")
+
+            if options:
+                for i, opt in enumerate(options, 1):
+                    renderer.console.print(f"  [{MUTED}]{i}.[/{MUTED}] {opt}")
+                hint = "(enter number to select, or type a custom answer; esc to cancel)"
+                renderer.console.print(f"  [{MUTED}]{hint}[/{MUTED}]")
+                answer = await _ask_session.prompt_async("  Choice: ")
+                answer = answer.strip()
+                if answer.isdigit():
+                    idx = int(answer)
+                    if 1 <= idx <= len(options):
+                        answer = options[idx - 1]
+                    else:
+                        renderer.console.print(f"  [{MUTED}]Invalid choice #{idx}, using as freeform answer[/{MUTED}]")
+            else:
+                renderer.console.print(f"  [{MUTED}](esc to cancel)[/{MUTED}]")
+                answer = await _ask_session.prompt_async("  Answer: ")
+                answer = answer.strip()
+
             renderer.console.print()
             renderer.start_thinking()
-            return answer.strip()
+            return answer
         except (EOFError, KeyboardInterrupt):
-            renderer.console.print(f"  [{MUTED}](skipped)[/{MUTED}]\n")
+            renderer.console.print(f"  [{MUTED}](cancelled)[/{MUTED}]\n")
             renderer.start_thinking()
             return ""
 

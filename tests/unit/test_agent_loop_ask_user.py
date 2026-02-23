@@ -65,7 +65,7 @@ class TestAskUserInAgentLoop:
         async def tool_executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
             if name == "ask_user":
                 # Simulate the callback injection that tool_executor does
-                async def mock_callback(q: str) -> str:
+                async def mock_callback(q: str, opts: list[str] | None = None) -> str:
                     return "PostgreSQL"
 
                 from anteroom.tools.ask_user import handle
@@ -136,7 +136,7 @@ class TestAskUserInAgentLoop:
         async def tool_executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
             if name == "ask_user":
 
-                async def cancel_callback(q: str) -> str:
+                async def cancel_callback(q: str, opts: list[str] | None = None) -> str:
                     raise EOFError()
 
                 from anteroom.tools.ask_user import handle
@@ -154,6 +154,7 @@ class TestAskUserInAgentLoop:
         )
 
         tool_end = next(e for e in events if e.kind == "tool_call_end")
+        assert tool_end.data["output"]["cancelled"] is True
         assert tool_end.data["output"]["answer"] == ""
         assert "done" in [e.kind for e in events]
 
@@ -173,7 +174,7 @@ class TestAskUserInAgentLoop:
         async def tool_executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
             if name == "ask_user":
 
-                async def cb(q: str) -> str:
+                async def cb(q: str, opts: list[str] | None = None) -> str:
                     return "yes"
 
                 from anteroom.tools.ask_user import handle

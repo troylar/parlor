@@ -1786,10 +1786,115 @@ const Chat = (() => {
         if (actionsEl) actionsEl.replaceWith(status);
     }
 
+    function showAskUserPrompt(data) {
+        const container = document.getElementById('messages-container');
+        if (!container) return;
+
+        const el = document.createElement('div');
+        el.className = 'ask-user-prompt';
+        el.setAttribute('data-ask-id', data.ask_id);
+
+        const icon = document.createElement('div');
+        icon.className = 'ask-user-icon';
+        icon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
+        const body = document.createElement('div');
+        body.className = 'ask-user-body';
+
+        const title = document.createElement('div');
+        title.className = 'ask-user-title';
+        title.textContent = 'Question';
+        body.appendChild(title);
+
+        const question = document.createElement('div');
+        question.className = 'ask-user-question';
+        question.textContent = data.question;
+        body.appendChild(question);
+
+        const actions = document.createElement('div');
+        actions.className = 'ask-user-actions';
+
+        if (data.options && data.options.length > 0) {
+            data.options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'ask-user-btn ask-user-option';
+                btn.textContent = opt;
+                btn.addEventListener('click', () => _respondAskUser(data.ask_id, opt, el));
+                actions.appendChild(btn);
+            });
+        } else {
+            const inputRow = document.createElement('div');
+            inputRow.className = 'ask-user-input-row';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'ask-user-input';
+            input.placeholder = 'Type your answer...';
+            input.maxLength = 4096;
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && input.value.trim()) {
+                    _respondAskUser(data.ask_id, input.value.trim(), el);
+                }
+            });
+            inputRow.appendChild(input);
+            const submitBtn = document.createElement('button');
+            submitBtn.className = 'ask-user-btn ask-user-submit';
+            submitBtn.textContent = 'Submit';
+            submitBtn.addEventListener('click', () => {
+                if (input.value.trim()) {
+                    _respondAskUser(data.ask_id, input.value.trim(), el);
+                }
+            });
+            inputRow.appendChild(submitBtn);
+            actions.appendChild(inputRow);
+            setTimeout(() => input.focus(), 50);
+        }
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'ask-user-btn ask-user-cancel';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => _respondAskUser(data.ask_id, null, el));
+        actions.appendChild(cancelBtn);
+
+        body.appendChild(actions);
+        el.appendChild(icon);
+        el.appendChild(body);
+        container.appendChild(el);
+        scrollToBottom();
+    }
+
+    async function _respondAskUser(askId, answer, el) {
+        const buttons = el.querySelectorAll('.ask-user-btn');
+        buttons.forEach(b => { b.disabled = true; });
+        const input = el.querySelector('.ask-user-input');
+        if (input) input.disabled = true;
+
+        const cancelled = answer === null;
+        try {
+            await App.api(`/api/approvals/${encodeURIComponent(askId)}/respond`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    approved: !cancelled,
+                    answer: cancelled ? '' : answer,
+                }),
+            });
+            el.classList.add(cancelled ? 'ask-user-cancelled' : 'ask-user-answered');
+            const status = document.createElement('div');
+            status.className = 'ask-user-status';
+            status.textContent = cancelled ? 'Cancelled' : answer;
+            const actionsEl = el.querySelector('.ask-user-actions');
+            if (actionsEl) actionsEl.replaceWith(status);
+        } catch (err) {
+            buttons.forEach(b => { b.disabled = false; });
+            if (input) input.disabled = false;
+            showToast('Failed to respond: ' + err.message);
+        }
+    }
+
     return {
         init, sendMessage, loadMessages, stopGeneration, setStreaming, escapeHtml,
         streamChatResponse, isRawMode, setRawMode, setConversationType,
         appendRemoteMessage, startRemoteStream, handleRemoteToken, finalizeRemoteStream,
-        showApprovalPrompt, resolveApprovalCard, showThinkingFromEvent: showThinking,
+        showApprovalPrompt, resolveApprovalCard, showAskUserPrompt, showThinkingFromEvent: showThinking,
     };
 })();

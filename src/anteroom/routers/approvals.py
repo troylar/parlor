@@ -7,7 +7,7 @@ import re
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ _APPROVAL_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 class ApprovalRequest(BaseModel):
     approved: bool = False
     scope: Literal["once", "session", "always"] = "once"
+    answer: str | None = Field(None, max_length=4096)
 
 
 @router.post("/approvals/{approval_id}/respond")
@@ -46,5 +47,7 @@ async def respond_approval(approval_id: str, body: ApprovalRequest, request: Req
 
     entry["approved"] = body.approved
     entry["scope"] = scope
+    if body.answer is not None:
+        entry["answer"] = body.answer
     entry["event"].set()
     return {"status": "ok", "approved": body.approved, "scope": scope}

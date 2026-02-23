@@ -674,7 +674,7 @@ async def chat(conversation_id: str, request: Request):
         return approved
 
     # Set up ask_user callback for mid-turn questions (reuses approval infrastructure)
-    async def _web_ask_user(question: str) -> str:
+    async def _web_ask_user(question: str, options: list[str] | None = None) -> str:
         import secrets as _secrets
 
         max_pending = 100
@@ -687,16 +687,20 @@ async def chat(conversation_id: str, request: Request):
         entry: dict[str, Any] = {"event": ask_event, "approved": False, "scope": "once", "answer": ""}
         pending_approvals[ask_id] = entry
 
+        event_data: dict[str, Any] = {
+            "ask_id": ask_id,
+            "question": question,
+            "conversation_id": conversation_id,
+        }
+        if options:
+            event_data["options"] = options
+
         if event_bus:
             await event_bus.publish(
                 f"global:{db_name}",
                 {
                     "type": "ask_user_required",
-                    "data": {
-                        "ask_id": ask_id,
-                        "question": question,
-                        "conversation_id": conversation_id,
-                    },
+                    "data": event_data,
                 },
             )
 

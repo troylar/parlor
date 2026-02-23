@@ -528,6 +528,15 @@ const App = (() => {
             }
         });
 
+        _eventSource.addEventListener('ask_user_required', (e) => {
+            const data = JSON.parse(e.data);
+            if (data.conversation_id === state.currentConversationId) {
+                if (_shownApprovalIds.has(data.ask_id)) return;
+                _shownApprovalIds.add(data.ask_id);
+                Chat.showAskUserPrompt(data);
+            }
+        });
+
         _eventSource.addEventListener('approval_resolved', (e) => {
             const data = JSON.parse(e.data);
             _shownApprovalIds.delete(data.approval_id);
