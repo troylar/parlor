@@ -207,7 +207,7 @@ class TestPortFlag:
             patch("anteroom.__main__._run_web") as mock_run_web,
         ):
             config = _make_config(port=8080)
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "--port", "9999"]):
                 main()
 
@@ -224,7 +224,7 @@ class TestPortFlag:
             pytest.raises(SystemExit) as exc_info,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "--port", "99999"]):
                 main()
 
@@ -242,7 +242,7 @@ class TestPortFlag:
             pytest.raises(SystemExit) as exc_info,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "--port", "0"]):
                 main()
 
@@ -257,7 +257,7 @@ class TestPortFlag:
             patch("anteroom.__main__._run_web") as mock_run_web,
         ):
             config = _make_config(port=8080)
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom"]):
                 main()
 
@@ -280,7 +280,7 @@ class TestPortEnvVar:
         monkeypatch.setenv("AI_CHAT_PORT", "3000")
 
         with patch("anteroom.config._get_config_path", return_value=config_file):
-            config = load_config()
+            config, _ = load_config()
 
         assert config.app.port == 3000
 
@@ -293,7 +293,7 @@ class TestPortEnvVar:
         monkeypatch.setenv("AI_CHAT_PORT", "3000")
 
         with patch("anteroom.config._get_config_path", return_value=config_file):
-            config = load_config()
+            config, _ = load_config()
 
         assert config.app.port == 7070
 
@@ -306,7 +306,7 @@ class TestPortEnvVar:
         monkeypatch.delenv("AI_CHAT_PORT", raising=False)
 
         with patch("anteroom.config._get_config_path", return_value=config_file):
-            config = load_config()
+            config, _ = load_config()
 
         assert config.app.port == 8080
 
@@ -328,7 +328,7 @@ class TestExecDispatch:
             config = _make_config()
             config.safety.approval_mode = "ask_for_writes"
             config.safety.allowed_tools = []
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "exec", "say hello"]):
                 main()
 
@@ -347,7 +347,7 @@ class TestExecDispatch:
             config = _make_config()
             config.safety.approval_mode = "ask_for_writes"
             config.safety.allowed_tools = []
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "exec", "--json", "test"]):
                 main()
 
@@ -366,7 +366,7 @@ class TestExecDispatch:
             config = _make_config()
             config.safety.approval_mode = "ask_for_writes"
             config.safety.allowed_tools = []
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "exec", "--timeout", "60", "prompt"]):
                 main()
 
@@ -386,7 +386,7 @@ class TestExecDispatch:
             config = _make_config()
             config.safety.approval_mode = "ask_for_writes"
             config.safety.allowed_tools = []
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "exec", "hello"]):
                 main()
 
@@ -410,7 +410,7 @@ class TestDebugFlag:
             patch("anteroom.__main__.logging.basicConfig") as mock_basic,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "--debug"]):
                 main()
 
@@ -429,7 +429,7 @@ class TestDebugFlag:
             patch("anteroom.__main__.logging.basicConfig") as mock_basic,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom"]):
                 main()
 
@@ -448,7 +448,7 @@ class TestDebugFlag:
             patch("anteroom.__main__.logging.basicConfig") as mock_basic,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom"]):
                 main()
 
@@ -467,7 +467,7 @@ class TestDebugFlag:
             patch("anteroom.__main__.logging.basicConfig") as mock_basic,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "--debug"]):
                 main()
 
@@ -486,7 +486,7 @@ class TestDebugFlag:
             patch("anteroom.__main__.logging.basicConfig") as mock_basic,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom"]):
                 main()
 
@@ -502,7 +502,7 @@ class TestDebugFlag:
             patch("anteroom.__main__._run_web") as mock_run_web,
         ):
             config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "--debug"]):
                 main()
 

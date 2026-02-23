@@ -423,13 +423,43 @@ def _get_config_path(data_dir: Path | None = None) -> Path:
     return _resolve_data_dir() / "config.yaml"
 
 
-def load_config(config_path: Path | None = None) -> AppConfig:
+def load_config(
+    config_path: Path | None = None,
+    *,
+    team_config_path: Path | None = None,
+    interactive: bool = False,
+) -> tuple[AppConfig, list[str]]:
+    """Load configuration with optional team config layer.
+
+    Returns ``(AppConfig, enforced_fields)`` where *enforced_fields* is
+    the list of dot-paths from the team config's ``enforce`` section.
+    """
     raw: dict[str, Any] = {}
     path = config_path or _get_config_path()
 
     if path.exists():
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
+
+    # --- Team config layer ---------------------------------------------------
+    team_raw: dict[str, Any] = {}
+    enforced_fields: list[str] = []
+
+    from .services.team_config import apply_enforcement, deep_merge, discover_team_config, load_team_config
+
+    team_path = discover_team_config(
+        cli_path=team_config_path,
+        env_path=os.environ.get("AI_CHAT_TEAM_CONFIG"),
+        personal_path=raw.get("team_config_path"),
+    )
+    if team_path:
+        data_dir = path.parent if path.exists() else None
+        team_raw, enforced_fields = load_team_config(team_path, data_dir, interactive=interactive)
+        if team_raw:
+            # Team is the base, personal overlays on top
+            raw = deep_merge(team_raw, raw)
+            # Re-apply enforced fields so personal values can't override them
+            raw = apply_enforcement(raw, team_raw, enforced_fields)
 
     ai_raw = raw.get("ai", {})
     base_url = ai_raw.get("base_url") or os.environ.get("AI_CHAT_BASE_URL", "")
@@ -874,17 +904,20 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         allowed_origins=proxy_origins,
     )
 
-    return AppConfig(
-        ai=ai,
-        app=app_settings,
-        mcp_servers=mcp_servers,
-        mcp_tool_warning_threshold=mcp_tool_warning_threshold,
-        shared_databases=shared_databases,
-        cli=cli_config,
-        identity=identity,
-        embeddings=embeddings_config,
-        safety=safety_config,
-        proxy=proxy_config,
+    return (
+        AppConfig(
+            ai=ai,
+            app=app_settings,
+            mcp_servers=mcp_servers,
+            mcp_tool_warning_threshold=mcp_tool_warning_threshold,
+            shared_databases=shared_databases,
+            cli=cli_config,
+            identity=identity,
+            embeddings=embeddings_config,
+            safety=safety_config,
+            proxy=proxy_config,
+        ),
+        enforced_fields,
     )
 
 

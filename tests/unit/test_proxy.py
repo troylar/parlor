@@ -276,7 +276,7 @@ proxy:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
             f.flush()
-            config = load_config(Path(f.name))
+            config, _ = load_config(Path(f.name))
 
         assert config.proxy.enabled is True
         assert config.proxy.allowed_origins == ["http://localhost:3000"]
@@ -299,7 +299,7 @@ ai:
             old = os.environ.get("AI_CHAT_PROXY_ENABLED")
             try:
                 os.environ["AI_CHAT_PROXY_ENABLED"] = "true"
-                config = load_config(Path(f.name))
+                config, _ = load_config(Path(f.name))
             finally:
                 if old is None:
                     os.environ.pop("AI_CHAT_PROXY_ENABLED", None)
@@ -328,6 +328,6 @@ proxy:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
             f.flush()
-            config = load_config(Path(f.name))
+            config, _ = load_config(Path(f.name))
 
         assert config.proxy.allowed_origins == ["http://localhost:3000"]

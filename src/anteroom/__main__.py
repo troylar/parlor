@@ -27,7 +27,11 @@ def _run_init(force: bool = False) -> None:
     run_init_wizard(force=force)
 
 
-def _load_config_or_exit() -> tuple[Path, object]:
+def _load_config_or_exit(
+    team_config_path: Path | None = None,
+    *,
+    interactive: bool = False,
+) -> tuple[Path, object, list[str]]:
     config_path = _get_config_path()
     if not config_path.exists():
         print(f"No configuration file found at {config_path}", file=sys.stderr)
@@ -39,12 +43,15 @@ def _load_config_or_exit() -> tuple[Path, object]:
         if not config_path.exists():
             sys.exit(1)
     try:
-        config = load_config()
+        config, enforced_fields = load_config(
+            team_config_path=team_config_path,
+            interactive=interactive,
+        )
     except ValueError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         print("Run 'aroom config' to fix your configuration.", file=sys.stderr)
         sys.exit(1)
-    return config_path, config
+    return config_path, config, enforced_fields
 
 
 async def _validate_ai_connection(config) -> None:
@@ -626,6 +633,12 @@ def main() -> None:
         default=False,
         help="Enable debug logging to stderr (useful for MCP troubleshooting)",
     )
+    parser.add_argument(
+        "--team-config",
+        dest="team_config",
+        default=None,
+        help="Path to team configuration file (YAML)",
+    )
 
     args = parser.parse_args()
 
@@ -660,22 +673,34 @@ def main() -> None:
         _run_db(args)
         return
 
-    config_path, config = _load_config_or_exit()
+    _team_config_arg = getattr(args, "team_config", None)
+    _team_config_path = Path(_team_config_arg) if _team_config_arg else None
+    _is_interactive = args.command in ("chat", None)  # chat or web UI (default)
+    config_path, config, enforced_fields = _load_config_or_exit(
+        team_config_path=_team_config_path,
+        interactive=_is_interactive,
+    )
 
     # Apply global safety flag overrides (work for both web UI and CLI modes)
     _approval_mode = getattr(args, "approval_mode", None)
     _allowed_tools = getattr(args, "allowed_tools", None)
     if _approval_mode:
-        config.safety.approval_mode = _approval_mode
-        if _approval_mode == "auto":
+        if "safety.approval_mode" in enforced_fields:
             print(
-                "WARNING: Auto-approval mode active. ALL tool calls will execute without confirmation,",
+                "WARNING: --approval-mode ignored; 'safety.approval_mode' is enforced by team config.",
                 file=sys.stderr,
             )
-            print(
-                "  including destructive commands (rm, git push --force, etc.).",
-                file=sys.stderr,
-            )
+        else:
+            config.safety.approval_mode = _approval_mode
+            if _approval_mode == "auto":
+                print(
+                    "WARNING: Auto-approval mode active. ALL tool calls will execute without confirmation,",
+                    file=sys.stderr,
+                )
+                print(
+                    "  including destructive commands (rm, git push --force, etc.).",
+                    file=sys.stderr,
+                )
     if _allowed_tools:
         extra = [t.strip() for t in _allowed_tools.split(",") if t.strip()]
         existing = set(config.safety.allowed_tools)
@@ -683,10 +708,13 @@ def main() -> None:
 
     _port = getattr(args, "port", None)
     if _port is not None:
-        if not 1 <= _port <= 65535:
-            print(f"Invalid port: {_port}. Must be between 1 and 65535.", file=sys.stderr)
-            sys.exit(1)
-        config.app.port = _port
+        if "app.port" in enforced_fields:
+            print("WARNING: --port ignored; 'app.port' is enforced by team config.", file=sys.stderr)
+        else:
+            if not 1 <= _port <= 65535:
+                print(f"Invalid port: {_port}. Must be between 1 and 65535.", file=sys.stderr)
+                sys.exit(1)
+            config.app.port = _port
 
     if args.test:
         asyncio.run(_test_connection(config))

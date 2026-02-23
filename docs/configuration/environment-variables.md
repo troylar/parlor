@@ -24,6 +24,7 @@ Every AI config option has an environment variable override with the `AI_CHAT_` 
 | `AI_CHAT_SAFETY_ENABLED` | `true` | Enable/disable the tool safety gate |
 | `AI_CHAT_SAFETY_APPROVAL_MODE` | `ask_for_writes` | Approval mode: `auto`, `ask_for_dangerous`, `ask_for_writes`, `ask` |
 | `AI_CHAT_LOG_LEVEL` | `WARNING` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Overridden by `--debug` flag |
+| `AI_CHAT_TEAM_CONFIG` | --- | Path to team configuration file (YAML). See [Team Config](../configuration/team-config.md) |
 
 ## Usage
 
@@ -42,8 +43,12 @@ $ aroom chat
 
 ## Precedence
 
-Environment variables take highest priority:
+Configuration is resolved in this order (highest wins):
 
 1. Defaults (lowest)
-2. Config file (`~/.anteroom/config.yaml`)
-3. Environment variables (highest)
+2. Team config file (if present)
+3. Personal config file (`~/.anteroom/config.yaml`)
+4. Environment variables
+5. CLI flags (highest)
+
+**Exception**: Fields listed in the team config's `enforce` section override all other sources, including environment variables and CLI flags. See [Team Config](../configuration/team-config.md).

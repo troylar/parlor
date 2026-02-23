@@ -34,7 +34,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert isinstance(config, AppConfig)
         assert config.ai.base_url == "https://api.example.com"
         assert config.ai.api_key == "sk-test-key"
@@ -81,7 +81,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.model == "gpt-4"
 
     def test_default_system_prompt(self, tmp_path: Path) -> None:
@@ -94,7 +94,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert "Anteroom" in config.ai.system_prompt
         assert "<agentic_behavior>" in config.ai.system_prompt
         assert "<tool_use>" in config.ai.system_prompt
@@ -114,7 +114,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.app.host == "127.0.0.1"
         assert config.app.port == 8080
 
@@ -128,7 +128,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_servers == []
 
     def test_mcp_servers_parsed(self, tmp_path: Path) -> None:
@@ -149,7 +149,7 @@ class TestLoadConfig:
                 ],
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert len(config.mcp_servers) == 1
         assert config.mcp_servers[0].name == "my-server"
         assert config.mcp_servers[0].transport == "stdio"
@@ -175,7 +175,7 @@ class TestLoadConfig:
                 ],
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_servers[0].timeout == 60.0
 
     def test_mcp_server_tools_include_parsed(self, tmp_path: Path) -> None:
@@ -193,7 +193,7 @@ class TestLoadConfig:
                 ],
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_servers[0].tools_include == ["search_issues", "get_issue", "create_*"]
         assert config.mcp_servers[0].tools_exclude == []
 
@@ -212,7 +212,7 @@ class TestLoadConfig:
                 ],
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_servers[0].tools_include == []
         assert config.mcp_servers[0].tools_exclude == ["bulk_*", "admin_*"]
 
@@ -224,7 +224,7 @@ class TestLoadConfig:
                 "mcp_servers": [{"name": "jira", "transport": "stdio", "command": "npx"}],
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_servers[0].tools_include == []
         assert config.mcp_servers[0].tools_exclude == []
 
@@ -233,7 +233,7 @@ class TestLoadConfig:
             tmp_path,
             {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test"}},
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_tool_warning_threshold == 40
 
     def test_mcp_tool_warning_threshold_custom(self, tmp_path: Path) -> None:
@@ -244,7 +244,7 @@ class TestLoadConfig:
                 "mcp_tool_warning_threshold": 20,
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_tool_warning_threshold == 20
 
     def test_mcp_tool_warning_threshold_zero_disables(self, tmp_path: Path) -> None:
@@ -255,7 +255,7 @@ class TestLoadConfig:
                 "mcp_tool_warning_threshold": 0,
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_tool_warning_threshold == 0
 
     def test_mcp_server_both_include_and_exclude_prefers_include(self, tmp_path: Path) -> None:
@@ -274,7 +274,7 @@ class TestLoadConfig:
                 ],
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.mcp_servers[0].tools_include == ["search"]
         assert config.mcp_servers[0].tools_exclude == []
 
@@ -304,7 +304,7 @@ class TestLoadConfig:
         monkeypatch.setenv("AI_CHAT_BASE_URL", "https://env.example.com")
         monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
         cfg_file = _write_config(tmp_path, {})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.base_url == "https://env.example.com"
         assert config.ai.api_key == "sk-env-key"
 
@@ -319,7 +319,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.user_system_prompt == "Always respond in French."
         assert "Anteroom" in config.ai.system_prompt
         assert "<agentic_behavior>" in config.ai.system_prompt
@@ -336,7 +336,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.user_system_prompt == ""
         assert "Anteroom" in config.ai.system_prompt
         assert "<user_instructions>" not in config.ai.system_prompt
@@ -346,7 +346,7 @@ class TestLoadConfig:
         monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
         monkeypatch.setenv("AI_CHAT_SYSTEM_PROMPT", "Be very brief.")
         cfg_file = _write_config(tmp_path, {})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.user_system_prompt == "Be very brief."
         assert "Be very brief." in config.ai.system_prompt
         assert "Anteroom" in config.ai.system_prompt
@@ -361,7 +361,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 5
         assert "<narration>" in config.ai.system_prompt
         assert "every 5 tool calls" in config.ai.system_prompt
@@ -377,7 +377,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 10
         assert "every 10 tool calls" in config.ai.system_prompt
 
@@ -392,7 +392,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 0
         assert "<narration>" not in config.ai.system_prompt
 
@@ -401,7 +401,7 @@ class TestLoadConfig:
         monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
         monkeypatch.setenv("AI_CHAT_NARRATION_CADENCE", "3")
         cfg_file = _write_config(tmp_path, {})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 3
         assert "every 3 tool calls" in config.ai.system_prompt
 
@@ -416,7 +416,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 0
         assert "<narration>" not in config.ai.system_prompt
 
@@ -431,7 +431,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 5
         assert "<narration>" in config.ai.system_prompt
 
@@ -440,7 +440,7 @@ class TestLoadConfig:
         monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
         monkeypatch.setenv("AI_CHAT_NARRATION_CADENCE", "0")
         cfg_file = _write_config(tmp_path, {})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 0
         assert "<narration>" not in config.ai.system_prompt
 
@@ -460,7 +460,7 @@ class TestLoadConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.ai.narration_cadence == 7
         assert "every 7 tool calls" in config.ai.system_prompt
 
@@ -476,7 +476,7 @@ class TestEmbeddingsConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.embeddings.enabled is True
         assert config.embeddings.provider == "local"
         assert config.embeddings.model == "text-embedding-3-small"
@@ -502,7 +502,7 @@ class TestEmbeddingsConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.embeddings.model == "custom-embed"
         assert config.embeddings.dimensions == 768
         assert config.embeddings.base_url == "https://embed.example.com"
@@ -521,7 +521,7 @@ class TestEmbeddingsConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.embeddings.enabled is False
 
     def test_embeddings_env_var_overrides(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -533,7 +533,7 @@ class TestEmbeddingsConfig:
         monkeypatch.setenv("AI_CHAT_EMBEDDINGS_BASE_URL", "https://embed.env.com")
         monkeypatch.setenv("AI_CHAT_EMBEDDINGS_API_KEY", "sk-embed-env")
         cfg_file = _write_config(tmp_path, {})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.embeddings.enabled is False
         assert config.embeddings.model == "text-embedding-ada-002"
         assert config.embeddings.dimensions == 512
@@ -554,7 +554,7 @@ class TestEmbeddingsConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.embeddings.model == "config-model"
 
     def test_embeddings_dimensions_clamped_to_max(self, tmp_path: Path) -> None:
@@ -565,7 +565,7 @@ class TestEmbeddingsConfig:
                 "embeddings": {"dimensions": 99999},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.embeddings.dimensions == 4096
 
     def test_embeddings_dimensions_clamped_to_min(self, tmp_path: Path) -> None:
@@ -576,7 +576,7 @@ class TestEmbeddingsConfig:
                 "embeddings": {"dimensions": -5},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.embeddings.dimensions == 1
 
 
@@ -591,7 +591,7 @@ class TestIdentityConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.identity is None
 
     def test_identity_parsed_from_config(self, tmp_path: Path) -> None:
@@ -610,7 +610,7 @@ class TestIdentityConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.identity is not None
         assert isinstance(config.identity, UserIdentity)
         assert config.identity.user_id == "abc-123"
@@ -629,7 +629,7 @@ class TestIdentityConfig:
                 "identity": {},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.identity is None
 
     def test_identity_none_when_user_id_empty(self, tmp_path: Path) -> None:
@@ -646,7 +646,7 @@ class TestIdentityConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.identity is None
 
     def test_identity_env_var_overrides(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -657,7 +657,7 @@ class TestIdentityConfig:
         monkeypatch.setenv("AI_CHAT_PUBLIC_KEY", "env-pub-key")
         monkeypatch.setenv("AI_CHAT_PRIVATE_KEY", "env-priv-key")
         cfg_file = _write_config(tmp_path, {})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.identity is not None
         assert config.identity.user_id == "env-user-id"
         assert config.identity.display_name == "EnvUser"
@@ -682,7 +682,7 @@ class TestIdentityConfig:
                 },
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.identity is not None
         assert config.identity.user_id == "config-user-id"
         assert config.identity.display_name == "ConfigUser"
@@ -692,7 +692,7 @@ class TestIdentityConfig:
         monkeypatch.setenv("AI_CHAT_API_KEY", "sk-env-key")
         monkeypatch.setenv("AI_CHAT_USER_ID", "env-user-id")
         cfg_file = _write_config(tmp_path, {})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.identity is not None
         assert config.identity.user_id == "env-user-id"
         assert config.identity.display_name == ""
@@ -781,33 +781,33 @@ class TestToolDedupConfig:
 
     def test_tool_dedup_default_true(self, tmp_path: Path) -> None:
         cfg_file = _write_config(tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.tool_dedup is True
 
     def test_tool_dedup_yaml_false(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
             tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}, "cli": {"tool_dedup": False}}
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.tool_dedup is False
 
     def test_tool_dedup_yaml_true_explicit(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
             tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}, "cli": {"tool_dedup": True}}
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.tool_dedup is True
 
     def test_tool_dedup_env_var_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AI_CHAT_TOOL_DEDUP", "false")
         cfg_file = _write_config(tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.tool_dedup is False
 
     def test_tool_dedup_env_var_zero(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AI_CHAT_TOOL_DEDUP", "0")
         cfg_file = _write_config(tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.tool_dedup is False
 
     def test_tool_dedup_env_var_takes_precedence_over_yaml(
@@ -817,14 +817,14 @@ class TestToolDedupConfig:
         cfg_file = _write_config(
             tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}, "cli": {"tool_dedup": True}}
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.tool_dedup is False
 
 
 class TestPlanningConfig:
     def test_defaults(self, tmp_path: Path) -> None:
         cfg_file = _write_config(tmp_path, {"ai": {"base_url": "http://test", "api_key": "sk-test"}})
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.enabled is True
         assert config.cli.planning.auto_threshold_tools == 15
         assert config.cli.planning.auto_mode == "off"
@@ -837,7 +837,7 @@ class TestPlanningConfig:
                 "cli": {"planning": {"enabled": False, "auto_threshold_tools": 10}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.enabled is False
         assert config.cli.planning.auto_threshold_tools == 10
 
@@ -849,7 +849,7 @@ class TestPlanningConfig:
                 "cli": {"planning": {"enabled": "false"}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.enabled is False
 
     def test_invalid_threshold_falls_back_to_default(self, tmp_path: Path) -> None:
@@ -860,7 +860,7 @@ class TestPlanningConfig:
                 "cli": {"planning": {"auto_threshold_tools": "bad"}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.auto_threshold_tools == 15
 
     def test_empty_planning_section(self, tmp_path: Path) -> None:
@@ -871,7 +871,7 @@ class TestPlanningConfig:
                 "cli": {"planning": {}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.enabled is True
         assert config.cli.planning.auto_threshold_tools == 15
         assert config.cli.planning.auto_mode == "off"
@@ -884,7 +884,7 @@ class TestPlanningConfig:
                 "cli": {"planning": {"auto_mode": "off"}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.auto_mode == "off"
 
     def test_auto_mode_auto_from_yaml(self, tmp_path: Path) -> None:
@@ -895,7 +895,7 @@ class TestPlanningConfig:
                 "cli": {"planning": {"auto_mode": "auto"}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.auto_mode == "auto"
 
     def test_auto_mode_invalid_falls_back_to_off(self, tmp_path: Path) -> None:
@@ -906,7 +906,7 @@ class TestPlanningConfig:
                 "cli": {"planning": {"auto_mode": "garbage"}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.auto_mode == "off"
 
     def test_auto_threshold_zero_disables(self, tmp_path: Path) -> None:
@@ -917,5 +917,5 @@ class TestPlanningConfig:
                 "cli": {"planning": {"auto_threshold_tools": 0}},
             },
         )
-        config = load_config(cfg_file)
+        config, _ = load_config(cfg_file)
         assert config.cli.planning.auto_threshold_tools == 0

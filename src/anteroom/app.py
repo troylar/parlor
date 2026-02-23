@@ -353,7 +353,7 @@ def _derive_auth_token(config: AppConfig) -> str:
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
     if config is None:
-        config = load_config()
+        config, _ = load_config()
 
     # Ensure user identity exists with a private key before token derivation
     # so first-run also gets a stable token (identity is auto-generated if missing).

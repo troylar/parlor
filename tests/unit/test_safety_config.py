@@ -34,7 +34,7 @@ class TestSafetyConfig:
                 Path(tmpdir),
                 {"ai": {"base_url": "http://localhost:1234", "api_key": "test"}},
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert isinstance(cfg.safety, SafetyConfig)
             assert cfg.safety.enabled is True
 
@@ -54,7 +54,7 @@ class TestSafetyConfig:
                     },
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.approval_timeout == 60
             assert cfg.safety.bash.enabled is False
             assert cfg.safety.write_file.enabled is True
@@ -67,7 +67,7 @@ class TestSafetyConfig:
                 Path(tmpdir),
                 {"ai": {"base_url": "http://localhost:1234", "api_key": "test"}},
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.enabled is True
             assert cfg.safety.approval_timeout == 120
 
@@ -80,7 +80,7 @@ class TestSafetyConfig:
                     "safety": {"approval_timeout": 1},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.approval_timeout == 10
 
     def test_timeout_clamped_high(self) -> None:
@@ -92,7 +92,7 @@ class TestSafetyConfig:
                     "safety": {"approval_timeout": 9999},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.approval_timeout == 600
 
     def test_env_var_override(self) -> None:
@@ -102,7 +102,7 @@ class TestSafetyConfig:
                 {"ai": {"base_url": "http://localhost:1234", "api_key": "test"}},
             )
             with mock.patch.dict(os.environ, {"AI_CHAT_SAFETY_ENABLED": "false"}):
-                cfg = load_config(config_path)
+                cfg, _ = load_config(config_path)
                 assert cfg.safety.enabled is False
 
     def test_safety_disabled(self) -> None:
@@ -114,7 +114,7 @@ class TestSafetyConfig:
                     "safety": {"enabled": False},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.enabled is False
 
     def test_default_approval_mode(self) -> None:
@@ -130,7 +130,7 @@ class TestSafetyConfig:
                     "safety": {"approval_mode": "ask"},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.approval_mode == "ask"
 
     def test_approval_mode_env_var(self) -> None:
@@ -140,7 +140,7 @@ class TestSafetyConfig:
                 {"ai": {"base_url": "http://localhost:1234", "api_key": "test"}},
             )
             with mock.patch.dict(os.environ, {"AI_CHAT_SAFETY_APPROVAL_MODE": "auto"}):
-                cfg = load_config(config_path)
+                cfg, _ = load_config(config_path)
                 assert cfg.safety.approval_mode == "auto"
 
     def test_allowed_tools_parsed(self) -> None:
@@ -152,7 +152,7 @@ class TestSafetyConfig:
                     "safety": {"allowed_tools": ["write_file", "edit_file"]},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.allowed_tools == ["write_file", "edit_file"]
 
     def test_denied_tools_parsed(self) -> None:
@@ -164,7 +164,7 @@ class TestSafetyConfig:
                     "safety": {"denied_tools": ["bash"]},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.denied_tools == ["bash"]
 
     def test_tool_tiers_parsed(self) -> None:
@@ -176,7 +176,7 @@ class TestSafetyConfig:
                     "safety": {"tool_tiers": {"create_canvas": "read", "my_mcp_tool": "destructive"}},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.tool_tiers == {"create_canvas": "read", "my_mcp_tool": "destructive"}
 
     def test_defaults_for_new_fields(self) -> None:
@@ -194,7 +194,7 @@ class TestSafetyConfig:
                     "safety": {"allowed_tools": "not_a_list", "denied_tools": 42},
                 },
             )
-            cfg = load_config(config_path)
+            cfg, _ = load_config(config_path)
             assert cfg.safety.allowed_tools == []
             assert cfg.safety.denied_tools == []
 
