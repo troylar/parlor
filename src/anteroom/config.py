@@ -541,12 +541,13 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         env: dict[str, str] = {}
         for k, v in env_raw.items():
             env[k] = os.path.expandvars(str(v))
-        tools_raw = srv.get("tools", {})
-        tools_include = [str(t) for t in tools_raw.get("include", [])] if isinstance(tools_raw, dict) else []
-        tools_exclude = [str(t) for t in tools_raw.get("exclude", [])] if isinstance(tools_raw, dict) else []
+        tools_include_raw = srv.get("tools_include", [])
+        tools_include = [str(t) for t in tools_include_raw] if isinstance(tools_include_raw, list) else []
+        tools_exclude_raw = srv.get("tools_exclude", [])
+        tools_exclude = [str(t) for t in tools_exclude_raw] if isinstance(tools_exclude_raw, list) else []
         if tools_include and tools_exclude:
             logger.warning(
-                "MCP server '%s': both tools.include and tools.exclude set; using include (ignoring exclude)",
+                "MCP server '%s': both tools_include and tools_exclude set; using include (ignoring exclude)",
                 srv.get("name", "?"),
             )
             tools_exclude = []

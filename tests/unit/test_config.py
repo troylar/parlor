@@ -188,7 +188,7 @@ class TestLoadConfig:
                         "name": "jira",
                         "transport": "stdio",
                         "command": "npx",
-                        "tools": {"include": ["search_issues", "get_issue", "create_*"]},
+                        "tools_include": ["search_issues", "get_issue", "create_*"],
                     }
                 ],
             },
@@ -207,7 +207,7 @@ class TestLoadConfig:
                         "name": "jira",
                         "transport": "stdio",
                         "command": "npx",
-                        "tools": {"exclude": ["bulk_*", "admin_*"]},
+                        "tools_exclude": ["bulk_*", "admin_*"],
                     }
                 ],
             },
@@ -268,7 +268,8 @@ class TestLoadConfig:
                         "name": "jira",
                         "transport": "stdio",
                         "command": "npx",
-                        "tools": {"include": ["search"], "exclude": ["delete"]},
+                        "tools_include": ["search"],
+                        "tools_exclude": ["delete"],
                     }
                 ],
             },

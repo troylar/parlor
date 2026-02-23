@@ -106,15 +106,24 @@ class McpManager:
         total_tools = len(self._tool_to_server)
         if self._tool_warning_threshold > 0 and total_tools > self._tool_warning_threshold:
             per_server = []
+            any_filters_active = False
             for sname in connected:
+                cfg = self._configs.get(sname)
+                has_filter = bool(cfg and (cfg.tools_include or cfg.tools_exclude)) if cfg else False
+                if has_filter:
+                    any_filters_active = True
                 count = sum(1 for t in self._server_tools.get(sname, []) if self._is_tool_allowed(t["name"], sname))
                 per_server.append(f"{sname}: {count}")
+            hint = (
+                "Current filters may not be restrictive enough."
+                if any_filters_active
+                else "Consider adding tools_include/tools_exclude filters to your MCP server config."
+            )
             logger.warning(
-                "MCP tool count (%d) exceeds threshold (%d). "
-                "Consider adding tools.include/tools.exclude filters to your MCP server config. "
-                "Per-server: %s",
+                "MCP tool count (%d) exceeds threshold (%d). %s Per-server: %s",
                 total_tools,
                 self._tool_warning_threshold,
+                hint,
                 ", ".join(per_server),
             )
 
