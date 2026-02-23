@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import AsyncExitStack
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -734,3 +735,203 @@ class TestMcpManagerShutdown:
         assert stack_b_closed
         assert mgr._exit_stacks == {}
         assert mgr._sessions == {}
+
+
+def _make_tool(name: str, server: str) -> dict[str, Any]:
+    return {"name": name, "server_name": server, "description": f"desc-{name}", "input_schema": {}}
+
+
+class TestMcpToolFiltering:
+    """Tests for per-server tool include/exclude filtering."""
+
+    def _make_manager(self, *configs: McpServerConfig) -> McpManager:
+        mgr = McpManager(list(configs))
+        return mgr
+
+    def test_no_filter_returns_all_tools(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo")
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {"jira": [_make_tool("search", "jira"), _make_tool("create", "jira")]}
+        mgr._rebuild_tool_map()
+        assert len(mgr.get_all_tools()) == 2
+
+    def test_include_filters_to_allowlist(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=["search", "get_issue"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {
+            "jira": [_make_tool("search", "jira"), _make_tool("create", "jira"), _make_tool("get_issue", "jira")],
+        }
+        mgr._rebuild_tool_map()
+        names = {t["name"] for t in mgr.get_all_tools()}
+        assert names == {"search", "get_issue"}
+
+    def test_exclude_filters_out_blocklist(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_exclude=["delete", "bulk_delete"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {
+            "jira": [_make_tool("search", "jira"), _make_tool("delete", "jira"), _make_tool("bulk_delete", "jira")],
+        }
+        mgr._rebuild_tool_map()
+        names = {t["name"] for t in mgr.get_all_tools()}
+        assert names == {"search"}
+
+    def test_include_glob_pattern(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=["get_*", "search_*"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {
+            "jira": [
+                _make_tool("get_issue", "jira"),
+                _make_tool("get_comment", "jira"),
+                _make_tool("search_issues", "jira"),
+                _make_tool("create_issue", "jira"),
+                _make_tool("delete_issue", "jira"),
+            ],
+        }
+        mgr._rebuild_tool_map()
+        names = {t["name"] for t in mgr.get_all_tools()}
+        assert names == {"get_issue", "get_comment", "search_issues"}
+
+    def test_exclude_glob_pattern(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_exclude=["bulk_*", "admin_*"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {
+            "jira": [
+                _make_tool("search", "jira"),
+                _make_tool("bulk_create", "jira"),
+                _make_tool("bulk_delete", "jira"),
+                _make_tool("admin_settings", "jira"),
+            ],
+        }
+        mgr._rebuild_tool_map()
+        names = {t["name"] for t in mgr.get_all_tools()}
+        assert names == {"search"}
+
+    def test_filtered_tool_not_in_tool_map(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=["search"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {"jira": [_make_tool("search", "jira"), _make_tool("delete", "jira")]}
+        mgr._rebuild_tool_map()
+        assert mgr.get_tool_server_name("search") == "jira"
+        assert mgr.get_tool_server_name("delete") == "unknown"
+
+    def test_get_openai_tools_respects_filter(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=["search"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {"jira": [_make_tool("search", "jira"), _make_tool("delete", "jira")]}
+        mgr._rebuild_tool_map()
+        openai_tools = mgr.get_openai_tools()
+        assert openai_tools is not None
+        assert len(openai_tools) == 1
+        assert openai_tools[0]["function"]["name"] == "search"
+
+    def test_multi_server_independent_filters(self) -> None:
+        cfg_a = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=["search"])
+        cfg_b = McpServerConfig(name="confluence", transport="stdio", command="echo", tools_exclude=["delete_*"])
+        mgr = self._make_manager(cfg_a, cfg_b)
+        mgr._server_tools = {
+            "jira": [_make_tool("search", "jira"), _make_tool("create", "jira")],
+            "confluence": [_make_tool("read_page", "confluence"), _make_tool("delete_page", "confluence")],
+        }
+        mgr._rebuild_tool_map()
+        names = {t["name"] for t in mgr.get_all_tools()}
+        assert names == {"search", "read_page"}
+
+    @pytest.mark.asyncio()
+    async def test_call_tool_blocked_for_filtered_tool(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=["search"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {"jira": [_make_tool("search", "jira"), _make_tool("delete", "jira")]}
+        mgr._sessions = {"jira": AsyncMock()}
+        mgr._rebuild_tool_map()
+        with pytest.raises(ValueError, match="filtered out"):
+            await mgr.call_tool("delete", {})
+
+    def test_empty_include_means_no_filter(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=[])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {"jira": [_make_tool("search", "jira"), _make_tool("create", "jira")]}
+        mgr._rebuild_tool_map()
+        assert len(mgr.get_all_tools()) == 2
+
+    def test_empty_exclude_means_no_filter(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_exclude=[])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {"jira": [_make_tool("search", "jira"), _make_tool("create", "jira")]}
+        mgr._rebuild_tool_map()
+        assert len(mgr.get_all_tools()) == 2
+
+    @pytest.mark.asyncio()
+    async def test_tool_warning_threshold_fires(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo")
+        mgr = McpManager([cfg], tool_warning_threshold=3)
+        mgr._server_tools = {"jira": [_make_tool(f"tool{i}", "jira") for i in range(5)]}
+        mgr._rebuild_tool_map()
+        mgr._server_status = {"jira": {"status": "connected", "tool_count": 5}}
+
+        async def noop(_config: McpServerConfig) -> None:
+            pass
+
+        with (
+            caplog.at_level(logging.WARNING, logger="anteroom.services.mcp_manager"),
+            patch.object(mgr, "_connect_one", side_effect=noop),
+        ):
+            await mgr.startup()
+
+        warning_records = [r for r in caplog.records if "exceeds threshold" in r.message]
+        assert warning_records, "Expected tool threshold warning"
+        assert "5" in warning_records[0].message
+        assert "3" in warning_records[0].message
+
+    @pytest.mark.asyncio()
+    async def test_tool_warning_threshold_disabled(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo")
+        mgr = McpManager([cfg], tool_warning_threshold=0)
+        mgr._server_tools = {"jira": [_make_tool(f"tool{i}", "jira") for i in range(50)]}
+        mgr._rebuild_tool_map()
+        mgr._server_status = {"jira": {"status": "connected", "tool_count": 50}}
+
+        async def noop(_config: McpServerConfig) -> None:
+            pass
+
+        with (
+            caplog.at_level(logging.WARNING, logger="anteroom.services.mcp_manager"),
+            patch.object(mgr, "_connect_one", side_effect=noop),
+        ):
+            await mgr.startup()
+
+        warning_records = [r for r in caplog.records if "exceeds threshold" in r.message]
+        assert not warning_records, "Should not warn when threshold is 0 (disabled)"
+
+    @pytest.mark.asyncio()
+    async def test_tool_warning_threshold_not_exceeded(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo")
+        mgr = McpManager([cfg], tool_warning_threshold=10)
+        mgr._server_tools = {"jira": [_make_tool(f"tool{i}", "jira") for i in range(5)]}
+        mgr._rebuild_tool_map()
+        mgr._server_status = {"jira": {"status": "connected", "tool_count": 5}}
+
+        async def noop(_config: McpServerConfig) -> None:
+            pass
+
+        with (
+            caplog.at_level(logging.WARNING, logger="anteroom.services.mcp_manager"),
+            patch.object(mgr, "_connect_one", side_effect=noop),
+        ):
+            await mgr.startup()
+
+        warning_records = [r for r in caplog.records if "exceeds threshold" in r.message]
+        assert not warning_records, "Should not warn when under threshold"
+
+    def test_include_no_matches_returns_empty(self) -> None:
+        cfg = McpServerConfig(name="jira", transport="stdio", command="echo", tools_include=["nonexistent_*"])
+        mgr = self._make_manager(cfg)
+        mgr._server_tools = {"jira": [_make_tool("search", "jira"), _make_tool("create", "jira")]}
+        mgr._rebuild_tool_map()
+        assert mgr.get_all_tools() == []
+        assert mgr.get_openai_tools() is None

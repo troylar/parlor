@@ -267,6 +267,8 @@ class McpServerConfig:
     url: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     timeout: float = 30.0  # seconds; connection timeout per server
+    tools_include: list[str] = field(default_factory=list)  # allowlist; fnmatch patterns
+    tools_exclude: list[str] = field(default_factory=list)  # blocklist; fnmatch patterns
 
 
 @dataclass
@@ -371,6 +373,7 @@ class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
+    mcp_tool_warning_threshold: int = 40  # warn when total MCP tools exceed this; 0 = disabled
     shared_databases: list[SharedDatabaseConfig] = field(default_factory=list)
     cli: CliConfig = field(default_factory=CliConfig)
     identity: UserIdentity | None = None
@@ -538,6 +541,16 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         env: dict[str, str] = {}
         for k, v in env_raw.items():
             env[k] = os.path.expandvars(str(v))
+        tools_include_raw = srv.get("tools_include", [])
+        tools_include = [str(t) for t in tools_include_raw] if isinstance(tools_include_raw, list) else []
+        tools_exclude_raw = srv.get("tools_exclude", [])
+        tools_exclude = [str(t) for t in tools_exclude_raw] if isinstance(tools_exclude_raw, list) else []
+        if tools_include and tools_exclude:
+            logger.warning(
+                "MCP server '%s': both tools_include and tools_exclude set; using include (ignoring exclude)",
+                srv.get("name", "?"),
+            )
+            tools_exclude = []
         mcp_servers.append(
             McpServerConfig(
                 name=srv["name"],
@@ -547,8 +560,15 @@ def load_config(config_path: Path | None = None) -> AppConfig:
                 url=srv.get("url"),
                 env=env,
                 timeout=float(srv.get("timeout", 30.0)),
+                tools_include=tools_include,
+                tools_exclude=tools_exclude,
             )
         )
+
+    try:
+        mcp_tool_warning_threshold = max(0, int(raw.get("mcp_tool_warning_threshold", 40)))
+    except (ValueError, TypeError):
+        mcp_tool_warning_threshold = 40
 
     shared_databases: list[SharedDatabaseConfig] = []
     for sdb in raw.get("shared_databases", []):
@@ -803,6 +823,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         ai=ai,
         app=app_settings,
         mcp_servers=mcp_servers,
+        mcp_tool_warning_threshold=mcp_tool_warning_threshold,
         shared_databases=shared_databases,
         cli=cli_config,
         identity=identity,

@@ -58,10 +58,14 @@ mcp_servers:
     args: ["-y", "@my-org/mcp-tools"]
     env:
       API_KEY: "${MY_API_KEY}"
+    tools_include: []                  # fnmatch allowlist (empty = include all)
+    tools_exclude: []                  # fnmatch blocklist
 
   - name: "remote-tools"
     transport: "sse"
     url: "https://mcp-server.example.com/sse"
+
+mcp_tool_warning_threshold: 40        # Warn when total MCP tools exceed this (0 = disabled)
 
 safety:
   enabled: true
@@ -167,6 +171,26 @@ A list of additional SQLite databases. See [Shared Databases](../web-ui/shared-d
 ### mcp_servers
 
 A list of MCP tool servers. See [MCP Servers](mcp-servers.md).
+
+Per-server configuration:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | --- | Display name for the server |
+| `transport` | string | --- | Transport type: `"stdio"` (local process) or `"sse"` (remote HTTP) |
+| `command` | string | --- | (stdio only) Command to launch the MCP server process |
+| `args` | list | `[]` | (stdio only) Command arguments |
+| `url` | string | --- | (SSE only) Server-Sent Events endpoint URL |
+| `env` | map | `{}` | (stdio only) Environment variables for the process; supports `${VAR}` expansion |
+| `timeout` | float | `30.0` | Connection timeout in seconds |
+| `tools_include` | list | `[]` | Fnmatch patterns for tools to include (empty = include all) |
+| `tools_exclude` | list | `[]` | Fnmatch patterns for tools to exclude |
+
+### mcp_tool_warning_threshold
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `mcp_tool_warning_threshold` | integer | `40` | Emit a warning when total MCP tools across all servers exceed this threshold (0 = disabled) |
 
 ### safety
 

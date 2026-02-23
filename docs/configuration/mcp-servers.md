@@ -34,6 +34,8 @@ mcp_servers:
     | `command` | string | Yes | Command to run |
     | `args` | list | No | Command arguments |
     | `env` | map | No | Environment variables for the process |
+    | `tools_include` | list | No | Fnmatch patterns for tools to include (empty = include all) |
+    | `tools_exclude` | list | No | Fnmatch patterns for tools to exclude |
 
 === "SSE"
 
@@ -44,6 +46,38 @@ mcp_servers:
     | `name` | string | Yes | Display name for the server |
     | `transport` | string | Yes | Must be `"sse"` |
     | `url` | string | Yes | SSE endpoint URL |
+    | `tools_include` | list | No | Fnmatch patterns for tools to include (empty = include all) |
+    | `tools_exclude` | list | No | Fnmatch patterns for tools to exclude |
+
+## Tool Filtering
+
+Control which tools from an MCP server are available to the AI using fnmatch patterns:
+
+```yaml
+mcp_servers:
+  - name: "filesystem"
+    transport: "stdio"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem"]
+    tools_include:
+      - "read_*"      # Include only read_* tools
+      - "list_*"
+
+  - name: "database"
+    transport: "stdio"
+    command: "npx"
+    args: ["-y", "@my-org/mcp-database"]
+    tools_exclude:
+      - "*drop*"      # Exclude any tools with 'drop' in the name
+      - "truncate*"
+```
+
+Rules:
+- `tools_include` — allowlist: if specified (non-empty), only matching tools are available
+- `tools_exclude` — blocklist: matching tools are hidden
+- If both are specified, `tools_include` takes precedence
+- Empty or omitted = all tools available
+- Patterns use fnmatch syntax (`*` = any chars, `?` = single char, `[abc]` = character set)
 
 ## Environment Variable Expansion
 

@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     mcp_manager = None
     if config.mcp_servers:
-        mcp_manager = McpManager(config.mcp_servers)
+        mcp_manager = McpManager(config.mcp_servers, tool_warning_threshold=config.mcp_tool_warning_threshold)
         try:
             await mcp_manager.startup()
             tools = mcp_manager.get_all_tools()

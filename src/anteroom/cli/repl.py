@@ -622,7 +622,7 @@ async def run_cli(
         try:
             from ..services.mcp_manager import McpManager
 
-            mcp_manager = McpManager(config.mcp_servers)
+            mcp_manager = McpManager(config.mcp_servers, tool_warning_threshold=config.mcp_tool_warning_threshold)
             server_count = len(config.mcp_servers)
             label = f"Starting {server_count} MCP server{'s' if server_count != 1 else ''}..."
             with renderer.startup_step(label):

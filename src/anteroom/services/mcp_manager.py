@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import ipaddress
 import logging
 import os
@@ -63,7 +64,7 @@ def _validate_command(command: str) -> None:
 
 
 class McpManager:
-    def __init__(self, server_configs: list[McpServerConfig]) -> None:
+    def __init__(self, server_configs: list[McpServerConfig], tool_warning_threshold: int = 40) -> None:
         self._configs: dict[str, McpServerConfig] = {cfg.name: cfg for cfg in server_configs}
         self._exit_stacks: dict[str, AsyncExitStack] = {}
         self._sessions: dict[str, Any] = {}
@@ -71,6 +72,7 @@ class McpManager:
         self._tool_to_server: dict[str, str] = {}
         self._server_status: dict[str, dict[str, Any]] = {}
         self._disabled: set[str] = set()
+        self._tool_warning_threshold = tool_warning_threshold
 
     async def startup(self) -> None:
         if not self._configs:
@@ -99,6 +101,31 @@ class McpManager:
             )
         else:
             logger.info("MCP startup complete: %d/%d connected", len(connected), len(self._configs))
+
+        # Warn if total tool count exceeds threshold
+        total_tools = len(self._tool_to_server)
+        if self._tool_warning_threshold > 0 and total_tools > self._tool_warning_threshold:
+            per_server = []
+            any_filters_active = False
+            for sname in connected:
+                cfg = self._configs.get(sname)
+                has_filter = bool(cfg and (cfg.tools_include or cfg.tools_exclude)) if cfg else False
+                if has_filter:
+                    any_filters_active = True
+                count = sum(1 for t in self._server_tools.get(sname, []) if self._is_tool_allowed(t["name"], sname))
+                per_server.append(f"{sname}: {count}")
+            hint = (
+                "Current filters may not be restrictive enough."
+                if any_filters_active
+                else "Consider adding tools_include/tools_exclude filters to your MCP server config."
+            )
+            logger.warning(
+                "MCP tool count (%d) exceeds threshold (%d). %s Per-server: %s",
+                total_tools,
+                self._tool_warning_threshold,
+                hint,
+                ", ".join(per_server),
+            )
 
     def _describe_config(self, config: McpServerConfig) -> str:
         """Build a human-readable description of a server config for diagnostics."""
@@ -226,17 +253,30 @@ class McpManager:
             self._server_tools[config.name] = server_tools
             self._rebuild_tool_map()
 
-            tool_names = [t["name"] for t in server_tools]
+            total = len(server_tools)
+            allowed_tools = [t for t in server_tools if self._is_tool_allowed(t["name"], config.name)]
+            allowed_count = len(allowed_tools)
+            tool_names = [t["name"] for t in allowed_tools]
             self._server_status[config.name] = {
                 "status": "connected",
-                "tool_count": len(server_tools),
+                "tool_count": allowed_count,
+                "total_tool_count": total,
             }
-            logger.info(
-                "MCP server '%s' connected: %d tools (%s)",
-                config.name,
-                len(server_tools),
-                ", ".join(tool_names[:10]) + ("..." if len(tool_names) > 10 else ""),
-            )
+            if allowed_count < total:
+                logger.info(
+                    "MCP server '%s' connected: %d/%d tools (filtered) (%s)",
+                    config.name,
+                    allowed_count,
+                    total,
+                    ", ".join(tool_names[:10]) + ("..." if len(tool_names) > 10 else ""),
+                )
+            else:
+                logger.info(
+                    "MCP server '%s' connected: %d tools (%s)",
+                    config.name,
+                    total,
+                    ", ".join(tool_names[:10]) + ("..." if len(tool_names) > 10 else ""),
+                )
 
         except BaseException as e:
             # Close the exit stack to clean up any partially-entered async
@@ -280,11 +320,24 @@ class McpManager:
                 "error_message": error_msg,
             }
 
+    def _is_tool_allowed(self, tool_name: str, server_name: str) -> bool:
+        """Check if a tool passes the server's include/exclude filter."""
+        config = self._configs.get(server_name)
+        if not config:
+            return True
+        if config.tools_include:
+            return any(fnmatch.fnmatch(tool_name, pattern) for pattern in config.tools_include)
+        if config.tools_exclude:
+            return not any(fnmatch.fnmatch(tool_name, pattern) for pattern in config.tools_exclude)
+        return True
+
     def _rebuild_tool_map(self) -> None:
         """Rebuild _tool_to_server from _server_tools, warning on collisions."""
         self._tool_to_server.clear()
         for server_name, tools in self._server_tools.items():
             for tool in tools:
+                if not self._is_tool_allowed(tool["name"], server_name):
+                    continue
                 if tool["name"] in self._tool_to_server:
                     logger.warning(
                         "Tool name collision: '%s' from server '%s' shadows existing tool from '%s'",
@@ -352,6 +405,10 @@ class McpManager:
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         server_name = self._tool_to_server.get(tool_name)
         if not server_name or server_name not in self._sessions:
+            # Check if this tool exists but was filtered out
+            for sname, tools in self._server_tools.items():
+                if any(t["name"] == tool_name for t in tools):
+                    raise ValueError(f"MCP tool '{tool_name}' is filtered out by server '{sname}' tool configuration")
             available = list(self._sessions.keys())
             raise ValueError(
                 f"MCP tool '{tool_name}' not available. "
@@ -385,10 +442,12 @@ class McpManager:
         return self._tool_to_server.get(tool_name, "unknown")
 
     def get_all_tools(self) -> list[dict[str, Any]]:
-        """Flatten _server_tools into a single list."""
+        """Flatten _server_tools into a single list, respecting per-server filters."""
         tools: list[dict[str, Any]] = []
-        for server_tools in self._server_tools.values():
-            tools.extend(server_tools)
+        for server_name, server_tools in self._server_tools.items():
+            for tool in server_tools:
+                if self._is_tool_allowed(tool["name"], server_name):
+                    tools.append(tool)
         return tools
 
     def get_server_statuses(self) -> dict[str, dict[str, Any]]:
