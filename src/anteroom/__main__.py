@@ -504,7 +504,9 @@ def main() -> None:
     init_parser = subparsers.add_parser("init", help="Interactive setup wizard for config")
     init_parser.add_argument("--force", action="store_true", help="Overwrite existing config without asking")
     init_parser.add_argument(
-        "--team-config", dest="init_team_config", default=None,
+        "--team-config",
+        dest="init_team_config",
+        default=None,
         help="Bootstrap from a team config file (sets team_config_path and prompts for required keys)",
     )
 
