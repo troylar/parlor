@@ -545,3 +545,80 @@ class TestDebugFlag:
 
         mock_uvicorn.assert_called_once()
         assert mock_uvicorn.call_args.kwargs.get("log_level") == "info"
+
+
+# ---------------------------------------------------------------------------
+# --team-config flag and enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestTeamConfigFlag:
+    def test_team_config_flag_passed_to_load(self) -> None:
+        """--team-config flag must be forwarded to _load_config_or_exit."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+        ):
+            config = _make_config()
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
+            with patch("sys.argv", ["aroom", "--team-config", "/tmp/team.yaml"]):
+                main()
+
+        mock_load.assert_called_once()
+        assert mock_load.call_args.kwargs["team_config_path"] == Path("/tmp/team.yaml")
+
+    def test_approval_mode_suppressed_when_enforced(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--approval-mode must be ignored when safety.approval_mode is enforced."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+        ):
+            config = _make_config()
+            config.safety.approval_mode = "ask"
+            config.safety.allowed_tools = []
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, ["safety.approval_mode"])
+            with patch("sys.argv", ["aroom", "--approval-mode", "auto"]):
+                main()
+
+        # Should NOT have changed to auto
+        assert config.safety.approval_mode == "ask"
+        captured = capsys.readouterr()
+        assert "enforced by team config" in captured.err
+
+    def test_approval_mode_applied_when_not_enforced(self) -> None:
+        """--approval-mode applies normally when not enforced."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+        ):
+            config = _make_config()
+            config.safety.approval_mode = "ask"
+            config.safety.allowed_tools = []
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
+            with patch("sys.argv", ["aroom", "--approval-mode", "auto"]):
+                main()
+
+        assert config.safety.approval_mode == "auto"
+
+    def test_port_suppressed_when_enforced(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--port must be ignored when app.port is enforced."""
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+        ):
+            config = _make_config(port=8080)
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, ["app.port"])
+            with patch("sys.argv", ["aroom", "--port", "9999"]):
+                main()
+
+        assert config.app.port == 8080
+        captured = capsys.readouterr()
+        assert "enforced by team config" in captured.err

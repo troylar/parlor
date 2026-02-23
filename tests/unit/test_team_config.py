@@ -10,6 +10,7 @@ import yaml
 
 from anteroom.services.team_config import (
     _MISSING,
+    _SAFE_DOT_PATH,
     _resolve_dot_path,
     _set_dot_path,
     _walk_up_for_team_config,
@@ -497,3 +498,89 @@ class TestTeamConfigIntegration:
             config, enforced = load_config(config_file)
 
         assert config.ai.base_url == "https://team-env.example.com"
+
+
+# ---------------------------------------------------------------------------
+# Dot-path validation
+# ---------------------------------------------------------------------------
+
+
+class TestDotPathValidation:
+    def test_valid_single_segment(self) -> None:
+        assert _SAFE_DOT_PATH.match("model")
+
+    def test_valid_two_segments(self) -> None:
+        assert _SAFE_DOT_PATH.match("ai.base_url")
+
+    def test_valid_four_segments(self) -> None:
+        assert _SAFE_DOT_PATH.match("a.b.c.d")
+
+    def test_rejects_five_segments(self) -> None:
+        assert not _SAFE_DOT_PATH.match("a.b.c.d.e")
+
+    def test_rejects_uppercase(self) -> None:
+        assert not _SAFE_DOT_PATH.match("AI.base_url")
+
+    def test_rejects_special_chars(self) -> None:
+        assert not _SAFE_DOT_PATH.match("ai.base-url")
+        assert not _SAFE_DOT_PATH.match("ai.base url")
+        assert not _SAFE_DOT_PATH.match("ai.base/url")
+
+    def test_rejects_empty(self) -> None:
+        assert not _SAFE_DOT_PATH.match("")
+
+    def test_rejects_leading_dot(self) -> None:
+        assert not _SAFE_DOT_PATH.match(".ai.model")
+
+    def test_load_filters_invalid_enforce_paths(self, tmp_path: Path) -> None:
+        team_file = tmp_path / "team.yaml"
+        _write_yaml(
+            team_file,
+            {
+                "ai": {"base_url": "https://team.example.com"},
+                "enforce": ["ai.base_url", "INVALID.PATH", "a.b.c.d.e.f", "valid_key"],
+            },
+        )
+
+        with patch("anteroom.services.trust.check_trust", return_value="trusted"):
+            raw, enforced = load_team_config(team_file, tmp_path)
+
+        assert enforced == ["ai.base_url", "valid_key"]
+
+    def test_apply_enforcement_skips_invalid_path(self) -> None:
+        team_raw = {"ai": {"base_url": "team"}}
+        merged = {"ai": {"base_url": "personal"}}
+        # Inject an invalid path that bypassed load-time validation
+        result = apply_enforcement(merged, team_raw, ["INVALID"])
+        assert result["ai"]["base_url"] == "personal"
+
+
+# ---------------------------------------------------------------------------
+# Walk-up depth cap
+# ---------------------------------------------------------------------------
+
+
+class TestWalkUpDepthCap:
+    def test_stops_at_home_directory(self, tmp_path: Path) -> None:
+        # Place a team config above $HOME — it should NOT be found
+        with patch("anteroom.services.team_config.Path.home", return_value=tmp_path / "home"):
+            child = tmp_path / "home" / "project"
+            child.mkdir(parents=True)
+            # Place config at tmp_path (above "home")
+            team_file = tmp_path / "anteroom.team.yaml"
+            _write_yaml(team_file, {"ai": {"model": "gpt-4"}})
+
+            result = _walk_up_for_team_config(child)
+            assert result is None
+
+    def test_finds_config_at_home(self, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        team_file = home / "anteroom.team.yaml"
+        _write_yaml(team_file, {"ai": {"model": "gpt-4"}})
+
+        with patch("anteroom.services.team_config.Path.home", return_value=home):
+            child = home / "project"
+            child.mkdir()
+            result = _walk_up_for_team_config(child)
+            assert result == team_file

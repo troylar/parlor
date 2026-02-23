@@ -15,12 +15,17 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+# Enforce dot-path validation: only lowercase identifiers separated by dots, max 4 segments.
+_SAFE_DOT_PATH = re.compile(r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*){0,3}$")
+_MAX_ENFORCE_DEPTH = 4
 
 _TEAM_DIR_FILENAME = ".anteroom/team.yaml"
 _TEAM_FLAT_FILENAME = "anteroom.team.yaml"
@@ -48,16 +53,22 @@ def discover_team_config(
     # 2. Environment variable
     if env_path:
         p = Path(env_path).expanduser().resolve()
-        if p.is_file():
-            return p
+        try:
+            if p.is_file():
+                return p
+        except OSError:
+            pass
         logger.warning("Team config path from AI_CHAT_TEAM_CONFIG does not exist: %s", p)
         return None
 
     # 3. Personal config field
     if personal_path:
         p = Path(personal_path).expanduser().resolve()
-        if p.is_file():
-            return p
+        try:
+            if p.is_file():
+                return p
+        except OSError:
+            pass
         logger.warning("Team config path from personal config does not exist: %s", p)
         return None
 
@@ -75,6 +86,7 @@ def _walk_up_for_team_config(start: str | Path | None = None) -> Path | None:
     Returns the first match or None.
     """
     current = Path(start or os.getcwd()).resolve()
+    home = Path.home().resolve()
     while True:
         for relative in (_TEAM_DIR_FILENAME, _TEAM_FLAT_FILENAME):
             candidate = current / relative
@@ -83,6 +95,9 @@ def _walk_up_for_team_config(start: str | Path | None = None) -> Path | None:
                     return candidate
             except OSError:
                 continue
+        # Stop at home directory — don't walk above it.
+        if current == home:
+            break
         parent = current.parent
         if parent == current:
             break
@@ -160,7 +175,15 @@ def load_team_config(
         enforce = []
     enforce = [str(e) for e in enforce if isinstance(e, str)]
 
-    return raw, enforce
+    # Validate enforce dot-paths: reject anything that doesn't match safe pattern.
+    valid_enforce: list[str] = []
+    for dp in enforce:
+        if not _SAFE_DOT_PATH.match(dp):
+            logger.warning("Ignoring invalid enforce dot-path in team config: %r", dp)
+            continue
+        valid_enforce.append(dp)
+
+    return raw, valid_enforce
 
 
 def _prompt_trust(path: Path, *, is_changed: bool) -> bool:
@@ -253,6 +276,9 @@ def apply_enforcement(
     Returns the modified *raw* dict (also modifies in place).
     """
     for dot_path in enforced_fields:
+        if not _SAFE_DOT_PATH.match(dot_path):
+            logger.warning("Skipping invalid enforce dot-path: %r", dot_path)
+            continue
         team_val = _resolve_dot_path(team_raw, dot_path)
         if isinstance(team_val, _MissingSentinel):
             logger.warning("Enforced field '%s' not found in team config; skipping", dot_path)
