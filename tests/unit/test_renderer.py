@@ -2836,3 +2836,31 @@ class TestPlanChecklistWithThinking:
         await stop_thinking()
         # Plan written lines should be reset
         assert r._plan_written_lines == 0
+
+    def test_stop_thinking_sync_clears_plan_block(self) -> None:
+        """stop_thinking_sync() clears the plan block and resets written lines."""
+        import anteroom.cli.renderer as r
+
+        start_plan(["A", "B"])
+        r._thinking_start = time.monotonic()
+        r._plan_written_lines = 3  # header + 2 steps
+        r._thinking_ticker_task = None
+        r._spinner = None
+        r._stdout = io.StringIO()
+        stop_thinking_sync()
+        assert r._plan_written_lines == 0
+
+    def test_update_plan_step_triggers_redraw(self) -> None:
+        """update_plan_step() redraws the block when thinking is active."""
+        import anteroom.cli.renderer as r
+
+        start_plan(["First", "Second"])
+        r._thinking_start = time.monotonic()
+        r._plan_written_lines = 3  # simulate block on screen
+        r._stdout = io.StringIO()
+        update_plan_step(0, "complete")
+        output = r._stdout.getvalue()
+        # Should contain cursor-up and plan content
+        assert "\033[3A" in output
+        assert "First" in output
+        assert "\u2713" in output  # checkmark for complete
