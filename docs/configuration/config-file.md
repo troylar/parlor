@@ -40,6 +40,10 @@ cli:
   tool_output_max_chars: 2000      # Max chars per tool result before truncation (default: 2000, clamped 100+)
   file_reference_max_chars: 100000 # Max chars from @file references (default: 100000, clamped 1000+)
   model_context_window: 128000     # Model context window size for usage bar (default: 128000, clamped 1000+)
+  usage:
+    week_days: 7                   # Days for "this week" rolling window (default: 7)
+    month_days: 30                 # Days for "this month" rolling window (default: 30)
+    model_costs: {}                # Per-model costs: {model: {input: rate, output: rate}} (default: empty)
 
 identity:
   user_id: "auto-generated-uuid"
@@ -238,6 +242,31 @@ Controls vector embeddings for semantic search. Requires an OpenAI-compatible em
 | `base_url` | string | `""` | Embedding API endpoint (falls back to `ai.base_url` if empty) |
 | `api_key` | string | `""` | API key for the embedding endpoint |
 | `api_key_command` | string | `""` | External command to obtain the embedding API key dynamically |
+
+### usage
+
+Controls token usage tracking and cost estimation for the CLI. All fields are optional with sensible defaults.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `week_days` | integer | `7` | Number of days to include in "this week" rolling window |
+| `month_days` | integer | `30` | Number of days to include in "this month" rolling window |
+| `model_costs` | dict | `{}` | Model pricing for cost estimation, keyed by model name with `input` and `output` rates (per-million-token) |
+
+Example with cost estimation:
+
+```yaml
+cli:
+  usage:
+    week_days: 7
+    month_days: 30
+    model_costs:
+      gpt-4o: { input: 0.003, output: 0.006 }
+      gpt-4-turbo: { input: 0.01, output: 0.03 }
+      claude-3-sonnet: { input: 0.003, output: 0.015 }
+```
+
+The `/usage` command displays token counts and estimated costs across multiple time periods. Without `model_costs` configured, only token counts are shown.
 
 ## API Key Command
 

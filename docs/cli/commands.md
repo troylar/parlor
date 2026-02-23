@@ -20,6 +20,7 @@ All slash commands available in the CLI REPL.
 | `/skills` | List available skills with descriptions and source |
 | `/mcp` | Show MCP server status |
 | `/mcp status <name>` | Detailed diagnostics for one server |
+| `/usage` | Show token usage statistics (today, this week, this month, all time) |
 | `/verbose` | Cycle verbosity: compact > detailed > verbose |
 | `/detail` | Replay last turn's tool calls with full output |
 | `/help` | Show all commands, input syntax, and keyboard shortcuts |
@@ -123,6 +124,45 @@ You can also set the model from the command line:
 ```bash
 aroom chat --model gpt-4-turbo
 aroom chat --model gpt-4o "explain this code"
+```
+
+## Usage Tracking
+
+### /usage
+
+Show token usage and estimated costs across multiple time periods:
+
+```
+you> /usage
+  Today:
+    Prompt tokens: 5,420 | Completion tokens: 2,150 | Total: 7,570
+    Messages: 12 | Estimated cost: $0.0234
+    By model:
+      gpt-4o: 7,570 tokens ($0.0234)
+
+  This week:
+    Prompt tokens: 42,100 | Completion tokens: 18,900 | Total: 61,000
+    Messages: 89 | Estimated cost: $0.1847
+
+  This month:
+    Prompt tokens: 185,400 | Completion tokens: 92,300 | Total: 277,700
+    Messages: 342 | Estimated cost: $0.8421
+
+  All time:
+    Prompt tokens: 890,250 | Completion tokens: 456,800 | Total: 1,347,050
+    Messages: 1,523 | Estimated cost: $4.0782
+```
+
+Token counts are automatically tracked for each message. Cost estimation requires configuring model costs in `~/.anteroom/config.yaml`:
+
+```yaml
+cli:
+  usage:
+    model_costs:
+      gpt-4o: { input: 0.003, output: 0.006 }       # per-million-token rates
+      gpt-4-turbo: { input: 0.01, output: 0.03 }
+    week_days: 7      # Days for "this week" rolling window (default: 7)
+    month_days: 30    # Days for "this month" rolling window (default: 30)
 ```
 
 ## Display Modes

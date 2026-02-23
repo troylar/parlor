@@ -23,6 +23,7 @@ http://127.0.0.1:8080/api
 | [Messages](messages.md) | Edit, delete, attachments |
 | [Projects](projects.md) | Projects, folders, tags |
 | [Config](config.md) | Configuration, models, databases, MCP tools |
+| [Usage](usage.md) | Token usage statistics and cost estimation |
 | Canvas | Create, read, update, and delete canvas panels |
 | Approvals | Respond to tool safety approval requests (`POST /api/approvals/{id}/respond`) |
 | Search | Semantic search (`/api/search/semantic`) and hybrid FTS5+vector search (`/api/search/hybrid`) |
