@@ -266,8 +266,58 @@ def _write_config(config_data: dict[str, Any], config_path: Path) -> None:
     config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
-def run_init_wizard(force: bool = False) -> bool:
-    """Main setup wizard. Returns True if config was written successfully."""
+def bootstrap_team_config(
+    team_config_path: str,
+    config_data: dict[str, Any],
+    config_path: Path,
+) -> bool:
+    """Bootstrap personal config from a team config file.
+
+    Trusts the team config, saves ``team_config_path`` in *config_data*,
+    and prompts for any required keys declared by the team config.
+    Returns True if the team config was linked successfully.
+    """
+    team_path = Path(team_config_path).resolve()
+    if not team_path.exists():
+        console.print(f"  [red]Team config not found: {team_path}[/]")
+        return False
+
+    config_data["team_config_path"] = str(team_path)
+    console.print(f"\n[{GOLD}]Team Configuration[/]")
+    console.print(f"  [{SLATE}]Linking team config: {team_path}[/]")
+
+    # Trust the team config
+    from ..services.trust import compute_content_hash, save_trust_decision
+
+    team_content = team_path.read_text(encoding="utf-8")
+    team_hash = compute_content_hash(team_content)
+    data_dir = config_path.parent
+    save_trust_decision(str(team_path), team_hash, recursive=False, data_dir=data_dir)
+    console.print(f"  [{SLATE}]Trusted team config (SHA-256 verified)[/]")
+
+    # Check for required keys in team config
+    team_raw = yaml.safe_load(team_content)
+    if isinstance(team_raw, dict):
+        required_entries = team_raw.get("required", [])
+        valid_required = [e for e in required_entries if isinstance(e, dict) and e.get("path")]
+        if valid_required:
+            from ..services.required_keys import check_required_keys, prompt_for_missing_keys
+
+            missing = check_required_keys(valid_required, config_data)
+            if missing:
+                console.print(f"\n  [{GOLD}]The team config requires {len(missing)} additional value(s):[/]")
+                prompt_for_missing_keys(missing, config_path)
+
+    return True
+
+
+def run_init_wizard(force: bool = False, team_config_path: str | None = None) -> bool:
+    """Main setup wizard. Returns True if config was written successfully.
+
+    If *team_config_path* is provided the wizard bootstraps from the team
+    config: it saves ``team_config_path`` in the personal config, trusts the
+    team file, and prompts for any ``required`` keys declared by the team.
+    """
     from ..config import _get_config_path
 
     if not _is_interactive():
@@ -383,6 +433,10 @@ def run_init_wizard(force: bool = False) -> bool:
         if not Confirm.ask(f"[{SLATE}]Write configuration?[/]", default=True):
             console.print("Setup cancelled.")
             return False
+
+        # Team config bootstrap
+        if team_config_path:
+            bootstrap_team_config(team_config_path, config_data, config_path)
 
         _write_config(config_data, config_path)
 

@@ -394,6 +394,20 @@ class ProxyConfig:
 
 
 @dataclass
+class ReferencesConfig:
+    """Paths to external instruction, rule, and skill files.
+
+    All paths are resolved relative to the config file that declares them.
+    Team and project configs can use this to share instructions, rules,
+    and skills across the team or per project.
+    """
+
+    instructions: list[str] = field(default_factory=list)
+    rules: list[str] = field(default_factory=list)
+    skills: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
@@ -402,6 +416,7 @@ class AppConfig:
     shared_databases: list[SharedDatabaseConfig] = field(default_factory=list)
     cli: CliConfig = field(default_factory=CliConfig)
     identity: UserIdentity | None = None
+    references: ReferencesConfig = field(default_factory=ReferencesConfig)
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
@@ -428,12 +443,18 @@ def load_config(
     config_path: Path | None = None,
     *,
     team_config_path: Path | None = None,
+    project_config_path: Path | None = None,
+    working_dir: str | None = None,
     interactive: bool = False,
 ) -> tuple[AppConfig, list[str]]:
-    """Load configuration with optional team config layer.
+    """Load configuration with optional team and project config layers.
 
     Returns ``(AppConfig, enforced_fields)`` where *enforced_fields* is
     the list of dot-paths from the team config's ``enforce`` section.
+
+    Layer precedence (highest wins):
+      env vars > project config > personal config > team config > defaults
+    Enforced team fields override everything.
     """
     raw: dict[str, Any] = {}
     path = config_path or _get_config_path()
@@ -441,6 +462,17 @@ def load_config(
     if path.exists():
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
+
+    # Validate raw config before parsing into dataclasses
+    from .services.config_validator import validate_config
+
+    validation = validate_config(raw)
+    if not validation.is_valid:
+        raise ValueError(f"Invalid configuration in {path}:\n{validation.format_errors()}")
+    if validation.has_warnings:
+        for w in validation.errors:
+            if w.severity == "warning":
+                logger.warning("Config %s: %s — %s", path, w.path, w.message)
 
     # --- Team config layer ---------------------------------------------------
     team_raw: dict[str, Any] = {}
@@ -461,6 +493,23 @@ def load_config(
             raw = deep_merge(team_raw, raw)
             # Re-apply enforced fields so personal values can't override them
             raw = apply_enforcement(raw, team_raw, enforced_fields)
+
+    # --- Project config layer ------------------------------------------------
+    from .services.project_config import discover_project_config, load_project_config
+
+    # Only auto-discover project config when working_dir is explicitly set
+    # (prevents accidentally loading configs from the test runner's cwd)
+    proj_path = project_config_path
+    if not proj_path and working_dir:
+        proj_path = discover_project_config(working_dir)
+    if proj_path:
+        data_dir_for_trust = path.parent if path.exists() else None
+        proj_raw, _required_keys = load_project_config(proj_path, data_dir_for_trust, interactive=interactive)
+        if proj_raw:
+            raw = deep_merge(raw, proj_raw)
+            # Re-apply enforced fields so project config can't override them
+            if enforced_fields and team_raw:
+                raw = apply_enforcement(raw, team_raw, enforced_fields)
 
     ai_raw = raw.get("ai", {})
     base_url = ai_raw.get("base_url") or os.environ.get("AI_CHAT_BASE_URL", "")
@@ -912,6 +961,16 @@ def load_config(
         allowed_origins=proxy_origins,
     )
 
+    # References (instructions, rules, skills from team/project configs)
+    refs_raw = raw.get("references", {})
+    if not isinstance(refs_raw, dict):
+        refs_raw = {}
+    refs_config = ReferencesConfig(
+        instructions=[str(p) for p in refs_raw.get("instructions", []) if isinstance(p, str) and p],
+        rules=[str(p) for p in refs_raw.get("rules", []) if isinstance(p, str) and p],
+        skills=[str(p) for p in refs_raw.get("skills", []) if isinstance(p, str) and p],
+    )
+
     return (
         AppConfig(
             ai=ai,
@@ -924,6 +983,7 @@ def load_config(
             embeddings=embeddings_config,
             safety=safety_config,
             proxy=proxy_config,
+            references=refs_config,
         ),
         enforced_fields,
     )

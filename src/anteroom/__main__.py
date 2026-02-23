@@ -20,11 +20,11 @@ from . import __version__
 from .config import _get_config_path, load_config
 
 
-def _run_init(force: bool = False) -> None:
+def _run_init(force: bool = False, team_config: str | None = None) -> None:
     """Interactive setup wizard for ~/.anteroom/config.yaml."""
     from .cli.setup import run_init_wizard
 
-    run_init_wizard(force=force)
+    run_init_wizard(force=force, team_config_path=team_config)
 
 
 def _load_config_or_exit(
@@ -503,6 +503,10 @@ def main() -> None:
     # `aroom init` subcommand
     init_parser = subparsers.add_parser("init", help="Interactive setup wizard for config")
     init_parser.add_argument("--force", action="store_true", help="Overwrite existing config without asking")
+    init_parser.add_argument(
+        "--team-config", dest="init_team_config", default=None,
+        help="Bootstrap from a team config file (sets team_config_path and prompts for required keys)",
+    )
 
     # `aroom config` subcommand
     subparsers.add_parser("config", help="View and edit configuration")
@@ -660,7 +664,10 @@ def main() -> None:
     )
 
     if args.command == "init":
-        _run_init(force=getattr(args, "force", False))
+        _run_init(
+            force=getattr(args, "force", False),
+            team_config=getattr(args, "init_team_config", None),
+        )
         return
 
     if args.command == "config":
