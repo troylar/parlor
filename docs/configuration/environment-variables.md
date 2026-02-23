@@ -23,6 +23,7 @@ Every AI config option has an environment variable override with the `AI_CHAT_` 
 | `AI_CHAT_PRIVATE_KEY` | --- | Override user private key (PEM) |
 | `AI_CHAT_SAFETY_ENABLED` | `true` | Enable/disable the tool safety gate |
 | `AI_CHAT_SAFETY_APPROVAL_MODE` | `ask_for_writes` | Approval mode: `auto`, `ask_for_dangerous`, `ask_for_writes`, `ask` |
+| `AI_CHAT_LOG_LEVEL` | `WARNING` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Overridden by `--debug` flag |
 
 ## Usage
 

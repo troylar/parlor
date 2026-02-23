@@ -195,6 +195,22 @@ aroom --approval-mode auto chat            # Works with subcommands
 aroom --approval-mode auto exec "task"     # Works with exec
 ```
 
+#### --debug
+
+Enable debug logging to stderr. Useful for troubleshooting MCP server connections, tool routing, and session lifecycle:
+
+```bash
+aroom --debug chat                        # Debug logs while chatting
+aroom --debug                             # Debug logs for web UI + uvicorn
+AI_CHAT_LOG_LEVEL=DEBUG aroom chat        # Same via env var
+AI_CHAT_LOG_LEVEL=INFO aroom              # Less verbose
+aroom --debug chat 2>debug.log            # Redirect logs to file
+```
+
+Priority: `--debug` flag > `AI_CHAT_LOG_LEVEL` env var > default (WARNING).
+
+Valid `AI_CHAT_LOG_LEVEL` values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+
 #### --allowed-tools
 
 Pre-allow specific tools to skip approval prompts for this session:
