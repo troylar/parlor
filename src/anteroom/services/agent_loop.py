@@ -362,8 +362,11 @@ async def run_agent_loop(
                     data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": status},
                 )
                 # Strip internal metadata before sending to the LLM
+                # _approval_decision: safety gate audit field
+                # _old_content/_new_content: large strings for diff rendering only
+                internal_keys = {"_approval_decision", "_old_content", "_new_content"}
                 if isinstance(result, dict):
-                    llm_result = {k: v for k, v in result.items() if k != "_approval_decision"}
+                    llm_result = {k: v for k, v in result.items() if k not in internal_keys}
                 else:
                     llm_result = result
                 messages.append(

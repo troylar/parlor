@@ -15,10 +15,12 @@ from anteroom.cli.renderer import (
     _dedup_key_from_summary,
     _flush_dedup,
     _format_tokens,
+    _has_diff_data,
     _humanize_tool,
     _output_summary,
     _phase_elapsed_str,
     _phase_suffix,
+    _render_inline_diff,
     _short_path,
     _write_thinking_line,
     clear_turn_history,
@@ -458,6 +460,157 @@ class TestToolCallDimming:
             render_tool_call_end("bash", "success", {"stdout": "file.txt"})
             printed = str(mock_console.print.call_args_list)
             assert r.MUTED not in printed
+
+
+class TestInlineDiff:
+    """Tests for #281: Claude Code-style inline diff rendering."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        set_verbosity(Verbosity.COMPACT)
+        r._dedup_key = ""
+        r._dedup_count = 0
+        r._dedup_first_summary = ""
+        r._dedup_summary = ""
+        r._tool_batch_active = False
+        r._current_turn_tools.clear()
+        r._tool_dedup_enabled = True
+
+    def _set_tool_start(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._tool_start = time.monotonic()
+
+    def test_has_diff_data_true_for_write_file(self) -> None:
+        assert _has_diff_data("write_file", {"_new_content": "hello"})
+
+    def test_has_diff_data_true_for_edit_file(self) -> None:
+        assert _has_diff_data("edit_file", {"_old_content": "a", "_new_content": "b"})
+
+    def test_has_diff_data_false_for_bash(self) -> None:
+        assert not _has_diff_data("bash", {"stdout": "hello"})
+
+    def test_has_diff_data_false_for_no_content(self) -> None:
+        assert not _has_diff_data("write_file", {"status": "ok"})
+
+    def test_has_diff_data_false_for_non_dict(self) -> None:
+        assert not _has_diff_data("write_file", "string output")
+
+    def test_render_inline_diff_created(self) -> None:
+        output = {
+            "status": "ok",
+            "path": "/tmp/new_file.py",
+            "action": "created",
+            "lines": 10,
+            "_new_content": "line1\nline2\n",
+        }
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            _render_inline_diff("write_file", output)
+            printed = str(mock_console.print.call_args_list)
+            assert "Write(" in printed
+            assert "Created" in printed
+            assert "10 lines" in printed
+
+    def test_render_inline_diff_edit(self) -> None:
+        output = {
+            "status": "ok",
+            "path": "/tmp/test.py",
+            "_old_content": "line1\nline2\nline3\n",
+            "_new_content": "line1\nmodified\nline3\nnew_line\n",
+        }
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            _render_inline_diff("edit_file", output)
+            printed = str(mock_console.print.call_args_list)
+            assert "Update(" in printed
+            assert "Added" in printed
+            assert "removed" in printed
+
+    def test_render_inline_diff_write_update(self) -> None:
+        output = {
+            "status": "ok",
+            "path": "/tmp/test.py",
+            "action": "updated",
+            "_old_content": "old\n",
+            "_new_content": "new\n",
+        }
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            _render_inline_diff("write_file", output)
+            printed = str(mock_console.print.call_args_list)
+            assert "Write(" in printed
+
+    def test_render_tool_call_end_uses_inline_diff(self) -> None:
+        import anteroom.cli.renderer as r
+
+        self._set_tool_start()
+        r._current_turn_tools.append(
+            {
+                "tool_name": "edit_file",
+                "arguments": {"path": "test.py", "old_text": "a", "new_text": "b"},
+                "summary": "Editing test.py",
+                "status": "running",
+                "output": None,
+            }
+        )
+        output = {
+            "status": "ok",
+            "path": "/tmp/test.py",
+            "_old_content": "aaa\n",
+            "_new_content": "baa\n",
+            "lines_before": 1,
+            "lines_after": 1,
+        }
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_tool_call_end("edit_file", "success", output)
+            printed = str(mock_console.print.call_args_list)
+            # Should use inline diff, not the default muted summary
+            assert "Update(" in printed
+
+    def test_render_tool_call_end_error_no_diff(self) -> None:
+        """Errors should not trigger inline diff even with diff data."""
+        import anteroom.cli.renderer as r
+
+        self._set_tool_start()
+        r._current_turn_tools.append(
+            {
+                "tool_name": "edit_file",
+                "arguments": {"path": "test.py", "old_text": "a", "new_text": "b"},
+                "summary": "Editing test.py",
+                "status": "running",
+                "output": None,
+            }
+        )
+        output = {"error": "file not found"}
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_tool_call_end("edit_file", "error", output)
+            printed = str(mock_console.print.call_args_list)
+            assert "Update(" not in printed
+            assert "file not found" in printed
+
+    def test_inline_diff_resets_dedup(self) -> None:
+        """Inline diff should reset dedup state so next tool isn't collapsed."""
+        import anteroom.cli.renderer as r
+
+        self._set_tool_start()
+        r._current_turn_tools.append(
+            {
+                "tool_name": "edit_file",
+                "arguments": {"path": "a.py", "old_text": "x", "new_text": "y"},
+                "summary": "Editing a.py",
+                "status": "running",
+                "output": None,
+            }
+        )
+        output = {
+            "status": "ok",
+            "path": "/tmp/a.py",
+            "_old_content": "x\n",
+            "_new_content": "y\n",
+        }
+        with patch("anteroom.cli.renderer.console"):
+            render_tool_call_end("edit_file", "success", output)
+        assert r._dedup_key == ""
+        assert r._dedup_count == 0
 
 
 class TestToolBatchSpacing:

@@ -746,6 +746,153 @@ def render_newline() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Inline diff rendering (Claude Code-style)
+# ---------------------------------------------------------------------------
+
+_DIFF_CONTEXT_LINES = 3  # lines of context around each change
+_DIFF_RED_BG = "on #3d1418"  # dark red background for removed lines
+_DIFF_GREEN_BG = "on #132a13"  # dark green background for added lines
+_DIFF_LINE_NO = "#6b7280"  # dim line numbers
+
+
+def _render_inline_diff(tool_name: str, output: dict[str, Any]) -> None:
+    """Render Claude Code-style color-coded inline diff for file changes.
+
+    Requires ``_old_content`` and/or ``_new_content`` keys in the output dict.
+    """
+    import difflib
+
+    old_content: str | None = output.get("_old_content")
+    new_content: str | None = output.get("_new_content")
+    file_path = output.get("path", "")
+    short = _short_path(file_path) if file_path else tool_name
+
+    # Determine action label
+    action = output.get("action", "")
+    if action == "created":
+        lines = output.get("lines", 0)
+        header_text = Text()
+        header_text.append("  ● ", style="green")
+        header_text.append(f"Write({short})", style="bold")
+        console.print(header_text)
+        summary_text = Text()
+        summary_text.append(f"  └ Created, {lines} lines", style=MUTED)
+        console.print(summary_text)
+        return
+
+    if old_content is None or new_content is None:
+        return
+
+    # Compute diff
+    old_lines = old_content.splitlines(keepends=True)
+    new_lines = new_content.splitlines(keepends=True)
+
+    # Ensure trailing newline for clean diffing
+    if old_lines and not old_lines[-1].endswith("\n"):
+        old_lines[-1] += "\n"
+    if new_lines and not new_lines[-1].endswith("\n"):
+        new_lines[-1] += "\n"
+
+    diff = list(difflib.unified_diff(old_lines, new_lines, lineterm=""))
+    if len(diff) < 3:
+        return  # no changes
+
+    # Count added/removed
+    added = sum(1 for line in diff[2:] if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in diff[2:] if line.startswith("-") and not line.startswith("---"))
+
+    # Header
+    label = "Update" if tool_name.lower() in ("edit_file", "file_edit") else "Write"
+    header_text = Text()
+    header_text.append("  ● ", style="green")
+    header_text.append(f"{label}({short})", style="bold")
+    console.print(header_text)
+
+    summary_text = Text()
+    summary_text.append("  └ ", style=MUTED)
+    summary_text.append(f"Added {added} lines", style="green") if added else None
+    if added and removed:
+        summary_text.append(", ", style=MUTED)
+    summary_text.append(f"removed {removed} lines", style="red") if removed else None
+    if not added and not removed:
+        summary_text.append("no line changes", style=MUTED)
+    console.print(summary_text)
+
+    # Parse hunks from unified diff and render with context collapsing
+    _render_diff_hunks(diff, old_lines, new_lines)
+
+
+def _render_diff_hunks(diff: list[str], old_lines: list[str], new_lines: list[str]) -> None:
+    """Parse unified diff output and render color-coded hunks with line numbers."""
+    import re
+
+    hunk_header_re = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+    hunks: list[tuple[int, int, list[tuple[str, str]]]] = []  # (old_start, new_start, lines)
+
+    current_hunk: list[tuple[str, str]] = []
+    old_start = new_start = 0
+
+    for line in diff[2:]:  # skip --- and +++ headers
+        m = hunk_header_re.match(line)
+        if m:
+            if current_hunk:
+                hunks.append((old_start, new_start, current_hunk))
+            old_start = int(m.group(1))
+            new_start = int(m.group(2))
+            current_hunk = []
+        elif line.startswith("+"):
+            current_hunk.append(("+", line[1:]))
+        elif line.startswith("-"):
+            current_hunk.append(("-", line[1:]))
+        elif line.startswith(" "):
+            current_hunk.append((" ", line[1:]))
+    if current_hunk:
+        hunks.append((old_start, new_start, current_hunk))
+
+    for i, (old_start, new_start, hunk_lines) in enumerate(hunks):
+        if i > 0:
+            console.print(f"    [{MUTED}]...[/{MUTED}]")
+
+        old_num = old_start
+        new_num = new_start
+        for tag, content in hunk_lines:
+            # Truncate long lines for display
+            display = content.rstrip("\n")
+            if len(display) > 120:
+                display = display[:117] + "..."
+
+            if tag == "-":
+                line_text = Text()
+                line_text.append(f"    {old_num:>4} ", style=_DIFF_LINE_NO)
+                line_text.append(f" {display} ", style=_DIFF_RED_BG)
+                console.print(line_text)
+                old_num += 1
+            elif tag == "+":
+                line_text = Text()
+                line_text.append(f"    {new_num:>4} ", style=_DIFF_LINE_NO)
+                line_text.append(f" {display} ", style=_DIFF_GREEN_BG)
+                console.print(line_text)
+                new_num += 1
+            else:
+                line_text = Text()
+                line_text.append(f"    {new_num:>4} ", style=_DIFF_LINE_NO)
+                line_text.append(f" {display}", style=MUTED)
+                console.print(line_text)
+                old_num += 1
+                new_num += 1
+
+
+def _has_diff_data(tool_name: str, output: Any) -> bool:
+    """Check if tool output contains diff rendering data."""
+    if not isinstance(output, dict):
+        return False
+    name = tool_name.lower()
+    if name not in ("write_file", "file_write", "edit_file", "file_edit"):
+        return False
+    return "_new_content" in output or "_old_content" in output
+
+
+# ---------------------------------------------------------------------------
 # Tool call rendering (verbosity-aware)
 # ---------------------------------------------------------------------------
 
@@ -834,6 +981,14 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
 
     # Different tool type or first occurrence — flush previous dedup, print new line
     _flush_dedup()
+
+    # Inline diff for file-modifying tools (all verbosity levels)
+    if status == "success" and _has_diff_data(tool_name, output):
+        _render_inline_diff(tool_name, output)
+        _dedup_key = ""
+        _dedup_count = 0
+        _dedup_summary = ""
+        return
 
     if status != "success":
         console.print(f"{status_icon} {escape(summary)}{elapsed_str}")

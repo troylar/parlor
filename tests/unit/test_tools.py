@@ -863,6 +863,121 @@ class TestEditFileTool:
             os.unlink(path)
 
 
+class TestWriteFileToolDiffData:
+    """Tests for #281: write_file returns diff data for inline rendering."""
+
+    @pytest.mark.asyncio
+    async def test_write_new_file_returns_created(self) -> None:
+        from anteroom.tools import write
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write.set_working_dir(tmpdir)
+            path = os.path.join(tmpdir, "new_file.txt")
+            result = await write.handle(path=path, content="line1\nline2\nline3\n")
+            assert result["action"] == "created"
+            assert result["lines"] == 3
+            assert "_old_content" not in result
+            assert result["_new_content"] == "line1\nline2\nline3\n"
+
+    @pytest.mark.asyncio
+    async def test_write_existing_file_returns_updated(self) -> None:
+        from anteroom.tools import write
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write.set_working_dir(tmpdir)
+            path = os.path.join(tmpdir, "existing.txt")
+            Path(path).write_text("old content\n")
+            result = await write.handle(path=path, content="new content\n")
+            assert result["action"] == "updated"
+            assert result["_old_content"] == "old content\n"
+            assert result["_new_content"] == "new content\n"
+
+    @pytest.mark.asyncio
+    async def test_write_single_line_no_trailing_newline(self) -> None:
+        from anteroom.tools import write
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write.set_working_dir(tmpdir)
+            path = os.path.join(tmpdir, "single.txt")
+            result = await write.handle(path=path, content="hello")
+            assert result["lines"] == 1
+
+    @pytest.mark.asyncio
+    async def test_write_preserves_existing_fields(self) -> None:
+        from anteroom.tools import write
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write.set_working_dir(tmpdir)
+            path = os.path.join(tmpdir, "test.txt")
+            result = await write.handle(path=path, content="abc")
+            assert result["status"] == "ok"
+            assert os.path.realpath(result["path"]) == os.path.realpath(path)
+            assert "bytes_written" in result
+
+
+class TestEditFileToolDiffData:
+    """Tests for #281: edit_file returns diff data for inline rendering."""
+
+    @pytest.mark.asyncio
+    async def test_edit_returns_path(self) -> None:
+        from anteroom.tools import edit
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("hello world")
+            path = f.name
+        try:
+            edit.set_working_dir(os.path.dirname(path))
+            result = await edit.handle(path=path, old_text="hello", new_text="goodbye")
+            assert os.path.realpath(result["path"]) == os.path.realpath(path)
+        finally:
+            os.unlink(path)
+
+    @pytest.mark.asyncio
+    async def test_edit_returns_line_counts(self) -> None:
+        from anteroom.tools import edit
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("line1\nline2\nline3\n")
+            path = f.name
+        try:
+            edit.set_working_dir(os.path.dirname(path))
+            result = await edit.handle(path=path, old_text="line2", new_text="line2a\nline2b")
+            assert result["lines_before"] == 3
+            assert result["lines_after"] == 4
+        finally:
+            os.unlink(path)
+
+    @pytest.mark.asyncio
+    async def test_edit_returns_old_new_content(self) -> None:
+        from anteroom.tools import edit
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("foo bar")
+            path = f.name
+        try:
+            edit.set_working_dir(os.path.dirname(path))
+            result = await edit.handle(path=path, old_text="foo", new_text="baz")
+            assert result["_old_content"] == "foo bar"
+            assert result["_new_content"] == "baz bar"
+        finally:
+            os.unlink(path)
+
+    @pytest.mark.asyncio
+    async def test_edit_line_delta_remove(self) -> None:
+        from anteroom.tools import edit
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("a\nb\nc\n")
+            path = f.name
+        try:
+            edit.set_working_dir(os.path.dirname(path))
+            result = await edit.handle(path=path, old_text="a\nb\n", new_text="a\n")
+            assert result["lines_before"] == 3
+            assert result["lines_after"] == 2
+        finally:
+            os.unlink(path)
+
+
 class TestBashTool:
     @pytest.mark.asyncio
     async def test_bash_echo(self) -> None:
