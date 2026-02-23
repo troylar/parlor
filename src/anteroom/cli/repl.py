@@ -688,6 +688,23 @@ async def run_cli(
     tool_registry.set_safety_config(config.safety, working_dir=working_dir)
     tool_registry.set_confirm_callback(_confirm_destructive)
 
+    # Set up ask_user callback for mid-turn questions
+    async def _ask_user_callback(question: str) -> str:
+        await renderer.stop_thinking()
+        renderer.console.print(f"\n[yellow bold]Question:[/yellow bold] {question}")
+        try:
+            from prompt_toolkit import PromptSession as _AskSession
+
+            _ask_session = _AskSession()
+            answer = await _ask_session.prompt_async("  Answer: ")
+            renderer.console.print()
+            renderer.start_thinking()
+            return answer.strip()
+        except (EOFError, KeyboardInterrupt):
+            renderer.console.print(f"  [{MUTED}](skipped)[/{MUTED}]\n")
+            renderer.start_thinking()
+            return ""
+
     # Build unified tool executor
     _subagent_counter = 0
     _active_cancel_event: list[asyncio.Event | None] = [None]
@@ -732,6 +749,8 @@ async def run_cli(
                 "_confirm_callback": _confirm_destructive,
                 "_config": _sa_config,
             }
+        elif tool_name == "ask_user":
+            arguments = {**arguments, "_ask_callback": _ask_user_callback}
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
         if mcp_manager:

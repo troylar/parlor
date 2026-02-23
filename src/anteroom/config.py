@@ -25,6 +25,7 @@ _BUILTIN_TOOL_DESCRIPTIONS: dict[str, str] = {
     "update_canvas": "Replace canvas content entirely with new content.",
     "patch_canvas": "Apply incremental search/replace edits to an existing canvas.",
     "run_agent": "Spawn a sub-agent for parallel or isolated tasks. Each gets its own context.",
+    "ask_user": "Ask the user a question and wait for their response. Use instead of asking in text output.",
 }
 
 
@@ -130,6 +131,9 @@ iterations automatically. Never stop partway to ask "should I continue?" unless 
 genuine ambiguity.
 - Only ask the user a question when you need information you truly cannot infer from context, \
 available tools, or prior conversation. When you do ask, ask one focused question, not a list.
+- IMPORTANT: When you need to ask the user a question, you MUST use the ask_user tool. Do NOT \
+ask questions in your text output — the user cannot respond to text mid-turn. The ask_user tool \
+pauses execution and waits for a response before continuing.
 </agentic_behavior>
 
 <tool_use>

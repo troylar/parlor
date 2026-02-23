@@ -40,6 +40,7 @@ DEFAULT_TOOL_TIERS: dict[str, ToolTier] = {
     "read_file": ToolTier.READ,
     "glob_files": ToolTier.READ,
     "grep": ToolTier.READ,
+    "ask_user": ToolTier.READ,
     "write_file": ToolTier.WRITE,
     "edit_file": ToolTier.WRITE,
     "create_canvas": ToolTier.WRITE,

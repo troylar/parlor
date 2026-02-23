@@ -214,6 +214,20 @@ async def run_exec_mode(
     tool_registry.set_safety_config(config.safety, working_dir=working_dir)
     tool_registry.set_confirm_callback(_exec_confirm)
 
+    # ask_user callback for exec mode: use TTY if available, otherwise fail closed
+    async def _exec_ask_user(question: str) -> str:
+        if not has_tty:
+            if not quiet:
+                print(f"[ask_user] {question} — no TTY, skipping", file=sys.stderr)
+            return ""
+        try:
+            if not quiet:
+                print(f"[ask_user] {question}", file=sys.stderr)
+            answer = input("  Answer: ")
+            return answer.strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
     # Sub-agent support
     sa_config = config.safety.subagent
     subagent_limiter = SubagentLimiter(
@@ -249,6 +263,8 @@ async def run_exec_mode(
                 "_confirm_callback": _exec_confirm,
                 "_config": sa_config,
             }
+        elif tool_name == "ask_user":
+            arguments = {**arguments, "_ask_callback": _exec_ask_user}
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
         if mcp_manager:

@@ -673,6 +673,58 @@ async def chat(conversation_id: str, request: Request):
 
         return approved
 
+    # Set up ask_user callback for mid-turn questions (reuses approval infrastructure)
+    async def _web_ask_user(question: str) -> str:
+        import secrets as _secrets
+
+        max_pending = 100
+        if len(pending_approvals) >= max_pending:
+            logger.warning("Pending approvals limit reached (%d); skipping ask_user", len(pending_approvals))
+            return ""
+
+        ask_id = _secrets.token_urlsafe(16)
+        ask_event = asyncio.Event()
+        entry: dict[str, Any] = {"event": ask_event, "approved": False, "scope": "once", "answer": ""}
+        pending_approvals[ask_id] = entry
+
+        if event_bus:
+            await event_bus.publish(
+                f"global:{db_name}",
+                {
+                    "type": "ask_user_required",
+                    "data": {
+                        "ask_id": ask_id,
+                        "question": question,
+                        "conversation_id": conversation_id,
+                    },
+                },
+            )
+
+        try:
+            elapsed = 0.0
+            poll_interval = 1.0
+            while not ask_event.is_set():
+                if elapsed >= approval_timeout:
+                    raise asyncio.TimeoutError()
+                try:
+                    if await request.is_disconnected():
+                        raise asyncio.TimeoutError()
+                except asyncio.TimeoutError:
+                    raise
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(ask_event.wait(), timeout=poll_interval)
+                except asyncio.TimeoutError:
+                    elapsed += poll_interval
+        except asyncio.TimeoutError:
+            logger.warning("ask_user timed out (id=%s)", ask_id)
+            return ""
+        finally:
+            pending_approvals.pop(ask_id, None)
+
+        return entry.get("answer", "")
+
     _subagent_counter = 0
     _subagent_events: dict[str, list[dict[str, Any]]] = {}
     _max_subagent_events = 500
@@ -723,6 +775,8 @@ async def chat(conversation_id: str, request: Request):
                 "_confirm_callback": _web_confirm,
                 "_config": _sa_config,
             }
+        elif tool_name == "ask_user":
+            arguments = {**arguments, "_ask_callback": _web_ask_user}
 
         def _scope_to_decision() -> str:
             task = asyncio.current_task()
