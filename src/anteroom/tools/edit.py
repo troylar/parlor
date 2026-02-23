@@ -69,4 +69,14 @@ async def handle(path: str, old_text: str, new_text: str, replace_all: bool = Fa
     except OSError as e:
         return {"error": str(e)}
 
-    return {"status": "ok", "replacements": count if replace_all else 1}
+    lines_before = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+    lines_after = new_content.count("\n") + (1 if new_content and not new_content.endswith("\n") else 0)
+    return {
+        "status": "ok",
+        "replacements": count if replace_all else 1,
+        "path": resolved,
+        "lines_before": lines_before,
+        "lines_after": lines_after,
+        "_old_content": content,
+        "_new_content": new_content,
+    }
