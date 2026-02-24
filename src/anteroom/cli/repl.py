@@ -1685,10 +1685,10 @@ async def _run_repl(
             for i, c in enumerate(convs):
                 is_sel = i == selected_idx[0]
                 title = (c.get("title") or "Untitled")[:35]
-                slug = c.get("slug", "")[:20]
-                badge = _picker_type_badge(c.get("type", "chat"))
-                ts = _picker_relative_time(c.get("updated_at", ""))
-                count = c.get("message_count", 0)
+                slug = (c.get("slug") or "")[:20]
+                badge = _picker_type_badge(c.get("type") or "chat")
+                ts = _picker_relative_time(c.get("updated_at") or "")
+                count = c.get("message_count") or 0
 
                 if is_sel:
                     fragments.append(("class:list.selected", f" > {title}"))
