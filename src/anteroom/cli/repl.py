@@ -486,6 +486,30 @@ def _detect_project_context(working_dir: str) -> str:
     return "\n".join(lines)
 
 
+def _build_introspect_instructions_info(working_dir: str) -> dict[str, Any]:
+    """Build a summary of loaded instructions for the introspect tool."""
+    from .instructions import estimate_tokens, find_global_instructions_path, find_project_instructions_path
+
+    sources: list[dict[str, Any]] = []
+    total_tokens = 0
+
+    global_result = find_global_instructions_path()
+    if global_result:
+        path, content = global_result
+        tokens = estimate_tokens(content)
+        sources.append({"path": str(path), "source": "global", "estimated_tokens": tokens})
+        total_tokens += tokens
+
+    project_result = find_project_instructions_path(working_dir)
+    if project_result:
+        path, content = project_result
+        tokens = estimate_tokens(content)
+        sources.append({"path": str(path), "source": "project", "estimated_tokens": tokens})
+        total_tokens += tokens
+
+    return {"sources": sources, "total_tokens": total_tokens}
+
+
 def _build_system_prompt(
     config: AppConfig,
     working_dir: str,
@@ -823,6 +847,17 @@ async def run_cli(
             }
         elif tool_name == "ask_user":
             arguments = {**arguments, "_ask_callback": _ask_user_callback}
+        elif tool_name == "introspect":
+            arguments = {
+                **arguments,
+                "_config": config,
+                "_mcp_manager": mcp_manager,
+                "_tool_registry": tool_registry,
+                "_skill_registry": skill_registry,
+                "_instructions_info": _introspect_instructions_info,
+                "_tools_openai": tools_openai,
+                "_working_dir": working_dir,
+            }
         if tool_registry.has_tool(tool_name):
             return await tool_registry.call_tool(tool_name, arguments)
         if mcp_manager:
@@ -861,6 +896,9 @@ async def run_cli(
         no_project_context=no_project_context,
         data_dir=config.app.data_dir,
     )
+    # Build introspect instructions info for the introspect tool
+    _introspect_instructions_info = _build_introspect_instructions_info(working_dir)
+
     mcp_statuses = mcp_manager.get_server_statuses() if mcp_manager else None
     extra_system_prompt = _build_system_prompt(
         config,
