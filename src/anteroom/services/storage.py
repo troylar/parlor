@@ -672,6 +672,27 @@ def copy_conversation_to_db(
     return get_conversation(target_db, new_cid)
 
 
+def delete_empty_conversations(
+    db: sqlite3.Connection, data_dir: Path, exclude_ids: set[str] | None = None
+) -> int:
+    """Delete conversations that have no messages. Returns count deleted."""
+    rows = db.execute_fetchall(
+        "SELECT id FROM conversations "
+        "WHERE id NOT IN (SELECT DISTINCT conversation_id FROM messages)"
+    )
+    exclude = exclude_ids or set()
+    count = 0
+    for row in rows:
+        cid = row["id"]
+        if cid in exclude:
+            continue
+        delete_conversation(db, cid, data_dir)
+        count += 1
+    if count:
+        logger.debug("Cleaned up %d empty conversation(s)", count)
+    return count
+
+
 def delete_conversation(db: sqlite3.Connection, conversation_id: str, data_dir: Path) -> bool:
     conv = get_conversation(db, conversation_id)
     if not conv:

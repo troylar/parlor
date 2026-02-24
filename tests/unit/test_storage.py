@@ -17,6 +17,7 @@ from anteroom.services.storage import (
     create_tag,
     create_tool_call,
     delete_conversation,
+    delete_empty_conversations,
     delete_folder,
     delete_message,
     delete_messages_after_position,
@@ -176,6 +177,45 @@ class TestConversations:
         delete_conversation(db, conv["id"], tmp_path)
         tcs = db.execute("SELECT * FROM tool_calls WHERE message_id = ?", (msg["id"],)).fetchall()
         assert len(tcs) == 0
+
+
+class TestDeleteEmptyConversations:
+    def test_removes_empty(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Empty")
+        count = delete_empty_conversations(db, tmp_path)
+        assert count == 1
+        assert get_conversation(db, conv["id"]) is None
+
+    def test_keeps_non_empty(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="HasMessages")
+        create_message(db, conv["id"], "user", "hello")
+        count = delete_empty_conversations(db, tmp_path)
+        assert count == 0
+        assert get_conversation(db, conv["id"]) is not None
+
+    def test_mixed(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        empty1 = create_conversation(db, title="Empty1")
+        empty2 = create_conversation(db, title="Empty2")
+        kept = create_conversation(db, title="Kept")
+        create_message(db, kept["id"], "user", "hi")
+        count = delete_empty_conversations(db, tmp_path)
+        assert count == 2
+        assert get_conversation(db, empty1["id"]) is None
+        assert get_conversation(db, empty2["id"]) is None
+        assert get_conversation(db, kept["id"]) is not None
+
+    def test_excludes_ids(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        protected = create_conversation(db, title="Protected")
+        doomed = create_conversation(db, title="Doomed")
+        count = delete_empty_conversations(db, tmp_path, exclude_ids={protected["id"]})
+        assert count == 1
+        assert get_conversation(db, protected["id"]) is not None
+        assert get_conversation(db, doomed["id"]) is None
+
+    def test_returns_zero_when_none_empty(self, db: sqlite3.Connection, tmp_path: Path) -> None:
+        conv = create_conversation(db, title="Full")
+        create_message(db, conv["id"], "user", "content")
+        assert delete_empty_conversations(db, tmp_path) == 0
 
 
 class TestMessages:
