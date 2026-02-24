@@ -311,12 +311,37 @@ def bootstrap_team_config(
     return True
 
 
+def _load_team_ai_settings(team_config_path: str | None) -> dict[str, Any]:
+    """Load AI settings from a team config file, if it exists.
+
+    Returns the ``ai`` section as a dict, or empty dict if unavailable.
+    """
+    if not team_config_path:
+        return {}
+    team_path = Path(team_config_path).resolve()
+    if not team_path.exists():
+        return {}
+    try:
+        team_raw = yaml.safe_load(team_path.read_text(encoding="utf-8"))
+        if isinstance(team_raw, dict):
+            ai = team_raw.get("ai")
+            if isinstance(ai, dict):
+                return ai
+    except Exception:
+        pass
+    return {}
+
+
 def run_init_wizard(force: bool = False, team_config_path: str | None = None) -> bool:
     """Main setup wizard. Returns True if config was written successfully.
 
     If *team_config_path* is provided the wizard bootstraps from the team
     config: it saves ``team_config_path`` in the personal config, trusts the
     team file, and prompts for any ``required`` keys declared by the team.
+
+    When the team config provides AI settings (``base_url``, ``api_key``,
+    ``model``, etc.) the wizard skips the corresponding prompts so the user
+    is not asked for values the team already defines.
     """
     from ..config import _get_config_path
 
@@ -345,6 +370,9 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
             console.print("Cancelled.")
             return False
 
+    # Pre-load team AI settings so we can skip prompts for values the team provides
+    team_ai = _load_team_ai_settings(team_config_path)
+
     # Welcome
     console.print()
     console.print(
@@ -356,14 +384,37 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
     )
 
     try:
-        # 1. Provider
-        preset = _select_provider()
+        # When team config provides AI settings, skip the corresponding prompts
+        team_has_base_url = bool(team_ai.get("base_url"))
+        team_has_api_key = bool(team_ai.get("api_key") or team_ai.get("api_key_command"))
+        team_has_model = bool(team_ai.get("model"))
 
-        # 2. Base URL
-        base_url = _collect_base_url(preset)
+        if team_has_base_url:
+            console.print(f"\n[{GOLD}]Using team-provided AI settings:[/]")
+            console.print(f"  [{SLATE}]Base URL: {team_ai['base_url']}[/]")
+            if team_has_api_key:
+                if team_ai.get("api_key_command"):
+                    console.print(f"  [{SLATE}]API key: via command[/]")
+                else:
+                    console.print(f"  [{SLATE}]API key: {_redact_key(team_ai.get('api_key', ''))}[/]")
+            if team_has_model:
+                console.print(f"  [{SLATE}]Model: {team_ai['model']}[/]")
 
-        # 3. API key
-        api_key, api_key_command = _collect_api_key(preset)
+        # 1. Provider (skip if team provides base_url)
+        if team_has_base_url:
+            preset = ProviderPreset(name="Team", base_url=team_ai["base_url"], needs_api_key=not team_has_api_key)
+            base_url = team_ai["base_url"]
+        else:
+            preset = _select_provider()
+            # 2. Base URL
+            base_url = _collect_base_url(preset)
+
+        # 3. API key (skip if team provides it)
+        if team_has_api_key:
+            api_key = team_ai.get("api_key", "")
+            api_key_command = team_ai.get("api_key_command", "")
+        else:
+            api_key, api_key_command = _collect_api_key(preset)
 
         # 4. Connection test
         available_models: list[str] | None = None
@@ -371,7 +422,7 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
 
         test_now = Confirm.ask(f"\n[{SLATE}]Test connection now?[/]", default=True)
         if test_now:
-            temp_model = preset.suggested_models[0] if preset.suggested_models else "gpt-4"
+            temp_model = team_ai.get("model") or (preset.suggested_models[0] if preset.suggested_models else "gpt-4")
             connected, models = _test_connection_with_spinner(base_url, api_key, api_key_command, temp_model)
             if connected:
                 available_models = models
@@ -392,11 +443,17 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
                         available_models = models
                         break
 
-        # 5. Model
-        model = _collect_model(preset, available_models)
+        # 5. Model (skip if team provides it)
+        if team_has_model:
+            model = team_ai["model"]
+        else:
+            model = _collect_model(preset, available_models)
 
-        # 6. System prompt
-        system_prompt = _collect_system_prompt()
+        # 6. System prompt (skip if team provides it)
+        if team_ai.get("system_prompt"):
+            system_prompt = team_ai["system_prompt"]
+        else:
+            system_prompt = _collect_system_prompt()
 
         # 7. User Identity
         console.print(f"\n[{GOLD}]User Identity[/]")
