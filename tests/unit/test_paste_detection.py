@@ -1,11 +1,14 @@
-"""Tests for paste detection in the CLI REPL."""
+"""Tests for paste detection and input collapsing in the CLI REPL."""
 
 from __future__ import annotations
 
+import os
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from anteroom.cli.repl import _PASTE_THRESHOLD, _is_paste
+from anteroom.cli.repl import _MAX_PASTE_DISPLAY_LINES, _PASTE_THRESHOLD, _collapse_long_input, _is_paste
+
+_TERM_SIZE = os.terminal_size((80, 24))
 
 
 class TestIsPaste:
@@ -98,3 +101,82 @@ class TestPasteKeybindingBehavior:
             event.current_buffer.validate_and_handle()
 
         event.current_buffer.validate_and_handle.assert_called_once()
+
+
+class TestCollapseLongInput:
+    """Tests for _collapse_long_input() output rendering."""
+
+    def _make_lines(self, count: int) -> str:
+        return "\n".join(f"line {i}" for i in range(count))
+
+    def test_short_input_no_output(self) -> None:
+        """Input with <= _MAX_PASTE_DISPLAY_LINES produces no output."""
+        short = self._make_lines(_MAX_PASTE_DISPLAY_LINES)
+        with (
+            patch("anteroom.cli.repl.renderer") as mock_renderer,
+            patch("anteroom.cli.repl.sys") as mock_sys,
+        ):
+            mock_sys.stdout.isatty.return_value = True
+            _collapse_long_input(short)
+            mock_renderer.console.print.assert_not_called()
+            mock_renderer._stdout.write.assert_not_called()
+
+    def test_long_input_collapses(self) -> None:
+        """Input with many lines writes collapsed output via renderer."""
+        long_input = self._make_lines(20)
+        with (
+            patch("anteroom.cli.repl.renderer") as mock_renderer,
+            patch("anteroom.cli.repl.sys") as mock_sys,
+            patch("anteroom.cli.repl.shutil") as mock_shutil,
+        ):
+            mock_sys.stdout.isatty.return_value = True
+            mock_shutil.get_terminal_size.return_value = _TERM_SIZE
+            _collapse_long_input(long_input)
+
+            # Cursor movement via _stdout (real fd)
+            assert mock_renderer._stdout.write.call_count == 1
+            cursor_call = mock_renderer._stdout.write.call_args[0][0]
+            assert "\033[" in cursor_call  # ANSI cursor movement
+            assert "\033[J" in cursor_call  # clear to end
+
+            # 3 shown lines + 1 hidden count = 4 console.print calls
+            assert mock_renderer.console.print.call_count == 4
+
+            # First call has the prompt character
+            first_call = mock_renderer.console.print.call_args_list[0][0][0]
+            assert "❯" in first_call
+
+            # Last call has the hidden line count
+            last_call = mock_renderer.console.print.call_args_list[3][0][0]
+            assert "17 more lines" in last_call
+
+            mock_renderer._stdout.flush.assert_called_once()
+
+    def test_user_content_escaped(self) -> None:
+        """Pasted content with Rich markup is escaped in output."""
+        lines = ["[bold red]danger[/]"] + [f"line {i}" for i in range(19)]
+        raw = "\n".join(lines)
+        with (
+            patch("anteroom.cli.repl.renderer") as mock_renderer,
+            patch("anteroom.cli.repl.sys") as mock_sys,
+            patch("anteroom.cli.repl.shutil") as mock_shutil,
+        ):
+            mock_sys.stdout.isatty.return_value = True
+            mock_shutil.get_terminal_size.return_value = _TERM_SIZE
+            _collapse_long_input(raw)
+
+            first_call = mock_renderer.console.print.call_args_list[0][0][0]
+            # The raw markup should be escaped — Rich escape() turns [ into \[
+            assert "[bold red]" not in first_call or "\\[bold red]" in first_call
+
+    def test_not_a_tty_no_output(self) -> None:
+        """When stdout is not a TTY, function returns early."""
+        long_input = self._make_lines(20)
+        with (
+            patch("anteroom.cli.repl.renderer") as mock_renderer,
+            patch("anteroom.cli.repl.sys") as mock_sys,
+        ):
+            mock_sys.stdout.isatty.return_value = False
+            _collapse_long_input(long_input)
+            mock_renderer.console.print.assert_not_called()
+            mock_renderer._stdout.write.assert_not_called()

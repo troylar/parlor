@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from rich.markup import escape
+
 from .. import __version__
 from ..config import AppConfig, build_runtime_context
 from ..db import init_db
@@ -155,14 +157,16 @@ def _collapse_long_input(user_input: str) -> None:
     show = 3
     hidden = len(lines) - show
 
-    # Move cursor up to input start and clear to end of screen
-    sys.stdout.write(f"\033[{total_rows}A\033[J")
-    # Reprint truncated with styled prompt
-    sys.stdout.write(f"\033[1;96m❯\033[0m {lines[0]}\n")
+    # Move cursor up to input start and clear to end of screen.
+    # Use renderer._stdout (real fd) to bypass patch_stdout() proxy
+    # which corrupts raw ESC bytes.
+    renderer._stdout.write(f"\033[{total_rows}A\033[J")
+    # Reprint truncated with styled prompt via Rich (handles patch_stdout correctly)
+    renderer.console.print(f"[bold cyan]❯[/] {escape(lines[0])}")
     for ln in lines[1:show]:
-        sys.stdout.write(f"  {ln}\n")
-    sys.stdout.write(f"  \033[90m... ({hidden} more lines)\033[0m\n")
-    sys.stdout.flush()
+        renderer.console.print(f"  {escape(ln)}")
+    renderer.console.print(f"  [dim]... ({hidden} more lines)[/]")
+    renderer._stdout.flush()
 
 
 _FILE_REF_RE = re.compile(r"@((?:[^\s\"']+|\"[^\"]+\"|'[^']+'))")
