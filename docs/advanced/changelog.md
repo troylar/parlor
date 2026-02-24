@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 24, 2026
 
+### v1.41.0
+
+**New:**
+
+- Resume hint on CLI exit — shows `aroom chat -c` and `aroom chat -r <id>` commands when leaving a conversation with messages (#370)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.41.0)
+
 ### v1.40.0
 
 **New:**
