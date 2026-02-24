@@ -50,16 +50,6 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // _CHARS_PER_TOKEN
 
 
-def _estimate_tool_tokens(tools_openai: list[dict[str, Any]]) -> dict[str, Any]:
-    """Estimate token cost of tool definitions sent to the LLM."""
-    total = 0
-    for tool in tools_openai:
-        func = tool.get("function", {})
-        serialized = json.dumps(func, separators=(",", ":"))
-        tokens = _estimate_tokens(serialized)
-        total += tokens
-    return {"total_tokens": total, "tool_count": len(tools_openai)}
-
 
 def _gather_config(config: Any) -> dict[str, Any]:
     """Gather config information with secret redaction."""
@@ -94,7 +84,7 @@ def _gather_config(config: Any) -> dict[str, Any]:
 
         personal = Path(data_dir_path) / "config.yaml"
         if personal.exists():
-            config_files.append({"path": str(personal), "layer": "personal"})
+            config_files.append({"path": "~/.anteroom/config.yaml", "layer": "personal"})
     result["config_files"] = config_files
 
     return result
