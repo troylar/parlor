@@ -1622,17 +1622,6 @@ async def _run_repl(
                 logger.debug("RAG: failed to create embedding service", exc_info=True)
                 return None
 
-        def _strip_rag_context(prompt: str) -> str:
-            """Remove previous RAG context block from the system prompt."""
-            import re as _re
-
-            return _re.sub(
-                r"\n*## Retrieved Context \(RAG\).*?(?=\n## |\Z)",
-                "",
-                prompt,
-                flags=_re.DOTALL,
-            )
-
         def _apply_plan_mode(conv_id: str) -> None:
             nonlocal tools_openai, extra_system_prompt
             plan_path = get_plan_file_path(config.app.data_dir, conv_id)
@@ -2329,7 +2318,7 @@ async def _run_repl(
             # RAG: retrieve relevant context from knowledge base
             if config.rag.enabled and not _plan_active[0]:
                 try:
-                    from ..services.rag import format_rag_context, retrieve_context
+                    from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
 
                     _rag_emb = _get_rag_embedding_service()
                     if _rag_emb:
@@ -2341,7 +2330,7 @@ async def _run_repl(
                             current_conversation_id=conv["id"],
                         )
                         # Strip any previous RAG context and inject fresh
-                        extra_system_prompt = _strip_rag_context(extra_system_prompt)
+                        extra_system_prompt = strip_rag_context(extra_system_prompt)
                         if _rag_chunks:
                             extra_system_prompt += format_rag_context(_rag_chunks)
                             renderer.console.print(

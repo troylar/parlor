@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -134,13 +135,23 @@ def format_rag_context(chunks: list[RetrievedChunk]) -> str:
             attribution = f'from source "{label}"'
         # SECURITY-REVIEW: chunk.content is user-controlled (past messages / uploaded sources).
         # Prompt injection is an accepted architectural trade-off for RAG pipelines.
-        parts.append(f"<retrieved-context {attribution}>\n{chunk.content}\n</retrieved-context>")
+        # Sanitize closing tags to prevent content from breaking out of the XML block.
+        safe_content = chunk.content.replace("</retrieved-context>", "[/retrieved-context]")
+        parts.append(f"<retrieved-context {attribution}>\n{safe_content}\n</retrieved-context>")
 
     return (
         "\n\n## Retrieved Context (RAG)\n"
         "The following context was automatically retrieved from your knowledge base "
         "based on semantic similarity to the current message. Use it if relevant.\n\n" + "\n\n".join(parts)
     )
+
+
+_RAG_SECTION_RE = re.compile(r"\n*## Retrieved Context \(RAG\).*?(?=\n## |\Z)", re.DOTALL)
+
+
+def strip_rag_context(prompt: str) -> str:
+    """Remove a previously injected RAG context block from the system prompt."""
+    return _RAG_SECTION_RE.sub("", prompt)
 
 
 def _deduplicate(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
