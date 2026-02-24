@@ -99,6 +99,31 @@ Trust this file? [y/N] y
 
 Once trusted, subsequent runs skip the prompt unless the file content changes.
 
+## Setup Wizard Integration
+
+When running `aroom init` with a team config, the setup wizard adapts to avoid redundant prompts:
+
+```bash
+aroom init --team-config /path/to/team.yaml
+```
+
+If the team config provides AI settings (`base_url`, `api_key`, `model`, `system_prompt`), the wizard skips those prompts and uses the team-provided values. You'll see a message like:
+
+```
+Using team-provided AI settings:
+  Base URL: https://api.company.com/v1
+  API key: sk-****...****
+  Model: gpt-4-turbo
+```
+
+The wizard still prompts for:
+- **User identity** (name, display name) — always required
+- **Any `required` keys declared by the team** — if the team config specifies fields that must be set
+- Connection test (optional)
+- System prompt (only if team doesn't provide one)
+
+This speeds up onboarding for new team members: the team config handles API details, and each person only needs to configure their identity.
+
 ## Configuration Merging
 
 When team and personal configs are combined, Anteroom uses a **deep merge** with three distinct strategies depending on the type of value being merged:
