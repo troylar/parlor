@@ -388,6 +388,19 @@ class SafetyConfig:
 
 
 @dataclass
+class RagConfig:
+    """Retrieval-augmented generation settings."""
+
+    enabled: bool = True  # auto-enabled when embeddings are available
+    max_chunks: int = 10  # top-K chunks to retrieve per query
+    max_tokens: int = 2000  # token budget for injected context (chars/4 estimate)
+    similarity_threshold: float = 0.5  # max cosine distance; lower = stricter matching
+    include_sources: bool = True  # search source chunks
+    include_conversations: bool = True  # search past conversation messages
+    exclude_current: bool = True  # exclude current conversation from results
+
+
+@dataclass
 class ProxyConfig:
     enabled: bool = False  # opt-in; must be explicitly enabled
     allowed_origins: list[str] = field(default_factory=list)
@@ -420,6 +433,7 @@ class AppConfig:
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
+    rag: RagConfig = field(default_factory=RagConfig)
 
 
 def _resolve_data_dir() -> Path:
@@ -945,6 +959,44 @@ def load_config(
         subagent=subagent_config,
     )
 
+    # RAG config
+    rag_raw = raw.get("rag", {})
+    if not isinstance(rag_raw, dict):
+        rag_raw = {}
+    rag_enabled = str(rag_raw.get("enabled", os.environ.get("AI_CHAT_RAG_ENABLED", "true"))).lower() not in (
+        "false",
+        "0",
+        "no",
+    )
+    try:
+        rag_max_chunks = max(1, min(50, int(rag_raw.get("max_chunks", os.environ.get("AI_CHAT_RAG_MAX_CHUNKS", 10)))))
+    except (ValueError, TypeError):
+        rag_max_chunks = 10
+    try:
+        _raw_rag_tokens = rag_raw.get("max_tokens", os.environ.get("AI_CHAT_RAG_MAX_TOKENS", 2000))
+        rag_max_tokens = max(100, min(20_000, int(_raw_rag_tokens)))
+    except (ValueError, TypeError):
+        rag_max_tokens = 2000
+    try:
+        _raw_rag_threshold = rag_raw.get(
+            "similarity_threshold", os.environ.get("AI_CHAT_RAG_SIMILARITY_THRESHOLD", 0.5)
+        )
+        rag_threshold = max(0.0, min(2.0, float(_raw_rag_threshold)))
+    except (ValueError, TypeError):
+        rag_threshold = 0.5
+    rag_include_sources = str(rag_raw.get("include_sources", "true")).lower() not in ("false", "0", "no")
+    rag_include_conversations = str(rag_raw.get("include_conversations", "true")).lower() not in ("false", "0", "no")
+    rag_exclude_current = str(rag_raw.get("exclude_current", "true")).lower() not in ("false", "0", "no")
+    rag_config = RagConfig(
+        enabled=rag_enabled,
+        max_chunks=rag_max_chunks,
+        max_tokens=rag_max_tokens,
+        similarity_threshold=rag_threshold,
+        include_sources=rag_include_sources,
+        include_conversations=rag_include_conversations,
+        exclude_current=rag_exclude_current,
+    )
+
     # Proxy config
     proxy_raw = raw.get("proxy", {})
     if not isinstance(proxy_raw, dict):
@@ -991,6 +1043,7 @@ def load_config(
             embeddings=embeddings_config,
             safety=safety_config,
             proxy=proxy_config,
+            rag=rag_config,
             references=refs_config,
         ),
         enforced_fields,

@@ -1603,6 +1603,25 @@ async def _run_repl(
         _plan_checklist_steps: list[str] = []  # parsed step descriptions for live checklist
         _plan_current_step: list[int] = [0]  # index of the step currently in progress
 
+        # -- RAG state --
+        _rag_embedding_service: list[Any] = [None]
+        _rag_service_checked: list[bool] = [False]
+
+        def _get_rag_embedding_service() -> Any:
+            """Lazily create embedding service for RAG retrieval."""
+            if _rag_service_checked[0]:
+                return _rag_embedding_service[0]
+            _rag_service_checked[0] = True
+            try:
+                from ..services.embeddings import create_embedding_service
+
+                svc = create_embedding_service(config)
+                _rag_embedding_service[0] = svc
+                return svc
+            except Exception:
+                logger.debug("RAG: failed to create embedding service", exc_info=True)
+                return None
+
         def _apply_plan_mode(conv_id: str) -> None:
             nonlocal tools_openai, extra_system_prompt
             plan_path = get_plan_file_path(config.app.data_dir, conv_id)
@@ -2295,6 +2314,30 @@ async def _run_repl(
             # Store user message
             storage.create_message(db, conv["id"], "user", expanded, **id_kw)
             ai_messages.append({"role": "user", "content": expanded})
+
+            # RAG: retrieve relevant context from knowledge base
+            if config.rag.enabled and not _plan_active[0]:
+                try:
+                    from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
+
+                    _rag_emb = _get_rag_embedding_service()
+                    if _rag_emb:
+                        _rag_chunks = await retrieve_context(
+                            query=expanded,
+                            db=db,
+                            embedding_service=_rag_emb,
+                            config=config.rag,
+                            current_conversation_id=conv["id"],
+                        )
+                        # Strip any previous RAG context and inject fresh
+                        extra_system_prompt = strip_rag_context(extra_system_prompt)
+                        if _rag_chunks:
+                            extra_system_prompt += format_rag_context(_rag_chunks)
+                            renderer.console.print(
+                                f"  [{MUTED}][RAG: {len(_rag_chunks)} relevant chunk(s) retrieved][/{MUTED}]"
+                            )
+                except Exception:
+                    logger.debug("RAG retrieval failed in CLI", exc_info=True)
 
             # Build message queue for queued follow-ups during agent loop
             msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()

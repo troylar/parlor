@@ -568,6 +568,35 @@ async def chat(conversation_id: str, request: Request):
                 + "\n\n".join(source_parts)
             )
 
+    # RAG: retrieve relevant context from knowledge base (skip in plan mode)
+    rag_config = getattr(request.app.state.config, "rag", None)
+    vec_enabled = getattr(request.app.state, "vec_enabled", False)
+    embedding_service = getattr(request.app.state, "embedding_service", None)
+    if (
+        rag_config
+        and rag_config.enabled
+        and not plan_mode
+        and vec_enabled
+        and embedding_service
+        and message_text.strip()
+    ):
+        try:
+            from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
+
+            # Strip any previous RAG context before injecting fresh
+            extra_system_prompt = strip_rag_context(extra_system_prompt)
+            rag_chunks = await retrieve_context(
+                query=message_text,
+                db=db,
+                embedding_service=embedding_service,
+                config=rag_config,
+                current_conversation_id=conversation_id,
+            )
+            if rag_chunks:
+                extra_system_prompt += format_rag_context(rag_chunks)
+        except Exception:
+            logger.debug("RAG retrieval failed, continuing without context", exc_info=True)
+
     # Build per-request safety approval callback
     from ..tools.safety import SafetyVerdict
 
