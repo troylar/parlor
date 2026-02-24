@@ -787,6 +787,17 @@ async def chat(conversation_id: str, request: Request):
             }
         elif tool_name == "ask_user":
             arguments = {**arguments, "_ask_callback": _web_ask_user}
+        elif tool_name == "introspect":
+            arguments = {
+                **arguments,
+                "_config": request.app.state.config,
+                "_mcp_manager": mcp_manager,
+                "_tool_registry": tool_registry,
+                "_skill_registry": None,
+                "_instructions_info": None,
+                "_tools_openai": tools_openai,
+                "_working_dir": None,
+            }
 
         def _scope_to_decision() -> str:
             task = asyncio.current_task()

@@ -265,7 +265,7 @@ def cap_tools(
 
 def register_default_tools(registry: ToolRegistry, working_dir: str | None = None) -> None:
     """Register all built-in tools."""
-    from . import ask_user, bash, edit, glob_tool, grep, read, subagent, write
+    from . import ask_user, bash, edit, glob_tool, grep, introspect, read, subagent, write
     from .canvas import (
         CANVAS_CREATE_DEFINITION,
         CANVAS_PATCH_DEFINITION,
@@ -287,3 +287,4 @@ def register_default_tools(registry: ToolRegistry, working_dir: str | None = Non
     registry.register(CANVAS_PATCH_DEFINITION["name"], handle_patch_canvas, CANVAS_PATCH_DEFINITION)
     registry.register(subagent.DEFINITION["name"], subagent.handle, subagent.DEFINITION)
     registry.register(ask_user.DEFINITION["name"], ask_user.handle, ask_user.DEFINITION)
+    registry.register(introspect.DEFINITION["name"], introspect.handle, introspect.DEFINITION)
