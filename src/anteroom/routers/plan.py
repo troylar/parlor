@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -13,15 +14,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["plan"])
 
+_CONV_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+
 
 def _validate_conversation_id(conversation_id: str) -> None:
     """Reject obviously invalid conversation IDs."""
-    if not conversation_id or len(conversation_id) > 64:
+    if not conversation_id or not _CONV_ID_RE.match(conversation_id):
         raise HTTPException(status_code=400, detail="Invalid conversation ID")
-    import re
 
-    if not re.match(r"^[A-Za-z0-9_\-]+$", conversation_id):
-        raise HTTPException(status_code=400, detail="Invalid conversation ID format")
+
+def _require_json(request: Request) -> None:
+    """Require application/json Content-Type on state-changing requests."""
+    ct = request.headers.get("content-type", "")
+    if not ct.startswith("application/json"):
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
 
 
 class PlanRejectRequest(BaseModel):
@@ -44,10 +50,7 @@ async def get_plan(conversation_id: str, request: Request) -> dict:
 
 @router.post("/conversations/{conversation_id}/plan/approve")
 async def approve_plan(conversation_id: str, request: Request) -> dict:
-    ct = request.headers.get("content-type", "")
-    if ct and not ct.startswith("application/json"):
-        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
-
+    _require_json(request)
     _validate_conversation_id(conversation_id)
     data_dir = request.app.state.config.app.data_dir
     try:
@@ -63,11 +66,8 @@ async def approve_plan(conversation_id: str, request: Request) -> dict:
 
 
 @router.post("/conversations/{conversation_id}/plan/reject")
-async def reject_plan(conversation_id: str, request: Request) -> dict:
-    ct = request.headers.get("content-type", "")
-    if ct and not ct.startswith("application/json"):
-        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
-
+async def reject_plan(conversation_id: str, body: PlanRejectRequest, request: Request) -> dict:
+    _require_json(request)
     _validate_conversation_id(conversation_id)
     data_dir = request.app.state.config.app.data_dir
     try:
@@ -78,5 +78,8 @@ async def reject_plan(conversation_id: str, request: Request) -> dict:
     if content is None:
         raise HTTPException(status_code=404, detail="No plan found for this conversation")
     delete_plan(plan_path)
-    logger.info("Plan rejected for conversation %s", conversation_id)
+    if body.reason:
+        logger.info("Plan rejected for conversation %s: %s", conversation_id, body.reason[:200])
+    else:
+        logger.info("Plan rejected for conversation %s", conversation_id)
     return {"status": "rejected"}

@@ -165,3 +165,15 @@ class TestRejectPlan:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "rejected"
+
+    def test_rejects_wrong_content_type(self) -> None:
+        app, data_dir = _create_test_app()
+        _write_plan(data_dir, "conv-ct2", "plan content")
+        client = TestClient(app)
+        resp = client.post(
+            "/api/conversations/conv-ct2/plan/reject",
+            headers={"Content-Type": "text/plain"},
+            content="{}",
+        )
+        # 422 from Pydantic body parse failure or 415 from _require_json — either rejects wrong type
+        assert resp.status_code in (415, 422)
