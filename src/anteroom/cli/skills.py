@@ -18,6 +18,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -149,3 +150,41 @@ class SkillRegistry:
         if args:
             prompt = f"{prompt}\n\nAdditional context: {args}"
         return True, prompt
+
+    def get_skill_descriptions(self) -> list[tuple[str, str]]:
+        """Return (name, description) pairs for all loaded skills, sorted by name."""
+        return [(s.name, s.description) for s in self.list_skills()]
+
+    def get_invoke_skill_definition(self) -> dict[str, Any] | None:
+        """Return an OpenAI function schema for the invoke_skill tool.
+
+        Returns None if no skills are loaded.
+        """
+        skills = self.list_skills()
+        if not skills:
+            return None
+        return {
+            "type": "function",
+            "function": {
+                "name": "invoke_skill",
+                "description": (
+                    "Invoke a predefined skill/workflow. Use this when the user's request "
+                    "clearly matches one of the available skills listed in <available_skills>."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_name": {
+                            "type": "string",
+                            "enum": [s.name for s in skills],
+                            "description": "The name of the skill to invoke.",
+                        },
+                        "args": {
+                            "type": "string",
+                            "description": "Optional additional context or arguments for the skill.",
+                        },
+                    },
+                    "required": ["skill_name"],
+                },
+            },
+        }
