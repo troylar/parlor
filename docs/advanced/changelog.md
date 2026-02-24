@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 24, 2026
 
+### v1.43.2
+
+**Fixed:**
+
+- Resume hint now appears on all exit paths including Ctrl+C (#376)
+- Added double Ctrl+C exit: first press clears buffer, second press exits with resume hint (#376)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.43.2)
+
 ### v1.43.1
 
 *Maintenance release — bumped CodeQL CI action from v3 to v4.*
