@@ -672,13 +672,10 @@ def copy_conversation_to_db(
     return get_conversation(target_db, new_cid)
 
 
-def delete_empty_conversations(
-    db: sqlite3.Connection, data_dir: Path, exclude_ids: set[str] | None = None
-) -> int:
+def delete_empty_conversations(db: sqlite3.Connection, data_dir: Path, exclude_ids: set[str] | None = None) -> int:
     """Delete conversations that have no messages. Returns count deleted."""
     rows = db.execute_fetchall(
-        "SELECT id FROM conversations "
-        "WHERE id NOT IN (SELECT DISTINCT conversation_id FROM messages)"
+        "SELECT id FROM conversations WHERE id NOT IN (SELECT DISTINCT conversation_id FROM messages)"
     )
     exclude = exclude_ids or set()
     count = 0
