@@ -1014,6 +1014,18 @@ async def run_cli(
         mcp_servers=mcp_statuses,
     )
 
+    # Inject codebase index (tree-sitter symbol map) if enabled
+    try:
+        from ..services.codebase_index import create_index_service
+
+        _index_service = create_index_service(config)
+        if _index_service:
+            _index_map = _index_service.get_map(working_dir, token_budget=config.codebase_index.map_tokens)
+            if _index_map:
+                extra_system_prompt += "\n" + _index_map
+    except Exception:
+        logger.debug("Codebase index unavailable, continuing without it", exc_info=True)
+
     # Inject skill catalog and invoke_skill tool only when auto-invoke is enabled
     if config.cli.skills.auto_invoke:
         skill_descs = skill_registry.get_skill_descriptions()

@@ -7,6 +7,7 @@ import base64
 import copy
 import json
 import logging
+import os
 import time as time_mod
 import uuid as uuid_mod
 from collections import defaultdict
@@ -597,6 +598,21 @@ async def chat(conversation_id: str, request: Request):
                 extra_system_prompt += format_rag_context(rag_chunks)
         except Exception:
             logger.debug("RAG retrieval failed, continuing without context", exc_info=True)
+
+    # Inject codebase index (tree-sitter symbol map) if enabled
+    try:
+        from ..services.codebase_index import create_index_service
+
+        _index_service = create_index_service(request.app.state.config)
+        _index_root = getattr(tool_registry, "_working_dir", None) or os.getcwd()
+        if _index_service:
+            _index_map = _index_service.get_map(
+                _index_root, token_budget=request.app.state.config.codebase_index.map_tokens
+            )
+            if _index_map:
+                extra_system_prompt += "\n" + _index_map
+    except Exception:
+        logger.debug("Codebase index unavailable, continuing without it", exc_info=True)
 
     # Build per-request safety approval callback
     from ..tools.safety import SafetyVerdict

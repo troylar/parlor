@@ -407,6 +407,30 @@ class RagConfig:
 
 
 @dataclass
+class CodebaseIndexConfig:
+    """Tree-sitter codebase index settings."""
+
+    enabled: bool = True  # auto-enabled; degrades gracefully without tree-sitter
+    map_tokens: int = 1000  # token budget for the injected codebase map
+    languages: list[str] = field(default_factory=list)  # auto-detect if empty
+    exclude_dirs: list[str] = field(
+        default_factory=lambda: [
+            "node_modules",
+            ".git",
+            "__pycache__",
+            "venv",
+            ".venv",
+            "dist",
+            "build",
+            ".tox",
+            ".mypy_cache",
+            ".pytest_cache",
+            "egg-info",
+        ]
+    )
+
+
+@dataclass
 class ProxyConfig:
     enabled: bool = False  # opt-in; must be explicitly enabled
     allowed_origins: list[str] = field(default_factory=list)
@@ -440,6 +464,7 @@ class AppConfig:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
     rag: RagConfig = field(default_factory=RagConfig)
+    codebase_index: CodebaseIndexConfig = field(default_factory=CodebaseIndexConfig)
 
 
 def _resolve_data_dir() -> Path:
@@ -1044,6 +1069,24 @@ def load_config(
         skills=[str(p) for p in refs_raw.get("skills", []) if isinstance(p, str) and p],
     )
 
+    # Codebase index config
+    ci_raw = raw.get("codebase_index", {})
+    if not isinstance(ci_raw, dict):
+        ci_raw = {}
+    ci_enabled = str(ci_raw.get("enabled", "true")).lower() not in ("false", "0", "no")
+    ci_map_tokens = int(ci_raw.get("map_tokens", 1000))
+    ci_languages = ci_raw.get("languages", [])
+    if not isinstance(ci_languages, list):
+        ci_languages = []
+    ci_exclude_raw = ci_raw.get("exclude_dirs")
+    ci_config = CodebaseIndexConfig(
+        enabled=ci_enabled,
+        map_tokens=ci_map_tokens,
+        languages=[str(lang) for lang in ci_languages],
+    )
+    if ci_exclude_raw is not None and isinstance(ci_exclude_raw, list):
+        ci_config.exclude_dirs = [str(d) for d in ci_exclude_raw]
+
     return (
         AppConfig(
             ai=ai,
@@ -1058,6 +1101,7 @@ def load_config(
             proxy=proxy_config,
             rag=rag_config,
             references=refs_config,
+            codebase_index=ci_config,
         ),
         enforced_fields,
     )

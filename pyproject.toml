@@ -52,6 +52,10 @@ dependencies = [
 embeddings = [
     "fastembed>=0.4.0",
 ]
+index = [
+    "tree-sitter>=0.23.0",
+    "tree-sitter-language-pack>=0.2.0",
+]
 docs = [
     "pypdf>=6.7.1",
     "python-docx>=1.0",
