@@ -693,6 +693,12 @@ async def run_cli(
     vec_dims = get_effective_dimensions(config)
     db = init_db(db_path, vec_dimensions=vec_dims)
 
+    # Clean up empty conversations
+    try:
+        storage.delete_empty_conversations(db, config.app.data_dir)
+    except Exception:
+        logger.debug("Failed to clean up empty conversations")
+
     # Register built-in tools
     tool_registry = ToolRegistry()
     if config.cli.builtin_tools and not no_tools:

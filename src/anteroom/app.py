@@ -68,6 +68,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
         except Exception:
             logger.warning("Failed to register user in personal DB")
+    # Clean up empty conversations before loading shared DBs
+    from .services import storage as _cleanup_storage
+
+    try:
+        _cleanup_storage.delete_empty_conversations(db_manager.personal, config.app.data_dir)
+    except Exception:
+        logger.warning("Failed to clean up empty conversations")
+
     for sdb in config.shared_databases:
         try:
             sdb_path = Path(sdb.path)
