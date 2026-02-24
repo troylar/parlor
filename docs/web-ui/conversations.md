@@ -8,9 +8,16 @@ Anteroom provides a full conversation lifecycle with powerful management feature
 |---|---|
 | **Create** | Click "New Chat" in the sidebar or press `Ctrl+Shift+N` |
 | **Rename** | Double-click the conversation title in the sidebar |
+| **Slug** | View or edit the human-readable slug (e.g., `auth-refactor`) in the conversation details panel |
 | **Search** | Use the search box at the top of the sidebar (FTS5-powered) |
 | **Delete** | Right-click or use the context menu on a conversation |
 | **Export** | Click the export button to download as Markdown (`.md`) |
+
+## Slugs
+
+Every conversation gets a unique, human-readable slug (e.g., `auth-refactor`, `database-migration`) auto-generated on creation. Slugs make it easier to reference conversations in URLs, exports, and team discussions without needing to remember long UUIDs.
+
+Slugs are lowercase alphanumeric with hyphens, 4-100 characters. You can view or customize the slug in the conversation details panel. In the CLI, you can use `/resume <slug>` or `/delete <slug>` as shortcuts instead of list numbers or IDs.
 
 ## Auto-Titles
 

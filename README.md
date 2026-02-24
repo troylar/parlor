@@ -223,8 +223,8 @@ Any endpoint that speaks the OpenAI protocol:
 
 | | |
 |---|---|
-| **Web UI** | Conversations, projects, folders, tags, attachments, canvas, themes, keyboard shortcuts |
-| **CLI** | REPL, one-shot, exec mode, planning, skills, @file references, Rich rendering |
+| **Web UI** | Conversations with auto-generated slugs, projects, folders, tags, attachments, canvas, themes, keyboard shortcuts |
+| **CLI** | REPL, one-shot, exec mode, planning, skills, @file references, Rich rendering, slug-based conversation lookup |
 | **Tools** | 10 built-in + unlimited MCP tools, parallel execution, sub-agent orchestration |
 | **Safety** | 4 risk tiers, 3 approval modes, destructive command detection, SSRF protection |
 | **Storage** | SQLite + FTS5 + optional vector search, fully local, no cloud |

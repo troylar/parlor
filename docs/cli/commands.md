@@ -10,8 +10,9 @@ All slash commands available in the CLI REPL.
 | `/last` | Resume the most recent conversation |
 | `/list [N]` | Show recent conversations (default 20) |
 | `/search <query>` | Search conversations by content |
-| `/resume <N\|id>` | Resume by list number or conversation ID |
-| `/delete <N\|id>` | Delete a conversation (with confirmation) |
+| `/resume <N\|id\|slug>` | Resume by list number, conversation ID, or slug |
+| `/slug [name]` | View or set the conversation slug |
+| `/delete <N\|id\|slug>` | Delete a conversation (with confirmation) |
 | `/rewind` | Rewind to a previous message, optionally undoing file changes via git |
 | `/compact` | Summarize and compact message history to free context |
 | `/model NAME` | Switch to a different model mid-session (omit NAME to see current) |
@@ -64,21 +65,39 @@ you> /search database migration
 
 ### /resume
 
-Resume by list number (from `/list` output) or by full conversation ID:
+Resume by list number (from `/list` output), full conversation ID, or slug:
 
 ```
 you> /resume 3
 you> /resume a1b2c3d4-e5f6-7890-abcd-ef1234567890
+you> /resume auth-refactor
 ```
 
 On resume, the last user/assistant exchange is shown for context.
 
+### /slug
+
+View or set the slug (human-readable alias) for the current conversation:
+
+```
+you> /slug
+  Slug: auth-refactor
+
+you> /slug jwt-implementation
+  Slug set to: jwt-implementation
+```
+
+Slugs are auto-generated on creation with format `{word}-{word}`, but you can set a custom slug. Slugs must be unique within your database. After setting a slug, you can use `/resume <slug>` instead of `/resume <id>`.
+
 ### /delete
 
-Delete a conversation by list number or ID. Prompts for confirmation:
+Delete a conversation by list number, ID, or slug. Prompts for confirmation:
 
 ```
 you> /delete 3
+  Delete "Fix auth middleware bug"? [y/N]
+
+you> /delete auth-refactor
   Delete "Fix auth middleware bug"? [y/N]
 ```
 
