@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 24, 2026
 
+### v1.44.0
+
+**New:**
+
+- Interactive conversation picker — type `/resume` with no argument to browse conversations with a live preview panel (#381)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.44.0)
+
 ### v1.43.3
 
 **Fixed:**
