@@ -146,6 +146,7 @@ const Chat = (() => {
             body = formData;
         } else {
             const payload = { message: text };
+            if (App.state.isPlanMode) payload.plan_mode = true;
             if (sourceRefs.source_ids && sourceRefs.source_ids.length > 0) payload.source_ids = sourceRefs.source_ids;
             if (sourceRefs.source_tag) payload.source_tag = sourceRefs.source_tag;
             if (sourceRefs.source_group_id) payload.source_group_id = sourceRefs.source_group_id;
@@ -311,6 +312,11 @@ const Chat = (() => {
                 break;
             case 'subagent_event':
                 renderSubagentEvent(data);
+                break;
+            case 'plan_saved':
+                if (App.state.isPlanMode && data.content) {
+                    App._showPlanContent(data.content);
+                }
                 break;
             case 'done':
                 hideThinking();
@@ -1891,10 +1897,19 @@ const Chat = (() => {
         }
     }
 
+    function sendPlanExecution(approvedPlanPrompt) {
+        const input = document.getElementById('message-input');
+        if (input) {
+            input.value = approvedPlanPrompt;
+            sendMessage();
+        }
+    }
+
     return {
         init, sendMessage, loadMessages, stopGeneration, setStreaming, escapeHtml,
         streamChatResponse, isRawMode, setRawMode, setConversationType,
         appendRemoteMessage, startRemoteStream, handleRemoteToken, finalizeRemoteStream,
         showApprovalPrompt, resolveApprovalCard, showAskUserPrompt, showThinkingFromEvent: showThinking,
+        renderMarkdown, highlightCode, showToast, sendPlanExecution,
     };
 })();

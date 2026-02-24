@@ -476,8 +476,9 @@ async def chat(conversation_id: str, request: Request):
             tools_openai.extend(mcp_tools)
 
     # Plan mode: filter tools and inject planning prompt
+    plan_path = None
     if plan_mode:
-        from ..cli.plan import PLAN_MODE_ALLOWED_TOOLS, build_planning_system_prompt, get_plan_file_path
+        from ..cli.plan import PLAN_MODE_ALLOWED_TOOLS, build_planning_system_prompt, get_plan_file_path, read_plan
 
         plan_path = get_plan_file_path(request.app.state.config.app.data_dir, conversation_id)
         tools_openai = [t for t in tools_openai if t.get("function", {}).get("name") in PLAN_MODE_ALLOWED_TOOLS]
@@ -1061,6 +1062,22 @@ async def chat(conversation_id: str, request: Request):
                         "data": json.dumps({"id": data["id"], "output": sse_output, "status": data["status"]}),
                     }
 
+                    # Emit plan_saved SSE event when write_file succeeds in plan mode
+                    # and the plan file now exists on disk
+                    if (
+                        plan_mode
+                        and plan_path
+                        and data["tool_name"] == "write_file"
+                        and data.get("status") == "success"
+                        and plan_path.exists()
+                    ):
+                        _plan_content = read_plan(plan_path)
+                        if _plan_content:
+                            yield {
+                                "event": "plan_saved",
+                                "data": json.dumps({"content": _plan_content, "conversation_id": conversation_id}),
+                            }
+
                     # Emit canvas SSE events after canvas tool calls
                     if data["tool_name"] == "create_canvas" and data.get("status") == "success":
                         output = data.get("output", {})
@@ -1164,7 +1181,7 @@ async def chat(conversation_id: str, request: Request):
                             },
                         )
 
-                    yield {"event": "done", "data": json.dumps({})}
+                    yield {"event": "done", "data": json.dumps({"plan_mode": plan_mode})}
 
         except Exception:
             logger.exception("Chat stream error")

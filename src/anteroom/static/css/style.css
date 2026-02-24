@@ -3503,6 +3503,209 @@ body {
 
 
 /* ============================================================
+   PLAN MODE
+   ============================================================ */
+
+.btn-plan-toggle {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    transition: all 0.12s var(--easing);
+}
+.btn-plan-toggle:hover {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+.btn-plan-toggle.active {
+    color: #eab308;
+    border-color: #eab308;
+    background: rgba(234, 179, 8, 0.08);
+}
+
+.plan-panel {
+    width: 40%;
+    min-width: 360px;
+    max-width: 50%;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    z-index: 5;
+}
+.chat-main.with-plan {
+    flex: 1;
+    min-width: 400px;
+}
+
+.plan-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    gap: 8px;
+}
+.plan-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.02em;
+}
+.plan-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.plan-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: color 0.12s;
+}
+.plan-close:hover {
+    color: var(--text-primary);
+}
+
+.plan-status-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.plan-status-ready {
+    color: #eab308;
+    background: rgba(234, 179, 8, 0.12);
+}
+
+.plan-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+.plan-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.6;
+    text-align: center;
+    padding: 40px 20px;
+}
+.plan-empty p {
+    margin: 0 0 8px;
+}
+.plan-content {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-primary);
+}
+.plan-content h1, .plan-content h2, .plan-content h3 {
+    margin: 16px 0 8px;
+    color: var(--text-primary);
+}
+.plan-content h2 { font-size: 15px; }
+.plan-content h3 { font-size: 13px; }
+.plan-content ul, .plan-content ol {
+    padding-left: 20px;
+    margin: 8px 0;
+}
+.plan-content li {
+    margin: 4px 0;
+}
+.plan-content code {
+    font-size: 12px;
+    background: var(--bg-input);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+.plan-content pre {
+    background: var(--bg-input);
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+}
+.plan-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.plan-footer {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+.plan-btn {
+    flex: 1;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s var(--easing);
+}
+.plan-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.plan-approve {
+    background: #22c55e;
+    color: #fff;
+}
+.plan-approve:hover:not(:disabled) {
+    background: #16a34a;
+}
+.plan-reject {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+.plan-reject:hover:not(:disabled) {
+    border-color: #ef4444;
+    color: #ef4444;
+}
+
+/* Responsive: narrow screens -> plan panel overlays */
+@media (max-width: 900px) {
+    .plan-panel {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 50%;
+        min-width: 320px;
+        z-index: 25;
+        box-shadow: var(--shadow-lg);
+    }
+}
+@media (max-width: 768px) {
+    .plan-panel {
+        width: 100%;
+        min-width: 100%;
+    }
+}
+
+
+/* ============================================================
    SOURCES PANEL
    ============================================================ */
 

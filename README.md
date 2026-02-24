@@ -165,8 +165,9 @@ mcp_servers:
 
 ### Planning mode
 
-For complex tasks, the AI explores first, writes a plan, then executes only after you approve. No surprises.
+For complex tasks, the AI explores first, writes a plan, then executes only after you approve. No surprises. Works in both CLI and web UI.
 
+**CLI:**
 ```
 > /plan build a REST API for user management
   Planning... reading codebase, designing approach
@@ -174,6 +175,8 @@ For complex tasks, the AI explores first, writes a plan, then executes only afte
 > /plan approve
   Executing plan: 8 steps across 5 files...
 ```
+
+**Web UI:** Check the plan panel when planning is active, approve or reject before execution continues.
 
 ---
 

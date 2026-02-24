@@ -435,7 +435,19 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
     app.state.csrf_token = csrf_token
     cache_bust = str(int(time.time()))
 
-    from .routers import approvals, chat, config_api, conversations, databases, events, projects, search, sources, usage
+    from .routers import (
+        approvals,
+        chat,
+        config_api,
+        conversations,
+        databases,
+        events,
+        plan,
+        projects,
+        search,
+        sources,
+        usage,
+    )
 
     app.include_router(conversations.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
@@ -447,6 +459,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
     app.include_router(approvals.router, prefix="/api")
     app.include_router(sources.router, prefix="/api")
     app.include_router(usage.router, prefix="/api")
+    app.include_router(plan.router, prefix="/api")
 
     if config.proxy.enabled:
         from .routers import proxy

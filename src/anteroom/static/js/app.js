@@ -7,6 +7,7 @@ const App = (() => {
         currentProjectId: null,
         currentDatabase: null,
         isStreaming: false,
+        isPlanMode: false,
         availableModels: [],
         databases: [],
         clientId: crypto.randomUUID(),
@@ -177,6 +178,7 @@ const App = (() => {
         Palette.init();
         Attachments.init();
         initRawToggle();
+        _initPlanToggle();
         _initMobileSidebar();
         _renderThemePicker();
 
@@ -282,6 +284,131 @@ const App = (() => {
             btn.classList.toggle('active', newVal);
         });
         topbar.appendChild(btn);
+    }
+
+    function _initPlanToggle() {
+        const btn = document.getElementById('btn-plan-toggle');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            const newVal = !state.isPlanMode;
+            setPlanMode(newVal);
+        });
+
+        // Plan panel close button
+        const closeBtn = document.getElementById('plan-close');
+        if (closeBtn) closeBtn.addEventListener('click', () => setPlanMode(false));
+
+        // Plan approve/reject buttons
+        const approveBtn = document.getElementById('plan-approve');
+        const rejectBtn = document.getElementById('plan-reject');
+        if (approveBtn) approveBtn.addEventListener('click', _approvePlan);
+        if (rejectBtn) rejectBtn.addEventListener('click', _rejectPlan);
+    }
+
+    function setPlanMode(active) {
+        state.isPlanMode = active;
+        const btn = document.getElementById('btn-plan-toggle');
+        const panel = document.getElementById('plan-panel');
+        const chatMain = document.querySelector('.chat-main');
+        if (btn) btn.classList.toggle('active', active);
+        if (panel) panel.style.display = active ? '' : 'none';
+        if (chatMain) chatMain.classList.toggle('with-plan', active);
+
+        // Reset plan panel content when entering plan mode
+        if (active) {
+            const emptyEl = document.getElementById('plan-empty');
+            const contentEl = document.getElementById('plan-content');
+            const footerEl = document.getElementById('plan-footer');
+            if (emptyEl) emptyEl.style.display = '';
+            if (contentEl) { contentEl.style.display = 'none'; contentEl.innerHTML = ''; }
+            if (footerEl) footerEl.style.display = 'none';
+
+            // Check if a plan already exists for current conversation
+            if (state.currentConversationId) {
+                _loadExistingPlan(state.currentConversationId);
+            }
+        }
+    }
+
+    async function _loadExistingPlan(conversationId) {
+        try {
+            const resp = await api(`/api/conversations/${encodeURIComponent(conversationId)}/plan`);
+            if (resp && resp.exists && resp.content) {
+                _showPlanContent(resp.content);
+            }
+        } catch { /* no plan yet */ }
+    }
+
+    function _showPlanContent(content) {
+        const emptyEl = document.getElementById('plan-empty');
+        const contentEl = document.getElementById('plan-content');
+        const footerEl = document.getElementById('plan-footer');
+        const badge = document.getElementById('plan-status-badge');
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (contentEl) {
+            contentEl.style.display = '';
+            contentEl.innerHTML = Chat.renderMarkdown(content);
+            Chat.highlightCode(contentEl);
+        }
+        if (footerEl) footerEl.style.display = '';
+        if (badge) { badge.textContent = 'Ready'; badge.className = 'plan-status-badge plan-status-ready'; }
+    }
+
+    async function _approvePlan() {
+        const convId = state.currentConversationId;
+        if (!convId) return;
+        const approveBtn = document.getElementById('plan-approve');
+        const rejectBtn = document.getElementById('plan-reject');
+        if (approveBtn) approveBtn.disabled = true;
+        if (rejectBtn) rejectBtn.disabled = true;
+
+        try {
+            const resp = await api(`/api/conversations/${encodeURIComponent(convId)}/plan/approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            if (resp && resp.content) {
+                // Exit plan mode and send the approved plan as a follow-up message
+                setPlanMode(false);
+                const approvedPrompt = `The following plan has been approved. Execute it step by step:\n\n${resp.content}`;
+                Chat.sendPlanExecution(approvedPrompt);
+            }
+        } catch (err) {
+            if (approveBtn) approveBtn.disabled = false;
+            if (rejectBtn) rejectBtn.disabled = false;
+            Chat.showToast('Failed to approve plan: ' + err.message);
+        }
+    }
+
+    async function _rejectPlan() {
+        const convId = state.currentConversationId;
+        if (!convId) return;
+        const approveBtn = document.getElementById('plan-approve');
+        const rejectBtn = document.getElementById('plan-reject');
+        if (approveBtn) approveBtn.disabled = true;
+        if (rejectBtn) rejectBtn.disabled = true;
+
+        try {
+            await api(`/api/conversations/${encodeURIComponent(convId)}/plan/reject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            // Reset plan panel to empty state
+            const emptyEl = document.getElementById('plan-empty');
+            const contentEl = document.getElementById('plan-content');
+            const footerEl = document.getElementById('plan-footer');
+            const badge = document.getElementById('plan-status-badge');
+            if (emptyEl) { emptyEl.style.display = ''; emptyEl.querySelector('p').textContent = 'Plan rejected. Send a new message to create another plan.'; }
+            if (contentEl) { contentEl.style.display = 'none'; contentEl.innerHTML = ''; }
+            if (footerEl) footerEl.style.display = 'none';
+            if (badge) { badge.textContent = ''; badge.className = 'plan-status-badge'; }
+        } catch (err) {
+            if (approveBtn) approveBtn.disabled = false;
+            if (rejectBtn) rejectBtn.disabled = false;
+            Chat.showToast('Failed to reject plan: ' + err.message);
+        }
     }
 
     let _currentModel = '';
@@ -420,6 +547,10 @@ const App = (() => {
         _updateUrl();
         _connectEventSource();
         Canvas.loadForConversation(id);
+        // If plan mode is active, check for existing plan in new conversation
+        if (state.isPlanMode) {
+            _loadExistingPlan(id);
+        }
     }
 
     // --- URL Params ---
@@ -1148,5 +1279,6 @@ const App = (() => {
         state, api, _handle401, _getCsrfToken, _selectModel, newConversation, loadConversation,
         loadProjects, loadDatabases, addDatabase, refreshModels, formatTimestamp,
         getTheme, setTheme, THEMES, openMcpModal,
+        setPlanMode, _showPlanContent,
     };
 })();
