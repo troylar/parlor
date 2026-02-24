@@ -498,6 +498,15 @@ def update_conversation_title(db: sqlite3.Connection, conversation_id: str, titl
     return get_conversation(db, conversation_id)
 
 
+def list_conversation_slugs(db: sqlite3.Connection, limit: int = 50) -> list[tuple[str, str]]:
+    """Return (slug, title) pairs for conversations that have slugs, ordered by most recent."""
+    rows = db.execute_fetchall(
+        "SELECT slug, title FROM conversations WHERE slug IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
+        (limit,),
+    )
+    return [(row["slug"], row["title"] or "") for row in rows]
+
+
 def update_conversation_slug(db: sqlite3.Connection, conversation_id: str, slug: str) -> dict[str, Any] | None:
     """Update the slug of a conversation. Raises sqlite3.IntegrityError on duplicate."""
     now = _now()

@@ -1367,12 +1367,26 @@ async def _run_repl(
     from prompt_toolkit.styles import Style as PtStyle
 
     class ParlorCompleter(Completer):
-        """Tab completer for / commands and @ file paths."""
+        """Tab completer for / commands, @ file paths, and conversation slugs."""
 
-        def __init__(self, commands: list[str], skill_names: list[str], wd: str) -> None:
+        _slug_commands = frozenset({"resume", "delete", "rename"})
+
+        def __init__(self, commands: list[str], skill_names: list[str], wd: str, db: Any) -> None:
             self._commands = commands
             self._skill_names = skill_names
             self._wd = wd
+            self._db = db
+
+        def _get_slug_completions(self, partial: str) -> Any:
+            """Yield slug completions matching the partial input."""
+            try:
+                slugs = storage.list_conversation_slugs(self._db, limit=50)
+            except Exception:
+                return
+            for slug, title in slugs:
+                if slug.startswith(partial):
+                    display = title[:50] if title else ""
+                    yield Completion(slug, start_position=-len(partial), display_meta=display)
 
         def get_completions(self, document: Document, complete_event: Any) -> Any:
             text = document.text_before_cursor
@@ -1387,6 +1401,13 @@ async def _run_repl(
                 for sname in self._skill_names:
                     if sname.startswith(prefix):
                         yield Completion(f"/{sname}", start_position=-len(word))
+            elif text.lstrip().startswith("/"):
+                # Check if we're completing an argument after a slug-accepting command
+                parts = text.lstrip().split(None, 2)
+                cmd_name = parts[0].lstrip("/") if parts else ""
+                if cmd_name in self._slug_commands and len(parts) <= 2:
+                    partial = parts[1] if len(parts) == 2 else ""
+                    yield from self._get_slug_completions(partial)
             elif "@" in word:
                 # Complete file paths after @
                 at_idx = word.rfind("@")
@@ -1442,7 +1463,7 @@ async def _run_repl(
         "exit",
     ]
     skill_names = [s.name for s in skill_registry.list_skills()] if skill_registry else []
-    completer = ParlorCompleter(commands, skill_names, working_dir)
+    completer = ParlorCompleter(commands, skill_names, working_dir, db)
 
     def _rebuild_tools() -> None:
         """Rebuild the tool list after MCP changes."""
