@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 24, 2026
 
+### v1.40.0
+
+**New:**
+
+- Automatic cleanup of empty conversations on startup — keeps your conversation list clutter-free in both web UI and CLI (#363)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.40.0)
+
 ### v1.39.0
 
 **New:**
