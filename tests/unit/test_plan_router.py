@@ -177,3 +177,13 @@ class TestRejectPlan:
         )
         # 422 from Pydantic body parse failure or 415 from _require_json — either rejects wrong type
         assert resp.status_code in (415, 422)
+
+    def test_rejects_oversized_reason(self) -> None:
+        app, data_dir = _create_test_app()
+        _write_plan(data_dir, "conv-big", "some plan")
+        client = TestClient(app)
+        resp = client.post(
+            "/api/conversations/conv-big/plan/reject",
+            json={"reason": "x" * 4097},
+        )
+        assert resp.status_code == 422

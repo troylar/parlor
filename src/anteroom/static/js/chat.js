@@ -321,11 +321,6 @@ const Chat = (() => {
             case 'done':
                 hideThinking();
                 finalizeAssistant();
-                // If plan mode response finished, check for plan and open panel
-                if (data.plan_mode && !App.state.isPlanMode) {
-                    // Auto-open plan panel if the response was in plan mode
-                    // (e.g. user toggled it off mid-stream)
-                }
                 break;
             case 'error':
                 hideThinking();

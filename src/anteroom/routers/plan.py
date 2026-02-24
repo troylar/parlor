@@ -60,7 +60,10 @@ async def approve_plan(conversation_id: str, request: Request) -> dict:
     content = read_plan(plan_path)
     if content is None:
         raise HTTPException(status_code=404, detail="No plan found for this conversation")
-    delete_plan(plan_path)
+    try:
+        delete_plan(plan_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No plan found for this conversation")
     logger.info("Plan approved for conversation %s", conversation_id)
     return {"status": "approved", "content": content}
 
@@ -77,7 +80,10 @@ async def reject_plan(conversation_id: str, body: PlanRejectRequest, request: Re
     content = read_plan(plan_path)
     if content is None:
         raise HTTPException(status_code=404, detail="No plan found for this conversation")
-    delete_plan(plan_path)
+    try:
+        delete_plan(plan_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No plan found for this conversation")
     if body.reason:
         logger.info("Plan rejected for conversation %s: %s", conversation_id, body.reason[:200])
     else:
