@@ -1472,6 +1472,8 @@ async def _run_repl(
                 (desc, "    Resume by list number or ID\n"),
                 (cmd, "  /delete <N|id>"),
                 (desc, "    Delete a conversation\n"),
+                (cmd, "  /rename [N|id] <title>"),
+                (desc, " Rename a conversation\n"),
                 (cmd, "  /rewind"),
                 (desc, "           Roll back to an earlier message\n"),
                 ("", "\n"),
@@ -1874,6 +1876,52 @@ async def _run_repl(
                         conv = storage.create_conversation(db, **id_kw)
                         ai_messages = []
                         is_first_message = True
+                    continue
+                elif cmd == "/rename":
+                    parts = user_input.split(maxsplit=2)
+                    if len(parts) < 2:
+                        renderer.console.print(
+                            f"[{CHROME}]Usage: /rename <title> or /rename <N|id> <title>[/{CHROME}]\n"
+                        )
+                        continue
+                    # Two forms: /rename <title> (current conv) or /rename <N|id> <title>
+                    first_arg = parts[1].strip()
+                    looks_like_target = first_arg.isdigit() or ("-" in first_arg and len(first_arg) >= 36)
+                    if len(parts) == 3 and looks_like_target:
+                        # Could be /rename <N> <title> or /rename <id> <title>
+                        target = parts[1].strip()
+                        new_title = parts[2].strip()
+                        resolved_id = None
+                        if target.isdigit():
+                            idx = int(target) - 1
+                            convs = storage.list_conversations(db, limit=20)
+                            if 0 <= idx < len(convs):
+                                resolved_id = convs[idx]["id"]
+                            else:
+                                renderer.render_error(f"Invalid number: {target}. Use /list to see conversations.")
+                                continue
+                        else:
+                            resolved_id = target
+                    else:
+                        # /rename <title> — rename current conversation
+                        new_title = user_input.split(maxsplit=1)[1].strip()
+                        resolved_id = conv.get("id")
+                    if not resolved_id:
+                        renderer.render_error("No active conversation to rename.")
+                        continue
+                    if not new_title:
+                        renderer.console.print(
+                            f"[{CHROME}]Usage: /rename <title> or /rename <N|id> <title>[/{CHROME}]\n"
+                        )
+                        continue
+                    target_conv = storage.get_conversation(db, resolved_id)
+                    if not target_conv:
+                        renderer.render_error(f"Conversation not found: {resolved_id}")
+                        continue
+                    storage.update_conversation_title(db, resolved_id, new_title)
+                    renderer.console.print(f'[{CHROME}]Renamed conversation to "{new_title}"[/{CHROME}]\n')
+                    if conv.get("id") == resolved_id:
+                        conv["title"] = new_title
                     continue
                 elif cmd == "/search":
                     parts = user_input.split(maxsplit=1)
