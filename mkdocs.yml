@@ -119,6 +119,7 @@ nav:
     - tutorials/connect-to-azure.md
     - tutorials/add-mcp-tools.md
     - tutorials/build-custom-skills.md
+    - tutorials/create-project-evals.md
   - Changelog: advanced/changelog.md
   - Advanced:
     - advanced/architecture.md
