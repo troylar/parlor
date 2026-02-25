@@ -779,6 +779,14 @@ class TestSamplingConfig:
         config, _ = load_config(cfg_file)
         assert config.ai.temperature is None
 
+    def test_invalid_top_p_falls_back_to_none(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "top_p": "invalid"}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.top_p is None
+
     def test_invalid_seed_falls_back_to_none(self, tmp_path: Path) -> None:
         cfg_file = _write_config(
             tmp_path,

@@ -118,7 +118,7 @@ Config at `~/.anteroom/config.yaml` (backward compat: `~/.parlor/config.yaml`). 
 **Precedence:** defaults < team < personal < project < env vars < CLI flags (team-enforced fields override all). Project configs require SHA-256 trust verification. Live reload via config watcher.
 
 Key config sections (see `config.py` dataclasses for all fields and defaults):
-- **`AIConfig`** — API connection, 6 timeouts, retry settings, narration cadence, max_tools (default 128)
+- **`AIConfig`** — API connection, 6 timeouts, retry settings, narration cadence, max_tools (default 128), temperature (None = provider default), top_p (None = provider default), seed (None = provider default)
 - **`SafetyConfig`** — Approval mode (default ask_for_writes), allowed/denied tools, custom bash patterns, per-tool tier overrides
 - **`CliConfig`** — Context compaction thresholds, tool dedup, retry behavior, visual thresholds
 - **`PlanningConfig`** — Auto-trigger: `auto_mode` (off/suggest/auto), `auto_threshold_tools`

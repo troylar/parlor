@@ -16,6 +16,9 @@ Every AI config option has an environment variable override with the `AI_CHAT_` 
 | `AI_CHAT_FIRST_TOKEN_TIMEOUT` | `30` | Max seconds to wait for first token after connect (clamped 5–120) |
 | `AI_CHAT_RETRY_MAX_ATTEMPTS` | `3` | Retries on transient errors; 0 disables (clamped 0–10) |
 | `AI_CHAT_RETRY_BACKOFF_BASE` | `1.0` | Exponential backoff base delay in seconds (clamped 0.1–30.0) |
+| `AI_CHAT_TEMPERATURE` | --- | Model temperature for response randomness (0.0–2.0) |
+| `AI_CHAT_TOP_P` | --- | Nucleus sampling parameter (0.0–1.0) |
+| `AI_CHAT_SEED` | --- | Random seed for deterministic output (integer) |
 | `AI_CHAT_PORT` | `8080` | Port for the web server |
 | `AI_CHAT_USER_ID` | --- | Override user identity UUID |
 | `AI_CHAT_DISPLAY_NAME` | --- | Override user display name |

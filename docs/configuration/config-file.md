@@ -20,6 +20,9 @@ ai:
   chunk_stall_timeout: 30                      # Max silence between chunks mid-stream in seconds (default: 30, clamped 10–600)
   retry_max_attempts: 3                        # Retries on transient errors; 0 disables (default: 3, clamped 0–10)
   retry_backoff_base: 1.0                      # Exponential backoff base in seconds (default: 1.0, clamped 0.1–30.0)
+  temperature: null                             # Model temperature for randomness (0.0–2.0, null = provider default)
+  top_p: null                                   # Nucleus sampling parameter (0.0–1.0, null = provider default)
+  seed: null                                    # Random seed for deterministic output (null = provider default)
 
 app:
   host: "127.0.0.1"      # Bind address
@@ -139,6 +142,9 @@ required:
 | `chunk_stall_timeout` | integer | `30` | Max silence between chunks mid-stream in seconds (clamped 10–600); env: `AI_CHAT_CHUNK_STALL_TIMEOUT` |
 | `retry_max_attempts` | integer | `3` | Retries on transient errors (timeout, connection); 0 disables (clamped 0–10); env: `AI_CHAT_RETRY_MAX_ATTEMPTS` |
 | `retry_backoff_base` | float | `1.0` | Exponential backoff base delay in seconds (clamped 0.1–30.0); env: `AI_CHAT_RETRY_BACKOFF_BASE` |
+| `temperature` | float or null | `null` | Model temperature for response randomness (0.0–2.0; null = provider default); env: `AI_CHAT_TEMPERATURE` |
+| `top_p` | float or null | `null` | Nucleus sampling parameter (0.0–1.0; null = provider default); env: `AI_CHAT_TOP_P` |
+| `seed` | integer or null | `null` | Random seed for deterministic output (null = provider default); env: `AI_CHAT_SEED` |
 
 ### app
 
