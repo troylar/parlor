@@ -477,7 +477,7 @@ class TestEmbeddingsConfig:
             },
         )
         config, _ = load_config(cfg_file)
-        assert config.embeddings.enabled is True
+        assert config.embeddings.enabled is None  # auto-detect by default
         assert config.embeddings.provider == "local"
         assert config.embeddings.model == "text-embedding-3-small"
         assert config.embeddings.dimensions == 0  # auto-detect from provider/model

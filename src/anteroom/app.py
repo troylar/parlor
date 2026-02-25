@@ -131,16 +131,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.embedding_worker = None
     embedding_service = create_embedding_service(config)
     if embedding_service:
-        app.state.embedding_service = embedding_service
-        if app.state.vec_enabled:
-            worker = EmbeddingWorker(app.state.db, embedding_service)
-            worker.start()
-            app.state.embedding_worker = worker
-            logger.info("Embedding worker started")
-        else:
-            logger.info("Embedding service available but sqlite-vec not loaded; vector search disabled")
+        # Auto-detect: probe the endpoint once before committing to the worker
+        if config.embeddings.enabled is None:
+            probe_ok = await embedding_service.probe()
+            if not probe_ok:
+                logger.info("Embedding endpoint unavailable; semantic search disabled. Configure in config.yaml")
+                embedding_service = None
+        if embedding_service:
+            app.state.embedding_service = embedding_service
+            if app.state.vec_enabled:
+                worker = EmbeddingWorker(app.state.db, embedding_service)
+                worker.start()
+                app.state.embedding_worker = worker
+                logger.info("Embedding worker started")
+            else:
+                logger.info("Embedding service available but sqlite-vec not loaded; vector search disabled")
     else:
-        logger.info("Embedding service not configured; vector search disabled")
+        if config.embeddings.enabled is False:
+            logger.info("Embeddings disabled in config; vector search disabled")
+        else:
+            logger.info("Embedding service not configured; vector search disabled")
 
     # Create shared AIService for proxy if enabled
     app.state.proxy_ai_service = None

@@ -114,6 +114,15 @@ class EmbeddingService:
             logger.warning("Transient embedding error: %s (status=%s)", type(e).__name__, status)
             raise EmbeddingTransientError(str(e), status_code=status) from e
 
+    async def probe(self, timeout: float = 5.0) -> bool:
+        """Test whether the embedding endpoint is available. Returns True if a test embedding succeeds."""
+        try:
+            result = await asyncio.wait_for(self.embed("test"), timeout=timeout)
+            return result is not None
+        except Exception:
+            logger.debug("Embedding API probe failed", exc_info=True)
+            return False
+
     async def embed_batch(self, texts: list[str], batch_size: int = 100) -> list[list[float] | None]:
         """Generate embeddings for a batch of texts.
 
@@ -217,6 +226,15 @@ class LocalEmbeddingService:
         logger.info("Local embedding model '%s' loaded (%d dimensions)", self._model_name, self._dimensions)
         return self._embedding_model
 
+    async def probe(self, timeout: float = 10.0) -> bool:
+        """Test whether the local embedding model is available. Returns True if model loads and embeds."""
+        try:
+            result = await asyncio.wait_for(self.embed("test"), timeout=timeout)
+            return result is not None
+        except Exception:
+            logger.debug("Local embedding probe failed", exc_info=True)
+            return False
+
     async def embed(self, text: str) -> list[float] | None:
         """Generate an embedding for a single text using the local model."""
         if not text or not text.strip():
@@ -263,8 +281,14 @@ _VALID_PROVIDERS = {"local", "api"}
 
 
 def create_embedding_service(config: AppConfig) -> EmbeddingService | LocalEmbeddingService | None:
-    """Factory: create an embedding service from app config. Returns None if unavailable."""
-    if not config.embeddings.enabled:
+    """Factory: create an embedding service from app config. Returns None if disabled.
+
+    When ``enabled`` is ``None`` (auto-detect), the service is still created so
+    callers can probe it; the caller is responsible for calling ``probe()`` to
+    decide whether to use it.  When ``enabled`` is ``False``, returns ``None``
+    immediately.
+    """
+    if config.embeddings.enabled is False:
         return None
 
     provider = config.embeddings.provider

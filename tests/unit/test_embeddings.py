@@ -486,3 +486,113 @@ class TestGetEffectiveDimensions:
             embeddings=EmbeddingsConfig(provider="api", dimensions=0),
         )
         assert get_effective_dimensions(config) == 1536
+
+
+class TestProbe:
+    """Tests for EmbeddingService.probe() and LocalEmbeddingService.probe()."""
+
+    @pytest.mark.asyncio
+    async def test_api_probe_success(self) -> None:
+        client = AsyncMock()
+        client.embeddings.create = AsyncMock(return_value=_make_embedding_response([[0.1, 0.2, 0.3]]))
+        service = EmbeddingService(client, model="test-model", dimensions=3)
+
+        assert await service.probe() is True
+
+    @pytest.mark.asyncio
+    async def test_api_probe_failure(self) -> None:
+        client = AsyncMock()
+        client.embeddings.create = AsyncMock(side_effect=Exception("connection refused"))
+        service = EmbeddingService(client, model="test-model", dimensions=3)
+
+        assert await service.probe() is False
+
+    @pytest.mark.asyncio
+    async def test_api_probe_timeout(self) -> None:
+        import asyncio
+
+        client = AsyncMock()
+
+        async def slow_create(**kwargs: object) -> None:
+            await asyncio.sleep(10)
+
+        client.embeddings.create = slow_create
+        service = EmbeddingService(client, model="test-model", dimensions=3)
+
+        assert await service.probe(timeout=0.1) is False
+
+    @pytest.mark.asyncio
+    async def test_local_probe_success(self) -> None:
+        service = LocalEmbeddingService(model_name="test-model", dimensions=3)
+        mock_model = MagicMock()
+        mock_model.embed = MagicMock(return_value=[_FakeArray([0.1, 0.2, 0.3])])
+        service._embedding_model = mock_model
+
+        assert await service.probe() is True
+
+    @pytest.mark.asyncio
+    async def test_local_probe_failure_no_fastembed(self) -> None:
+        service = LocalEmbeddingService()
+        with patch.dict("sys.modules", {"fastembed": None}):
+            with patch("builtins.__import__", side_effect=ImportError("No module named 'fastembed'")):
+                assert await service.probe() is False
+
+    @pytest.mark.asyncio
+    async def test_local_probe_failure_model_error(self) -> None:
+        service = LocalEmbeddingService(model_name="test-model", dimensions=3)
+        mock_model = MagicMock()
+        mock_model.embed = MagicMock(side_effect=RuntimeError("ONNX crash"))
+        service._embedding_model = mock_model
+
+        assert await service.probe() is False
+
+
+class TestTriStateEnabled:
+    """Tests for enabled=None (auto-detect) vs True/False in create_embedding_service."""
+
+    def test_enabled_none_creates_local_service(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(enabled=None),
+        )
+        service = create_embedding_service(config)
+        assert service is not None
+        assert isinstance(service, LocalEmbeddingService)
+
+    def test_enabled_none_creates_api_service(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(enabled=None, provider="api"),
+        )
+        service = create_embedding_service(config)
+        assert service is not None
+        assert isinstance(service, EmbeddingService)
+
+    def test_enabled_false_returns_none(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(enabled=False),
+        )
+        assert create_embedding_service(config) is None
+
+    def test_enabled_true_creates_service(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            embeddings=EmbeddingsConfig(enabled=True),
+        )
+        service = create_embedding_service(config)
+        assert service is not None
+
+    def test_default_enabled_is_none(self) -> None:
+        from anteroom.config import EmbeddingsConfig
+
+        config = EmbeddingsConfig()
+        assert config.enabled is None

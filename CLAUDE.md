@@ -148,7 +148,7 @@ Key config sections (see `config.py` dataclasses for all fields, defaults, and e
 - **`SkillsConfig`** — Skill auto-invocation: `auto_invoke` (default true) enables the AI to invoke skills from natural language via the synthetic `invoke_skill` tool
 - **`UsageConfig`** — Token usage tracking: `week_days` (default 7), `month_days` (default 30), `model_costs` (per-model input/output rates for cost estimation)
 - **`SubagentConfig`** — Sub-agent limits: concurrency, total, depth, iterations, timeout, output/prompt size
-- **`EmbeddingsConfig`** — Dual provider (local fastembed default, or OpenAI-compatible API)
+- **`EmbeddingsConfig`** — Dual provider (local fastembed default, or OpenAI-compatible API). `enabled` is tri-state: `None` (default) = auto-detect via probe at startup, `True` = force-enable, `False` = force-disable. Probe tests the endpoint once; failure silently disables embeddings
 - **`RagConfig`** — RAG pipeline settings: `enabled` (default true), `max_chunks` (10), `max_tokens` (2000), `similarity_threshold` (0.5), `include_sources`/`include_conversations` (both true), `exclude_current` (true). Env vars: `AI_CHAT_RAG_ENABLED`, `AI_CHAT_RAG_MAX_CHUNKS`, `AI_CHAT_RAG_MAX_TOKENS`, `AI_CHAT_RAG_SIMILARITY_THRESHOLD`
 - **`CodebaseIndexConfig`** — Tree-sitter codebase index: `enabled` (default true, degrades gracefully), `map_tokens` (default 1000 token budget), `languages` (empty = auto-detect all), `exclude_dirs` (default: .git, node_modules, __pycache__, venv, etc.). Optional dependency: `pip install anteroom[index]`
 - **`ProxyConfig`** — OpenAI-compatible proxy (opt-in), CORS allowlist

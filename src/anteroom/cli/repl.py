@@ -1952,8 +1952,8 @@ async def _run_repl(
         _rag_embedding_service: list[Any] = [None]
         _rag_service_checked: list[bool] = [False]
 
-        def _get_rag_embedding_service() -> Any:
-            """Lazily create embedding service for RAG retrieval."""
+        async def _get_rag_embedding_service() -> Any:
+            """Lazily create embedding service for RAG retrieval, with auto-detect probe."""
             if _rag_service_checked[0]:
                 return _rag_embedding_service[0]
             _rag_service_checked[0] = True
@@ -1961,6 +1961,11 @@ async def _run_repl(
                 from ..services.embeddings import create_embedding_service
 
                 svc = create_embedding_service(config)
+                if svc and config.embeddings.enabled is None:
+                    probe_ok = await svc.probe()
+                    if not probe_ok:
+                        logger.info("Embedding endpoint unavailable; semantic search disabled")
+                        svc = None
                 _rag_embedding_service[0] = svc
                 return svc
             except Exception:
@@ -2712,7 +2717,7 @@ async def _run_repl(
                 try:
                     from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
 
-                    _rag_emb = _get_rag_embedding_service()
+                    _rag_emb = await _get_rag_embedding_service()
                     if _rag_emb:
                         _rag_chunks = await retrieve_context(
                             query=expanded,

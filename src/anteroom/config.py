@@ -352,7 +352,7 @@ class UserIdentity:
 
 @dataclass
 class EmbeddingsConfig:
-    enabled: bool = True
+    enabled: bool | None = None  # None = auto-detect at startup, True = force-enable, False = force-disable
     provider: str = "local"  # "local" (fastembed) or "api" (OpenAI-compatible)
     model: str = "text-embedding-3-small"
     dimensions: int = 0  # 0 = auto-detect from provider/model
@@ -899,11 +899,11 @@ def load_config(
         )
 
     emb_raw = raw.get("embeddings", {})
-    emb_enabled = str(emb_raw.get("enabled", os.environ.get("AI_CHAT_EMBEDDINGS_ENABLED", "true"))).lower() not in (
-        "false",
-        "0",
-        "no",
-    )
+    _emb_enabled_raw = emb_raw.get("enabled", os.environ.get("AI_CHAT_EMBEDDINGS_ENABLED"))
+    if _emb_enabled_raw is None:
+        emb_enabled: bool | None = None  # auto-detect at startup
+    else:
+        emb_enabled = str(_emb_enabled_raw).lower() not in ("false", "0", "no")
     emb_provider = emb_raw.get("provider") or os.environ.get("AI_CHAT_EMBEDDINGS_PROVIDER", "local")
     emb_model = emb_raw.get("model") or os.environ.get("AI_CHAT_EMBEDDINGS_MODEL", "text-embedding-3-small")
     emb_local_model = emb_raw.get("local_model") or os.environ.get(
