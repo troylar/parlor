@@ -1348,10 +1348,8 @@ async def _run_repl(
     id_kw = _identity_kwargs(config)
 
     from prompt_toolkit import PromptSession
-    from prompt_toolkit.filters import Condition
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
-    from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style as PtStyle
 
     from .completer import AnteroomCompleter
@@ -1407,61 +1405,18 @@ async def _run_repl(
 
     history_path = config.app.data_dir / "cli_history"
 
-    # Map Shift+Enter (CSI u: \x1b[13;2u) to Ctrl+J for terminals that
-    # support the kitty keyboard protocol (iTerm2, kitty, WezTerm, foot).
-    # Terminal.app doesn't send this sequence — Shift+Enter = Enter there.
-    try:
-        from prompt_toolkit.input import vt100_parser
+    from .keybindings import KeybindingState, create_keybindings, on_buffer_change, patch_shift_enter
 
-        vt100_parser.ANSI_SEQUENCES["\x1b[13;2u"] = "c-j"
-    except Exception:
-        pass
-
-    # Key bindings
-    kb = KeyBindings()
-
-    # Paste detection: track buffer changes to distinguish paste from typing.
-    # Pasted characters arrive in < 5ms bursts; human typing is > 50ms apart.
-    _last_text_change: list[float] = [0.0]
-
-    # Enter submits; Alt+Enter / Shift+Enter / Ctrl+J inserts newline
-    @kb.add("enter")
-    def _submit(event: Any) -> None:
-        if _is_paste(_last_text_change[0]):
-            # Rapid input (paste) — insert newline, don't submit
-            event.current_buffer.insert_text("\n")
-        else:
-            event.current_buffer.validate_and_handle()
-
-    @kb.add("escape", "enter")
-    @kb.add("c-j")
-    def _newline(event: Any) -> None:
-        event.current_buffer.insert_text("\n")
-
-    # Ctrl+C: clear buffer if text present (with double-press exit), exit if empty
-    _exit_flag: list[bool] = [False]
-    _last_ctrl_c: list[float] = [0.0]
-
-    @kb.add("c-c")
-    def _handle_ctrl_c(event: Any) -> None:
-        import time
-
-        buf = event.current_buffer
-        now = time.monotonic()
-        if buf.text:
-            buf.reset()
-            _last_ctrl_c[0] = now
-        elif now - _last_ctrl_c[0] < 2.0:
-            _exit_flag[0] = True
-            buf.validate_and_handle()
-        else:
-            _exit_flag[0] = True
-            buf.validate_and_handle()
+    patch_shift_enter()
+    _kb_state = KeybindingState()
+    kb = create_keybindings(_kb_state)
+    _exit_flag = _kb_state.exit_flag_value
 
     # Styled prompt — dim while agent is working to signal "you can type to queue"
     _prompt_text = HTML("<style fg='#C5A059'>❯</style> ")
     _prompt_dim = HTML(f"<style fg='{CHROME}'>❯</style> ")
     _continuation = "  "  # align with "❯ "
+    agent_busy = _kb_state.agent_busy
 
     def _prompt() -> HTML:
         return _prompt_dim if agent_busy.is_set() else _prompt_text
@@ -1488,11 +1443,7 @@ async def _run_repl(
 
     _patch_completion_menu_position()
 
-    # Hook buffer changes for paste detection timing
-    def _on_buffer_change(_buf: Any) -> None:
-        _last_text_change[0] = time.monotonic()
-
-    session.default_buffer.on_text_changed += _on_buffer_change
+    session.default_buffer.on_text_changed += on_buffer_change(_kb_state)
 
     current_model = config.ai.model
 
@@ -1519,20 +1470,8 @@ async def _run_repl(
     # prompt_toolkit's patch_stdout keeps the input prompt anchored at the bottom.
 
     input_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=10)
-    agent_busy = asyncio.Event()  # set while agent loop is running
     exit_flag = asyncio.Event()
-    _current_cancel_event: list[asyncio.Event | None] = [None]
-
-    # Escape cancels the agent loop (only active during streaming).
-    # prompt_toolkit's key processor handles the Escape timeout (~100ms)
-    # to distinguish bare Escape from escape sequences (arrow keys, etc.).
-    @kb.add("escape", filter=Condition(lambda: agent_busy.is_set()))
-    def _cancel_on_escape(event: Any) -> None:
-        ce = _current_cancel_event[0]
-        if ce is not None:
-            ce.set()
-            # Cancel display is handled by stop_thinking(cancel_msg="cancelled")
-            # in the event loop when it detects the cancel_event.
+    _current_cancel_event = _kb_state.current_cancel_event
 
     async def _collect_input() -> None:
         """Continuously collect user input and put on queue."""
