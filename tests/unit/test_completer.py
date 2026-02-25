@@ -1,4 +1,4 @@
-"""Tests for ParlorCompleter slug autocomplete."""
+"""Tests for AnteroomCompleter slug autocomplete."""
 
 from __future__ import annotations
 
@@ -76,11 +76,11 @@ class TestListConversationSlugs:
         assert results[0][1] == ""
 
 
-class TestParlorCompleterSlugs:
+class TestAnteroomCompleterSlugs:
     """Test slug completion in the completer using a mock document."""
 
     def _make_completer(self, db: ThreadSafeConnection) -> object:
-        """Create a minimal ParlorCompleter-like object for testing."""
+        """Create a minimal AnteroomCompleter-like object for testing."""
         # Import here to avoid importing the full REPL module
         from prompt_toolkit.completion import Completion
 

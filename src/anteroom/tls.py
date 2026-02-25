@@ -37,7 +37,7 @@ def _generate_certificate(cert_path: Path, key_path: Path) -> None:
     """Generate an ECDSA P-256 self-signed certificate with localhost SANs."""
     private_key = ec.generate_private_key(ec.SECP256R1())
 
-    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Parlor Local")])
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Anteroom Local")])
     now = datetime.datetime.now(datetime.timezone.utc)
 
     cert = (

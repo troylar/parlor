@@ -1,4 +1,4 @@
-"""REPL loop and one-shot mode for the Parlor CLI."""
+"""REPL loop and one-shot mode for the Anteroom CLI."""
 
 from __future__ import annotations
 
@@ -1421,7 +1421,7 @@ async def _run_repl(
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style as PtStyle
 
-    class ParlorCompleter(Completer):
+    class AnteroomCompleter(Completer):
         """Tab completer for / commands, @ file paths, and conversation slugs."""
 
         _slug_commands = frozenset({"resume", "delete", "rename"})
@@ -1518,7 +1518,7 @@ async def _run_repl(
         "exit",
     ]
     skill_names = [s.name for s in skill_registry.list_skills()] if skill_registry else []
-    completer = ParlorCompleter(commands, skill_names, working_dir, db)
+    completer = AnteroomCompleter(commands, skill_names, working_dir, db)
 
     def _rebuild_tools() -> None:
         """Rebuild the tool list after MCP changes."""

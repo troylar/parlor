@@ -1,1 +1,1 @@
-"""Parlor CLI - interactive agentic chat mode."""
+"""Anteroom CLI - interactive agentic chat mode."""

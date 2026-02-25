@@ -7,7 +7,7 @@ Multi-process flow (polled):
     publish() → INSERT into change_log table
     background poller → SELECT new rows → publish to local subscribers (skipping own process_id)
 
-This allows N Parlor server processes sharing the same SQLite DB to see each other's
+This allows N Anteroom server processes sharing the same SQLite DB to see each other's
 events with ~1-2s latency, without exposing any ports.
 """
 
