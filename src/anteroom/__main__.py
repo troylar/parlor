@@ -638,7 +638,7 @@ def main() -> None:
         dest="temperature",
         type=float,
         default=None,
-        help="Override model temperature (0.0-2.0; 0 for deterministic output)",
+        help="Override model temperature (0.0-2.0; lower = more focused)",
     )
     parser.add_argument(
         "--top-p",
