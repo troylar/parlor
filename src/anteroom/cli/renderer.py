@@ -1373,6 +1373,41 @@ def render_compact_done(original: int, compacted: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+def format_mcp_toolbar(statuses: dict[str, dict[str, Any]]) -> list[tuple[str, str]] | None:
+    """Format MCP server statuses for prompt_toolkit bottom_toolbar.
+
+    Returns a list of (style, text) tuples for FormattedText, or None
+    when all servers have resolved (toolbar should disappear).
+    """
+    if not statuses:
+        return None
+
+    # Check if all servers have resolved (no longer connecting)
+    all_resolved = all(s.get("status") != "connecting" for s in statuses.values())
+    if all_resolved:
+        return None
+
+    parts: list[tuple[str, str]] = [("class:mcp-label", " MCP: ")]
+    for i, (name, info) in enumerate(statuses.items()):
+        status = info.get("status", "unknown")
+        if i > 0:
+            parts.append(("", "  "))
+        if status == "connecting":
+            parts.append(("class:mcp-connecting", f"● {name}"))
+        elif status == "connected":
+            count = info.get("tool_count", 0)
+            parts.append(("class:mcp-connected", f"✓ {name} ({count} tools)"))
+        elif status == "error":
+            err = info.get("error_message", "failed")
+            if len(err) > 30:
+                err = err[:27] + "..."
+            parts.append(("class:mcp-error", f"✗ {name} ({err})"))
+        else:
+            parts.append(("class:mcp-connecting", f"○ {name}"))
+    parts.append(("", " "))
+    return parts
+
+
 def render_mcp_status(statuses: dict[str, dict[str, Any]]) -> None:
     """Render MCP server status as a Rich table."""
     from rich.table import Table

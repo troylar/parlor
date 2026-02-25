@@ -735,6 +735,46 @@ async def _load_instructions_with_trust(
     return "\n\n".join(parts)
 
 
+async def _run_mcp_startup_live(
+    mcp_manager: Any,
+    mcp_servers: list[Any],
+    statuses: dict[str, dict[str, Any]],
+) -> None:
+    """Connect MCP servers in parallel, printing each result as it resolves."""
+    server_names = [s.name for s in mcp_servers]
+    pending = set(server_names)
+
+    def _on_status(name: str, status: dict[str, Any]) -> None:
+        statuses[name] = status
+        st = status.get("status", "unknown")
+        if st == "connected":
+            pending.discard(name)
+            count = status.get("tool_count", 0)
+            renderer.console.print(f"  [green]✓[/green] [{MUTED}]{name} ({count} tools)[/{MUTED}]")
+        elif st == "error":
+            pending.discard(name)
+            err = status.get("error_message", "failed")
+            if len(err) > 40:
+                err = err[:37] + "..."
+            renderer.console.print(f"  [red]✗[/red] [{MUTED}]{name} ({err})[/{MUTED}]")
+
+    try:
+        with renderer.startup_step(f"Connecting {len(server_names)} MCP server(s)..."):
+            await mcp_manager.startup(status_callback=_on_status)
+    except Exception as e:
+        logger.warning("MCP startup failed: %s", e)
+
+    # Print summary
+    connected = sum(1 for s in statuses.values() if s.get("status") == "connected")
+    failed = sum(1 for s in statuses.values() if s.get("status") == "error")
+    total_tools = sum(s.get("tool_count", 0) for s in statuses.values())
+    if connected or failed:
+        parts = [f"{connected} server(s)", f"{total_tools} tools"]
+        if failed:
+            parts.append(f"{failed} failed")
+        renderer.console.print(f"  [{MUTED}]MCP: {', '.join(parts)}[/{MUTED}]\n")
+
+
 async def run_cli(
     config: AppConfig,
     prompt: str | None = None,
@@ -765,25 +805,17 @@ async def run_cli(
     if config.cli.builtin_tools and not no_tools:
         register_default_tools(tool_registry, working_dir=working_dir)
 
-    # Start MCP servers
+    # Prepare MCP manager (startup deferred to background after REPL prompt appears)
     mcp_manager = None
+    _mcp_statuses: dict[str, dict[str, Any]] = {}
     if config.mcp_servers:
         try:
             from ..services.mcp_manager import McpManager
 
             mcp_manager = McpManager(config.mcp_servers, tool_warning_threshold=config.mcp_tool_warning_threshold)
-            server_count = len(config.mcp_servers)
-            label = f"Starting {server_count} MCP server{'s' if server_count != 1 else ''}..."
-            with renderer.startup_step(label):
-                await mcp_manager.startup()
-            # Show per-server errors at startup so user knows immediately
-            for name, status in mcp_manager.get_server_statuses().items():
-                if status.get("status") == "error":
-                    err = status.get("error_message", "unknown error")
-                    renderer.render_error(f"MCP '{name}': {err}")
         except Exception as e:
-            logger.warning("Failed to start MCP servers: %s", e)
-            renderer.render_error(f"MCP startup failed: {e}")
+            logger.warning("Failed to initialize MCP manager: %s", e)
+            renderer.render_error(f"MCP init failed: {e}")
 
     # Set up safety configuration and confirmation callback
     from ..tools.safety import SafetyVerdict
@@ -1103,6 +1135,17 @@ async def run_cli(
             )
             if latest_version:
                 renderer.render_update_available(__version__, latest_version)
+            if config.mcp_servers and mcp_manager:
+                await _run_mcp_startup_live(mcp_manager, config.mcp_servers, _mcp_statuses)
+                # Rebuild tool list now that MCP tools are available
+                mcp_tools_post = mcp_manager.get_openai_tools()
+                if mcp_tools_post:
+                    tools_openai.extend(mcp_tools_post)
+                    tools_openai[:] = cap_tools(
+                        tools_openai, set(tool_registry.list_tools()), limit=config.ai.max_tools
+                    )
+                    tools_openai_or_none = tools_openai if tools_openai else None
+                    all_tool_names.extend(t["name"] for t in mcp_manager.get_all_tools())
             if plan_mode:
                 renderer.console.print(
                     f"[yellow]Planning mode active.[/yellow] The AI will explore and write a plan.\n"
