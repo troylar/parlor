@@ -801,6 +801,42 @@ async def _poll_disconnect(request: Any, cancel_event: asyncio.Event, interval: 
         pass
 
 
+_KEEPALIVE_INTERVAL = 15  # seconds between SSE keepalive pings
+
+
+async def _with_keepalive(gen, interval: float = _KEEPALIVE_INTERVAL):
+    """Wrap an async generator to yield keepalive comments during long pauses.
+
+    Prevents browsers and proxies from closing the SSE connection when the
+    agent loop blocks (e.g. during ask_user or tool approval waits).
+
+    Uses asyncio.wait() instead of wait_for() to avoid cancelling the
+    underlying generator coroutine on timeout.
+    """
+    aiter = gen.__aiter__()
+    pending_next: asyncio.Task | None = None
+    try:
+        while True:
+            if pending_next is None:
+                pending_next = asyncio.ensure_future(aiter.__anext__())
+            done, _ = await asyncio.wait({pending_next}, timeout=interval)
+            if done:
+                try:
+                    yield pending_next.result()
+                except StopAsyncIteration:
+                    break
+                pending_next = None
+            else:
+                yield {"comment": "keepalive"}
+    finally:
+        if pending_next is not None and not pending_next.done():
+            pending_next.cancel()
+            try:
+                await pending_next
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+
+
 async def _stream_chat_events(ctx: StreamContext):
     """Async generator that yields SSE events for the chat stream."""
     from ..services.agent_loop import run_agent_loop
@@ -828,7 +864,7 @@ async def _stream_chat_events(ctx: StreamContext):
 
     try:
         _planning_cfg = ctx.planning_config
-        async for agent_event in run_agent_loop(
+        agent_gen = run_agent_loop(
             ai_service=ctx.ai_service,
             messages=ctx.ai_messages,
             tool_executor=ctx.tool_executor,
@@ -840,7 +876,12 @@ async def _stream_chat_events(ctx: StreamContext):
             auto_plan_threshold=(
                 _planning_cfg.auto_threshold_tools if not ctx.plan_mode and _planning_cfg.auto_mode != "off" else 0
             ),
-        ):
+        )
+        async for agent_event in _with_keepalive(agent_gen):
+            if isinstance(agent_event, dict) and "comment" in agent_event:
+                yield agent_event
+                continue
+
             _pending_usage: dict[str, Any] | None = None
             kind = agent_event.kind
             data = agent_event.data
