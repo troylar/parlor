@@ -1626,10 +1626,13 @@ const Chat = (() => {
 
     async function stopGeneration() {
         if (!App.state.currentConversationId) return;
+        // Immediately reset client state so UI is responsive
+        hideThinking();
+        setStreaming(false);
         try {
             await App.api(`/api/conversations/${App.state.currentConversationId}/stop`, { method: 'POST' });
         } catch (e) {
-            // ignore
+            // ignore — server may have already cleaned up
         }
     }
 

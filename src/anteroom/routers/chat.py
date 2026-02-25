@@ -774,9 +774,31 @@ class StreamContext:
     conv_title: str
     embedding_worker: Any
     planning_config: Any
+    request: Any = None
     canvas_needs_approval: bool = False
     token_throttle_interval: float = 0.1
     last_token_broadcast: float = 0.0
+
+
+_DISCONNECT_POLL_INTERVAL = 3  # seconds
+
+
+async def _poll_disconnect(request: Any, cancel_event: asyncio.Event, interval: float = _DISCONNECT_POLL_INTERVAL):
+    """Background task that polls for client disconnect and cancels the stream."""
+    try:
+        while not cancel_event.is_set():
+            await asyncio.sleep(interval)
+            try:
+                if await request.is_disconnected():
+                    logger.info("Client disconnected — cancelling stream")
+                    cancel_event.set()
+                    return
+            except Exception:
+                logger.debug("is_disconnected() check failed — treating as disconnected", exc_info=True)
+                cancel_event.set()
+                return
+    except asyncio.CancelledError:
+        pass
 
 
 async def _stream_chat_events(ctx: StreamContext):
@@ -789,6 +811,11 @@ async def _stream_chat_events(ctx: StreamContext):
     _canvas_args_accum: dict[int, str] = {}
     _canvas_content_sent: dict[int, int] = {}
     _canvas_stream_started: set[int] = set()
+
+    # Spawn background disconnect poller so stale streams are cancelled promptly
+    _disconnect_task: asyncio.Task[None] | None = None
+    if ctx.request is not None:
+        _disconnect_task = asyncio.create_task(_poll_disconnect(ctx.request, ctx.cancel_event))
 
     if ctx.event_bus:
         await ctx.event_bus.publish(
@@ -1089,6 +1116,12 @@ async def _stream_chat_events(ctx: StreamContext):
         logger.exception("Chat stream error")
         yield {"event": "error", "data": json.dumps({"message": "An internal error occurred"})}
     finally:
+        if _disconnect_task is not None and not _disconnect_task.done():
+            _disconnect_task.cancel()
+            try:
+                await _disconnect_task
+            except asyncio.CancelledError:
+                pass
         _active_streams.pop(ctx.conversation_id, None)
         queue = _message_queues.get(ctx.conversation_id)
         if queue and queue.empty():
@@ -1499,6 +1532,7 @@ async def chat(conversation_id: str, request: Request):
         embedding_worker=getattr(request.app.state, "embedding_worker", None),
         planning_config=request.app.state.config.cli.planning,
         canvas_needs_approval=_canvas_needs_approval(safety_config, tool_registry),
+        request=request,
     )
 
     return EventSourceResponse(_stream_chat_events(stream_ctx))
@@ -1516,6 +1550,16 @@ async def stop_generation(conversation_id: str, request: Request):
     for event in events:
         event.set()
     return {"status": "stopped"}
+
+
+@router.get("/conversations/{conversation_id}/stream-status")
+async def stream_status(conversation_id: str, request: Request):
+    _validate_uuid(conversation_id)
+    stream_info = _active_streams.get(conversation_id)
+    if not stream_info:
+        return {"active": False}
+    age = time_mod.monotonic() - stream_info.get("started_at", 0)
+    return {"active": True, "age_seconds": round(age)}
 
 
 @router.get("/attachments/{attachment_id}")

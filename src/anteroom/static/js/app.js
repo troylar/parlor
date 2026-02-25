@@ -551,6 +551,20 @@ const App = (() => {
         if (state.isPlanMode) {
             _loadExistingPlan(id);
         }
+        // Check for orphaned server-side streams (e.g., after page refresh)
+        _checkStreamStatus(id);
+    }
+
+    async function _checkStreamStatus(conversationId) {
+        try {
+            const status = await api(`/api/conversations/${conversationId}/stream-status`);
+            if (status.active) {
+                Chat.setStreaming(true);
+                Chat.showThinkingFromEvent();
+            }
+        } catch {
+            // ignore — endpoint may not exist on older server versions
+        }
     }
 
     // --- URL Params ---
