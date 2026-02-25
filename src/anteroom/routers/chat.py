@@ -571,6 +571,118 @@ async def _web_ask_user_callback(ctx: WebConfirmContext, question: str, options:
     return entry.get("answer", "")
 
 
+@dataclass
+class ToolExecutorContext:
+    """Shared state for tool execution in the web UI."""
+
+    tool_registry: Any
+    mcp_manager: Any
+    confirm_ctx: WebConfirmContext
+    ai_service: Any
+    cancel_event: asyncio.Event
+    db: Any
+    uid: str | None
+    uname: str | None
+    conversation_id: str
+    tools_openai: list[dict[str, Any]]
+    subagent_events: dict[str, list[dict[str, Any]]]
+    subagent_limiter: Any
+    sa_config: Any
+    request_config: Any
+    subagent_counter: list[int] = field(default_factory=lambda: [0])
+    max_subagent_events: int = 500
+
+
+async def _web_event_sink_fn(ctx: ToolExecutorContext, agent_id: str, event: Any) -> None:
+    """Buffer sub-agent events for SSE emission, partitioned by agent_id."""
+    kind = event.kind
+    data = event.data
+    if kind in ("subagent_start", "subagent_end", "tool_call_start"):
+        buf = ctx.subagent_events.setdefault(agent_id, [])
+        if len(buf) < ctx.max_subagent_events:
+            buf.append({"kind": kind, "agent_id": agent_id, **data})
+
+
+def _scope_to_decision(confirm_ctx: WebConfirmContext) -> str:
+    """Map the last resolved approval scope to an audit decision string."""
+    task = asyncio.current_task()
+    task_id = id(task) if task is not None else None
+    scope = confirm_ctx.last_resolved_scope.pop(task_id, "once") if task_id else "once"
+    return {"once": "allowed_once", "session": "allowed_session", "always": "allowed_always"}.get(scope, "allowed_once")
+
+
+async def _execute_web_tool(ctx: ToolExecutorContext, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Execute a tool call in the web UI context."""
+
+    async def _confirm(verdict: Any) -> bool:
+        return await _web_confirm_tool(ctx.confirm_ctx, verdict)
+
+    async def _ask_user(question: str, options: list[str] | None = None) -> str:
+        return await _web_ask_user_callback(ctx.confirm_ctx, question, options)
+
+    if tool_name in ("create_canvas", "update_canvas", "patch_canvas"):
+        arguments = {
+            **arguments,
+            "_conversation_id": ctx.conversation_id,
+            "_db": ctx.db,
+            "_user_id": ctx.uid,
+            "_user_display_name": ctx.uname,
+        }
+    elif tool_name == "run_agent":
+        ctx.subagent_counter[0] += 1
+        arguments = {
+            **arguments,
+            "_ai_service": ctx.ai_service,
+            "_tool_registry": ctx.tool_registry,
+            "_mcp_manager": ctx.mcp_manager,
+            "_cancel_event": ctx.cancel_event,
+            "_depth": 0,
+            "_agent_id": f"agent-{ctx.subagent_counter[0]}",
+            "_event_sink": lambda agent_id, event: _web_event_sink_fn(ctx, agent_id, event),
+            "_limiter": ctx.subagent_limiter,
+            "_confirm_callback": _confirm,
+            "_config": ctx.sa_config,
+        }
+    elif tool_name == "ask_user":
+        arguments = {**arguments, "_ask_callback": _ask_user}
+    elif tool_name == "introspect":
+        arguments = {
+            **arguments,
+            "_config": ctx.request_config,
+            "_mcp_manager": ctx.mcp_manager,
+            "_tool_registry": ctx.tool_registry,
+            "_skill_registry": None,
+            "_instructions_info": None,
+            "_tools_openai": ctx.tools_openai,
+            "_working_dir": None,
+        }
+
+    if ctx.tool_registry.has_tool(tool_name):
+        result = await ctx.tool_registry.call_tool(tool_name, arguments, confirm_callback=_confirm)
+        if result.get("_approval_decision") == "allowed_once":
+            result["_approval_decision"] = _scope_to_decision(ctx.confirm_ctx)
+        return result
+    if ctx.mcp_manager:
+        verdict = ctx.tool_registry.check_safety(tool_name, arguments)
+        if verdict and verdict.needs_approval:
+            if verdict.hard_denied:
+                return {
+                    "error": f"Tool '{tool_name}' is blocked by configuration",
+                    "safety_blocked": True,
+                    "_approval_decision": "hard_denied",
+                }
+            confirmed = await _confirm(verdict)
+            if not confirmed:
+                return {"error": "Operation denied by user", "exit_code": -1, "_approval_decision": "denied"}
+            result = await ctx.mcp_manager.call_tool(tool_name, arguments)
+            result["_approval_decision"] = _scope_to_decision(ctx.confirm_ctx)
+            return result
+        result = await ctx.mcp_manager.call_tool(tool_name, arguments)
+        result["_approval_decision"] = "auto"
+        return result
+    raise ValueError(f"Unknown tool: {tool_name}")
+
+
 async def _parse_chat_request(request: Request) -> ChatRequestContext:
     """Parse and validate the chat request body (multipart or JSON)."""
     content_type = request.headers.get("content-type", "")
@@ -914,19 +1026,6 @@ async def chat(conversation_id: str, request: Request):
     async def _web_ask_user(question: str, options: list[str] | None = None) -> str:
         return await _web_ask_user_callback(confirm_ctx, question, options)
 
-    _subagent_counter = 0
-    _subagent_events: dict[str, list[dict[str, Any]]] = {}
-    _max_subagent_events = 500
-
-    async def _web_event_sink(agent_id: str, event: Any) -> None:
-        """Buffer sub-agent events for SSE emission, partitioned by agent_id."""
-        kind = event.kind
-        data = event.data
-        if kind in ("subagent_start", "subagent_end", "tool_call_start"):
-            buf = _subagent_events.setdefault(agent_id, [])
-            if len(buf) < _max_subagent_events:
-                buf.append({"kind": kind, "agent_id": agent_id, **data})
-
     from ..tools.subagent import SubagentLimiter
 
     _sa_config = getattr(request.app.state.config.safety, "subagent", None)
@@ -938,80 +1037,27 @@ async def chat(conversation_id: str, request: Request):
         max_concurrent=_sa_config.max_concurrent if _sa_config else 5,
         max_total=_sa_config.max_total if _sa_config else 10,
     )
+    _subagent_events: dict[str, list[dict[str, Any]]] = {}
+
+    tool_exec_ctx = ToolExecutorContext(
+        tool_registry=tool_registry,
+        mcp_manager=mcp_manager,
+        confirm_ctx=confirm_ctx,
+        ai_service=ai_service,
+        cancel_event=cancel_event,
+        db=db,
+        uid=uid,
+        uname=uname,
+        conversation_id=conversation_id,
+        tools_openai=tools_openai,
+        subagent_events=_subagent_events,
+        subagent_limiter=_subagent_limiter,
+        sa_config=_sa_config,
+        request_config=request.app.state.config,
+    )
 
     async def _tool_executor(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        nonlocal _subagent_counter
-        if tool_name in ("create_canvas", "update_canvas", "patch_canvas"):
-            arguments = {
-                **arguments,
-                "_conversation_id": conversation_id,
-                "_db": db,
-                "_user_id": uid,
-                "_user_display_name": uname,
-            }
-        elif tool_name == "run_agent":
-            _subagent_counter += 1
-            arguments = {
-                **arguments,
-                "_ai_service": ai_service,
-                "_tool_registry": tool_registry,
-                "_mcp_manager": mcp_manager,
-                "_cancel_event": cancel_event,
-                "_depth": 0,
-                "_agent_id": f"agent-{_subagent_counter}",
-                "_event_sink": _web_event_sink,
-                "_limiter": _subagent_limiter,
-                "_confirm_callback": _web_confirm,
-                "_config": _sa_config,
-            }
-        elif tool_name == "ask_user":
-            arguments = {**arguments, "_ask_callback": _web_ask_user}
-        elif tool_name == "introspect":
-            arguments = {
-                **arguments,
-                "_config": request.app.state.config,
-                "_mcp_manager": mcp_manager,
-                "_tool_registry": tool_registry,
-                "_skill_registry": None,
-                "_instructions_info": None,
-                "_tools_openai": tools_openai,
-                "_working_dir": None,
-            }
-
-        def _scope_to_decision() -> str:
-            task = asyncio.current_task()
-            task_id = id(task) if task is not None else None
-            scope = confirm_ctx.last_resolved_scope.pop(task_id, "once") if task_id else "once"
-            return {"once": "allowed_once", "session": "allowed_session", "always": "allowed_always"}.get(
-                scope, "allowed_once"
-            )
-
-        if tool_registry.has_tool(tool_name):
-            result = await tool_registry.call_tool(tool_name, arguments, confirm_callback=_web_confirm)
-            # Upgrade generic "allowed_once" with actual scope if user chose session/always
-            if result.get("_approval_decision") == "allowed_once":
-                result["_approval_decision"] = _scope_to_decision()
-            return result
-        if mcp_manager:
-            # MCP tools bypass ToolRegistry — apply safety gate here
-            verdict = tool_registry.check_safety(tool_name, arguments)
-            if verdict and verdict.needs_approval:
-                if verdict.hard_denied:
-                    return {
-                        "error": f"Tool '{tool_name}' is blocked by configuration",
-                        "safety_blocked": True,
-                        "_approval_decision": "hard_denied",
-                    }
-                confirmed = await _web_confirm(verdict)
-                if not confirmed:
-                    return {"error": "Operation denied by user", "exit_code": -1, "_approval_decision": "denied"}
-                result = await mcp_manager.call_tool(tool_name, arguments)
-                result["_approval_decision"] = _scope_to_decision()
-                return result
-            result = await mcp_manager.call_tool(tool_name, arguments)
-            result["_approval_decision"] = "auto"
-            return result
-        raise ValueError(f"Unknown tool: {tool_name}")
+        return await _execute_web_tool(tool_exec_ctx, tool_name, arguments)
 
     from ..services.agent_loop import run_agent_loop
 
