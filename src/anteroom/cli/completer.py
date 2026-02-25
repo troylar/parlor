@@ -11,7 +11,7 @@ from prompt_toolkit.document import Document
 from ..services import storage
 
 
-class ParlorCompleter(Completer):
+class AnteroomCompleter(Completer):
     """Tab completer for / commands, @ file paths, and conversation slugs."""
 
     _slug_commands = frozenset({"resume", "delete", "rename"})
