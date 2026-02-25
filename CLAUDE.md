@@ -21,8 +21,15 @@ aroom --allowed-tools bash,write_file  # Pre-allow tools
 pytest tests/ -v                    # All tests
 pytest tests/unit/ -v               # Unit tests only
 pytest tests/e2e/ -v                # E2e tests (requires uvx/npx)
+pytest tests/e2e/ -m real_ai -v    # Agent evals (requires API key)
 ruff check src/ tests/              # Lint
 ruff format src/ tests/             # Format (120 char line length)
+
+# Evals and demos
+npx promptfoo eval --config evals/promptfoo.yaml   # Prompt regression
+npx promptfoo eval --config evals/agentic.yaml     # Agentic behavior
+npx promptfoo redteam run --config evals/redteam.yaml  # Red teaming
+cd demos && make demos              # Build demo GIFs (requires VHS)
 ```
 
 ## Architecture
@@ -144,10 +151,13 @@ PyPI: `anteroom`. Deploy via `/deploy` skill (merge PR, CI, version bump, build,
 
 ## Testing Patterns
 
-- **Async tests**: `@pytest.mark.asyncio` with `asyncio_mode = "auto"`
-- **Unit tests**: fully mocked (no I/O). **Integration**: real SQLite. **E2e**: real servers, mock AI
-- Tests in `tests/unit/`, `tests/integration/`, `tests/contract/`, `tests/e2e/`
-- **Markers**: `e2e`, `real_ai`. Coverage target: 80%+
+- **Unit tests** (`tests/unit/`, ~2,400 tests): fully mocked, no I/O. `@pytest.mark.asyncio` with `asyncio_mode = "auto"`
+- **Integration** (`tests/integration/`): real SQLite databases
+- **E2e** (`tests/e2e/`): real servers, mock AI. Markers: `e2e`, `requires_mcp`
+- **Agent evals** (`tests/e2e/test_agent_evals.py`): 10 tests with real AI via `aroom exec --json`. Marker: `real_ai`. Auto-skip without API key. Uses `--temperature 0 --seed 42` for reproducibility
+- **Prompt regression** (`evals/`): promptfoo suites via OpenAI-compatible proxy. `promptfoo.yaml` (11 prompt regression tests), `agentic.yaml` (6 exec-mode tests), `redteam.yaml` (adversarial). Run: `npx promptfoo eval --config evals/promptfoo.yaml`
+- **Demo recordings** (`demos/`): VHS tape scripts producing reproducible GIFs. 3 demos: quickstart, tools, exec-mode. Run: `cd demos && make demos`
+- Coverage target: 80%+. See `docs/advanced/testing.md` for full guide
 
 ## CI
 

@@ -17,11 +17,14 @@ $ pip install -e ".[dev]"
 
 ```bash
 $ pytest tests/ -v                           # All tests
-$ pytest tests/unit/ -v                      # Unit tests only (~1080 tests)
+$ pytest tests/unit/ -v                      # Unit tests (~2,400 tests)
 $ pytest tests/integration/ -v               # Integration tests
 $ pytest tests/e2e/ -v                       # E2e tests (requires uvx/npx)
+$ pytest tests/e2e/ -m real_ai -v           # Agent evals (requires API key)
 $ pytest --cov=anteroom --cov-report=html    # With coverage
 ```
+
+See the [Developer Testing Guide](testing.md) for the full multi-layer testing strategy including promptfoo evals, red teaming, and VHS demo recordings.
 
 ## Linting and Formatting
 
@@ -45,6 +48,9 @@ $ ruff format src/ tests/       # Format (120 char line length)
 - **Unit tests** (`tests/unit/`): Fully mocked, no I/O
 - **Integration tests** (`tests/integration/`): Real SQLite databases
 - **Contract tests** (`tests/contract/`): API contract verification
+- **E2e tests** (`tests/e2e/`): Real servers, mock AI (requires uvx/npx)
+- **Agent evals** (`tests/e2e/test_agent_evals.py`): Real AI backend via `aroom exec --json`
+- **Prompt regression** (`evals/`): promptfoo suites for system prompt behavior
 - **Async tests**: Use `@pytest.mark.asyncio` with auto mode
 
 ## CI
