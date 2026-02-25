@@ -6,7 +6,7 @@ import asyncio
 import sys
 from contextlib import AsyncExitStack
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -288,7 +288,7 @@ class TestMcpManagerFailedConnection:
 
         call_count = 0
 
-        async def fake_connect_one(config: McpServerConfig) -> None:
+        async def fake_connect_one(config: McpServerConfig, status_callback: Any = None) -> None:
             nonlocal call_count
             call_count += 1
             if config.name == "bad-server":
@@ -304,7 +304,8 @@ class TestMcpManagerFailedConnection:
                 }
 
         with patch.object(mgr, "_connect_one", side_effect=fake_connect_one):
-            await mgr.startup()
+            with patch.dict("sys.modules", {"mcp": MagicMock(), "mcp.client.stdio": MagicMock()}):
+                await mgr.startup()
 
         assert call_count == 2
         assert mgr._server_status["good-server"]["status"] == "connected"
@@ -483,7 +484,7 @@ class TestMcpManagerErrorClassification:
             patch("anteroom.services.mcp_manager.AsyncExitStack") as mock_stack_cls,
             patch.object(
                 logging.getLogger("anteroom.services.mcp_manager"),
-                "error",
+                "warning",
                 side_effect=lambda *a, **kw: logged_kwargs.append(kw),
             ),
         ):
@@ -494,7 +495,7 @@ class TestMcpManagerErrorClassification:
             await mgr._do_connect(config)
 
         error_calls = [kw for kw in logged_kwargs if "exc_info" in kw]
-        assert error_calls, "Expected at least one logger.error call with exc_info kwarg"
+        assert error_calls, "Expected at least one logger.warning call with exc_info kwarg"
         assert error_calls[-1]["exc_info"] is False, "McpError should suppress traceback (exc_info=False)"
 
     @pytest.mark.asyncio()
@@ -511,7 +512,7 @@ class TestMcpManagerErrorClassification:
             patch("anteroom.services.mcp_manager.AsyncExitStack") as mock_stack_cls,
             patch.object(
                 logging.getLogger("anteroom.services.mcp_manager"),
-                "error",
+                "warning",
                 side_effect=lambda *a, **kw: logged_kwargs.append(kw),
             ),
         ):
@@ -522,7 +523,7 @@ class TestMcpManagerErrorClassification:
             await mgr._do_connect(config)
 
         error_calls = [kw for kw in logged_kwargs if "exc_info" in kw]
-        assert error_calls, "Expected at least one logger.error call with exc_info kwarg"
+        assert error_calls, "Expected at least one logger.warning call with exc_info kwarg"
         assert error_calls[-1]["exc_info"] is True, "Unexpected errors should include traceback (exc_info=True)"
 
     @pytest.mark.asyncio()

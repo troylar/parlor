@@ -10,10 +10,13 @@ import os
 import shutil
 import socket
 from contextlib import AsyncExitStack
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from ..config import McpServerConfig
+
+# Type for status update callbacks: (server_name, status_dict) -> None
+StatusCallback = Callable[[str, dict[str, Any]], None]
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +77,14 @@ class McpManager:
         self._disabled: set[str] = set()
         self._tool_warning_threshold = tool_warning_threshold
 
-    async def startup(self) -> None:
+    @property
+    def is_ready(self) -> bool:
+        """True when all configured servers have resolved (connected or failed)."""
+        if not self._configs:
+            return True
+        return len(self._server_status) >= len(self._configs)
+
+    async def startup(self, status_callback: StatusCallback | None = None) -> None:
         if not self._configs:
             return
 
@@ -85,15 +95,27 @@ class McpManager:
             logger.warning("MCP SDK not installed, skipping MCP server connections")
             return
 
-        logger.info("Starting %d MCP server(s): %s", len(self._configs), ", ".join(self._configs))
-        for name, config in self._configs.items():
-            await self._connect_one(config)
+        logger.info("Starting %d MCP server(s) in parallel: %s", len(self._configs), ", ".join(self._configs))
+
+        # Notify connecting status for all servers
+        if status_callback:
+            for name in self._configs:
+                status_callback(name, {"status": "connecting", "tool_count": 0})
+
+        # Connect all servers in parallel
+        await asyncio.gather(
+            *(self._connect_one(config, status_callback=status_callback) for config in self._configs.values()),
+            return_exceptions=True,
+        )
+
+        # Rebuild tool map once after all connections complete (not per-server)
+        self._rebuild_tool_map()
 
         # Log startup summary
         connected = [n for n, s in self._server_status.items() if s.get("status") == "connected"]
         failed = [n for n, s in self._server_status.items() if s.get("status") == "error"]
         if failed:
-            logger.warning(
+            logger.info(
                 "MCP startup complete: %d connected, %d failed (%s)",
                 len(connected),
                 len(failed),
@@ -140,7 +162,7 @@ class McpManager:
         parts.append(f"timeout={config.timeout}s")
         return ", ".join(parts)
 
-    async def _connect_one(self, config: McpServerConfig) -> None:
+    async def _connect_one(self, config: McpServerConfig, status_callback: StatusCallback | None = None) -> None:
         desc = self._describe_config(config)
         logger.info("Connecting MCP server '%s' [%s] (timeout=%gs)", config.name, desc, config.timeout)
 
@@ -148,12 +170,16 @@ class McpManager:
             await asyncio.wait_for(self._do_connect(config), timeout=config.timeout)
         except asyncio.TimeoutError:
             error_msg = f"Connection timed out after {config.timeout}s"
-            logger.error("MCP server '%s': %s [%s]", config.name, error_msg, desc)
+            logger.warning("MCP server '%s': %s [%s]", config.name, error_msg, desc)
             self._server_status[config.name] = {
                 "status": "error",
                 "tool_count": 0,
                 "error_message": error_msg,
             }
+
+        # Notify caller of final status
+        if status_callback:
+            status_callback(config.name, self._server_status.get(config.name, {}))
 
     async def _do_connect(self, config: McpServerConfig) -> None:
         """Inner connection logic, called under a timeout by _connect_one."""
@@ -164,7 +190,7 @@ class McpManager:
             from mcp.client.stdio import stdio_client
         except ImportError:
             msg = "MCP SDK not installed (pip install mcp)"
-            logger.error("MCP server '%s': %s", config.name, msg)
+            logger.debug("MCP server '%s': %s", config.name, msg)
             self._server_status[config.name] = {
                 "status": "error",
                 "tool_count": 0,
@@ -192,7 +218,9 @@ class McpManager:
                     env={**os.environ, **config.env} if config.env else None,
                 )
                 logger.debug("MCP '%s': launching stdio transport", config.name)
-                stdio_transport = await stack.enter_async_context(stdio_client(server_params))
+                errlog = open(os.devnull, "w")  # noqa: SIM115
+                stack.callback(errlog.close)
+                stdio_transport = await stack.enter_async_context(stdio_client(server_params, errlog=errlog))
                 read_stream, write_stream = stdio_transport
                 logger.debug("MCP '%s': initializing session", config.name)
                 session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
@@ -204,7 +232,7 @@ class McpManager:
                     from mcp.client.sse import sse_client
                 except ImportError:
                     msg = "SSE client not available (pip install mcp[sse])"
-                    logger.error("MCP server '%s': %s", config.name, msg)
+                    logger.debug("MCP server '%s': %s", config.name, msg)
                     self._server_status[config.name] = {
                         "status": "error",
                         "tool_count": 0,
@@ -227,7 +255,7 @@ class McpManager:
                     f"command={'set' if config.command else 'missing'}, "
                     f"url={'set' if config.url else 'missing'}"
                 )
-                logger.error("MCP server '%s': %s", config.name, msg)
+                logger.debug("MCP server '%s': %s", config.name, msg)
                 self._server_status[config.name] = {
                     "status": "error",
                     "tool_count": 0,
@@ -251,7 +279,6 @@ class McpManager:
                 server_tools.append(tool_entry)
 
             self._server_tools[config.name] = server_tools
-            self._rebuild_tool_map()
 
             total = len(server_tools)
             allowed_tools = [t for t in server_tools if self._is_tool_allowed(t["name"], config.name)]
@@ -305,13 +332,11 @@ class McpManager:
             is_mcp_error = McpError is not None and isinstance(e, McpError)
             error_type = type(e).__name__
             error_msg = f"{error_type}: {e}"
-            logger.error(
+            logger.warning(
                 "MCP server '%s' failed to connect: %s [%s]",
                 config.name,
                 error_msg,
                 desc,
-                # Suppress full traceback for known MCP protocol errors — the
-                # message is already diagnostic.  Keep it for unexpected errors.
                 exc_info=not is_mcp_error,
             )
             self._server_status[config.name] = {
@@ -358,6 +383,7 @@ class McpManager:
 
         self._disabled.discard(name)
         await self._connect_one(self._configs[name])
+        self._rebuild_tool_map()
 
     async def disconnect_server(self, name: str) -> None:
         """Disconnect a single server by name."""
