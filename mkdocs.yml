@@ -122,5 +122,6 @@ nav:
   - Changelog: advanced/changelog.md
   - Advanced:
     - advanced/architecture.md
+    - advanced/testing.md
     - advanced/developer-workflow.md
     - advanced/contributing.md
