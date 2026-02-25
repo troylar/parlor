@@ -28,7 +28,7 @@ from ..services.ai_service import AIService, create_ai_service
 from ..services.embeddings import get_effective_dimensions
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
-from .agent_turn import AgentTurnContext, inject_rag_context, run_agent_turn
+from .agent_turn import AgentTurnContext, RagEmbeddingCache, inject_rag_context, run_agent_turn
 from .commands import CommandResult, ReplSession, handle_slash_command
 from .instructions import (
     CONVENTIONS_TOKEN_WARNING_THRESHOLD,
@@ -1512,28 +1512,7 @@ async def _run_repl(
         _plan_current_step: list[int] = [0]  # index of the step currently in progress
 
         # -- RAG state --
-        _rag_embedding_service: list[Any] = [None]
-        _rag_service_checked: list[bool] = [False]
-
-        async def _get_rag_embedding_service() -> Any:
-            """Lazily create embedding service for RAG retrieval, with auto-detect probe."""
-            if _rag_service_checked[0]:
-                return _rag_embedding_service[0]
-            _rag_service_checked[0] = True
-            try:
-                from ..services.embeddings import create_embedding_service
-
-                svc = create_embedding_service(config)
-                if svc and config.embeddings.enabled is None:
-                    probe_ok = await svc.probe()
-                    if not probe_ok:
-                        logger.info("Embedding endpoint unavailable; semantic search disabled")
-                        svc = None
-                _rag_embedding_service[0] = svc
-                return svc
-            except Exception:
-                logger.debug("RAG: failed to create embedding service", exc_info=True)
-                return None
+        _rag_cache = RagEmbeddingCache(config)
 
         def _apply_plan_mode(conv_id: str) -> None:
             nonlocal tools_openai, extra_system_prompt
@@ -1692,7 +1671,7 @@ async def _run_repl(
                 conv_id=conv["id"],
                 expanded=expanded,
                 extra_system_prompt=extra_system_prompt,
-                get_rag_embedding_service=_get_rag_embedding_service,
+                rag_cache=_rag_cache,
             )
 
             # Build message queue for queued follow-ups during agent loop

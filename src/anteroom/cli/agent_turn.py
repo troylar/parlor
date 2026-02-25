@@ -20,6 +20,35 @@ logger = logging.getLogger(__name__)
 _IS_WINDOWS = __import__("platform").system() == "Windows"
 
 
+class RagEmbeddingCache:
+    """Lazily create and cache an embedding service for RAG retrieval."""
+
+    def __init__(self, config: Any) -> None:
+        self._config = config
+        self._service: Any = None
+        self._checked: bool = False
+
+    async def get(self) -> Any:
+        """Return the cached embedding service, creating on first call."""
+        if self._checked:
+            return self._service
+        self._checked = True
+        try:
+            from ..services.embeddings import create_embedding_service
+
+            svc = create_embedding_service(self._config)
+            if svc and self._config.embeddings.enabled is None:
+                probe_ok = await svc.probe()
+                if not probe_ok:
+                    logger.info("Embedding endpoint unavailable; semantic search disabled")
+                    svc = None
+            self._service = svc
+            return svc
+        except Exception:
+            logger.debug("RAG: failed to create embedding service", exc_info=True)
+            return None
+
+
 @dataclass
 class AgentTurnContext:
     """All state needed to execute one agent turn (stream + event handling)."""
@@ -66,7 +95,7 @@ async def inject_rag_context(
     conv_id: str,
     expanded: str,
     extra_system_prompt: str,
-    get_rag_embedding_service: Callable[[], Any],
+    rag_cache: RagEmbeddingCache,
 ) -> str:
     """Retrieve RAG context and inject into system prompt.
 
@@ -78,7 +107,7 @@ async def inject_rag_context(
     try:
         from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
 
-        rag_emb = await get_rag_embedding_service()
+        rag_emb = await rag_cache.get()
         if rag_emb:
             rag_chunks = await retrieve_context(
                 query=expanded,
