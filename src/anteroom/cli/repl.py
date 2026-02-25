@@ -10,7 +10,6 @@ import platform
 import re
 import shutil
 import signal
-import sqlite3 as _sqlite3
 import subprocess
 import sys
 import time
@@ -27,19 +26,15 @@ from ..services import storage
 from ..services.agent_loop import _build_compaction_history, run_agent_loop
 from ..services.ai_service import AIService, create_ai_service
 from ..services.embeddings import get_effective_dimensions
-from ..services.rewind import collect_file_paths
-from ..services.rewind import rewind_conversation as rewind_service
-from ..services.slug import is_valid_slug, suggest_unique_slug
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
+from .commands import CommandResult, ReplSession, handle_slash_command
 from .instructions import (
     CONVENTIONS_TOKEN_WARNING_THRESHOLD,
-    discover_conventions,
     estimate_tokens,
     find_global_instructions,
     find_project_instructions_path,
 )
-from .pickers import resolve_conversation as _resolve_conversation
 from .pickers import show_resume_info as _show_resume_info
 from .renderer import CHROME, GOLD, MUTED
 from .skills import SkillRegistry
@@ -1516,12 +1511,7 @@ async def _run_repl(
         from .plan import (
             PLAN_MODE_ALLOWED_TOOLS,
             build_planning_system_prompt,
-            delete_plan,
-            get_editor,
             get_plan_file_path,
-            parse_plan_command,
-            parse_plan_steps,
-            read_plan,
         )
 
         _plan_active: list[bool] = [plan_mode]
@@ -1598,6 +1588,58 @@ async def _run_repl(
         if _plan_active[0]:
             _apply_plan_mode(conv["id"])
 
+        # Build the ReplSession used by handle_slash_command
+        _cmd_session = ReplSession(
+            conv=conv,
+            ai_messages=ai_messages,
+            is_first_message=is_first_message,
+            current_model=current_model,
+            tools_openai=tools_openai,
+            extra_system_prompt=extra_system_prompt,
+            all_tool_names=all_tool_names,
+            db=db,
+            config=config,
+            working_dir=working_dir,
+            ai_service=ai_service,
+            identity_kwargs=id_kw,
+            skill_registry=skill_registry,
+            mcp_manager=mcp_manager,
+            tool_registry=tool_registry,
+            plan_active=_plan_active,
+            plan_file=_plan_file,
+            plan_checklist_steps=_plan_checklist_steps,
+            plan_current_step=_plan_current_step,
+            apply_plan_mode=_apply_plan_mode,
+            exit_plan_mode=_exit_plan_mode,
+            rebuild_tools=_rebuild_tools,
+            compact_messages=_compact_messages,
+            create_ai_service_fn=create_ai_service,
+        )
+
+        def _sync_from_session() -> None:
+            """Sync mutable state back from _cmd_session to local variables."""
+            nonlocal conv, ai_messages, is_first_message, current_model
+            nonlocal tools_openai, extra_system_prompt, all_tool_names, ai_service
+            conv = _cmd_session.conv
+            ai_messages = _cmd_session.ai_messages
+            is_first_message = _cmd_session.is_first_message
+            current_model = _cmd_session.current_model
+            tools_openai = _cmd_session.tools_openai
+            extra_system_prompt = _cmd_session.extra_system_prompt
+            all_tool_names = _cmd_session.all_tool_names
+            ai_service = _cmd_session.ai_service
+
+        def _sync_to_session() -> None:
+            """Sync local variables into _cmd_session before a command call."""
+            _cmd_session.conv = conv
+            _cmd_session.ai_messages = ai_messages
+            _cmd_session.is_first_message = is_first_message
+            _cmd_session.current_model = current_model
+            _cmd_session.tools_openai = tools_openai
+            _cmd_session.extra_system_prompt = extra_system_prompt
+            _cmd_session.all_tool_names = all_tool_names
+            _cmd_session.ai_service = ai_service
+
         while not exit_flag.is_set():
             # If agent_busy was set (by _collect_input) but we're back here waiting
             # for input, clear it so the prompt renders as gold (idle).
@@ -1610,648 +1652,17 @@ async def _run_repl(
             except asyncio.TimeoutError:
                 continue
 
-            # Handle commands
+            # Handle slash commands
             if user_input.startswith("/"):
-                cmd = user_input.lower().split()[0]
-                if cmd in ("/quit", "/exit"):
+                _sync_to_session()
+                cmd_result, user_input = await handle_slash_command(_cmd_session, user_input)
+                _sync_from_session()
+                if cmd_result == CommandResult.EXIT:
                     exit_flag.set()
                     return
-                elif cmd == "/new":
-                    parts = user_input.split(maxsplit=2)
-                    conv_type = "chat"
-                    conv_title = "New Conversation"
-                    if len(parts) >= 2 and parts[1] in ("note", "doc", "document"):
-                        conv_type = "document" if parts[1] in ("doc", "document") else "note"
-                        conv_title = parts[2].strip() if len(parts) >= 3 else f"New {conv_type.title()}"
-                    conv = storage.create_conversation(db, title=conv_title, conversation_type=conv_type, **id_kw)
-                    ai_messages = []
-                    is_first_message = conv_type == "chat"
-                    if _plan_active[0]:
-                        _apply_plan_mode(conv["id"])
-                    type_label = f" ({conv_type})" if conv_type != "chat" else ""
-                    renderer.console.print(f"[{CHROME}]New conversation started{type_label}[/{CHROME}]\n")
+                elif cmd_result == CommandResult.CONTINUE:
                     continue
-                elif cmd == "/append":
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) < 2 or not parts[1].strip():
-                        renderer.console.print(f"[{CHROME}]Usage: /append <text>[/{CHROME}]\n")
-                        continue
-                    current_type = conv.get("type", "chat")
-                    if current_type != "note":
-                        renderer.render_error("Current conversation is not a note. Use /new note <title> first.")
-                        continue
-                    entry_text = parts[1].strip()
-                    storage.create_message(db, conv["id"], "user", entry_text, **id_kw)
-                    renderer.console.print(f"[{CHROME}]Entry added to '{conv.get('title', 'Untitled')}'[/{CHROME}]\n")
-                    continue
-                elif cmd == "/tools":
-                    renderer.render_tools(all_tool_names)
-                    continue
-                elif cmd == "/conventions":
-                    info = discover_conventions(working_dir)
-                    if info.source == "none":
-                        renderer.console.print(
-                            f"[{CHROME}]No conventions file found.[/{CHROME}]\n"
-                            f"  [{MUTED}]Create ANTEROOM.md in your project root to define conventions.[/{MUTED}]\n"
-                        )
-                    else:
-                        label = "Project" if info.source == "project" else "Global"
-                        renderer.console.print(f"\n[bold]{label} conventions:[/bold] {info.path}")
-                        renderer.console.print(f"  [{MUTED}]~{info.estimated_tokens:,} tokens[/{MUTED}]")
-                        if info.warning:
-                            renderer.console.print(f"  [yellow]{info.warning}[/yellow]")
-                        renderer.console.print()
-                        lines = (info.content or "").splitlines()
-                        preview = lines[:50]
-                        for line in preview:
-                            renderer.console.print(f"  {line}")
-                        if len(lines) > 50:
-                            renderer.console.print(
-                                f"\n  [{MUTED}]... {len(lines) - 50} more lines. View full file: {info.path}[/{MUTED}]"
-                            )
-                        renderer.console.print()
-                    continue
-                elif cmd == "/upload":
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) < 2 or not parts[1].strip():
-                        renderer.console.print(f"[{CHROME}]Usage: /upload <path>[/{CHROME}]\n")
-                        continue
-                    upload_path = Path(parts[1].strip()).expanduser().resolve()
-                    if not upload_path.is_file():
-                        renderer.console.print(f"[{CHROME}]File not found: {upload_path}[/{CHROME}]\n")
-                        continue
-                    try:
-                        import mimetypes
-
-                        import filetype as _ft
-
-                        max_size_mb = 10
-                        max_size = max_size_mb * 1024 * 1024
-                        file_size = upload_path.stat().st_size
-                        if file_size > max_size:
-                            size_mb = file_size // (1024 * 1024)
-                            renderer.console.print(
-                                f"[{CHROME}]File too large ({size_mb} MB). Maximum is {max_size_mb} MB.[/{CHROME}]\n"
-                            )
-                            continue
-                        file_data = upload_path.read_bytes()
-                        guess = _ft.guess(file_data)
-                        mime = guess.mime if guess else (mimetypes.guess_type(str(upload_path))[0] or "text/plain")
-                        source = storage.save_source_file(
-                            db,
-                            title=upload_path.name,
-                            filename=upload_path.name,
-                            mime_type=mime,
-                            data=file_data,
-                            data_dir=config.app.data_dir,
-                            user_id=config.identity.user_id if config.identity else None,
-                            user_display_name=config.identity.display_name
-                            if config.identity and hasattr(config.identity, "display_name")
-                            else None,
-                        )
-                        renderer.console.print(
-                            f"[{CHROME}]Uploaded {upload_path.name} → source {source['id'][:8]}…[/{CHROME}]"
-                        )
-                        if source.get("content"):
-                            renderer.console.print(
-                                f"  [{MUTED}]{mime}, {len(source['content']):,} chars extracted[/{MUTED}]"
-                            )
-                        else:
-                            renderer.console.print(f"  [{MUTED}]{mime}, stored (no text extracted)[/{MUTED}]")
-                        renderer.console.print()
-                    except Exception:
-                        logger.error("CLI upload failed", exc_info=True)
-                        renderer.console.print(f"[{CHROME}]Upload failed[/{CHROME}]\n")
-                    continue
-                elif cmd == "/usage":
-                    _show_usage_stats(db, config)
-                    continue
-                elif cmd == "/help":
-                    from .dialogs import show_help_dialog
-
-                    await show_help_dialog()
-                    continue
-                elif cmd == "/compact":
-                    await _compact_messages(ai_service, ai_messages, db, conv["id"])
-                    continue
-                elif cmd == "/last":
-                    convs = storage.list_conversations(db, limit=1)
-                    if convs:
-                        conv = storage.get_conversation(db, convs[0]["id"]) or conv
-                        ai_messages = _load_conversation_messages(db, conv["id"])
-                        is_first_message = False
-                        _show_resume_info(db, conv, ai_messages)
-                    else:
-                        renderer.console.print(f"[{CHROME}]No previous conversations[/{CHROME}]\n")
-                    continue
-                elif cmd == "/list":
-                    parts = user_input.split()
-                    list_limit = 20
-                    if len(parts) >= 2 and parts[1].isdigit():
-                        list_limit = max(1, int(parts[1]))
-                    convs = storage.list_conversations(db, limit=list_limit + 1)
-                    has_more = len(convs) > list_limit
-                    display_convs = convs[:list_limit]
-                    if display_convs:
-                        renderer.console.print("\n[bold]Recent conversations:[/bold]")
-                        for i, c in enumerate(display_convs):
-                            msg_count = c.get("message_count", 0)
-                            ctype = c.get("type", "chat")
-                            type_badge = f" [cyan]\\[{ctype}][/cyan]" if ctype != "chat" else ""
-                            slug_label = f" [{MUTED}]{c['slug']}[/{MUTED}]" if c.get("slug") else ""
-                            renderer.console.print(
-                                f"  {i + 1}. {c['title']}{type_badge} ({msg_count} msgs){slug_label}"
-                            )
-                        if has_more:
-                            more_n = list_limit + 20
-                            msg = f"... more available. Use /list {more_n} to show more."
-                            renderer.console.print(f"  [{MUTED}]{msg}[/{MUTED}]")
-                        renderer.console.print("  Use [bold]/resume <number>[/bold] or [bold]/resume <slug>[/bold]\n")
-                    else:
-                        renderer.console.print(f"[{CHROME}]No conversations[/{CHROME}]\n")
-                    continue
-                elif cmd == "/delete":
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) < 2:
-                        renderer.console.print(f"[{CHROME}]Usage: /delete <number|slug|id>[/{CHROME}]\n")
-                        continue
-                    target = parts[1].strip()
-                    to_delete = _resolve_conversation(db, target)
-                    if not to_delete:
-                        renderer.render_error(f"Conversation not found: {target}. Use /list to see conversations.")
-                        continue
-                    title = to_delete.get("title", "Untitled")
-                    try:
-                        answer = input(f'  Delete "{title}"? [y/N] ').strip().lower()
-                    except (EOFError, KeyboardInterrupt):
-                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                        continue
-                    if answer not in ("y", "yes"):
-                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                        continue
-                    storage.delete_conversation(db, to_delete["id"], config.app.data_dir)
-                    renderer.console.print(f"[{CHROME}]Deleted: {title}[/{CHROME}]\n")
-                    if conv.get("id") == to_delete["id"]:
-                        conv = storage.create_conversation(db, **id_kw)
-                        ai_messages = []
-                        is_first_message = True
-                    continue
-                elif cmd == "/rename":
-                    parts = user_input.split(maxsplit=2)
-                    if len(parts) < 2:
-                        renderer.console.print(
-                            f"[{CHROME}]Usage: /rename <title> or /rename <N|id|slug> <title>[/{CHROME}]\n"
-                        )
-                        continue
-                    # Two forms: /rename <title> (current conv) or /rename <target> <title>
-                    first_arg = parts[1].strip()
-                    looks_like_target = first_arg.isdigit() or ("-" in first_arg and len(first_arg) >= 36)
-                    # Also treat as target if it resolves as a slug
-                    if not looks_like_target and len(parts) == 3:
-                        maybe_conv = storage.get_conversation(db, first_arg)
-                        if maybe_conv:
-                            looks_like_target = True
-                    if len(parts) == 3 and looks_like_target:
-                        target = parts[1].strip()
-                        new_title = parts[2].strip()
-                        resolved = _resolve_conversation(db, target)
-                        if not resolved:
-                            renderer.render_error(f"Conversation not found: {target}. Use /list to see conversations.")
-                            continue
-                        resolved_id = resolved["id"]
-                    else:
-                        # /rename <title> — rename current conversation
-                        new_title = user_input.split(maxsplit=1)[1].strip()
-                        resolved_id = conv.get("id")
-                    if not resolved_id:
-                        renderer.render_error("No active conversation to rename.")
-                        continue
-                    if not new_title:
-                        renderer.console.print(
-                            f"[{CHROME}]Usage: /rename <title> or /rename <N|id|slug> <title>[/{CHROME}]\n"
-                        )
-                        continue
-                    storage.update_conversation_title(db, resolved_id, new_title)
-                    renderer.console.print(f'[{CHROME}]Renamed conversation to "{new_title}"[/{CHROME}]\n')
-                    if conv.get("id") == resolved_id:
-                        conv["title"] = new_title
-                    continue
-                elif cmd == "/slug":
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) < 2:
-                        # Show current slug
-                        current_slug = conv.get("slug", "none")
-                        renderer.console.print(f"[{CHROME}]Slug: {current_slug}[/{CHROME}]\n")
-                        continue
-                    desired = parts[1].strip().lower()
-                    if not conv.get("id"):
-                        renderer.render_error("No active conversation.")
-                        continue
-                    if not is_valid_slug(desired):
-                        renderer.render_error(
-                            "Invalid slug. Use lowercase letters, numbers, and hyphens (e.g. my-project)."
-                        )
-                        continue
-                    suggestion = suggest_unique_slug(db, desired)
-                    if suggestion is None:
-                        # Desired slug is available
-                        try:
-                            storage.update_conversation_slug(db, conv["id"], desired)
-                            conv["slug"] = desired
-                            renderer.console.print(f"[{CHROME}]Slug set to: {desired}[/{CHROME}]\n")
-                        except _sqlite3.IntegrityError:
-                            # Race: slug was taken between check and write
-                            fallback = suggest_unique_slug(db, desired)
-                            renderer.render_error(f'"{desired}" is taken. Try: {fallback}')
-                    else:
-                        renderer.console.print(f'[{CHROME}]"{desired}" is taken. Suggestion: {suggestion}[/{CHROME}]\n')
-                    continue
-                elif cmd == "/search":
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) < 2 or not parts[1].strip():
-                        renderer.console.print(
-                            f"[{CHROME}]Usage: /search <query> | /search --keyword <query>[/{CHROME}]\n"
-                        )
-                        continue
-                    search_arg = parts[1].strip()
-
-                    # Check for --keyword flag
-                    force_keyword = False
-                    type_filter = None
-                    if search_arg.startswith("--keyword "):
-                        force_keyword = True
-                        search_arg = search_arg[len("--keyword ") :].strip()
-                        if not search_arg:
-                            renderer.console.print(f"[{CHROME}]Usage: /search --keyword <query>[/{CHROME}]\n")
-                            continue
-                    elif search_arg.startswith("--type "):
-                        rest = search_arg[len("--type ") :].strip()
-                        type_parts = rest.split(maxsplit=1)
-                        if type_parts and type_parts[0] in ("chat", "note", "document"):
-                            type_filter = type_parts[0]
-                            search_arg = type_parts[1] if len(type_parts) > 1 else ""
-                        else:
-                            renderer.render_error("Invalid type. Use: chat, note, or document")
-                            continue
-                        if not search_arg:
-                            renderer.console.print(f"[{CHROME}]Usage: /search --type <type> <query>[/{CHROME}]\n")
-                            continue
-
-                    query = search_arg
-
-                    # Try semantic search if vec is available
-                    use_semantic = False
-                    if not force_keyword:
-                        try:
-                            from ..db import has_vec_support as _has_vec
-                            from ..services.embeddings import create_embedding_service as _create_emb
-
-                            raw_conn = db._conn if hasattr(db, "_conn") else None
-                            if raw_conn and _has_vec(raw_conn):
-                                _emb_svc = _create_emb(config)
-                                if _emb_svc:
-                                    use_semantic = True
-                        except Exception:
-                            pass
-
-                    if use_semantic:
-                        try:
-                            query_emb = await _emb_svc.embed(query)
-                            if query_emb:
-                                sem_results = storage.search_similar_messages(db, query_emb, limit=20)
-                                if sem_results:
-                                    renderer.console.print(f"\n[bold]Semantic search results for '{query}':[/bold]")
-                                    for i, r in enumerate(sem_results):
-                                        snippet = r["content"][:80].replace("\n", " ")
-                                        dist = r.get("distance", 0)
-                                        relevance = max(0, 100 - int(dist * 100))
-                                        renderer.console.print(
-                                            f"  {i + 1}. [{r['role']}] {snippet}... "
-                                            f"[{CHROME}]({relevance}% match, {r['conversation_id'][:8]}...)[/{CHROME}]"
-                                        )
-                                    renderer.console.print()
-                                    continue
-                        except Exception:
-                            pass  # Fall through to keyword search
-
-                    results = storage.list_conversations(db, search=query, limit=20, conversation_type=type_filter)
-                    if results:
-                        renderer.console.print(f"\n[bold]Search results for '{query}':[/bold]")
-                        for i, c in enumerate(results):
-                            msg_count = c.get("message_count", 0)
-                            renderer.console.print(
-                                f"  {i + 1}. {c['title']} ({msg_count} msgs) [{CHROME}]{c['id'][:8]}...[/{CHROME}]"
-                            )
-                        renderer.console.print("  Use [bold]/resume <number|slug>[/bold] to open\n")
-                    else:
-                        renderer.console.print(f"[{CHROME}]No conversations matching '{query}'[/{CHROME}]\n")
-                    continue
-                elif cmd == "/skills":
-                    if skill_registry:
-                        skills = skill_registry.list_skills()
-                        if skills:
-                            renderer.console.print("\n[bold]Available skills:[/bold]")
-                            for s in skills:
-                                src = s.source
-                                renderer.console.print(f"  /{s.name} - {s.description} [{CHROME}]({src})[/{CHROME}]")
-                            renderer.console.print()
-                        else:
-                            renderer.console.print(
-                                f"[{CHROME}]No skills loaded. Add .yaml files to"
-                                f" ~/.anteroom/skills/ or .anteroom/skills/[/{CHROME}]\n"
-                            )
-                    continue
-                elif cmd == "/mcp":
-                    parts = user_input.split()
-                    if len(parts) == 1:
-                        if mcp_manager:
-                            renderer.render_mcp_status(mcp_manager.get_server_statuses())
-                        else:
-                            renderer.console.print(f"[{CHROME}]No MCP servers configured.[/{CHROME}]\n")
-                    elif len(parts) >= 2 and parts[1].lower() == "status":
-                        if not mcp_manager:
-                            renderer.render_error("No MCP servers configured")
-                            continue
-                        if len(parts) >= 3:
-                            renderer.render_mcp_server_detail(parts[2], mcp_manager.get_server_statuses(), mcp_manager)
-                        else:
-                            renderer.render_mcp_status(mcp_manager.get_server_statuses())
-                    elif len(parts) >= 3:
-                        action = parts[1].lower()
-                        server_name = parts[2]
-                        if not mcp_manager:
-                            renderer.render_error("No MCP servers configured")
-                            continue
-                        try:
-                            if action == "connect":
-                                await mcp_manager.connect_server(server_name)
-                                status = mcp_manager.get_server_statuses().get(server_name, {})
-                                if status.get("status") == "connected":
-                                    renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
-                                else:
-                                    err = status.get("error_message", "unknown error")
-                                    renderer.render_error(f"Failed to connect '{server_name}': {err}")
-                            elif action == "disconnect":
-                                await mcp_manager.disconnect_server(server_name)
-                                renderer.console.print(f"[{CHROME}]Disconnected: {server_name}[/{CHROME}]\n")
-                            elif action == "reconnect":
-                                await mcp_manager.reconnect_server(server_name)
-                                status = mcp_manager.get_server_statuses().get(server_name, {})
-                                if status.get("status") == "connected":
-                                    renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
-                                else:
-                                    err = status.get("error_message", "unknown error")
-                                    renderer.render_error(f"Failed to reconnect '{server_name}': {err}")
-                            else:
-                                renderer.render_error(
-                                    f"Unknown action: {action}. Use connect, disconnect, reconnect, or status."
-                                )
-                                continue
-                            _rebuild_tools()
-                        except ValueError as e:
-                            renderer.render_error(str(e))
-                    else:
-                        renderer.console.print(
-                            f"[{CHROME}]Usage: /mcp [status [name]|connect|disconnect|reconnect <name>][/{CHROME}]\n"
-                        )
-                    continue
-                elif cmd == "/model":
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) < 2:
-                        renderer.console.print(f"[{CHROME}]Current model: {current_model}[/{CHROME}]")
-                        renderer.console.print(f"[{CHROME}]Usage: /model <model_name>[/{CHROME}]\n")
-                        continue
-                    new_model = parts[1].strip()
-                    current_model = new_model
-                    ai_service = create_ai_service(config.ai)
-                    ai_service.config.model = new_model
-                    renderer.console.print(f"[{CHROME}]Switched to model: {new_model}[/{CHROME}]\n")
-                    continue
-                elif cmd == "/plan":
-                    sub, inline_prompt = parse_plan_command(user_input)
-                    if sub in ("on", "start"):
-                        if _plan_active[0]:
-                            renderer.console.print(f"[{CHROME}]Already in planning mode[/{CHROME}]\n")
-                        else:
-                            _apply_plan_mode(conv["id"])
-                            renderer.console.print(
-                                f"[yellow]Planning mode active.[/yellow] The AI will explore and write a plan.\n"
-                                f"  [{MUTED}]Use /plan approve to execute, /plan off to exit.[/{MUTED}]\n"
-                            )
-                        continue
-                    elif sub == "approve":
-                        if not _plan_active[0]:
-                            renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
-                        elif _plan_file[0] is None:
-                            renderer.console.print(f"[{CHROME}]No plan file path set[/{CHROME}]\n")
-                        else:
-                            content = read_plan(_plan_file[0])
-                            if not content:
-                                renderer.console.print(
-                                    f"[{CHROME}]No plan file found at {_plan_file[0]}[/{CHROME}]\n"
-                                    f"  [{MUTED}]The AI needs to write the plan first.[/{MUTED}]\n"
-                                )
-                            else:
-                                _exit_plan_mode(plan_content=content)
-                                delete_plan(_plan_file[0])
-                                # Parse implementation steps for live checklist
-                                steps = parse_plan_steps(content)
-                                _plan_checklist_steps.clear()
-                                _plan_checklist_steps.extend(steps)
-                                _plan_current_step[0] = 0
-                                if steps:
-                                    renderer.start_plan(steps)
-                                renderer.console.print(
-                                    "[green]Plan approved.[/green] Full tools restored.\n"
-                                    f"  [{MUTED}]Plan injected into context. "
-                                    f"Send a message to start.[/{MUTED}]\n"
-                                )
-                        continue
-                    elif sub == "status":
-                        if _plan_active[0]:
-                            renderer.console.print("[yellow]Planning mode: active[/yellow]")
-                            if _plan_file[0]:
-                                content = read_plan(_plan_file[0])
-                                if content:
-                                    renderer.console.print(f"  Plan file: {_plan_file[0]} ({len(content)} chars)")
-                                    lines = content.splitlines()
-                                    preview = lines[:20]
-                                    renderer.console.print()
-                                    for line in preview:
-                                        renderer.console.print(f"  {line}")
-                                    if len(lines) > 20:
-                                        renderer.console.print(
-                                            f"\n  [{MUTED}]... {len(lines) - 20} more lines[/{MUTED}]"
-                                        )
-                                else:
-                                    renderer.console.print(
-                                        f"  [{MUTED}]Plan file: {_plan_file[0]} (not yet written)[/{MUTED}]"
-                                    )
-                        else:
-                            renderer.console.print(f"[{CHROME}]Planning mode: off[/{CHROME}]")
-                        renderer.console.print()
-                        continue
-                    elif sub == "edit":
-                        if not _plan_active[0]:
-                            renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
-                            continue
-                        if _plan_file[0] is None:
-                            renderer.console.print(f"[{CHROME}]No plan file path set[/{CHROME}]\n")
-                            continue
-                        edit_args = user_input.split(maxsplit=2)
-                        edit_instruction = edit_args[2] if len(edit_args) > 2 else ""
-                        if edit_instruction:
-                            user_input = f"Revise the plan based on this feedback: {edit_instruction}"
-                        else:
-                            content = read_plan(_plan_file[0])
-                            if not content:
-                                renderer.console.print(
-                                    f"[{CHROME}]No plan file yet — the AI needs to write it first.[/{CHROME}]\n"
-                                )
-                                continue
-                            import subprocess
-
-                            editor = get_editor()
-                            subprocess.call([editor, str(_plan_file[0])])
-                            renderer.console.print(
-                                "Plan updated. Use [bold]/plan status[/bold] to review, "
-                                "[bold]/plan approve[/bold] to execute.\n"
-                            )
-                            continue
-                    elif sub == "reject":
-                        if not _plan_active[0]:
-                            renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
-                            continue
-                        reject_parts = user_input.split(maxsplit=2)
-                        if len(reject_parts) < 3 or not reject_parts[2].strip():
-                            renderer.console.print(f"[{CHROME}]Usage: /plan reject <reason for rejection>[/{CHROME}]\n")
-                            continue
-                        reason = reject_parts[2].strip()
-                        user_input = (
-                            f"The plan has been rejected. Reason: {reason}\n\n"
-                            "Please revise the plan based on this feedback and write the updated "
-                            "plan to the same plan file. Keep exploring if you need more information."
-                        )
-                    elif sub == "off":
-                        if not _plan_active[0]:
-                            renderer.console.print(f"[{CHROME}]Not in planning mode[/{CHROME}]\n")
-                        else:
-                            _exit_plan_mode()
-                            renderer.console.print(f"[{CHROME}]Planning mode off. Full tools restored.[/{CHROME}]\n")
-                        continue
-                    else:
-                        # Inline prompt mode: /plan <prompt text>
-                        if not inline_prompt:
-                            renderer.console.print(
-                                f"[{CHROME}]Usage: /plan [on|approve|status|edit|reject|off]"
-                                f" or /plan <prompt>[/{CHROME}]\n"
-                            )
-                            continue
-                        if not _plan_active[0]:
-                            _apply_plan_mode(conv["id"])
-                            renderer.console.print("[yellow]Planning mode active.[/yellow]\n")
-                        user_input = inline_prompt
-                        # Fall through to agent loop — do NOT continue
-                elif cmd == "/verbose":
-                    new_v = renderer.cycle_verbosity()
-                    renderer.render_verbosity_change(new_v)
-                    continue
-                elif cmd == "/detail":
-                    renderer.render_tool_detail()
-                    continue
-                elif cmd == "/resume":
-                    parts = user_input.split(maxsplit=1)
-                    if len(parts) < 2:
-                        from .pickers import show_resume_picker as _show_resume_picker
-
-                        picked = await _show_resume_picker(db)
-                        if picked is None:
-                            continue
-                        loaded = storage.get_conversation(db, picked["id"])
-                    else:
-                        target = parts[1].strip()
-                        loaded = _resolve_conversation(db, target)
-                    if not loaded:
-                        renderer.render_error("Conversation not found. Use /list to see conversations.")
-                        continue
-                    conv = loaded
-                    ai_messages = _load_conversation_messages(db, conv["id"])
-                    is_first_message = False
-                    _show_resume_info(db, conv, ai_messages)
-                    continue
-                elif cmd == "/rewind":
-                    stored = storage.list_messages(db, conv["id"])
-                    if len(stored) < 2:
-                        renderer.console.print(f"[{CHROME}]Not enough messages to rewind[/{CHROME}]\n")
-                        continue
-
-                    renderer.console.print("\n[bold]Messages:[/bold]")
-                    for msg in stored:
-                        role_label = "You" if msg["role"] == "user" else "AI"
-                        preview = msg["content"][:80].replace("\n", " ")
-                        if len(msg["content"]) > 80:
-                            preview += "..."
-                        renderer.console.print(f"  {msg['position']}. [{role_label}] {preview}")
-
-                    renderer.console.print(
-                        f"\n[{CHROME}]Enter position to rewind to (keep that message, delete after):[/{CHROME}]"
-                    )
-                    try:
-                        pos_input = input("  Position: ").strip()
-                    except (EOFError, KeyboardInterrupt):
-                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                        continue
-
-                    if not pos_input.isdigit():
-                        renderer.render_error("Invalid position")
-                        continue
-
-                    target_pos = int(pos_input)
-                    positions = [m["position"] for m in stored]
-                    if target_pos not in positions:
-                        renderer.render_error(f"Position {target_pos} not found")
-                        continue
-
-                    msgs_after = [m for m in stored if m["position"] > target_pos]
-                    msg_ids_after = [m["id"] for m in msgs_after]
-                    file_paths = collect_file_paths(db, msg_ids_after)
-
-                    undo_files = False
-                    if file_paths:
-                        renderer.console.print(
-                            f"\n[yellow]{len(file_paths)} file(s) were modified after this point:[/yellow]"
-                        )
-                        for fp in sorted(file_paths):
-                            renderer.console.print(f"  - {fp}")
-                        try:
-                            answer = input("  Undo file changes? [y/N] ").strip().lower()
-                            undo_files = answer in ("y", "yes")
-                        except (EOFError, KeyboardInterrupt):
-                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                            continue
-
-                    result = await rewind_service(
-                        db=db,
-                        conversation_id=conv["id"],
-                        to_position=target_pos,
-                        undo_files=undo_files,
-                        working_dir=working_dir,
-                    )
-
-                    ai_messages = _load_conversation_messages(db, conv["id"])
-
-                    summary = f"Rewound {result.deleted_messages} message(s)"
-                    if result.reverted_files:
-                        summary += f", reverted {len(result.reverted_files)} file(s)"
-                    if result.skipped_files:
-                        summary += f", {len(result.skipped_files)} skipped"
-                    renderer.console.print(f"[{CHROME}]{summary}[/{CHROME}]\n")
-
-                    if result.skipped_files:
-                        for sf in result.skipped_files:
-                            renderer.console.print(f"  [yellow]Skipped: {sf}[/yellow]")
-                        renderer.console.print()
-                    continue
+                # FALL_THROUGH: user_input was modified, continue to agent loop
 
             # Check for skill invocation
             if skill_registry and user_input.startswith("/"):
