@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 25, 2026
 
+### v1.50.0
+
+**New:**
+
+- Web UI thinking indicator now shows lifecycle phases — connecting, waiting, streaming with char count, and stall detection (#435)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.50.0)
+
 ### v1.49.1
 
 **Fixed:**
