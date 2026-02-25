@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 25, 2026
 
+### v1.48.1
+
+**New:**
+
+- Comprehensive developer testing guide covering all 7 test layers — unit through red teaming (#428)
+- Documents promptfoo eval setup, agent behavioral evals, VHS demo recordings, and deterministic output configuration (#428)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.48.1)
+
 ### v1.48.0
 
 **New:**
