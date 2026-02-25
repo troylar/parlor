@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 25, 2026
 
+### v1.49.1
+
+**Fixed:**
+
+- Canvas streaming now renders with proper syntax highlighting from the start (#432)
+- Canvas content no longer leaks before approval prompt (#432)
+- Thinking animation dots render below the SYSTEM header, not above it (#434)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.49.1)
+
 ### v1.49.0
 
 **New:**
