@@ -11,6 +11,7 @@ import os
 import time as time_mod
 import uuid as uuid_mod
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -117,6 +118,20 @@ MAX_QUEUED_MESSAGES = 10
 
 SAFE_INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
+
+@dataclass
+class ChatRequestContext:
+    """Parsed and validated chat request data."""
+
+    message_text: str
+    regenerate: bool
+    plan_mode: bool
+    source_ids: list[str]
+    source_tag: str | None
+    source_group_id: str | None
+    files: list = field(default_factory=list)
+
+
 _cancel_events: dict[str, set[asyncio.Event]] = defaultdict(set)
 _message_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _active_streams: dict[str, dict[str, Any]] = {}
@@ -186,6 +201,58 @@ def _get_ai_service(request: Request, model_override: str | None = None) -> AISe
     return create_ai_service(config.ai)
 
 
+async def _parse_chat_request(request: Request) -> ChatRequestContext:
+    """Parse and validate the chat request body (multipart or JSON)."""
+    content_type = request.headers.get("content-type", "")
+    regenerate = False
+    plan_mode = False
+    source_ids: list[str] = []
+    source_tag: str | None = None
+    source_group_id: str | None = None
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        message_text = str(form.get("message", ""))
+        files = form.getlist("files")
+        if len(files) > MAX_FILES_PER_REQUEST:
+            raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_REQUEST} files per request")
+    else:
+        body = ChatRequest(**(await request.json()))
+        message_text = body.message
+        regenerate = body.regenerate
+        plan_mode = body.plan_mode
+        source_ids = body.source_ids
+        source_tag = body.source_tag
+        source_group_id = body.source_group_id
+        files = []
+
+    # Validate source reference UUIDs
+    for sid in source_ids:
+        try:
+            uuid_mod.UUID(sid)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid source_id format: {sid[:50]}")
+    if source_tag:
+        try:
+            uuid_mod.UUID(source_tag)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid source_tag format")
+    if source_group_id:
+        try:
+            uuid_mod.UUID(source_group_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid source_group_id format")
+
+    return ChatRequestContext(
+        message_text=message_text,
+        regenerate=regenerate,
+        plan_mode=plan_mode,
+        source_ids=source_ids,
+        source_tag=source_tag,
+        source_group_id=source_group_id,
+        files=files,
+    )
+
+
 @router.post("/conversations/{conversation_id}/chat")
 async def chat(conversation_id: str, request: Request):
     _validate_uuid(conversation_id)
@@ -236,44 +303,14 @@ async def chat(conversation_id: str, request: Request):
 
         return JSONResponse({"status": "saved", "message": msg})
 
-    content_type = request.headers.get("content-type", "")
-    regenerate = False
-    plan_mode = False
-    source_ids: list[str] = []
-    source_tag: str | None = None
-    source_group_id: str | None = None
-    if "multipart/form-data" in content_type:
-        form = await request.form()
-        message_text = str(form.get("message", ""))
-        files = form.getlist("files")
-        if len(files) > MAX_FILES_PER_REQUEST:
-            raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_REQUEST} files per request")
-    else:
-        body = ChatRequest(**(await request.json()))
-        message_text = body.message
-        regenerate = body.regenerate
-        plan_mode = body.plan_mode
-        source_ids = body.source_ids
-        source_tag = body.source_tag
-        source_group_id = body.source_group_id
-        files = []
-
-    # Validate source reference UUIDs
-    for sid in source_ids:
-        try:
-            uuid_mod.UUID(sid)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid source_id format: {sid[:50]}")
-    if source_tag:
-        try:
-            uuid_mod.UUID(source_tag)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid source_tag format")
-    if source_group_id:
-        try:
-            uuid_mod.UUID(source_group_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid source_group_id format")
+    req_ctx = await _parse_chat_request(request)
+    message_text = req_ctx.message_text
+    regenerate = req_ctx.regenerate
+    plan_mode = req_ctx.plan_mode
+    source_ids = req_ctx.source_ids
+    source_tag = req_ctx.source_tag
+    source_group_id = req_ctx.source_group_id
+    files = req_ctx.files
 
     if not regenerate and not message_text.strip():
         raise HTTPException(status_code=400, detail="Message content cannot be empty")
