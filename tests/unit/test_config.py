@@ -698,6 +698,119 @@ class TestIdentityConfig:
         assert config.identity.display_name == ""
 
 
+class TestSamplingConfig:
+    def test_defaults_are_none(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key"}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature is None
+        assert config.ai.top_p is None
+        assert config.ai.seed is None
+
+    def test_yaml_config_sets_values(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "seed": 42,
+                },
+            },
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature == 0.7
+        assert config.ai.top_p == 0.9
+        assert config.ai.seed == 42
+
+    def test_env_var_overrides(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_BASE_URL", "https://api.example.com")
+        monkeypatch.setenv("AI_CHAT_API_KEY", "sk-test-key")
+        monkeypatch.setenv("AI_CHAT_TEMPERATURE", "0.3")
+        monkeypatch.setenv("AI_CHAT_TOP_P", "0.5")
+        monkeypatch.setenv("AI_CHAT_SEED", "123")
+        cfg_file = _write_config(tmp_path, {})
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature == 0.3
+        assert config.ai.top_p == 0.5
+        assert config.ai.seed == 123
+
+    def test_temperature_clamped_high(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "temperature": 5.0}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature == 2.0
+
+    def test_temperature_clamped_low(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "temperature": -1.0}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature == 0.0
+
+    def test_top_p_clamped_high(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "top_p": 3.0}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.top_p == 1.0
+
+    def test_top_p_clamped_low(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "top_p": -0.5}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.top_p == 0.0
+
+    def test_invalid_temperature_falls_back_to_none(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "temperature": "not-a-number"}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature is None
+
+    def test_invalid_seed_falls_back_to_none(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "seed": "abc"}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.seed is None
+
+    def test_yaml_takes_precedence_over_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_TEMPERATURE", "1.5")
+        cfg_file = _write_config(
+            tmp_path,
+            {
+                "ai": {
+                    "base_url": "https://api.example.com",
+                    "api_key": "sk-test-key",
+                    "temperature": 0.2,
+                },
+            },
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature == 0.2
+
+    def test_zero_temperature(self, tmp_path: Path) -> None:
+        cfg_file = _write_config(
+            tmp_path,
+            {"ai": {"base_url": "https://api.example.com", "api_key": "sk-test-key", "temperature": 0}},
+        )
+        config, _ = load_config(cfg_file)
+        assert config.ai.temperature == 0.0
+
+
 class TestEnsureIdentity:
     def test_generates_identity_when_missing(self, tmp_path: Path) -> None:
         from anteroom.config import ensure_identity

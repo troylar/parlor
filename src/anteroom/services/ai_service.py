@@ -210,6 +210,12 @@ class AIService:
         }
         if tools:
             kwargs["tools"] = tools
+        if self.config.temperature is not None:
+            kwargs["temperature"] = self.config.temperature
+        if self.config.top_p is not None:
+            kwargs["top_p"] = self.config.top_p
+        if self.config.seed is not None:
+            kwargs["seed"] = self.config.seed
 
         max_attempts = max(1, self.config.retry_max_attempts + 1)  # +1: first attempt is not a "retry"
         last_transient_error: Exception | None = None

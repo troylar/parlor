@@ -257,6 +257,9 @@ class AIConfig:
     retry_backoff_base: float = 1.0  # seconds; base for exponential backoff
     narration_cadence: int = 5  # progress updates every N tool calls; 0 = disabled
     max_tools: int = 128  # hard cap on tools per request; 0 = unlimited
+    temperature: float | None = None  # None = provider default; 0.0-2.0
+    top_p: float | None = None  # None = provider default; 0.0-1.0
+    seed: int | None = None  # None = provider default; any int for deterministic output
 
 
 @dataclass
@@ -643,6 +646,30 @@ def load_config(
     except (ValueError, TypeError):
         max_tools = 128
 
+    _raw_temperature = ai_raw.get("temperature", os.environ.get("AI_CHAT_TEMPERATURE"))
+    temperature: float | None = None
+    if _raw_temperature is not None and str(_raw_temperature).strip() != "":
+        try:
+            temperature = max(0.0, min(2.0, float(_raw_temperature)))
+        except (ValueError, TypeError):
+            temperature = None
+
+    _raw_top_p = ai_raw.get("top_p", os.environ.get("AI_CHAT_TOP_P"))
+    top_p: float | None = None
+    if _raw_top_p is not None and str(_raw_top_p).strip() != "":
+        try:
+            top_p = max(0.0, min(1.0, float(_raw_top_p)))
+        except (ValueError, TypeError):
+            top_p = None
+
+    _raw_seed = ai_raw.get("seed", os.environ.get("AI_CHAT_SEED"))
+    seed: int | None = None
+    if _raw_seed is not None and str(_raw_seed).strip() != "":
+        try:
+            seed = int(_raw_seed)
+        except (ValueError, TypeError):
+            seed = None
+
     if narration_cadence > 0:
         system_prompt += (
             "\n\n<narration>\n"
@@ -670,6 +697,9 @@ def load_config(
         retry_backoff_base=retry_backoff_base,
         narration_cadence=narration_cadence,
         max_tools=max_tools,
+        temperature=temperature,
+        top_p=top_p,
+        seed=seed,
     )
 
     app_raw = raw.get("app", {})

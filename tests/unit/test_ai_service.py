@@ -2154,3 +2154,74 @@ class TestStreamCloseTimeout:
             pass
 
         assert close_called
+
+
+class TestSamplingParameters:
+    """Tests for temperature, top_p, and seed forwarding to the API."""
+
+    def _make_service_with_mock(self, **config_overrides):
+        config = _make_config(**config_overrides)
+        service = AIService.__new__(AIService)
+        service.config = config
+        service._token_provider = None
+
+        mock_stream = MagicMock()
+        mock_stream.__aiter__ = MagicMock(return_value=iter([]))
+
+        async def _empty_gen(self):
+            return
+            yield  # noqa: unreachable - makes this an async generator
+
+        mock_stream.__aiter__ = _empty_gen
+        mock_stream.close = AsyncMock()
+        mock_stream.response = MagicMock()
+        mock_stream.response.status_code = 200
+
+        create_mock = AsyncMock(return_value=mock_stream)
+        service.client = MagicMock()
+        service.client.chat.completions.create = create_mock
+        return service, create_mock
+
+    @pytest.mark.asyncio
+    async def test_temperature_forwarded(self):
+        service, create_mock = self._make_service_with_mock(temperature=0.0)
+        async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+            pass
+        call_kwargs = create_mock.call_args[1]
+        assert call_kwargs["temperature"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_top_p_forwarded(self):
+        service, create_mock = self._make_service_with_mock(top_p=0.9)
+        async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+            pass
+        call_kwargs = create_mock.call_args[1]
+        assert call_kwargs["top_p"] == 0.9
+
+    @pytest.mark.asyncio
+    async def test_seed_forwarded(self):
+        service, create_mock = self._make_service_with_mock(seed=42)
+        async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+            pass
+        call_kwargs = create_mock.call_args[1]
+        assert call_kwargs["seed"] == 42
+
+    @pytest.mark.asyncio
+    async def test_none_params_not_sent(self):
+        service, create_mock = self._make_service_with_mock()
+        async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+            pass
+        call_kwargs = create_mock.call_args[1]
+        assert "temperature" not in call_kwargs
+        assert "top_p" not in call_kwargs
+        assert "seed" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_partial_params(self):
+        service, create_mock = self._make_service_with_mock(temperature=0.5)
+        async for _ in service.stream_chat([{"role": "user", "content": "hi"}]):
+            pass
+        call_kwargs = create_mock.call_args[1]
+        assert call_kwargs["temperature"] == 0.5
+        assert "top_p" not in call_kwargs
+        assert "seed" not in call_kwargs

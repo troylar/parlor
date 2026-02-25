@@ -89,7 +89,7 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
         "messages": messages,
         "stream": stream,
     }
-    for param in ("temperature", "top_p", "max_tokens", "stop", "frequency_penalty", "presence_penalty", "n"):
+    for param in ("temperature", "top_p", "seed", "max_tokens", "stop", "frequency_penalty", "presence_penalty", "n"):
         if param in body:
             kwargs[param] = body[param]
 

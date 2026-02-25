@@ -634,6 +634,27 @@ def main() -> None:
         help="Override port for web UI (e.g., --port 9090)",
     )
     parser.add_argument(
+        "--temperature",
+        dest="temperature",
+        type=float,
+        default=None,
+        help="Override model temperature (0.0-2.0; 0 for deterministic output)",
+    )
+    parser.add_argument(
+        "--top-p",
+        dest="top_p",
+        type=float,
+        default=None,
+        help="Override model top_p (0.0-1.0)",
+    )
+    parser.add_argument(
+        "--seed",
+        dest="seed",
+        type=int,
+        default=None,
+        help="Set random seed for deterministic outputs",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
@@ -724,6 +745,18 @@ def main() -> None:
                 print(f"Invalid port: {_port}. Must be between 1 and 65535.", file=sys.stderr)
                 sys.exit(1)
             config.app.port = _port
+
+    _temperature = getattr(args, "temperature", None)
+    if _temperature is not None:
+        config.ai.temperature = max(0.0, min(2.0, _temperature))
+
+    _top_p = getattr(args, "top_p", None)
+    if _top_p is not None:
+        config.ai.top_p = max(0.0, min(1.0, _top_p))
+
+    _seed = getattr(args, "seed", None)
+    if _seed is not None:
+        config.ai.seed = _seed
 
     if args.test:
         asyncio.run(_test_connection(config))

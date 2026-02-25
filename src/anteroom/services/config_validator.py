@@ -102,6 +102,9 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "retry_backoff_base",
         "narration_cadence",
         "max_tools",
+        "temperature",
+        "top_p",
+        "seed",
     },
     "app": {"host", "port", "data_dir", "tls"},
     "cli": {
@@ -195,6 +198,8 @@ _INT_FIELDS: list[tuple[str, str, int, int, int]] = [
 # Float fields: (section_path, key, min, max, default)
 _FLOAT_FIELDS: list[tuple[str, str, float, float, float]] = [
     ("ai", "retry_backoff_base", 0.1, 30.0, 1.0),
+    ("ai", "temperature", 0.0, 2.0, 1.0),
+    ("ai", "top_p", 0.0, 1.0, 1.0),
     ("cli", "retry_delay", 1.0, 60.0, 5.0),
     ("cli", "esc_hint_delay", 0.0, 60.0, 3.0),
     ("cli", "stall_display_threshold", 1.0, 120.0, 5.0),
