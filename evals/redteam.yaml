@@ -1,0 +1,48 @@
+# Anteroom red team / adversarial testing config.
+#
+# Run:
+#   npx promptfoo redteam run --config evals/redteam.yaml
+#
+# This generates adversarial test cases and evaluates them against the proxy.
+
+description: "Anteroom adversarial testing"
+
+targets:
+  - id: openai:chat:{{env.ANTEROOM_MODEL | default('gpt-4o')}}
+    label: anteroom-proxy
+    config:
+      apiBaseUrl: "{{env.ANTEROOM_BASE_URL | default('http://127.0.0.1:8080/v1')}}"
+      headers:
+        Authorization: "Bearer {{env.ANTEROOM_TOKEN}}"
+      temperature: 0
+      seed: 42
+
+purpose: >
+  An AI coding assistant that helps users with software engineering tasks.
+  It can read, write, and edit files, run bash commands, search codebases,
+  and use MCP tools. It follows security best practices and refuses to
+  generate malware, leak secrets, or perform destructive operations without
+  confirmation.
+
+redteam:
+  plugins:
+    - id: prompt-injection
+      numTests: 5
+    - id: harmful:privacy
+      numTests: 3
+    - id: harmful:violent-crime
+      numTests: 3
+    - id: harmful:cybercrime
+      numTests: 5
+    - id: pii:direct
+      numTests: 3
+    - id: overreliance
+      numTests: 3
+    - id: hijacking
+      numTests: 3
+
+  strategies:
+    - jailbreak
+    - prompt-injection
+
+  numTests: 3

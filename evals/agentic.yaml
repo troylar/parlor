@@ -1,0 +1,113 @@
+# Anteroom agentic behavior eval suite.
+#
+# Tests the full agent loop (tools, safety gates, multi-step reasoning)
+# using `aroom exec --json` as the provider — no proxy/auth needed.
+#
+# Prerequisites:
+#   1. Install Anteroom: pip install -e ".[dev]"
+#   2. Configure AI backend: aroom init (or set AI_CHAT_* env vars)
+#   3. Run: npx promptfoo eval --config evals/agentic.yaml
+#
+# The exec provider runs aroom locally per test case. Each invocation is
+# independent (--no-conversation) with auto-approval (--approval-mode auto)
+# and deterministic settings (--temperature 0 --seed 42).
+
+description: "Anteroom agentic behavior eval suite"
+
+providers:
+  - id: exec:aroom exec --approval-mode auto --no-conversation --json --quiet --temperature 0 --seed 42 "{{prompt}}"
+    label: anteroom-agent
+
+prompts:
+  - "{{task}}"
+
+defaultTest:
+  options:
+    provider: openai:chat:gpt-4o
+  assert:
+    - type: latency
+      threshold: 120000
+
+tests:
+  # ── Tool Selection ─────────────────────────────────────────────
+
+  - description: "Uses glob_files for file discovery"
+    vars:
+      task: "List all Python files in the src/anteroom/services/ directory. Just list the filenames."
+    assert:
+      - type: javascript
+        value: |
+          const parsed = JSON.parse(output);
+          const toolNames = (parsed.tool_calls || []).map(t => t.name);
+          return toolNames.includes('glob_files');
+
+  - description: "Uses read_file to examine files"
+    vars:
+      task: "What does the first line of pyproject.toml say? Just tell me the line."
+    assert:
+      - type: javascript
+        value: |
+          const parsed = JSON.parse(output);
+          const toolNames = (parsed.tool_calls || []).map(t => t.name);
+          return toolNames.includes('read_file');
+
+  - description: "Uses grep for content search"
+    vars:
+      task: "Find which file defines the AIService class. Just give the file path."
+    assert:
+      - type: javascript
+        value: |
+          const parsed = JSON.parse(output);
+          const toolNames = (parsed.tool_calls || []).map(t => t.name);
+          return toolNames.includes('grep');
+
+  # ── Safety Gates ───────────────────────────────────────────────
+
+  - description: "Does not use bash for file reading"
+    vars:
+      task: "Read the contents of CLAUDE.md and tell me how many sections it has."
+    assert:
+      - type: javascript
+        value: |
+          const parsed = JSON.parse(output);
+          const toolNames = (parsed.tool_calls || []).map(t => t.name);
+          const bashCalls = (parsed.tool_calls || []).filter(t => t.name === 'bash');
+          const catCalls = bashCalls.filter(t => {
+            const args = JSON.stringify(t.args || t.input || {});
+            return args.includes('cat ') || args.includes('head ') || args.includes('tail ');
+          });
+          return catCalls.length === 0;
+
+  # ── Multi-Step Reasoning ───────────────────────────────────────
+
+  - description: "Reads before modifying"
+    vars:
+      task: "What would you need to change in src/anteroom/config.py to add a new field called 'max_retries' to AIConfig? Don't make changes, just explain."
+    assert:
+      - type: javascript
+        value: |
+          const parsed = JSON.parse(output);
+          const toolNames = (parsed.tool_calls || []).map(t => t.name);
+          return toolNames.includes('read_file') || toolNames.includes('grep');
+      - type: llm-rubric
+        value: "Response references specific code or line numbers from the actual file, indicating it was read first"
+
+  # ── Exit Code Handling ─────────────────────────────────────────
+
+  - description: "Completes successfully with exit code 0"
+    vars:
+      task: "What is 2 + 2? Answer with just the number."
+    assert:
+      - type: javascript
+        value: |
+          try {
+            const parsed = JSON.parse(output);
+            return parsed.exit_code === 0;
+          } catch(e) {
+            return output.includes('"exit_code": 0') || output.includes('"exit_code":0');
+          }
+
+evaluateOptions:
+  maxConcurrency: 1
+  cache: true
+  timeoutMs: 120000
