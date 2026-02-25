@@ -125,12 +125,6 @@ async def _watch_for_escape(cancel_event: asyncio.Event) -> None:
 
 
 _MAX_PASTE_DISPLAY_LINES = 6
-_PASTE_THRESHOLD = 0.05  # 50ms; paste arrives faster than human typing
-
-
-def _is_paste(last_text_change: float, threshold: float = _PASTE_THRESHOLD) -> bool:
-    """Return True if Enter arrived fast enough after last buffer change to be paste."""
-    return (time.monotonic() - last_text_change) < threshold
 
 
 def _collapse_long_input(user_input: str) -> None:
