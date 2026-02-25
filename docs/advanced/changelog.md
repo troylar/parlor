@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 25, 2026
 
+### v1.50.2
+
+**Fixed:**
+
+- ask_user tool in web UI no longer hangs after clicking an option — SSE keepalive pings prevent stream death during long waits (#439)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.50.2)
+
 ### v1.50.1
 
 **Fixed:**
