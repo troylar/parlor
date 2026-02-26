@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 25, 2026
 
+### v1.50.3
+
+**Fixed:**
+
+- Canvas tools no longer prompt for approval — reclassified from WRITE to READ tier (#441)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.50.3)
+
 ### v1.50.2
 
 **Fixed:**
