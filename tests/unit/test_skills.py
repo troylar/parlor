@@ -6,6 +6,8 @@ import tempfile
 from pathlib import Path
 
 from anteroom.cli.skills import (
+    _BUILTIN_COMMANDS,
+    MAX_PROMPT_SIZE,
     MAX_SKILLS,
     SkillRegistry,
     _expand_args,
@@ -112,10 +114,15 @@ class TestExpandArgs:
         result = _expand_args("Do something", "extra context")
         assert result == "Do something\n\nAdditional context: extra context"
 
-    def test_empty_args_not_appended(self) -> None:
+    def test_empty_args_noop(self) -> None:
         prompt = "Do something"
         result = _expand_args(prompt, "")
-        assert result == "Do something\n\nAdditional context: "
+        assert result == "Do something"
+
+    def test_whitespace_only_args_noop(self) -> None:
+        prompt = "Do something"
+        result = _expand_args(prompt, "   ")
+        assert result == "Do something"
 
 
 class TestSkillRegistry:
@@ -423,3 +430,153 @@ class TestSkillRegistry:
             reg = SkillRegistry()
             reg.load(tmpdir)
             assert any("invalid format" in w for w in reg.load_warnings)
+
+    def test_case_insensitive_get(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = self._make_registry(tmpdir)
+            assert reg.get("COMMIT") is not None
+            assert reg.get("Commit") is not None
+            assert reg.get("commit") is not None
+
+    def test_case_insensitive_has_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = self._make_registry(tmpdir)
+            assert reg.has_skill("COMMIT")
+            assert reg.has_skill("Review")
+
+    def test_case_insensitive_resolve_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = self._make_registry(tmpdir)
+            is_skill, prompt = reg.resolve_input("/COMMIT")
+            assert is_skill
+            assert "git commit" in prompt.lower()
+
+    def test_load_returns_sorted_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = self._make_registry(tmpdir)
+            skills = reg.load(tmpdir)
+            names = [s.name for s in skills]
+            assert names == sorted(names)
+
+    def test_empty_file_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "empty.yaml").write_text("")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert any("empty file" in w for w in reg.load_warnings)
+
+    def test_non_string_name_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "bad.yaml").write_text("name: 123\nprompt: do something\n")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert any("'name' must be a string" in w for w in reg.load_warnings)
+
+    def test_non_string_prompt_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "bad.yaml").write_text("name: bad\nprompt:\n  - step1\n  - step2\n")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert any("'prompt' must be a string" in w for w in reg.load_warnings)
+
+    def test_prompt_size_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            big_prompt = "x" * (MAX_PROMPT_SIZE + 1)
+            (skills_dir / "huge.yaml").write_text(f"name: huge\nprompt: |\n  {big_prompt}\n")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert not reg.has_skill("huge")
+            assert any("exceeds" in w for w in reg.load_warnings)
+
+    def test_missing_description_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "nodesc.yaml").write_text("name: nodesc\nprompt: do something\n")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert reg.has_skill("nodesc")
+            assert any("no description" in w for w in reg.load_warnings)
+
+
+class TestBuiltinCommandBlocklist:
+    def test_builtin_commands_rejected(self) -> None:
+        for cmd in ["quit", "exit", "help", "skills", "tools"]:
+            name, warning = _validate_skill_name(cmd, cmd)
+            assert name == "", f"Built-in command '{cmd}' should be rejected"
+            assert warning is not None
+            assert "conflicts" in warning
+
+    def test_non_builtin_accepted(self) -> None:
+        for name in ["commit", "deploy", "review"]:
+            result_name, warning = _validate_skill_name(name, name)
+            assert result_name == name
+            assert warning is None
+
+    def test_builtin_set_is_nonempty(self) -> None:
+        assert len(_BUILTIN_COMMANDS) > 20
+
+
+class TestExpandArgsCodeFences:
+    def test_placeholder_inside_code_fence_not_replaced(self) -> None:
+        prompt = "Do this:\n```\necho {args}\n```\n"
+        result = _expand_args(prompt, "hello")
+        assert "echo {args}" in result
+        assert "Additional context: hello" in result
+
+    def test_placeholder_outside_code_fence_replaced(self) -> None:
+        prompt = "Process {args} now.\n```\necho {args}\n```\n"
+        result = _expand_args(prompt, "data")
+        assert "Process data now." in result
+        assert "echo {args}" in result
+        assert "Additional context" not in result
+
+    def test_multiple_code_fences(self) -> None:
+        prompt = "A {args} B\n```\n{args}\n```\nC {args} D\n```\n{args}\n```\n"
+        result = _expand_args(prompt, "X")
+        assert "A X B" in result
+        assert "C X D" in result
+        # Code blocks should be untouched
+        code_count = result.count("{args}")
+        assert code_count == 2
+
+    def test_no_placeholder_anywhere_appends(self) -> None:
+        prompt = "Do something useful.\n```\ncode here\n```\n"
+        result = _expand_args(prompt, "context")
+        assert "Additional context: context" in result
+
+    def test_only_code_fence_placeholder_treated_as_no_placeholder(self) -> None:
+        prompt = "Instructions:\n```yaml\nprompt: Analyze {args}\n```\n"
+        result = _expand_args(prompt, "my data")
+        assert "{args}" in result
+        assert "Additional context: my data" in result
+
+
+class TestSkillDirs:
+    def test_collects_all_matching_dirs_at_first_level(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / ".anteroom" / "skills").mkdir(parents=True)
+            (Path(tmpdir) / ".claude" / "skills").mkdir(parents=True)
+            from anteroom.cli.skills import _skill_dirs
+
+            dirs = _skill_dirs(tmpdir)
+            dir_strs = [str(d) for d in dirs]
+            assert any(".anteroom" in d for d in dir_strs)
+            assert any(".claude" in d for d in dir_strs)
+
+    def test_parlor_dir_also_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / ".parlor" / "skills").mkdir(parents=True)
+            from anteroom.cli.skills import _skill_dirs
+
+            dirs = _skill_dirs(tmpdir)
+            dir_strs = [str(d) for d in dirs]
+            assert any(".parlor" in d for d in dir_strs)

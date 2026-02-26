@@ -61,7 +61,10 @@ prompt: |
 
   ## Workflow
 
-  1. Ask the user what the skill should do
+  The user's skill request: {args}
+
+  1. If no skill request was provided above, ask the user what the skill should do.
+     Otherwise, use the provided description directly — do NOT re-ask.
   2. Determine the best skill name (kebab-case, descriptive)
   3. Write a clear description
   4. Design the prompt with specific steps

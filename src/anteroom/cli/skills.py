@@ -28,6 +28,46 @@ logger = logging.getLogger(__name__)
 _VALID_SKILL_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 MAX_SKILLS = 100
 _ARGS_PLACEHOLDER = "{args}"
+MAX_PROMPT_SIZE = 50_000  # 50KB limit on skill prompts
+
+# Built-in slash commands that skill names must not shadow.
+# If a skill has one of these names, direct /invocation would hit the built-in
+# command handler instead, while invoke_skill would hit the skill — causing
+# inconsistent behavior.
+_BUILTIN_COMMANDS = frozenset(
+    {
+        "quit",
+        "exit",
+        "new",
+        "append",
+        "tools",
+        "conventions",
+        "upload",
+        "usage",
+        "help",
+        "compact",
+        "last",
+        "list",
+        "delete",
+        "rename",
+        "slug",
+        "search",
+        "skills",
+        "reload-skills",
+        "projects",
+        "project",
+        "mcp",
+        "model",
+        "plan",
+        "verbose",
+        "detail",
+        "resume",
+        "rewind",
+    }
+)
+
+# Regex to match fenced code blocks (``` ... ```)
+_CODE_FENCE_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
 
 
 @dataclass
@@ -81,6 +121,8 @@ def _validate_skill_name(raw_name: str, stem: str) -> tuple[str, str | None]:
         name = stem
     if not _VALID_SKILL_NAME.match(name):
         return "", f"Skipped {stem}.yaml: invalid skill name '{name}' (must match [a-z0-9][a-z0-9_-]*)"
+    if name in _BUILTIN_COMMANDS:
+        return "", f"Skipped {stem}.yaml: skill name '{name}' conflicts with built-in /{name} command"
     return name, None
 
 
@@ -93,24 +135,45 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> _LoadResult:
         try:
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
+            if data is None:
+                result.warnings.append(f"Skipped {path.name}: empty file")
+                continue
             if not isinstance(data, dict):
                 result.warnings.append(f"Skipped {path.name}: invalid format (expected YAML mapping)")
                 continue
             raw_name = data.get("name", path.stem)
-            name, warning = _validate_skill_name(str(raw_name), path.stem)
+            if not isinstance(raw_name, str):
+                result.warnings.append(
+                    f"Skipped {path.name}: 'name' must be a string, got {type(raw_name).__name__}"
+                )
+                continue
+            name, warning = _validate_skill_name(raw_name, path.stem)
             if warning:
                 result.warnings.append(warning)
                 continue
             prompt = data.get("prompt", "")
-            if not prompt:
+            if not isinstance(prompt, str):
+                result.warnings.append(
+                    f"Skipped {path.name}: 'prompt' must be a string, got {type(prompt).__name__}"
+                )
+                continue
+            if not prompt.strip():
                 result.warnings.append(f"Skipped {path.name}: missing 'prompt' field")
                 continue
+            if len(prompt) > MAX_PROMPT_SIZE:
+                result.warnings.append(
+                    f"Skipped {path.name}: prompt exceeds {MAX_PROMPT_SIZE // 1000}KB limit "
+                    f"({len(prompt) // 1000}KB)"
+                )
+                continue
             description = data.get("description", "")
+            if not description:
+                result.warnings.append(f"Warning: {path.name} has no description")
             result.skills.append(
                 Skill(
                     name=name,
-                    description=str(description),
-                    prompt=str(prompt),
+                    description=str(description) if description else "",
+                    prompt=prompt,
                     source=source,
                 )
             )
@@ -122,18 +185,26 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> _LoadResult:
 
 
 def _skill_dirs(working_dir: str | None = None) -> list[Path]:
-    """Return skill directories (global + project)."""
+    """Return skill directories (global + project).
+
+    Walks up from working_dir looking for .anteroom/skills/, .claude/skills/,
+    or .parlor/skills/. Collects ALL matching directories at the first level
+    that has any match, not just the first one found.
+    """
     from ..config import _resolve_data_dir
 
     data_dir = _resolve_data_dir()
     dirs = [data_dir / "skills"]
     current = Path(working_dir or os.getcwd()).resolve()
     while True:
+        found: list[Path] = []
         for dirname in (".anteroom", ".claude", ".parlor"):
             project_dir = current / dirname / "skills"
             if project_dir.is_dir():
-                dirs.append(project_dir)
-                return dirs
+                found.append(project_dir)
+        if found:
+            dirs.extend(found)
+            return dirs
         parent = current.parent
         if parent == current:
             break
@@ -154,9 +225,35 @@ def load_skills(working_dir: str | None = None) -> _LoadResult:
 
 
 def _expand_args(prompt: str, args: str) -> str:
-    """Expand {args} placeholder in prompt, or append as context."""
-    if _ARGS_PLACEHOLDER in prompt:
-        return prompt.replace(_ARGS_PLACEHOLDER, args)
+    """Expand {args} placeholder in prompt, or append as context.
+
+    - Empty/whitespace-only args are a no-op (returns prompt unchanged).
+    - {args} inside fenced code blocks (``` ... ```) is NOT replaced.
+    - When no {args} placeholder exists outside code blocks, args are appended.
+    """
+    if not args or not args.strip():
+        return prompt
+
+    # Check for {args} outside of fenced code blocks
+    segments = _CODE_FENCE_RE.split(prompt)
+    has_placeholder_outside_code = False
+    for i, segment in enumerate(segments):
+        is_code_block = i % 2 == 1  # odd indices are code fence captures
+        if not is_code_block and _ARGS_PLACEHOLDER in segment:
+            has_placeholder_outside_code = True
+            break
+
+    if has_placeholder_outside_code:
+        # Replace {args} only in non-code-block segments
+        result_parts = []
+        for i, segment in enumerate(segments):
+            is_code_block = i % 2 == 1
+            if is_code_block:
+                result_parts.append(segment)
+            else:
+                result_parts.append(segment.replace(_ARGS_PLACEHOLDER, args))
+        return "".join(result_parts)
+
     return f"{prompt}\n\nAdditional context: {args}"
 
 
@@ -167,48 +264,60 @@ class SkillRegistry:
         self._skills: dict[str, Skill] = {}
         self.load_warnings: list[str] = []
 
-    def load(self, working_dir: str | None = None) -> None:
-        """Load skills from default, global, and project directories."""
-        self._skills.clear()
-        self.load_warnings.clear()
+    def load(self, working_dir: str | None = None) -> list[Skill]:
+        """Load skills from default, global, and project directories.
+
+        Uses atomic swap: builds new dict fully before replacing self._skills,
+        so concurrent readers never see a partially-loaded state.
+
+        Returns the list of loaded skills (for callers that need to rebuild schemas).
+        """
+        new_skills: dict[str, Skill] = {}
+        new_warnings: list[str] = []
 
         default_dir = Path(__file__).parent / "default_skills"
         default_result = _load_skills_from_dir(default_dir, "default")
-        self.load_warnings.extend(default_result.warnings)
+        new_warnings.extend(default_result.warnings)
         default_names = set()
         for skill in default_result.skills:
-            self._skills[skill.name] = skill
+            new_skills[skill.name] = skill
             default_names.add(skill.name)
 
         user_result = load_skills(working_dir)
-        self.load_warnings.extend(user_result.warnings)
+        new_warnings.extend(user_result.warnings)
         for skill in user_result.skills:
             if skill.name in default_names:
-                self.load_warnings.append(f"User skill '{skill.name}' ({skill.source}) overrides built-in")
-            self._skills[skill.name] = skill
+                new_warnings.append(f"User skill '{skill.name}' ({skill.source}) overrides built-in")
+            new_skills[skill.name] = skill
 
-        if len(self._skills) > MAX_SKILLS:
-            self.load_warnings.append(
-                f"Loaded {len(self._skills)} skills (limit: {MAX_SKILLS}). Consider removing unused skill files."
+        if len(new_skills) > MAX_SKILLS:
+            new_warnings.append(
+                f"Loaded {len(new_skills)} skills (limit: {MAX_SKILLS}). Consider removing unused skill files."
             )
+
+        # Atomic swap — Python dict assignment is GIL-protected
+        self._skills = new_skills
+        self.load_warnings = new_warnings
+
+        return sorted(new_skills.values(), key=lambda s: s.name)
 
     reload = load
 
     def get(self, name: str) -> Skill | None:
-        return self._skills.get(name)
+        return self._skills.get(name.lower() if name else name)
 
     def list_skills(self) -> list[Skill]:
         return sorted(self._skills.values(), key=lambda s: s.name)
 
     def has_skill(self, name: str) -> bool:
-        return name in self._skills
+        return (name.lower() if name else name) in self._skills
 
     def resolve_input(self, user_input: str) -> tuple[bool, str]:
         """Check if input is a skill invocation. Returns (is_skill, expanded_prompt)."""
         if not user_input.startswith("/"):
             return False, user_input
         parts = user_input.split(maxsplit=1)
-        skill_name = parts[0][1:]  # Remove leading /
+        skill_name = parts[0][1:].lower()  # Remove leading /, normalize case
         skill = self._skills.get(skill_name)
         if not skill:
             return False, user_input

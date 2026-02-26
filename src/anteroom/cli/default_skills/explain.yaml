@@ -1,7 +1,7 @@
 name: explain
 description: Explain how a file or code section works
 prompt: |
-  Explain the code that was referenced or described.
+  Explain the code that was referenced or described: {args}
 
   Provide:
   1. A high-level overview of what the code does

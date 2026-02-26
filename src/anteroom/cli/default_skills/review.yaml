@@ -1,7 +1,7 @@
 name: review
 description: Review code changes for issues and improvements
 prompt: |
-  Review the current code changes for potential issues.
+  Review the current code changes for potential issues. Focus area: {args}
 
   Steps:
   1. Run `git diff` to see all changes

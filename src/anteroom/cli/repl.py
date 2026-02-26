@@ -485,10 +485,12 @@ async def _drain_input_to_msg_queue(
     warn_callback: Any | None = None,
     identity_kwargs: dict[str, str | None] | None = None,
     file_max_chars: int = 100_000,
+    skill_registry: Any | None = None,
 ) -> None:
     """Drain input_queue into msg_queue, filtering out / commands.
 
     - /quit and /exit trigger cancel_event and exit_flag
+    - Skill invocations are expanded and queued as user messages
     - Other / commands are ignored with a warning
     - Normal text is expanded and queued as user messages
     """
@@ -501,6 +503,18 @@ async def _drain_input_to_msg_queue(
                     cancel_event.set()
                     exit_flag.set()
                     break
+                # Try expanding as a skill invocation
+                if skill_registry:
+                    is_skill, skill_prompt = skill_registry.resolve_input(queued_text)
+                    if is_skill:
+                        q_expanded = _expand_file_references(
+                            skill_prompt, working_dir, file_max_chars=file_max_chars
+                        )
+                        storage.create_message(
+                            db, conversation_id, "user", q_expanded, **(identity_kwargs or {})
+                        )
+                        await msg_queue.put({"role": "user", "content": q_expanded})
+                        continue
                 if warn_callback:
                     warn_callback(cmd)
                 continue
@@ -1089,12 +1103,12 @@ async def run_cli(
             prompt = skill.prompt
             if args:
                 # Trust boundary: args originate from the LLM, not the user.
-                # Truncate to limit injection surface; the skill prompt itself
-                # is from trusted local YAML files.
+                # Truncate and delimit to limit injection surface; the skill
+                # prompt itself is from trusted local YAML files.
                 from .skills import _expand_args
 
                 args = args[:2000]
-                prompt = _expand_args(prompt, args)
+                prompt = _expand_args(prompt, f"<skill_args>{args}</skill_args>")
             await queue.put({"role": "user", "content": prompt})
             return {"status": "skill_invoked", "skill": skill_name}
         if tool_name == "run_agent":
@@ -1679,6 +1693,9 @@ async def _run_repl(
             self._skill_names = skill_names
             self._wd = wd
             self._db = db
+
+        def update_skill_names(self, skill_names: list[str]) -> None:
+            self._skill_names = skill_names
 
         def _get_slug_completions(self, partial: str) -> Any:
             """Yield slug completions matching the partial input."""
@@ -2703,6 +2720,19 @@ async def _run_repl(
                             for warn in skill_registry.load_warnings:
                                 renderer.console.print(f"  [yellow]- {warn}[/yellow]")
                         renderer.console.print()
+                        # Rebuild invoke_skill tool schema so LLM sees updated skill list
+                        if config.cli.skills.auto_invoke and tools_openai is not None:
+                            tools_openai[:] = [
+                                t for t in tools_openai
+                                if t.get("function", {}).get("name") != "invoke_skill"
+                            ]
+                            invoke_def = skill_registry.get_invoke_skill_definition()
+                            if invoke_def:
+                                tools_openai.append(invoke_def)
+                        # Refresh tab-completion skill names
+                        completer.update_skill_names(
+                            [s.name for s in skills]
+                        )
                     continue
                 elif cmd in ("/projects", "/project"):
                     parts = user_input.split(maxsplit=2)
@@ -3200,7 +3230,8 @@ async def _run_repl(
                         renderer.console.print()
                     continue
 
-            # Check for skill invocation
+            # Check for skill invocation — preserve original for title generation
+            original_user_input = user_input
             if skill_registry and user_input.startswith("/"):
                 is_skill, skill_prompt = skill_registry.resolve_input(user_input)
                 if is_skill:
@@ -3324,6 +3355,7 @@ async def _run_repl(
                     warn_callback=_warn,
                     identity_kwargs=id_kw,
                     file_max_chars=config.cli.file_reference_max_chars,
+                    skill_registry=skill_registry,
                 )
 
                 while True:
@@ -3364,6 +3396,7 @@ async def _run_repl(
                             warn_callback=_warn,
                             identity_kwargs=id_kw,
                             file_max_chars=config.cli.file_reference_max_chars,
+                            skill_registry=skill_registry,
                         )
 
                         if event.kind == "thinking":
@@ -3562,7 +3595,7 @@ async def _run_repl(
                     is_first_message = False
                     if not cancel_event.is_set():
                         try:
-                            title = await ai_service.generate_title(user_input)
+                            title = await ai_service.generate_title(original_user_input)
                             storage.update_conversation_title(db, conv["id"], title)
                         except Exception:
                             pass
