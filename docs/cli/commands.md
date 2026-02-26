@@ -18,7 +18,8 @@ All slash commands available in the CLI REPL.
 | `/model NAME` | Switch to a different model mid-session (omit NAME to see current) |
 | `/upload <path>` | Upload a file to the knowledge base, auto-extracts text from PDFs/DOCX |
 | `/tools` | List all available tools (built-in + MCP), sorted alphabetically |
-| `/skills` | List available skills with descriptions and source |
+| `/skills` | List available skills with descriptions and source (auto-reloads from disk) |
+| `/reload-skills` | Reload skill files from disk |
 | `/project list` | List all projects |
 | `/project create <name>` | Create a new project |
 | `/project select <name\|id>` | Set active project for new conversations |

@@ -112,7 +112,7 @@ CLI (cli/)         ──┘         │
 - **`cli/exec_mode.py`** — Non-interactive mode for scripting/CI. JSON output, timeout, fail-closed approval. Exit codes: 0/1/124
 - **`cli/plan.py`** — Planning mode helpers: `PLAN_MODE_ALLOWED_TOOLS`, plan file I/O, plan command parsing, `enter_plan_mode()`, `leave_plan_mode()`
 - **`cli/instructions.py`** — ANTEROOM.md discovery (`.anteroom.md` > `ANTEROOM.md`, walk-up from cwd), global instructions, token estimation
-- **`cli/skills.py`** — Skills registry: loads `.claude/commands/` files, auto-invocation via synthetic `invoke_skill` tool
+- **`cli/skills.py`** — Skills registry: loads YAML skill files from default/global/project directories. Name validation (`[a-z0-9][a-z0-9_-]*`), `{args}` template interpolation, YAML error hints, collision warnings, `MAX_SKILLS` limit. `SkillRegistry` with `load()`/`reload()`, `resolve_input()`, `get_invoke_skill_definition()`. Auto-invocation via synthetic `invoke_skill` tool
 
 #### Tools
 - **`tools/`** — ToolRegistry: `_handlers` + `_definitions`. Built-in: read_file, write_file, edit_file, bash, glob_files, grep, create_canvas, update_canvas, patch_canvas, run_agent, ask_user, introspect. Safety gate: tier check → pattern detection → hard-block. File-modifying tools return `_old_content`/`_new_content` for diff rendering (stripped before LLM)
