@@ -78,6 +78,7 @@ CLI (cli/)         ──┘         │
 - **`services/project_config.py`** — Project-scoped config discovery with SHA-256 trust verification
 - **`services/required_keys.py`** — Required keys validation and interactive prompting
 - **`services/audit.py`** — Structured audit log with HMAC-SHA256 chain tamper protection. JSONL format for SIEM integration (Splunk, ELK/OpenSearch). Async writer, file locking, rotation by date, retention policy. Genesis chain start. Verification and purge subcommands
+- **`services/tool_rate_limit.py`** — Tool call rate limiting: per-minute, per-conversation, and consecutive-failure caps. `ToolRateLimiter` tracks call timestamps, enforces configurable limits. Configurable action: `block` (return error) or `warn` (log warning, allow). Instantiated per-request (web UI) or per-session (CLI). Shared across parent and sub-agents for unified rate limiting
 - **`services/session_store.py`** — Session persistence backends: `MemorySessionStore` (volatile, in-process) and `SQLiteSessionStore` (durable, survives restart). Protocol-based design with `create()`, `get()`, `touch()`, `delete()`, `count_active()`, `cleanup_expired()`. Session state: id, user_id, ip_address, created_at, last_activity_at. Timeouts (idle/absolute) configurable via `SessionConfig`
 - **`services/ip_allowlist.py`** — IP allowlist checking with CIDR and exact address support. `check_ip_allowed()` validates client IPs against allowlist. Returns `True` if list is empty (no restrictions) or IP matches any entry. Both IPv4 and IPv6 supported. Fails closed on invalid input
 
@@ -130,7 +131,7 @@ Config at `~/.anteroom/config.yaml` (backward compat: `~/.parlor/config.yaml`). 
 
 Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`AIConfig`** — API connection, 6 timeouts, retry settings, narration cadence, max_tools (default 128), temperature (None = provider default), top_p (None = provider default), seed (None = provider default)
-- **`SafetyConfig`** — Approval mode (default ask_for_writes), allowed/denied tools, custom bash patterns, per-tool tier overrides, read-only mode
+- **`SafetyConfig`** — Approval mode (default ask_for_writes), allowed/denied tools, custom bash patterns, per-tool tier overrides, read-only mode, tool rate limiting (per-minute, per-conversation, consecutive failures)
 - **`CliConfig`** — Context compaction thresholds, tool dedup, retry behavior, visual thresholds
 - **`PlanningConfig`** — Auto-trigger: `auto_mode` (off/suggest/auto), `auto_threshold_tools`
 - **`SkillsConfig`** — `auto_invoke` (default true) enables AI skill invocation

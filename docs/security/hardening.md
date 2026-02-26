@@ -84,6 +84,27 @@ Sessions automatically expire via two mechanisms:
 - Data directory created with `0700` permissions
 - UUID validation on all ID parameters
 
+## Tool Call Rate Limiting
+
+Prevent tool abuse, runaway agents, and denial-of-service via excessive tool calls:
+
+- **Per-minute limits** — Cap total tool calls across all conversations to prevent API resource exhaustion
+- **Per-conversation limits** — Cap accumulated tool calls within a single conversation (including sub-agents)
+- **Consecutive failure detection** — Automatically block after N failed tool calls to break infinite error loops
+- **Configurable actions** — Choose `block` (hard deny with error) or `warn` (log warning, allow execution)
+- **Shared across agents** — Parent and sub-agent tool calls count toward the same limits
+
+All limits default to 0 (unlimited). Configure in `safety.tool_rate_limit`:
+
+```yaml
+safety:
+  tool_rate_limit:
+    max_calls_per_minute: 30              # max 30 tool calls per minute
+    max_calls_per_conversation: 100       # max 100 total calls per conversation
+    max_consecutive_failures: 3           # break infinite error loops
+    action: "block"                       # deny when limits exceeded
+```
+
 ## Read-Only Mode
 
 For untrusted or shared environments, enable read-only mode to restrict the AI to read-only operations:

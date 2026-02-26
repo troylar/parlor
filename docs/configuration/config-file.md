@@ -111,6 +111,11 @@ safety:
     timeout: 120
     max_output_chars: 4000
     max_prompt_chars: 32000
+  tool_rate_limit:
+    max_calls_per_minute: 0               # Max tool calls per minute (0 = unlimited)
+    max_calls_per_conversation: 0         # Max tool calls per conversation (0 = unlimited)
+    max_consecutive_failures: 5           # Max consecutive failed tool calls
+    action: "block"                       # "block" to deny, "warn" to allow + log
 
 embeddings:
   enabled: true
@@ -278,6 +283,28 @@ Controls limits for the `run_agent` sub-agent tool. All fields are optional — 
 | `timeout` | integer | `120` | Wall-clock timeout in seconds per sub-agent (clamped 10–600) |
 | `max_output_chars` | integer | `4000` | Maximum output characters returned to parent |
 | `max_prompt_chars` | integer | `32000` | Maximum prompt characters accepted |
+
+#### safety.tool_rate_limit
+
+Controls tool call rate limiting to prevent tool abuse and excessive iterations. All limits default to 0 (unlimited). Set a positive value to enable.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_calls_per_minute` | integer | `0` | Maximum tool calls allowed per minute (0 = unlimited); applies globally across all conversations |
+| `max_calls_per_conversation` | integer | `0` | Maximum tool calls allowed per conversation thread (0 = unlimited). Counts accumulated calls from root and all sub-agents |
+| `max_consecutive_failures` | integer | `5` | Maximum consecutive tool failures before rate limit triggers. Useful to break infinite error loops |
+| `action` | string | `block` | Action when rate limit is exceeded: `block` (deny request with error) or `warn` (log warning, allow execution) |
+
+Example configuration to prevent runaway agents:
+
+```yaml
+safety:
+  tool_rate_limit:
+    max_calls_per_minute: 30              # max 30 tool calls per minute
+    max_calls_per_conversation: 100       # max 100 total calls per conversation
+    max_consecutive_failures: 3           # block after 3 consecutive failures
+    action: "block"                       # hard block when limits exceeded
+```
 
 See [Tool Safety](../security/tool-safety.md) for the full list of built-in patterns and the approval flow.
 
