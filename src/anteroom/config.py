@@ -262,6 +262,8 @@ class AIConfig:
     temperature: float | None = None  # None = provider default; 0.0-2.0
     top_p: float | None = None  # None = provider default; 0.0-1.0
     seed: int | None = None  # None = provider default; any int for deterministic output
+    allowed_domains: list[str] = field(default_factory=list)  # empty = no restriction
+    block_localhost_api: bool = False  # when True, reject loopback/localhost base_url
 
 
 @dataclass
@@ -959,6 +961,17 @@ def load_config(
         except (ValueError, TypeError):
             seed = None
 
+    _raw_allowed_domains = ai_raw.get("allowed_domains", [])
+    if not isinstance(_raw_allowed_domains, list):
+        _raw_allowed_domains = []
+    allowed_domains: list[str] = [str(d).strip() for d in _raw_allowed_domains if d]
+    _env_allowed_domains = os.environ.get("AI_CHAT_ALLOWED_DOMAINS", "")
+    if _env_allowed_domains:
+        allowed_domains = [d.strip() for d in _env_allowed_domains.split(",") if d.strip()]
+
+    _raw_block_localhost = ai_raw.get("block_localhost_api", os.environ.get("AI_CHAT_BLOCK_LOCALHOST_API", "false"))
+    block_localhost_api = str(_raw_block_localhost).lower() not in ("false", "0", "no")
+
     if narration_cadence > 0:
         system_prompt += (
             "\n\n<narration>\n"
@@ -989,6 +1002,8 @@ def load_config(
         temperature=temperature,
         top_p=top_p,
         seed=seed,
+        allowed_domains=allowed_domains,
+        block_localhost_api=block_localhost_api,
     )
 
     app_raw = raw.get("app", {})

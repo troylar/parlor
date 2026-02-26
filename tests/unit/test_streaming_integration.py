@@ -129,7 +129,7 @@ class TestAiServiceToolCallArgsDelta:
         config.retry_max_attempts = 0
         config.first_token_timeout = 30
 
-        with patch.object(AIService, "_build_client"):
+        with patch.object(AIService, "_build_client"), patch.object(AIService, "_validate_egress"):
             service = AIService(config)
         service.client = mock_client
 
@@ -180,7 +180,7 @@ class TestAiServiceToolCallArgsDelta:
         config.retry_max_attempts = 0
         config.first_token_timeout = 30
 
-        with patch.object(AIService, "_build_client"):
+        with patch.object(AIService, "_build_client"), patch.object(AIService, "_validate_egress"):
             service = AIService(config)
         service.client = mock_client
 

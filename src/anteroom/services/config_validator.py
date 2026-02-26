@@ -111,6 +111,8 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "temperature",
         "top_p",
         "seed",
+        "allowed_domains",
+        "block_localhost_api",
     },
     "app": {"host", "port", "data_dir", "tls"},
     "cli": {
@@ -489,6 +491,7 @@ def validate_config(raw: dict[str, Any]) -> ValidationResult:
     # Validate bool fields
     for section_path, key in [
         ("ai", "verify_ssl"),
+        ("ai", "block_localhost_api"),
         ("app", "tls"),
         ("cli", "builtin_tools"),
         ("cli", "tool_dedup"),
@@ -530,6 +533,7 @@ def validate_config(raw: dict[str, Any]) -> ValidationResult:
         ("safety", "allowed_tools"),
         ("safety", "denied_tools"),
         ("proxy", "allowed_origins"),
+        ("ai", "allowed_domains"),
     ]:
         section = _get_section(raw, section_path)
         if section is None or key not in section:

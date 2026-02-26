@@ -244,6 +244,28 @@ safety:
     action: block
 ```
 
+## Egress Domain Allowlist
+
+Restrict outbound API calls to a whitelist of approved domains:
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `ai.allowed_domains` | list[string] | `[]` | Egress domain allowlist (empty = no restriction). Domains matched case-insensitively as exact domain matches. Fails closed: unparseable URLs are rejected |
+| `ai.block_localhost_api` | boolean | `false` | When true, reject localhost/127.0.0.1/[::1] as the API base_url. Prevents accidental connections to local development services |
+
+Example to restrict API calls to specific production domains:
+
+```yaml
+ai:
+  base_url: "https://api.example.com/v1"
+  allowed_domains:
+    - "api.example.com"
+    - "api-backup.example.com"
+  block_localhost_api: true              # prevent localhost fallback
+```
+
+When `allowed_domains` is configured, the system verifies that the `base_url` (and any proxy URLs) target only domains in the allowlist. If validation fails, the API call is rejected before any network activity occurs.
+
 ## Configuration Reference
 
 ### `safety.*`

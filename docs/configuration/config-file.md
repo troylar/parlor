@@ -23,6 +23,8 @@ ai:
   temperature: null                             # Model temperature for randomness (0.0–2.0, null = provider default)
   top_p: null                                   # Nucleus sampling parameter (0.0–1.0, null = provider default)
   seed: null                                    # Random seed for deterministic output (null = provider default)
+  allowed_domains: []                           # Egress domain allowlist (empty = no restriction)
+  block_localhost_api: false                    # When true, reject localhost/127.0.0.1 as base_url
 
 app:
   host: "127.0.0.1"      # Bind address
@@ -201,6 +203,8 @@ required:
 | `temperature` | float or null | `null` | Model temperature for response randomness (0.0–2.0; null = provider default); env: `AI_CHAT_TEMPERATURE` |
 | `top_p` | float or null | `null` | Nucleus sampling parameter (0.0–1.0; null = provider default); env: `AI_CHAT_TOP_P` |
 | `seed` | integer or null | `null` | Random seed for deterministic output (null = provider default); env: `AI_CHAT_SEED` |
+| `allowed_domains` | list[string] | `[]` | Egress domain allowlist for API requests (empty list = no restriction). Domains are matched case-insensitively as exact matches. Fails closed: unparseable URLs are rejected; env: `AI_CHAT_ALLOWED_DOMAINS` (comma-separated) |
+| `block_localhost_api` | boolean | `false` | When true, reject localhost/127.0.0.1/[::1] as the API base_url. Useful in enterprise environments to prevent accidental connections to local services; env: `AI_CHAT_BLOCK_LOCALHOST_API` |
 
 ### app
 
