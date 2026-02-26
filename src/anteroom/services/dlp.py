@@ -60,9 +60,10 @@ BUILTIN_PATTERNS: list[dict[str, str]] = [
 def _validate_pattern_safety(pattern: str, name: str) -> bool:
     """Static analysis to detect regex patterns vulnerable to catastrophic backtracking.
 
-    Detects common ReDoS patterns:
-    - Nested quantifiers: (a+)+, (a*)+, (a+)*, etc.
-    - Overlapping alternation with quantifiers
+    Detects nested quantifiers: (a+)+, (a*)+, (a+)*, etc.
+
+    Note: alternation-based ReDoS (e.g., (a|aa)+) is not detected by this
+    check. The MAX_SCAN_LENGTH guard provides a secondary defense for those cases.
 
     Returns True if the pattern appears safe, False if it looks pathological.
     """

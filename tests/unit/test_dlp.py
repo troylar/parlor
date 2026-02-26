@@ -493,6 +493,79 @@ class TestAgentLoopIntegration:
         token_events = [e for e in events if e.kind == "token"]
         assert "123-45-6789" in token_events[0].data["content"]
 
+    @pytest.mark.asyncio
+    async def test_final_scan_catches_cross_chunk_pattern(self) -> None:
+        """Final assembled-text scan catches patterns split across streaming chunks."""
+        from anteroom.services.agent_loop import AgentEvent, run_agent_loop
+        from anteroom.services.ai_service import AIService
+
+        ai_service = AIService.__new__(AIService)
+        ai_service.config = MagicMock()
+        ai_service.config.narration_cadence = 0
+        ai_service._token_provider = None
+        ai_service.client = MagicMock()
+
+        # SSN split across two chunks: "123-45" + "-6789"
+        async def fake_stream_chat(messages, **kwargs):
+            yield {"event": "token", "data": {"content": "SSN is 123-45"}}
+            yield {"event": "token", "data": {"content": "-6789 ok"}}
+            yield {"event": "done", "data": {}}
+
+        ai_service.stream_chat = fake_stream_chat
+
+        scanner = _make_scanner(action="block")
+
+        events: list[AgentEvent] = []
+        async for event in run_agent_loop(
+            ai_service=ai_service,
+            messages=[{"role": "user", "content": "test"}],
+            tool_executor=AsyncMock(),
+            tools_openai=None,
+            dlp_scanner=scanner,
+        ):
+            events.append(event)
+
+        # The final assembled-text scan should catch the cross-chunk SSN
+        blocked = [e for e in events if e.kind == "dlp_blocked"]
+        assert len(blocked) == 1
+
+    @pytest.mark.asyncio
+    async def test_scan_output_false_bypasses_dlp_in_agent_loop(self) -> None:
+        """Scanner with scan_output=False should not scan agent output."""
+        from anteroom.services.agent_loop import AgentEvent, run_agent_loop
+        from anteroom.services.ai_service import AIService
+
+        ai_service = AIService.__new__(AIService)
+        ai_service.config = MagicMock()
+        ai_service.config.narration_cadence = 0
+        ai_service._token_provider = None
+        ai_service.client = MagicMock()
+
+        async def fake_stream_chat(messages, **kwargs):
+            yield {"event": "token", "data": {"content": "SSN: 123-45-6789"}}
+            yield {"event": "done", "data": {}}
+
+        ai_service.stream_chat = fake_stream_chat
+
+        scanner = _make_scanner(action="block", scan_output=False)
+
+        events: list[AgentEvent] = []
+        async for event in run_agent_loop(
+            ai_service=ai_service,
+            messages=[{"role": "user", "content": "test"}],
+            tool_executor=AsyncMock(),
+            tools_openai=None,
+            dlp_scanner=scanner,
+        ):
+            events.append(event)
+
+        # No blocking — scan_output is disabled
+        blocked = [e for e in events if e.kind == "dlp_blocked"]
+        assert len(blocked) == 0
+        # Token passes through unmodified
+        tokens = [e for e in events if e.kind == "token"]
+        assert "123-45-6789" in tokens[0].data["content"]
+
 
 # --- Config parsing ---
 

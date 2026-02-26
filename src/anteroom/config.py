@@ -495,10 +495,10 @@ class DlpConfig:
 
     enabled: bool = False
     scan_output: bool = True
-    scan_input: bool = False
+    scan_input: bool = False  # Reserved for future use
     action: str = "redact"  # "redact", "block", "warn"
-    patterns: list[DlpPatternConfig] = field(default_factory=list)
-    custom_patterns: list[DlpPatternConfig] = field(default_factory=list)
+    patterns: list[DlpPatternConfig] = field(default_factory=list)  # Replaces built-in patterns
+    custom_patterns: list[DlpPatternConfig] = field(default_factory=list)  # Appended to patterns
     redaction_string: str = "[REDACTED]"
     log_detections: bool = True
 

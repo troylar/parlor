@@ -104,7 +104,7 @@ Both events include:
 
 DLP patterns are heuristic-based and not foolproof:
 
-- **False positives**: Patterns like email and phone may match valid non-sensitive data (e.g., documentation examples).
+- **False positives**: The `credit_card` pattern matches any 13-19 digit sequence with optional separators, which may match ISBNs, order numbers, or other numeric identifiers. Other patterns (email, phone) may also match documentation examples.
 - **Evasion**: Sophisticated attackers can obscure patterns (e.g., "555-1-2-3-4-567"). Use `redact` mode for best coverage, or `block` for maximum caution.
 - **Custom patterns**: Ensure regex patterns are tested thoroughly before deployment to avoid blocking legitimate content.
 
