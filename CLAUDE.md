@@ -110,8 +110,9 @@ CLI (cli/)         ──┘         │
 #### Tools
 - **`tools/`** — ToolRegistry: `_handlers` + `_definitions`. Built-in: read_file, write_file, edit_file, bash, glob_files, grep, create_canvas, update_canvas, patch_canvas, run_agent, ask_user, introspect. Safety gate: tier check → pattern detection → hard-block. File-modifying tools return `_old_content`/`_new_content` for diff rendering (stripped before LLM)
 - **`tools/tiers.py`** — Risk tiers: READ/WRITE/EXECUTE/DESTRUCTIVE. Approval modes: AUTO/ASK_FOR_DANGEROUS/ASK_FOR_WRITES/ASK. Unknown/MCP tools default to EXECUTE
-- **`tools/bash.py`** — Shell command execution with configurable sandboxing. `_check_sandbox()` enforces network/package/path/command restrictions before execution. Accepts `_sandbox_config: BashSandboxConfig` from `call_tool()`. Configurable timeout caps, output truncation, and audit logging via `security_logger`
+- **`tools/bash.py`** — Shell command execution with configurable sandboxing. `_check_sandbox()` enforces network/package/path/command restrictions before execution. Accepts `_sandbox_config: BashSandboxConfig` from `call_tool()`. On Windows, assigns subprocess to Win32 Job Object for kernel-level resource limits. Configurable timeout caps, output truncation, and audit logging via `security_logger`
 - **`tools/security.py`** — Security utilities: hard-block patterns, path validation, `check_network_command()`, `check_package_install()`, `check_blocked_path()`, `check_custom_patterns()` for sandbox enforcement. Cross-platform: Unix tools, PowerShell, Windows package managers
+- **`tools/sandbox_win32.py`** — Win32 Job Object sandbox via ctypes (no dependencies). `create_job_object()`, `assign_process()`, `terminate_job()`, `close_job()`, `setup_job_for_process()`. Enforces memory, process count, and CPU time limits. No-op on non-Windows. All functions return success/failure, never raise
 - **`tools/safety.py`** — Pure detection: `check_bash_command()` (regex patterns), `check_write_path()` (sensitive paths). Returns `SafetyVerdict` with `is_hard_blocked`
 - **`tools/canvas.py`** — Canvas create/update/patch with SSE streaming support
 - **`tools/subagent.py`** — `run_agent` tool: isolated child AI sessions, same safety gates. Guarded by `SubagentLimiter`. Configurable via `safety.subagent`
@@ -133,7 +134,7 @@ Config at `~/.anteroom/config.yaml` (backward compat: `~/.parlor/config.yaml`). 
 
 Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`AIConfig`** — API connection, 6 timeouts, retry settings, narration cadence, max_tools (default 128), temperature (None = provider default), top_p (None = provider default), seed (None = provider default)
-- **`SafetyConfig`** — Approval mode (default ask_for_writes), allowed/denied tools, custom bash patterns, per-tool tier overrides, read-only mode, tool rate limiting (per-minute, per-conversation, consecutive failures). Nested `BashSandboxConfig`: execution timeout (1-600s), output limits (min 1000 chars), path/command blocking, network/package restrictions, audit logging
+- **`SafetyConfig`** — Approval mode (default ask_for_writes), allowed/denied tools, custom bash patterns, per-tool tier overrides, read-only mode, tool rate limiting (per-minute, per-conversation, consecutive failures). Nested `BashSandboxConfig`: execution timeout (1-600s), output limits (min 1000 chars), path/command blocking, network/package restrictions, audit logging. Nested `OsSandboxConfig`: Win32 Job Object limits — `max_memory_mb` (512), `max_processes` (10), `cpu_time_limit` (None). Auto-detects Windows
 - **`CliConfig`** — Context compaction thresholds, tool dedup, retry behavior, visual thresholds
 - **`PlanningConfig`** — Auto-trigger: `auto_mode` (off/suggest/auto), `auto_threshold_tools`
 - **`SkillsConfig`** — `auto_invoke` (default true) enables AI skill invocation

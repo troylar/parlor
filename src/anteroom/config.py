@@ -384,6 +384,44 @@ class SafetyToolConfig:
 
 
 @dataclass
+class OsSandboxConfig:
+    """OS-level sandbox controls (Win32 Job Objects on Windows, no-op elsewhere)."""
+
+    enabled: bool | None = None  # None = auto-detect (True on Windows)
+    max_memory_mb: int = 512
+    max_processes: int = 10
+    cpu_time_limit: int | None = None  # CPU seconds, None = no limit
+
+    _MIN_MEMORY_MB: int = field(default=64, init=False, repr=False)
+    _MIN_PROCESSES: int = field(default=1, init=False, repr=False)
+    _MAX_PROCESSES: int = field(default=1000, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.max_memory_mb < self._MIN_MEMORY_MB:
+            logger.warning(
+                "sandbox max_memory_mb=%d below minimum (%d), clamping",
+                self.max_memory_mb,
+                self._MIN_MEMORY_MB,
+            )
+            object.__setattr__(self, "max_memory_mb", self._MIN_MEMORY_MB)
+        if self.max_processes < self._MIN_PROCESSES:
+            object.__setattr__(self, "max_processes", self._MIN_PROCESSES)
+        if self.max_processes > self._MAX_PROCESSES:
+            object.__setattr__(self, "max_processes", self._MAX_PROCESSES)
+        if self.cpu_time_limit is not None and self.cpu_time_limit < 1:
+            object.__setattr__(self, "cpu_time_limit", 1)
+
+    @property
+    def is_enabled(self) -> bool:
+        """Resolve enabled state: None means auto-detect (True on Windows)."""
+        if self.enabled is None:
+            import sys
+
+            return sys.platform == "win32"
+        return self.enabled
+
+
+@dataclass
 class BashSandboxConfig:
     """Bash tool sandboxing controls. All fields have safe defaults."""
 
@@ -396,6 +434,7 @@ class BashSandboxConfig:
     allow_network: bool = True
     allow_package_install: bool = True
     log_all_commands: bool = False
+    sandbox: OsSandboxConfig = field(default_factory=OsSandboxConfig)
 
     _MIN_TIMEOUT: int = field(default=1, init=False, repr=False)
     _MAX_TIMEOUT: int = field(default=600, init=False, repr=False)
@@ -1177,6 +1216,41 @@ def load_config(
             return [str(v) for v in val]
         return []
 
+    # Parse OS-level sandbox config (safety.bash.sandbox)
+    sandbox_raw = bash_raw.get("sandbox", {})
+    if not isinstance(sandbox_raw, dict):
+        sandbox_raw = {}
+
+    def _sandbox_int(key: str, env_key: str, default: int) -> int:
+        try:
+            return int(sandbox_raw.get(key, os.environ.get(env_key, default)))
+        except (ValueError, TypeError):
+            return default
+
+    def _sandbox_optional_int(key: str, env_key: str) -> int | None:
+        val = sandbox_raw.get(key)
+        if val is None:
+            env_val = os.environ.get(env_key)
+            if env_val is None:
+                return None
+            val = env_val
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+
+    sandbox_enabled_raw = sandbox_raw.get("enabled", os.environ.get("AI_CHAT_BASH_SANDBOX_ENABLED"))
+    sandbox_enabled: bool | None = None
+    if sandbox_enabled_raw is not None:
+        sandbox_enabled = str(sandbox_enabled_raw).lower() in ("true", "1", "yes")
+
+    os_sandbox = OsSandboxConfig(
+        enabled=sandbox_enabled,
+        max_memory_mb=_sandbox_int("max_memory_mb", "AI_CHAT_BASH_SANDBOX_MAX_MEMORY_MB", 512),
+        max_processes=_sandbox_int("max_processes", "AI_CHAT_BASH_SANDBOX_MAX_PROCESSES", 10),
+        cpu_time_limit=_sandbox_optional_int("cpu_time_limit", "AI_CHAT_BASH_SANDBOX_CPU_TIME_LIMIT"),
+    )
+
     bash_sandbox = BashSandboxConfig(
         enabled=bash_safety_enabled,
         timeout=_bash_int("timeout", "AI_CHAT_BASH_TIMEOUT", 120),
@@ -1187,6 +1261,7 @@ def load_config(
         allow_network=_bash_bool("allow_network", "AI_CHAT_BASH_ALLOW_NETWORK", True),
         allow_package_install=_bash_bool("allow_package_install", "AI_CHAT_BASH_ALLOW_PACKAGE_INSTALL", True),
         log_all_commands=_bash_bool("log_all_commands", "AI_CHAT_BASH_LOG_ALL_COMMANDS", False),
+        sandbox=os_sandbox,
     )
     wf_raw = safety_raw.get("write_file", {})
     wf_safety_enabled = str(wf_raw.get("enabled", "true")).lower() not in ("false", "0", "no")
