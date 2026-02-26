@@ -509,6 +509,32 @@ class DlpConfig:
 
 
 @dataclass
+class PromptInjectionConfig:
+    """Prompt injection detection configuration."""
+
+    enabled: bool = False
+    action: str = "warn"  # "block", "warn", "log"
+    canary_length: int = 16  # bytes of randomness for canary token
+    detect_encoding_attacks: bool = True
+    detect_instruction_override: bool = True
+    heuristic_threshold: float = 0.7  # minimum confidence to trigger action
+    log_detections: bool = True
+
+    def __post_init__(self) -> None:
+        if self.action not in ("block", "warn", "log"):
+            logger.warning("Invalid injection detection action '%s', defaulting to 'warn'", self.action)
+            object.__setattr__(self, "action", "warn")
+        if self.canary_length < 8:
+            object.__setattr__(self, "canary_length", 8)
+        elif self.canary_length > 64:
+            object.__setattr__(self, "canary_length", 64)
+        if self.heuristic_threshold < 0.0:
+            object.__setattr__(self, "heuristic_threshold", 0.0)
+        elif self.heuristic_threshold > 1.0:
+            object.__setattr__(self, "heuristic_threshold", 1.0)
+
+
+@dataclass
 class SafetyConfig:
     enabled: bool = True
     approval_mode: str = "ask_for_writes"
@@ -524,6 +550,7 @@ class SafetyConfig:
     subagent: SubagentConfig = field(default_factory=SubagentConfig)
     tool_rate_limit: ToolRateLimitConfig = field(default_factory=ToolRateLimitConfig)
     dlp: DlpConfig = field(default_factory=DlpConfig)
+    prompt_injection: PromptInjectionConfig = field(default_factory=PromptInjectionConfig)
 
 
 @dataclass

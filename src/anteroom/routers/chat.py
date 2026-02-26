@@ -895,13 +895,25 @@ async def _stream_chat_events(ctx: StreamContext):
         # Retrieve app-scoped DLP scanner (constructed once at startup)
         _dlp_scanner = getattr(getattr(ctx.request.app, "state", None), "dlp_scanner", None)
 
+        # Retrieve app-scoped injection detector
+        _injection_detector = getattr(getattr(ctx.request.app, "state", None), "injection_detector", None)
+
+        # Inject canary token into the trusted section of the system prompt
+        _extra_prompt = ctx.extra_system_prompt
+        if _injection_detector is not None and _injection_detector.enabled:
+            _canary_segment = _injection_detector.canary_prompt_segment()
+            if _canary_segment and _extra_prompt:
+                _extra_prompt = _canary_segment + _extra_prompt
+            elif _canary_segment:
+                _extra_prompt = _canary_segment
+
         agent_gen = run_agent_loop(
             ai_service=ctx.ai_service,
             messages=ctx.ai_messages,
             tool_executor=ctx.tool_executor,
             tools_openai=ctx.tools,
             cancel_event=ctx.cancel_event,
-            extra_system_prompt=ctx.extra_system_prompt,
+            extra_system_prompt=_extra_prompt,
             message_queue=_message_queues.get(ctx.conversation_id),
             narration_cadence=ctx.ai_service.config.narration_cadence,
             auto_plan_threshold=(
@@ -910,6 +922,7 @@ async def _stream_chat_events(ctx: StreamContext):
             budget_config=ctx.budget_config,
             get_token_totals=_get_token_totals,
             dlp_scanner=_dlp_scanner,
+            injection_detector=_injection_detector,
         )
         async for agent_event in _with_keepalive(agent_gen):
             if isinstance(agent_event, dict) and "comment" in agent_event:

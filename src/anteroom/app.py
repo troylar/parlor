@@ -564,6 +564,14 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
 
         app.state.dlp_scanner = DlpScanner(_dlp_cfg)
 
+    # Construct injection detector once at startup
+    app.state.injection_detector = None
+    _inj_cfg = getattr(getattr(config, "safety", None), "prompt_injection", None)
+    if _inj_cfg is not None and _inj_cfg.enabled:
+        from .services.injection_detector import InjectionDetector
+
+        app.state.injection_detector = InjectionDetector(_inj_cfg)
+
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
         security_logger.exception("Unhandled exception on %s %s", request.method, request.url.path)

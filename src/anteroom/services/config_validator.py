@@ -160,6 +160,7 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "subagent",
         "tool_rate_limit",
         "dlp",
+        "prompt_injection",
     },
     "safety.dlp": {
         "enabled",
@@ -169,6 +170,15 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "patterns",
         "custom_patterns",
         "redaction_string",
+        "log_detections",
+    },
+    "safety.prompt_injection": {
+        "enabled",
+        "action",
+        "canary_length",
+        "detect_encoding_attacks",
+        "detect_instruction_override",
+        "heuristic_threshold",
         "log_detections",
     },
     "safety.tool_rate_limit": {
@@ -238,6 +248,7 @@ _INT_FIELDS: list[tuple[str, str, int, int, int]] = [
     ("safety.subagent", "max_prompt_chars", 100, 100_000, 32_000),
     ("storage", "retention_days", 0, 36500, 0),
     ("storage", "retention_check_interval", 60, 86400, 3600),
+    ("safety.prompt_injection", "canary_length", 8, 64, 16),
 ]
 
 # Float fields: (section_path, key, min, max, default)
@@ -249,6 +260,7 @@ _FLOAT_FIELDS: list[tuple[str, str, float, float, float]] = [
     ("cli", "esc_hint_delay", 0.0, 60.0, 3.0),
     ("cli", "stall_display_threshold", 1.0, 120.0, 5.0),
     ("cli", "stall_warning_threshold", 1.0, 300.0, 15.0),
+    ("safety.prompt_injection", "heuristic_threshold", 0.0, 1.0, 0.7),
 ]
 
 # Enum fields: (section_path, key, allowed_values)
@@ -258,6 +270,7 @@ _ENUM_FIELDS: list[tuple[str, str, set[str]]] = [
     ("cli.usage.budgets", "action_on_exceed", {"block", "warn"}),
     ("safety.tool_rate_limit", "action", {"block", "warn"}),
     ("safety.dlp", "action", {"redact", "block", "warn"}),
+    ("safety.prompt_injection", "action", {"block", "warn", "log"}),
     ("embeddings", "provider", {"local", "api"}),
     ("storage", "encryption_kdf", {"hkdf-sha256"}),
 ]
@@ -437,6 +450,10 @@ def validate_config(raw: dict[str, Any]) -> ValidationResult:
         ("storage", "purge_attachments"),
         ("storage", "purge_embeddings"),
         ("storage", "encrypt_at_rest"),
+        ("safety.prompt_injection", "enabled"),
+        ("safety.prompt_injection", "detect_encoding_attacks"),
+        ("safety.prompt_injection", "detect_instruction_override"),
+        ("safety.prompt_injection", "log_detections"),
     ]:
         section = _get_section(raw, section_path)
         if section is None or key not in section:

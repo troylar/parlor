@@ -965,6 +965,13 @@ async def run_cli(
 
         _dlp_scanner = DlpScanner(config.safety.dlp)
 
+    # Construct injection detector if configured
+    _injection_detector = None
+    if config.safety.prompt_injection.enabled:
+        from ..services.injection_detector import InjectionDetector
+
+        _injection_detector = InjectionDetector(config.safety.prompt_injection)
+
     async def _cli_event_sink(agent_id: str, event: Any) -> None:
         """Render sub-agent progress events in the CLI."""
         kind = event.kind
@@ -1133,6 +1140,12 @@ async def run_cli(
         mcp_servers=mcp_statuses,
     )
 
+    # Inject canary token into trusted section (before untrusted marker)
+    if _injection_detector is not None and _injection_detector.enabled:
+        _canary_seg = _injection_detector.canary_prompt_segment()
+        if _canary_seg:
+            extra_system_prompt += _canary_seg
+
     # Structural separation: everything below is external/auto-generated context
     extra_system_prompt += untrusted_section_marker()
 
@@ -1209,6 +1222,7 @@ async def run_cli(
                 resume_conversation_id=resume_conversation_id,
                 cancel_event_ref=_active_cancel_event,
                 dlp_scanner=_dlp_scanner,
+                injection_detector=_injection_detector,
             )
         else:
             git_branch = _detect_git_branch()
@@ -1270,6 +1284,7 @@ async def run_cli(
                 plan_mode=plan_mode,
                 skill_msg_queue_ref=_active_msg_queue,
                 dlp_scanner=_dlp_scanner,
+                injection_detector=_injection_detector,
             )
     finally:
         if retention_worker:
@@ -1294,6 +1309,7 @@ async def _run_one_shot(
     resume_conversation_id: str | None = None,
     cancel_event_ref: list[asyncio.Event | None] | None = None,
     dlp_scanner: Any | None = None,
+    injection_detector: Any | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     id_kw = _identity_kwargs(config)
@@ -1326,6 +1342,13 @@ async def _run_one_shot(
 
     _budget_cfg = config.cli.usage.budgets
 
+    # Inject canary token into the trusted section of the system prompt
+    _effective_prompt = extra_system_prompt
+    if injection_detector is not None and injection_detector.enabled:
+        _canary_seg = injection_detector.canary_prompt_segment()
+        if _canary_seg:
+            _effective_prompt = _canary_seg + _effective_prompt
+
     async def _get_token_totals() -> tuple[int, int]:
         return (
             storage.get_conversation_token_total(db, conv["id"]),
@@ -1343,13 +1366,14 @@ async def _run_one_shot(
                 tool_executor=tool_executor,
                 tools_openai=tools_openai,
                 cancel_event=cancel_event,
-                extra_system_prompt=extra_system_prompt,
+                extra_system_prompt=_effective_prompt,
                 max_iterations=config.cli.max_tool_iterations,
                 narration_cadence=ai_service.config.narration_cadence,
                 tool_output_max_chars=config.cli.tool_output_max_chars,
                 budget_config=_budget_cfg,
                 get_token_totals=_get_token_totals,
                 dlp_scanner=dlp_scanner,
+                injection_detector=injection_detector,
             ):
                 if event.kind == "thinking":
                     if not thinking:
@@ -1542,6 +1566,7 @@ async def _run_repl(
     plan_mode: bool = False,
     skill_msg_queue_ref: list[asyncio.Queue[dict[str, Any]] | None] | None = None,
     dlp_scanner: Any | None = None,
+    injection_detector: Any | None = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -2954,6 +2979,7 @@ async def _run_repl(
                         budget_config=_budget_cfg,
                         get_token_totals=_get_token_totals,
                         dlp_scanner=dlp_scanner,
+                        injection_detector=injection_detector,
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(
