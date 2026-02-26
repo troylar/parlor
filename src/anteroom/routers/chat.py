@@ -1494,9 +1494,13 @@ async def chat(conversation_id: str, request: Request):
                         try:
                             from ..services.document_extractor import EXTRACTABLE_MIME_TYPES, extract_text
 
-                            if f.content_type and f.content_type in EXTRACTABLE_MIME_TYPES:
-                                extracted = extract_text(file_data, f.content_type)
+                            validated_mime = att.get("mime_type") or f.content_type
+                            if validated_mime and validated_mime in EXTRACTABLE_MIME_TYPES:
+                                extracted = extract_text(file_data, validated_mime)
                                 if extracted:
+                                    max_chars = 50_000
+                                    if len(extracted) > max_chars:
+                                        extracted = extracted[:max_chars] + "\n\n[... truncated]"
                                     attachment_contents.append(
                                         {
                                             "type": "text",
@@ -1508,7 +1512,7 @@ async def chat(conversation_id: str, request: Request):
                                     logger.warning(
                                         "Could not extract text from %s (%s)",
                                         f.filename,
-                                        f.content_type,
+                                        validated_mime,
                                     )
                         except Exception:
                             logger.debug("Document extraction failed for %s", f.filename, exc_info=True)
