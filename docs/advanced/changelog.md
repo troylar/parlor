@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 25, 2026
 
+### v1.51.0
+
+**New:**
+
+- Token budget enforcement for denial-of-wallet prevention — configurable per-request, per-conversation, and per-day limits with block/warn modes (#446)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.51.0)
+
 ### v1.50.3
 
 **Fixed:**
