@@ -153,6 +153,12 @@ const Chat = (() => {
             const formData = new FormData();
             formData.append('message', text);
             files.forEach(f => formData.append('files', f));
+            if (App.state.isPlanMode) formData.append('plan_mode', 'true');
+            if (sourceRefs.source_ids && sourceRefs.source_ids.length > 0) {
+                sourceRefs.source_ids.forEach(id => formData.append('source_ids', id));
+            }
+            if (sourceRefs.source_tag) formData.append('source_tag', sourceRefs.source_tag);
+            if (sourceRefs.source_group_id) formData.append('source_group_id', sourceRefs.source_group_id);
             body = formData;
         } else {
             const payload = { message: text };
