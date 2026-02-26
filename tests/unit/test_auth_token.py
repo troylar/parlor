@@ -190,7 +190,7 @@ class TestBearerTokenMiddleware:
             mw = getattr(mw, "app", None)
 
         resp = client.get("/api/test", cookies={"anteroom_session": token})
-        assert resp.status_code == 200  # session re-created after expiry (auto-recovery)
+        assert resp.status_code == 401  # expired sessions are rejected, not auto-recreated
 
     def test_idle_timeout_returns_401(self) -> None:
         token = "correct-token"
@@ -214,7 +214,7 @@ class TestBearerTokenMiddleware:
             mw = getattr(mw, "app", None)
 
         resp = client.get("/api/test", cookies={"anteroom_session": token})
-        assert resp.status_code == 200  # session re-created after expiry (auto-recovery)
+        assert resp.status_code == 401  # expired sessions are rejected, not auto-recreated
 
 
 class TestMiddleware401CookieRefresh:
