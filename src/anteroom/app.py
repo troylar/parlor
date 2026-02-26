@@ -152,6 +152,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else:
             logger.info("Embedding service not configured; vector search disabled")
 
+    # Initialize audit writer
+    from .services.audit import create_audit_writer
+
+    _private_key = config.identity.private_key if config.identity else ""
+    app.state.audit_writer = create_audit_writer(config, private_key_pem=_private_key)
+    if app.state.audit_writer.enabled:
+        logger.info("Audit log enabled: %s", app.state.audit_writer.log_dir)
+
     # Create shared AIService for proxy if enabled
     app.state.proxy_ai_service = None
     if config.proxy.enabled:
@@ -313,14 +321,14 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
         if not self._is_session_valid():
             security_logger.warning("Expired session access attempt from %s: %s", client_ip, path)
-            # Don't set a fresh cookie for timeout — the server-side session
-            # is expired and a new cookie won't fix it (requires server restart).
+            _emit_auth_audit(request, "auth.session_expired", "warning", client_ip, path)
             return JSONResponse(status_code=401, content={"detail": "Session expired"})
 
         # Check Authorization header
         auth = request.headers.get("authorization", "")
         if auth.startswith("Bearer ") and self._check_token(auth[7:]):
             self._last_activity = time.time()
+            _emit_auth_audit(request, "auth.success", "info", client_ip, path)
             return await call_next(request)
 
         # Check HttpOnly session cookie
@@ -332,6 +340,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 csrf_header = request.headers.get("x-csrf-token", "")
                 if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
                     security_logger.warning("CSRF validation failed from %s: %s %s", client_ip, request.method, path)
+                    _emit_auth_audit(request, "auth.csrf_failure", "warning", client_ip, path)
                     return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
                 # Defense-in-depth: validate Origin header if present
                 origin = request.headers.get("origin")
@@ -339,12 +348,34 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                     allowed = getattr(request.app.state, "_allowed_origins", set())
                     if allowed and origin not in allowed:
                         security_logger.warning("Origin mismatch from %s: %s", client_ip, origin)
+                        _emit_auth_audit(request, "auth.origin_mismatch", "warning", client_ip, path)
                         return JSONResponse(status_code=403, content={"detail": "Origin not allowed"})
             self._last_activity = time.time()
+            _emit_auth_audit(request, "auth.success", "info", client_ip, path)
             return await call_next(request)
 
         security_logger.warning("Authentication failed from %s: %s %s", client_ip, request.method, path)
+        _emit_auth_audit(request, "auth.failure", "warning", client_ip, path)
         return self._make_401()
+
+
+def _emit_auth_audit(request: Request, event_type: str, severity: str, client_ip: str, path: str) -> None:
+    """Emit an auth audit event if the audit writer is available and enabled."""
+    app = getattr(request, "app", None)
+    state = getattr(app, "state", None)
+    writer = getattr(state, "audit_writer", None)
+    if writer is None:
+        return
+    from .services.audit import AuditEntry
+
+    writer.emit(
+        AuditEntry.create(
+            event_type,
+            severity,
+            source_ip=client_ip,
+            details={"path": path, "method": request.method},
+        )
+    )
 
 
 def _derive_auth_token(config: AppConfig) -> str:

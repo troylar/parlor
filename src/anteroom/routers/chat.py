@@ -1045,6 +1045,35 @@ async def _stream_chat_events(ctx: StreamContext):
                         approval_decision=approval_decision,
                     )
                     storage.update_tool_call(ctx.db, data["id"], tool_output, data["status"])
+                    # Audit log: tool call event
+                    _audit_writer = (
+                        getattr(
+                            getattr(getattr(ctx.request, "app", None), "state", None),
+                            "audit_writer",
+                            None,
+                        )
+                        if ctx.request
+                        else None
+                    )
+                    if _audit_writer is not None:
+                        from ..services.audit import AuditEntry
+
+                        _audit_writer.emit(
+                            AuditEntry.create(
+                                "tool_calls.executed",
+                                "info",
+                                conversation_id=ctx.conversation_id,
+                                tool_name=data["tool_name"],
+                                details={
+                                    "tool_call_id": data["id"],
+                                    "status": data["status"],
+                                    "approval_decision": approval_decision or "auto",
+                                    "server": server_name,
+                                    "tool_input": str(tool_input)[:500],
+                                    "tool_output": str(tool_output)[:500] if tool_output else "",
+                                },
+                            )
+                        )
                 sse_output = data["output"]
                 yield {
                     "event": "tool_call_end",

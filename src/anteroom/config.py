@@ -467,6 +467,25 @@ class ReferencesConfig:
 
 
 @dataclass
+class AuditConfig:
+    """Structured audit log settings."""
+
+    enabled: bool = False
+    log_path: str = ""  # empty = default to data_dir/audit/
+    tamper_protection: str = "hmac"  # "none" or "hmac"
+    rotation: str = "daily"  # "daily" or "size"
+    rotate_size_bytes: int = 10_485_760  # 10 MB; only used when rotation=size
+    retention_days: int = 90  # 0 = keep forever
+    redact_content: bool = True  # log metadata only, strip message/tool content
+    events: dict[str, bool] = field(
+        default_factory=lambda: {
+            "auth": True,
+            "tool_calls": True,
+        }
+    )
+
+
+@dataclass
 class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
@@ -481,6 +500,7 @@ class AppConfig:
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
     rag: RagConfig = field(default_factory=RagConfig)
     codebase_index: CodebaseIndexConfig = field(default_factory=CodebaseIndexConfig)
+    audit: AuditConfig = field(default_factory=AuditConfig)
 
 
 def _resolve_data_dir() -> Path:
@@ -1189,6 +1209,51 @@ def load_config(
         skills=[str(p) for p in refs_raw.get("skills", []) if isinstance(p, str) and p],
     )
 
+    # Audit config
+    audit_raw = raw.get("audit", {})
+    if not isinstance(audit_raw, dict):
+        audit_raw = {}
+    audit_enabled = str(audit_raw.get("enabled", os.environ.get("AI_CHAT_AUDIT_ENABLED", "false"))).lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    audit_log_path = str(audit_raw.get("log_path", os.environ.get("AI_CHAT_AUDIT_LOG_PATH", "")))
+    audit_tamper = str(audit_raw.get("tamper_protection", os.environ.get("AI_CHAT_AUDIT_TAMPER_PROTECTION", "hmac")))
+    if audit_tamper not in ("none", "hmac"):
+        audit_tamper = "hmac"
+    audit_rotation = str(audit_raw.get("rotation", "daily"))
+    if audit_rotation not in ("daily", "size"):
+        audit_rotation = "daily"
+    try:
+        audit_rotate_size = max(1_048_576, int(audit_raw.get("rotate_size_bytes", 10_485_760)))
+    except (ValueError, TypeError):
+        audit_rotate_size = 10_485_760
+    try:
+        _raw_retention = audit_raw.get("retention_days", os.environ.get("AI_CHAT_AUDIT_RETENTION_DAYS", 90))
+        audit_retention = max(0, int(_raw_retention))
+    except (ValueError, TypeError):
+        audit_retention = 90
+    audit_redact = str(
+        audit_raw.get("redact_content", os.environ.get("AI_CHAT_AUDIT_REDACT_CONTENT", "true"))
+    ).lower() not in ("false", "0", "no")
+    audit_events_raw = audit_raw.get("events", {})
+    if not isinstance(audit_events_raw, dict):
+        audit_events_raw = {}
+    audit_events: dict[str, bool] = {}
+    for evt_key in ("auth", "tool_calls"):
+        audit_events[evt_key] = str(audit_events_raw.get(evt_key, "true")).lower() not in ("false", "0", "no")
+    audit_config = AuditConfig(
+        enabled=audit_enabled,
+        log_path=audit_log_path,
+        tamper_protection=audit_tamper,
+        rotation=audit_rotation,
+        rotate_size_bytes=audit_rotate_size,
+        retention_days=audit_retention,
+        redact_content=audit_redact,
+        events=audit_events,
+    )
+
     # Codebase index config
     ci_raw = raw.get("codebase_index", {})
     if not isinstance(ci_raw, dict):
@@ -1222,6 +1287,7 @@ def load_config(
             rag=rag_config,
             references=refs_config,
             codebase_index=ci_config,
+            audit=audit_config,
         ),
         enforced_fields,
     )

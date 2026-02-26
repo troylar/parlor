@@ -285,6 +285,70 @@ def _run_usage(
     print()
 
 
+def _run_audit(args) -> None:
+    """Handle `aroom audit` subcommands."""
+    action = getattr(args, "audit_action", None)
+    if not action:
+        print("Usage: aroom audit {verify,purge}", file=sys.stderr)
+        sys.exit(1)
+
+    config_path, config, _enforced = _load_config_or_exit()
+
+    if action == "verify":
+        from .services.audit import verify_chain
+
+        audit_file = getattr(args, "audit_file", None)
+        if audit_file:
+            log_path = Path(audit_file).resolve()
+        else:
+            from datetime import datetime, timezone
+
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            log_dir = Path(config.audit.log_path) if config.audit.log_path else config.app.data_dir / "audit"
+            log_path = log_dir / f"audit-{today}.jsonl"
+
+        if not log_path.exists():
+            print(f"Audit log not found: {log_path}", file=sys.stderr)
+            sys.exit(1)
+
+        private_key = config.identity.private_key if config.identity else ""
+        if not private_key:
+            print("No identity key found. Cannot verify HMAC chain.", file=sys.stderr)
+            sys.exit(1)
+
+        results = verify_chain(log_path, private_key)
+        if not results:
+            print(f"Audit log is empty: {log_path}")
+            return
+
+        valid_count = sum(1 for r in results if r["valid"])
+        invalid_count = len(results) - valid_count
+
+        print(f"Audit Log: {log_path}")
+        print(f"Entries:   {len(results)}")
+        print(f"Valid:     {valid_count}")
+        if invalid_count:
+            print(f"INVALID:   {invalid_count}")
+            print("\nTampered or corrupted entries:")
+            for r in results:
+                if not r["valid"]:
+                    print(f"  Line {r['line']}: {r['event_type']} at {r['timestamp']} {r.get('error', '')}")
+            sys.exit(1)
+        else:
+            print("Chain:     INTACT")
+
+    elif action == "purge":
+        from .services.audit import create_audit_writer
+
+        private_key = config.identity.private_key if config.identity else ""
+        writer = create_audit_writer(config, private_key_pem=private_key)
+        if not writer.enabled:
+            print("Audit log is not enabled.", file=sys.stderr)
+            sys.exit(1)
+        deleted = writer.purge_old_logs()
+        print(f"Purged {deleted} audit log file(s) older than {config.audit.retention_days} days.")
+
+
 def _run_web(config, config_path: Path, *, debug: bool = False, enforced_fields: list[str] | None = None) -> None:
     """Launch the web UI server."""
     print(f"Config loaded from {config_path}")
@@ -604,6 +668,18 @@ def main() -> None:
         help="Output as JSON",
     )
 
+    # `aroom audit` subcommand
+    audit_parser = subparsers.add_parser("audit", help="Audit log management")
+    audit_subparsers = audit_parser.add_subparsers(dest="audit_action")
+    audit_verify_parser = audit_subparsers.add_parser("verify", help="Verify HMAC chain integrity of audit log")
+    audit_verify_parser.add_argument(
+        "--file",
+        dest="audit_file",
+        default=None,
+        help="Path to specific audit log file (default: today's log)",
+    )
+    audit_subparsers.add_parser("purge", help="Delete audit logs older than retention period")
+
     # `aroom db` subcommand
     db_parser = subparsers.add_parser("db", help="Manage shared databases")
     db_parser.add_argument("db_action", choices=["create", "list", "connect"], help="Database action")
@@ -701,6 +777,10 @@ def main() -> None:
 
     if args.command == "db":
         _run_db(args)
+        return
+
+    if args.command == "audit":
+        _run_audit(args)
         return
 
     _team_config_arg = getattr(args, "team_config", None)

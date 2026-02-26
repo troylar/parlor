@@ -817,6 +817,12 @@ async def run_cli(
             logger.warning("Failed to initialize MCP manager: %s", e)
             renderer.render_error(f"MCP init failed: {e}")
 
+    # Initialize audit writer
+    from ..services.audit import AuditEntry, create_audit_writer
+
+    _private_key = config.identity.private_key if config.identity else ""
+    audit_writer = create_audit_writer(config, private_key_pem=_private_key)
+
     # Set up safety configuration and confirmation callback
     from ..tools.safety import SafetyVerdict
 
@@ -931,6 +937,29 @@ async def run_cli(
                 agent_id, data.get("elapsed_seconds", 0), data.get("tool_calls", []), data.get("error")
             )
 
+    def _audit_tool_call(
+        writer: Any, tool_name: str, arguments: dict[str, Any], result: dict[str, Any], conv_id: str | None
+    ) -> None:
+        if writer is None or not writer.enabled:
+            return
+        approval = result.get("_approval_decision", "auto") if isinstance(result, dict) else "auto"
+        status = "error" if isinstance(result, dict) and result.get("error") else "success"
+        writer.emit(
+            AuditEntry.create(
+                "tool_calls.executed",
+                "info",
+                conversation_id=conv_id or "",
+                tool_name=tool_name,
+                user_id=config.identity.user_id if config.identity else "",
+                details={
+                    "status": status,
+                    "approval_decision": approval,
+                    "tool_input": str(arguments)[:500],
+                    "tool_output": str(result)[:500] if result else "",
+                },
+            )
+        )
+
     # Mutable ref so tool_executor can queue skill prompts into the per-turn msg_queue
     _active_msg_queue: list[asyncio.Queue[dict[str, Any]] | None] = [None]
 
@@ -991,7 +1020,9 @@ async def run_cli(
                 "_working_dir": working_dir,
             }
         if tool_registry.has_tool(tool_name):
-            return await tool_registry.call_tool(tool_name, arguments)
+            result = await tool_registry.call_tool(tool_name, arguments)
+            _audit_tool_call(audit_writer, tool_name, arguments, result, conversation_id)
+            return result
         if mcp_manager:
             # MCP tools bypass ToolRegistry — apply safety gate here
             verdict = tool_registry.check_safety(tool_name, arguments)
@@ -1001,7 +1032,9 @@ async def run_cli(
                 confirmed = await _confirm_destructive(verdict)
                 if not confirmed:
                     return {"error": "Operation denied by user", "exit_code": -1}
-            return await mcp_manager.call_tool(tool_name, arguments)
+            result = await mcp_manager.call_tool(tool_name, arguments)
+            _audit_tool_call(audit_writer, tool_name, arguments, result, conversation_id)
+            return result
         raise ValueError(f"Unknown tool: {tool_name}")
 
     # Build unified tool list (exclude canvas tools — they require web UI context)

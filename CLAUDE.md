@@ -54,7 +54,7 @@ CLI (cli/)         ──┘         │
 #### Entry Points & Core
 - **`__main__.py`** — Argparse dispatch: `init`, `config`, `chat`, `exec`, `db`, `usage`, `audit` subcommands. Global flags: `--version`, `--test`, `--allowed-tools`, `--approval-mode`, `--port`, `--debug`, `--team-config`. Chat flags: `--trust-project`, `--no-project-context`, `--plan`. Audit flags: `audit {verify,purge}`
 - **`app.py`** — FastAPI app factory, middleware stack (auth, rate limiting, CSRF, security headers, body size limit). Auth token derived from Ed25519 identity key via HMAC-SHA256
-- **`config.py`** — YAML config loader with layered precedence: defaults < team < personal < project < env vars < CLI flags. Dataclass hierarchy: `AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `PlanningConfig`, `SkillsConfig`, `McpServerConfig`, `SafetyConfig`, `SubagentConfig`, `EmbeddingsConfig`, `UsageConfig`, `ProxyConfig`, `ReferencesConfig`, `CodebaseIndexConfig`. Enforces locked fields from team `enforce` list. Config validated via `services/config_validator.py` before parsing
+- **`config.py`** — YAML config loader with layered precedence: defaults < team < personal < project < env vars < CLI flags. Dataclass hierarchy: `AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `PlanningConfig`, `SkillsConfig`, `McpServerConfig`, `SafetyConfig`, `SubagentConfig`, `EmbeddingsConfig`, `UsageConfig`, `ProxyConfig`, `ReferencesConfig`, `CodebaseIndexConfig`, `AuditConfig`. Enforces locked fields from team `enforce` list. Config validated via `services/config_validator.py` before parsing
 - **`identity.py`** — Ed25519 keypair generation, UUID4 user IDs, PEM serialization
 - **`tls.py`** — Self-signed cert generation for localhost HTTPS
 
@@ -67,6 +67,7 @@ CLI (cli/)         ──┘         │
 - **`services/embedding_worker.py`** — Background worker for unembedded messages/source chunks. Exponential backoff, skip/fail sentinels, auto-disables after 10 consecutive failures
 - **`services/rag.py`** — RAG pipeline: embed query, search similar messages/source chunks via sqlite-vec, filter by threshold, deduplicate, trim to token budget. Gracefully degrades
 - **`services/codebase_index.py`** — Tree-sitter codebase index for token-efficient context injection. 10 languages. Graceful degradation. Optional: `pip install anteroom[index]`
+- **`services/audit.py`** — Structured JSONL audit log with HMAC-SHA256 chain tamper protection. Append-only writes with fcntl locking, daily/size rotation, retention purge. `AuditWriter` emits events from auth middleware and tool executors. `verify_chain()` validates integrity. SIEM-compatible (Splunk, ELK/OpenSearch)
 - **`services/event_bus.py`** — Async pub/sub: in-process via `asyncio.Queue`, cross-process via SQLite `change_log` polling
 - **`services/slug.py`** — Slug generation: unique `{word}-{word}` names for conversation resumption
 - **`services/trust.py`** — Trust store for ANTEROOM.md files. SHA-256 hash verification. Fails closed
@@ -137,7 +138,7 @@ Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`CodebaseIndexConfig`** — Tree-sitter index: `map_tokens` (1000), auto-detect languages. Optional dependency
 - **`ProxyConfig`** — OpenAI-compatible proxy (opt-in), CORS allowlist
 - **`McpServerConfig`** — Per-server `tools_include`/`tools_exclude` (fnmatch)
-- **`AuditConfig`** — Audit log: `enabled` (default true), `log_path` (default data_dir/audit), `retention_days` (180), `tamper_protection` (default true). HMAC chain integrity verification
+- **`AuditConfig`** — Structured audit log: `enabled` (default false), `log_path`, `tamper_protection` (hmac/none), `rotation` (daily/size), `retention_days` (90), `redact_content` (true), per-event-type toggles
 
 ### Developer Workflow
 
@@ -153,7 +154,7 @@ PyPI: `anteroom`. Deploy via `/deploy` skill (merge PR, CI, version bump, build,
 
 ## Testing Patterns
 
-- **Unit tests** (`tests/unit/`, ~2,495 tests): fully mocked, no I/O. `@pytest.mark.asyncio` with `asyncio_mode = "auto"`
+- **Unit tests** (`tests/unit/`, ~2,500 tests): fully mocked, no I/O. `@pytest.mark.asyncio` with `asyncio_mode = "auto"`
 - **Integration** (`tests/integration/`): real SQLite databases
 - **E2e** (`tests/e2e/`): real servers, mock AI. Markers: `e2e`, `requires_mcp`
 - **Agent evals** (`tests/e2e/test_agent_evals.py`): 10 tests with real AI via `aroom exec --json`. Marker: `real_ai`. Auto-skip without API key. Uses `--temperature 0 --seed 42` for reproducibility
