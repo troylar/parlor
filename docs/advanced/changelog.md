@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.57.1
+
+**Improved:**
+
+- Security documentation overhauled: 3 new pages (bash sandboxing, audit log, prompt injection defense), 4 rewritten pages, all config tables cross-verified against source (#469)
+- README rewrite: fixed stale counts (ASVS L2, 2900+ tests, 12 tools, 4 approval modes), expanded security and feature sections (#469)
+- SECURITY.md updated from ASVS v4.0 Level 1 to v5.0 Level 2 with 27-row threat model (#469)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.57.1)
+
 ### v1.57.0
 
 **New:**
