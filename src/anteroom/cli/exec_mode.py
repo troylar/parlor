@@ -84,6 +84,7 @@ def _build_system_prompt(
     instructions: str | None,
     builtin_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
+    project_instructions: str | None = None,
 ) -> str:
     runtime_ctx = build_runtime_context(
         model=config.ai.model,
@@ -94,6 +95,8 @@ def _build_system_prompt(
     )
     parts = [runtime_ctx]
     parts.append(f"\n<project_context>\nWorking directory: {working_dir}\n</project_context>")
+    if project_instructions:
+        parts.append(f"\n{project_instructions}")
     if instructions:
         parts.append(f"\n{instructions}")
     return "\n".join(parts)
@@ -148,6 +151,7 @@ async def run_exec_mode(
     verbose: bool = False,
     no_project_context: bool = False,
     trust_project: bool = False,
+    project_id: str | None = None,
 ) -> int:
     """Run a prompt non-interactively and return an exit code."""
     working_dir = os.getcwd()
@@ -175,6 +179,22 @@ async def run_exec_mode(
     config.app.data_dir.mkdir(parents=True, exist_ok=True)
     vec_dims = get_effective_dimensions(config)
     db = init_db(db_path, vec_dimensions=vec_dims)
+
+    # Load named project if specified via --project
+    _project_instructions: str | None = None
+    if project_id:
+        proj = storage.get_project(db, project_id)
+        if proj:
+            if proj.get("instructions"):
+                _project_instructions = proj["instructions"]
+            if proj.get("model") and not config.ai.model:
+                config.ai.model = proj["model"]
+            if not quiet:
+                print(f"Project: {proj['name']}", file=sys.stderr)
+        else:
+            if not quiet:
+                print(f"Warning: project ID {project_id} not found", file=sys.stderr)
+            project_id = None
 
     # Register tools
     tool_registry = ToolRegistry()
@@ -327,6 +347,7 @@ async def run_exec_mode(
         instructions,
         builtin_tools=tool_registry.list_tools() if not no_tools else None,
         mcp_servers=mcp_statuses,
+        project_instructions=_project_instructions,
     )
 
     ai_service = create_ai_service(config.ai)
@@ -339,6 +360,7 @@ async def run_exec_mode(
         db,
         title=f"exec: {prompt[:80]}" if persist_messages else f"exec-audit: {prompt[:40]}",
         working_dir=working_dir,
+        project_id=project_id,
         **id_kw,
     )
     if persist_messages:

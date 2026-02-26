@@ -1632,6 +1632,13 @@ async def chat(conversation_id: str, request: Request):
                 model_override = project["model"]
             if project.get("instructions"):
                 project_instructions = project["instructions"]
+            # Auto-inject project sources into the source list
+            project_sources = storage.get_project_sources(db, project_id)
+            proj_source_ids = {s["id"] for s in project_sources}
+            existing_ids = set(source_ids)
+            for sid in proj_source_ids:
+                if sid not in existing_ids:
+                    source_ids.append(sid)
 
     ai_service = _get_ai_service(request, model_override=model_override)
 

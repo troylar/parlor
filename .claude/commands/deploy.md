@@ -405,7 +405,8 @@ On success:
   📦 Deployed anteroom vX.Y.Z
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  🔗 PR:       #NN (merged)
+  🔗 PR:       #NN — <title> (merged)
+  📎 Issues:   #<N> — <issue title> (https://github.com/troylar/anteroom/issues/<N>)
   🧪 CI:       ✅ passed
   🔄 Freshness: ✅ CI ran against current main / ⚠️ rebased and re-validated
   📖 Docs:     ✅ up to date / ⚠️ N updates committed

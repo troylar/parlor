@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
 
 CREATE TABLE IF NOT EXISTS folders (
     id TEXT PRIMARY KEY,
@@ -759,6 +760,9 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             emb_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({emb_table})").fetchall()}
             if "status" not in emb_cols:
                 conn.execute(f"ALTER TABLE {emb_table} ADD COLUMN status TEXT NOT NULL DEFAULT 'embedded'")
+
+    # Add unique index on projects.name for name-based lookup (--project <name>)
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:

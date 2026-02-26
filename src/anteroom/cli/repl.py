@@ -617,6 +617,7 @@ def _build_system_prompt(
     instructions: str | None,
     builtin_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
+    project_instructions: str | None = None,
 ) -> str:
     runtime_ctx = build_runtime_context(
         model=config.ai.model,
@@ -634,6 +635,8 @@ def _build_system_prompt(
     else:
         parts.append(f"\n<project_context>\nWorking directory: {working_dir}\n</project_context>")
 
+    if project_instructions:
+        parts.append(f"\n{project_instructions}")
     if instructions:
         parts.append(f"\n{instructions}")
     return "\n".join(parts)
@@ -817,6 +820,7 @@ async def run_cli(
     no_tools: bool = False,
     continue_last: bool = False,
     conversation_id: str | None = None,
+    project_id: str | None = None,
     trust_project: bool = False,
     no_project_context: bool = False,
     plan_mode: bool = False,
@@ -846,6 +850,21 @@ async def run_cli(
         encryption_key = derive_db_key(pk)
 
     db = init_db(db_path, vec_dimensions=vec_dims, encryption_key=encryption_key)
+
+    # Load named project if specified via --project
+    _project: dict[str, Any] | None = None
+    _project_instructions: str | None = None
+    if project_id:
+        _project = storage.get_project(db, project_id)
+        if _project:
+            if _project.get("instructions"):
+                _project_instructions = _project["instructions"]
+            if _project.get("model") and not config.ai.model:
+                config.ai.model = _project["model"]
+            renderer.console.print(f"[dim]Project:[/dim] {_project['name']}")
+        else:
+            renderer.render_error(f"Project ID {project_id} not found in database")
+            project_id = None
 
     # Clean up empty conversations
     try:
@@ -1175,6 +1194,7 @@ async def run_cli(
         instructions,
         builtin_tools=tool_registry.list_tools(),
         mcp_servers=mcp_statuses,
+        project_instructions=_project_instructions,
     )
 
     # Inject canary token into trusted section (before untrusted marker)
@@ -1269,6 +1289,7 @@ async def run_cli(
                 dlp_scanner=_dlp_scanner,
                 injection_detector=_injection_detector,
                 output_filter=_output_filter,
+                project_id=project_id,
             )
         else:
             git_branch = _detect_git_branch()
@@ -1332,6 +1353,9 @@ async def run_cli(
                 dlp_scanner=_dlp_scanner,
                 injection_detector=_injection_detector,
                 output_filter=_output_filter,
+                project_id=project_id,
+                instructions=instructions,
+                project_instructions=_project_instructions,
             )
     finally:
         if retention_worker:
@@ -1359,6 +1383,7 @@ async def _run_one_shot(
     dlp_scanner: Any | None = None,
     injection_detector: Any | None = None,
     output_filter: Any | None = None,
+    project_id: str | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     id_kw = _identity_kwargs(config)
@@ -1372,7 +1397,7 @@ async def _run_one_shot(
         working_dir = _restore_working_dir(conv, tool_registry, working_dir)
         messages = _load_conversation_messages(db, resume_conversation_id)
     else:
-        conv = storage.create_conversation(db, working_dir=working_dir, **id_kw)
+        conv = storage.create_conversation(db, working_dir=working_dir, project_id=project_id, **id_kw)
         messages = []
 
     storage.create_message(db, conv["id"], "user", expanded, **id_kw)
@@ -1628,6 +1653,9 @@ async def _run_repl(
     dlp_scanner: Any | None = None,
     injection_detector: Any | None = None,
     output_filter: Any | None = None,
+    project_id: str | None = None,
+    instructions: str | None = None,
+    project_instructions: str | None = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -1866,13 +1894,32 @@ async def _run_repl(
             is_first_message = False
             working_dir = _restore_working_dir(conv, tool_registry, working_dir)
             _show_resume_info(db, conv, ai_messages)
+            # Load project from resumed conversation if not already set via --project
+            if not project_id and conv.get("project_id"):
+                project_id = conv["project_id"]
+                _proj = storage.get_project(db, project_id)
+                if _proj:
+                    if _proj.get("instructions"):
+                        project_instructions = _proj["instructions"]
+                    if _proj.get("model") and not config.ai.model:
+                        config.ai.model = _proj["model"]
+                    renderer.console.print(f"[dim]Project:[/dim] {_proj['name']}")
+                    # Rebuild system prompt with project instructions
+                    extra_system_prompt = _build_system_prompt(
+                        config,
+                        working_dir,
+                        instructions,
+                        builtin_tools=tool_registry.list_tools(),
+                        mcp_servers=mcp_manager.get_server_statuses() if mcp_manager else None,
+                        project_instructions=project_instructions,
+                    )
         else:
             renderer.render_error(f"Conversation {resume_conversation_id} not found, starting new")
-            conv = storage.create_conversation(db, working_dir=working_dir, **id_kw)
+            conv = storage.create_conversation(db, working_dir=working_dir, project_id=project_id, **id_kw)
             ai_messages = []
             is_first_message = True
     else:
-        conv = storage.create_conversation(db, working_dir=working_dir, **id_kw)
+        conv = storage.create_conversation(db, working_dir=working_dir, project_id=project_id, **id_kw)
         ai_messages: list[dict[str, Any]] = []
         is_first_message = True
 
@@ -2482,7 +2529,7 @@ async def _run_repl(
                     storage.delete_conversation(db, to_delete["id"], config.app.data_dir)
                     renderer.console.print(f"[{CHROME}]Deleted: {title}[/{CHROME}]\n")
                     if conv.get("id") == to_delete["id"]:
-                        conv = storage.create_conversation(db, working_dir=working_dir, **id_kw)
+                        conv = storage.create_conversation(db, working_dir=working_dir, project_id=project_id, **id_kw)
                         ai_messages = []
                         is_first_message = True
                     continue

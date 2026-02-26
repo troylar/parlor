@@ -598,6 +598,54 @@ def _run_web(config, config_path: Path, *, debug: bool = False, enforced_fields:
         raise
 
 
+def _resolve_project_id(config: object, project_name: str) -> str:
+    """Resolve a project name to its ID, or exit with an error."""
+    from .db import get_db
+    from .services import storage
+
+    db = get_db(config.app.data_dir / "anteroom.db")
+    project = storage.get_project_by_name(db, project_name)
+    if not project:
+        print(f"Error: Project '{project_name}' not found.", file=sys.stderr)
+        print("Run `aroom projects` to list available projects.", file=sys.stderr)
+        sys.exit(1)
+    return project["id"]
+
+
+def _run_projects(config: object) -> None:
+    """List all named projects."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from .db import get_db
+    from .services import storage
+
+    db = get_db(config.app.data_dir / "anteroom.db")
+    projects = storage.list_projects(db)
+    if not projects:
+        print("No projects found. Create one in the web UI.")
+        return
+
+    console = Console()
+    table = Table(title="Projects")
+    table.add_column("Name", style="bold")
+    table.add_column("Model")
+    table.add_column("Instructions", max_width=50)
+    table.add_column("Updated")
+
+    for p in projects:
+        instructions_preview = (p.get("instructions") or "")[:50]
+        if len(p.get("instructions") or "") > 50:
+            instructions_preview += "..."
+        table.add_row(
+            p["name"],
+            p.get("model") or "(default)",
+            instructions_preview,
+            p.get("updated_at", "")[:10],
+        )
+    console.print(table)
+
+
 def _run_chat(
     config,
     prompt: str | None = None,
@@ -605,6 +653,7 @@ def _run_chat(
     continue_last: bool = False,
     resume_id: str | None = None,
     project_path: str | None = None,
+    project_id: str | None = None,
     model: str | None = None,
     trust_project: bool = False,
     no_project_context: bool = False,
@@ -635,6 +684,7 @@ def _run_chat(
                 no_tools=no_tools,
                 continue_last=continue_last,
                 conversation_id=resume_id,
+                project_id=project_id,
                 trust_project=trust_project,
                 no_project_context=no_project_context,
                 plan_mode=plan_mode,
@@ -680,6 +730,7 @@ def _run_exec(
     verbose: bool = False,
     no_project_context: bool = False,
     trust_project: bool = False,
+    project_id: str | None = None,
 ) -> None:
     """Launch non-interactive exec mode."""
     if model:
@@ -702,6 +753,7 @@ def _run_exec(
                 verbose=verbose,
                 no_project_context=no_project_context,
                 trust_project=trust_project,
+                project_id=project_id,
             )
         )
         sys.exit(exit_code)
@@ -910,6 +962,12 @@ def main() -> None:
         help="Set random seed for deterministic outputs",
     )
     parser.add_argument(
+        "--project",
+        dest="project_name",
+        default=None,
+        help="Load a named project (instructions, model override, source context)",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
@@ -921,6 +979,9 @@ def main() -> None:
         default=None,
         help="Path to team configuration file (YAML)",
     )
+
+    # `aroom projects` subcommand
+    subparsers.add_parser("projects", help="List named projects")
 
     args = parser.parse_args()
 
@@ -1045,6 +1106,16 @@ def main() -> None:
         )
         return
 
+    if args.command == "projects":
+        _run_projects(config)
+        return
+
+    # Resolve --project <name> to project_id
+    _project_name = getattr(args, "project_name", None)
+    _project_id: str | None = None
+    if _project_name:
+        _project_id = _resolve_project_id(config, _project_name)
+
     if args.command == "chat":
         _run_chat(
             config,
@@ -1053,6 +1124,7 @@ def main() -> None:
             continue_last=args.continue_last,
             resume_id=args.resume_id,
             project_path=args.project_path,
+            project_id=_project_id,
             model=args.model,
             trust_project=args.trust_project,
             no_project_context=args.no_project_context,
@@ -1071,6 +1143,7 @@ def main() -> None:
             verbose=args.verbose,
             no_project_context=args.no_project_context,
             trust_project=args.trust_project,
+            project_id=_project_id,
         )
     else:
         _run_web(config, config_path, debug=args.debug, enforced_fields=enforced_fields)
