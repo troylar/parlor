@@ -481,6 +481,34 @@ class ToolRateLimitConfig:
 
 
 @dataclass
+class DlpPatternConfig:
+    """A single DLP detection rule."""
+
+    name: str = ""
+    pattern: str = ""
+    description: str = ""
+
+
+@dataclass
+class DlpConfig:
+    """Data Loss Prevention scanning configuration."""
+
+    enabled: bool = False
+    scan_output: bool = True
+    scan_input: bool = False  # Reserved for future use
+    action: str = "redact"  # "redact", "block", "warn"
+    patterns: list[DlpPatternConfig] = field(default_factory=list)  # Replaces built-in patterns
+    custom_patterns: list[DlpPatternConfig] = field(default_factory=list)  # Appended to patterns
+    redaction_string: str = "[REDACTED]"
+    log_detections: bool = True
+
+    def __post_init__(self) -> None:
+        if self.action not in ("redact", "block", "warn"):
+            logger.warning("Invalid DLP action '%s', defaulting to 'redact'", self.action)
+            object.__setattr__(self, "action", "redact")
+
+
+@dataclass
 class SafetyConfig:
     enabled: bool = True
     approval_mode: str = "ask_for_writes"
@@ -495,6 +523,7 @@ class SafetyConfig:
     read_only: bool = False
     subagent: SubagentConfig = field(default_factory=SubagentConfig)
     tool_rate_limit: ToolRateLimitConfig = field(default_factory=ToolRateLimitConfig)
+    dlp: DlpConfig = field(default_factory=DlpConfig)
 
 
 @dataclass
@@ -622,6 +651,7 @@ class AuditConfig:
         default_factory=lambda: {
             "auth": True,
             "tool_calls": True,
+            "dlp": True,
         }
     )
 
@@ -1362,6 +1392,57 @@ def load_config(
         action=trl_action,
     )
 
+    # DLP config
+    dlp_raw = safety_raw.get("dlp", {})
+    if not isinstance(dlp_raw, dict):
+        dlp_raw = {}
+    dlp_enabled = str(dlp_raw.get("enabled", os.environ.get("AI_CHAT_DLP_ENABLED", "false"))).lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    dlp_scan_output = str(dlp_raw.get("scan_output", "true")).lower() not in ("false", "0", "no")
+    dlp_scan_input = str(dlp_raw.get("scan_input", "false")).lower() in ("true", "1", "yes")
+    dlp_action = str(dlp_raw.get("action", os.environ.get("AI_CHAT_DLP_ACTION", "redact"))).lower()
+    if dlp_action not in ("redact", "block", "warn"):
+        dlp_action = "redact"
+    dlp_redaction_string = str(dlp_raw.get("redaction_string", "[REDACTED]"))
+    dlp_log_detections = str(dlp_raw.get("log_detections", "true")).lower() not in ("false", "0", "no")
+
+    dlp_patterns: list[DlpPatternConfig] = []
+    for rule_raw in dlp_raw.get("patterns", []):
+        if not isinstance(rule_raw, dict) or not rule_raw.get("name") or not rule_raw.get("pattern"):
+            continue
+        dlp_patterns.append(
+            DlpPatternConfig(
+                name=str(rule_raw["name"]),
+                pattern=str(rule_raw["pattern"]),
+                description=str(rule_raw.get("description", "")),
+            )
+        )
+    dlp_custom: list[DlpPatternConfig] = []
+    for rule_raw in dlp_raw.get("custom_patterns", []):
+        if not isinstance(rule_raw, dict) or not rule_raw.get("name") or not rule_raw.get("pattern"):
+            continue
+        dlp_custom.append(
+            DlpPatternConfig(
+                name=str(rule_raw["name"]),
+                pattern=str(rule_raw["pattern"]),
+                description=str(rule_raw.get("description", "")),
+            )
+        )
+
+    dlp_config = DlpConfig(
+        enabled=dlp_enabled,
+        scan_output=dlp_scan_output,
+        scan_input=dlp_scan_input,
+        action=dlp_action,
+        patterns=dlp_patterns,
+        custom_patterns=dlp_custom,
+        redaction_string=dlp_redaction_string,
+        log_detections=dlp_log_detections,
+    )
+
     safety_config = SafetyConfig(
         enabled=safety_enabled,
         approval_mode=safety_approval_mode,
@@ -1376,6 +1457,7 @@ def load_config(
         read_only=safety_read_only,
         subagent=subagent_config,
         tool_rate_limit=tool_rate_limit_config,
+        dlp=dlp_config,
     )
 
     # RAG config

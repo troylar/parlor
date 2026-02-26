@@ -892,6 +892,9 @@ async def _stream_chat_events(ctx: StreamContext):
                 storage.get_daily_token_total(ctx.db),
             )
 
+        # Retrieve app-scoped DLP scanner (constructed once at startup)
+        _dlp_scanner = getattr(getattr(ctx.request.app, "state", None), "dlp_scanner", None)
+
         agent_gen = run_agent_loop(
             ai_service=ctx.ai_service,
             messages=ctx.ai_messages,
@@ -906,6 +909,7 @@ async def _stream_chat_events(ctx: StreamContext):
             ),
             budget_config=ctx.budget_config,
             get_token_totals=_get_token_totals,
+            dlp_scanner=_dlp_scanner,
         )
         async for agent_event in _with_keepalive(agent_gen):
             if isinstance(agent_event, dict) and "comment" in agent_event:
@@ -1178,6 +1182,29 @@ async def _stream_chat_events(ctx: StreamContext):
 
             elif kind == "budget_warning":
                 yield {"event": "budget_warning", "data": json.dumps(data)}
+
+            elif kind == "dlp_blocked":
+                yield {
+                    "event": "error",
+                    "data": json.dumps(
+                        {
+                            "message": "Response blocked by DLP policy",
+                            "code": "dlp_blocked",
+                            "rules": data.get("matches", []),
+                        }
+                    ),
+                }
+
+            elif kind == "dlp_warning":
+                yield {
+                    "event": "dlp_warning",
+                    "data": json.dumps(
+                        {
+                            "message": "Sensitive data detected in response",
+                            "rules": data.get("matches", []),
+                        }
+                    ),
+                }
 
             elif kind == "queued_message":
                 current_assistant_msg = None

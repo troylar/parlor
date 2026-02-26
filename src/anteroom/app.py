@@ -556,6 +556,14 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
     app.state.config = config
     app.state.enforced_fields = enforced_fields
 
+    # Construct DLP scanner once at startup (compiled regexes reused across requests)
+    app.state.dlp_scanner = None
+    _dlp_cfg = getattr(getattr(config, "safety", None), "dlp", None)
+    if _dlp_cfg is not None and _dlp_cfg.enabled:
+        from .services.dlp import DlpScanner
+
+        app.state.dlp_scanner = DlpScanner(_dlp_cfg)
+
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
         security_logger.exception("Unhandled exception on %s %s", request.method, request.url.path)

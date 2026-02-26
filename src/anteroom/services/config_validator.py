@@ -159,6 +159,17 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "read_only",
         "subagent",
         "tool_rate_limit",
+        "dlp",
+    },
+    "safety.dlp": {
+        "enabled",
+        "scan_output",
+        "scan_input",
+        "action",
+        "patterns",
+        "custom_patterns",
+        "redaction_string",
+        "log_detections",
     },
     "safety.tool_rate_limit": {
         "max_calls_per_minute",
@@ -246,6 +257,7 @@ _ENUM_FIELDS: list[tuple[str, str, set[str]]] = [
     ("cli.planning", "auto_mode", {"off", "suggest", "auto"}),
     ("cli.usage.budgets", "action_on_exceed", {"block", "warn"}),
     ("safety.tool_rate_limit", "action", {"block", "warn"}),
+    ("safety.dlp", "action", {"redact", "block", "warn"}),
     ("embeddings", "provider", {"local", "api"}),
     ("storage", "encryption_kdf", {"hkdf-sha256"}),
 ]

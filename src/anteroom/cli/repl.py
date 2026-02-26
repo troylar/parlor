@@ -958,6 +958,13 @@ async def run_cli(
     _rate_limiter = ToolRateLimiter(config.safety.tool_rate_limit)
     tool_registry.set_rate_limiter(_rate_limiter)
 
+    # Construct DLP scanner if configured
+    _dlp_scanner = None
+    if config.safety.dlp.enabled:
+        from ..services.dlp import DlpScanner
+
+        _dlp_scanner = DlpScanner(config.safety.dlp)
+
     async def _cli_event_sink(agent_id: str, event: Any) -> None:
         """Render sub-agent progress events in the CLI."""
         kind = event.kind
@@ -1201,6 +1208,7 @@ async def run_cli(
                 working_dir=working_dir,
                 resume_conversation_id=resume_conversation_id,
                 cancel_event_ref=_active_cancel_event,
+                dlp_scanner=_dlp_scanner,
             )
         else:
             git_branch = _detect_git_branch()
@@ -1261,6 +1269,7 @@ async def run_cli(
                 rate_limiter=_rate_limiter,
                 plan_mode=plan_mode,
                 skill_msg_queue_ref=_active_msg_queue,
+                dlp_scanner=_dlp_scanner,
             )
     finally:
         if retention_worker:
@@ -1284,6 +1293,7 @@ async def _run_one_shot(
     working_dir: str,
     resume_conversation_id: str | None = None,
     cancel_event_ref: list[asyncio.Event | None] | None = None,
+    dlp_scanner: Any | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     id_kw = _identity_kwargs(config)
@@ -1339,6 +1349,7 @@ async def _run_one_shot(
                 tool_output_max_chars=config.cli.tool_output_max_chars,
                 budget_config=_budget_cfg,
                 get_token_totals=_get_token_totals,
+                dlp_scanner=dlp_scanner,
             ):
                 if event.kind == "thinking":
                     if not thinking:
@@ -1366,6 +1377,15 @@ async def _run_one_shot(
                 elif event.kind == "assistant_message":
                     if event.data["content"]:
                         storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
+                elif event.kind == "dlp_blocked":
+                    if thinking:
+                        await renderer.stop_thinking(error_msg="Response blocked by DLP policy")
+                        thinking = False
+                    else:
+                        renderer.render_error("Response blocked by DLP policy")
+                elif event.kind == "dlp_warning":
+                    rules = ", ".join(event.data.get("matches", []))
+                    renderer.render_error(f"DLP warning: sensitive data detected [{rules}]")
                 elif event.kind == "error":
                     error_msg = event.data.get("message", "Unknown error")
                     retryable = event.data.get("retryable", False)
@@ -1521,6 +1541,7 @@ async def _run_repl(
     rate_limiter: Any = None,
     plan_mode: bool = False,
     skill_msg_queue_ref: list[asyncio.Queue[dict[str, Any]] | None] | None = None,
+    dlp_scanner: Any | None = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -2932,6 +2953,7 @@ async def _run_repl(
                         ),
                         budget_config=_budget_cfg,
                         get_token_totals=_get_token_totals,
+                        dlp_scanner=dlp_scanner,
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(
@@ -3031,6 +3053,17 @@ async def _run_repl(
                                         _pending_usage.get("model", ""),
                                     )
                                     _pending_usage = None
+                        elif event.kind == "dlp_blocked":
+                            if thinking:
+                                total_elapsed += await renderer.stop_thinking(
+                                    error_msg="Response blocked by DLP policy"
+                                )
+                                thinking = False
+                            else:
+                                renderer.render_error("Response blocked by DLP policy")
+                        elif event.kind == "dlp_warning":
+                            rules = ", ".join(event.data.get("matches", []))
+                            renderer.render_error(f"DLP warning: sensitive data detected [{rules}]")
                         elif event.kind == "queued_message":
                             if thinking:
                                 total_elapsed += await renderer.stop_thinking()
