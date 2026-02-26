@@ -128,7 +128,7 @@ Config at `~/.anteroom/config.yaml` (backward compat: `~/.parlor/config.yaml`). 
 
 Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`AIConfig`** — API connection, 6 timeouts, retry settings, narration cadence, max_tools (default 128), temperature (None = provider default), top_p (None = provider default), seed (None = provider default)
-- **`SafetyConfig`** — Approval mode (default ask_for_writes), allowed/denied tools, custom bash patterns, per-tool tier overrides
+- **`SafetyConfig`** — Approval mode (default ask_for_writes), allowed/denied tools, custom bash patterns, per-tool tier overrides, read-only mode
 - **`CliConfig`** — Context compaction thresholds, tool dedup, retry behavior, visual thresholds
 - **`PlanningConfig`** — Auto-trigger: `auto_mode` (off/suggest/auto), `auto_threshold_tools`
 - **`SkillsConfig`** — `auto_invoke` (default true) enables AI skill invocation

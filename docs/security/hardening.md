@@ -57,6 +57,23 @@ All vendor scripts (marked.js, highlight.js, KaTeX, DOMPurify) include SHA-384 h
 - Data directory created with `0700` permissions
 - UUID validation on all ID parameters
 
+## Read-Only Mode
+
+For untrusted or shared environments, enable read-only mode to restrict the AI to read-only operations:
+
+```yaml
+safety:
+  read_only: true
+```
+
+When enabled:
+- Only READ-tier tools are available (read_file, glob_files, grep, introspect)
+- All WRITE, EXECUTE, and DESTRUCTIVE tools are blocked
+- AI cannot modify files, run bash commands, or create canvases
+- Can be toggled at runtime: `aroom chat --read-only` or `AI_CHAT_READ_ONLY=true`
+
+Use this in shared environments, demo settings, or when auditing AI behavior in a sandbox.
+
 ## Token Budget Enforcement (Denial-of-Wallet Prevention)
 
 Enterprise teams can enforce token consumption limits to control API costs and prevent runaway spending:

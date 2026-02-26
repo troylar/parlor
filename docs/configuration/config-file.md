@@ -85,6 +85,7 @@ safety:
   enabled: true
   approval_mode: "ask_for_writes"    # auto | ask_for_dangerous | ask_for_writes | ask
   approval_timeout: 120
+  read_only: false                   # If true, only READ-tier tools are available
   bash:
     enabled: true
   write_file:
@@ -235,6 +236,7 @@ Controls the tool safety approval gate. Tools are assigned risk tiers (read, wri
 | `enabled` | boolean | `true` | Enable the safety gate globally |
 | `approval_mode` | string | `ask_for_writes` | Which tiers require approval: `auto` (none), `ask_for_dangerous` (destructive only), `ask_for_writes` (write+execute+destructive), `ask` (same as ask_for_writes) |
 | `approval_timeout` | integer | `120` | Seconds to wait for approval before blocking the operation (clamped 10–600) |
+| `read_only` | boolean | `false` | If true, only READ-tier tools are available; all WRITE, EXECUTE, and DESTRUCTIVE tools are blocked; env: `AI_CHAT_READ_ONLY` |
 | `bash.enabled` | boolean | `true` | Enable `bash` tool (set false to hard-block) |
 | `write_file.enabled` | boolean | `true` | Enable `write_file` tool (set false to hard-block) |
 | `allowed_tools` | list | `[]` | Tools that always skip approval regardless of tier |

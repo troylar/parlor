@@ -20,6 +20,7 @@ Anteroom is hardened for use on corporate networks and shared machines. Built to
 | **SRI** | SHA-384 hashes on all vendor scripts |
 | **API Surface** | OpenAPI/Swagger docs disabled |
 | **CLI Safety** | Destructive command confirmation, path validation blocks `/etc/shadow`, `/proc/`, etc. |
+| **Read-Only Mode** | Optional mode restricts AI to read-only operations in untrusted environments |
 | **Token Budgets** | Denial-of-wallet prevention via configurable request, conversation, and daily token limits |
 
 ## Threat Model
