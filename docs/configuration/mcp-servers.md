@@ -36,6 +36,7 @@ mcp_servers:
     | `env` | map | No | Environment variables for the process |
     | `tools_include` | list | No | Fnmatch patterns for tools to include (empty = include all) |
     | `tools_exclude` | list | No | Fnmatch patterns for tools to exclude |
+    | `trust_level` | string | No | `"untrusted"` (default) or `"trusted"`. Controls defensive prompt envelope wrapping. Untrusted outputs are wrapped in XML envelopes instructing the model to treat them as data only |
 
 === "SSE"
 
@@ -48,6 +49,7 @@ mcp_servers:
     | `url` | string | Yes | SSE endpoint URL |
     | `tools_include` | list | No | Fnmatch patterns for tools to include (empty = include all) |
     | `tools_exclude` | list | No | Fnmatch patterns for tools to exclude |
+    | `trust_level` | string | No | `"untrusted"` (default) or `"trusted"`. Controls defensive prompt envelope wrapping. Untrusted outputs are wrapped in XML envelopes instructing the model to treat them as data only |
 
 ## Tool Filtering
 

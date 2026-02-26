@@ -63,6 +63,7 @@ CLI (cli/)         ──┘         │
 - **`services/ai_service.py`** — OpenAI SDK wrapper with streaming, token refresh on 401, split timeout architecture (6 timeouts: connect/write/pool/first_token/request/chunk_stall), cancel-aware at all phases, exponential backoff retry on transient errors. Emits `phase`, `retrying`, `tool_call_args_delta`, `usage` events. Error events include `retryable` flag
 - **`services/storage.py`** — SQLite DAL with column-allowlisted SQL builder, parameterized queries, UUID IDs. Vector storage (graceful degradation without sqlite-vec). Source CRUD, tags, groups, project linking, text chunking, embeddings. Token usage tracking. Conversation slugs
 - **`services/mcp_manager.py`** — MCP client lifecycle: parallel startup, per-server tool filtering, routes `call_tool()` to correct session. Each server gets own `AsyncExitStack`. Warns on tool-name collisions
+- **`services/context_trust.py`** — Prompt injection defense: classifies content as trusted or untrusted. `wrap_untrusted()` wraps external content in defensive XML envelopes with origin attribution. `sanitize_trust_tags()` prevents envelope breakout. `trusted_section_marker()` / `untrusted_section_marker()` provide structural system prompt separation. Used by `rag.py`, `mcp_manager.py`, `agent_loop.py`, `routers/chat.py`, `cli/repl.py`
 - **`services/embeddings.py`** — Dual provider: `LocalEmbeddingService` (fastembed, offline-first, default) and `EmbeddingService` (OpenAI-compatible API)
 - **`services/embedding_worker.py`** — Background worker for unembedded messages/source chunks. Exponential backoff, skip/fail sentinels, auto-disables after 10 consecutive failures
 - **`services/rag.py`** — RAG pipeline: embed query, search similar messages/source chunks via sqlite-vec, filter by threshold, deduplicate, trim to token budget. Gracefully degrades
@@ -143,7 +144,7 @@ Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`RagConfig`** — RAG pipeline: `max_chunks` (10), `max_tokens` (2000), `similarity_threshold` (0.5)
 - **`CodebaseIndexConfig`** — Tree-sitter index: `map_tokens` (1000), auto-detect languages. Optional dependency
 - **`ProxyConfig`** — OpenAI-compatible proxy (opt-in), CORS allowlist
-- **`McpServerConfig`** — Per-server `tools_include`/`tools_exclude` (fnmatch)
+- **`McpServerConfig`** — Per-server `tools_include`/`tools_exclude` (fnmatch), `trust_level` (default `"untrusted"`; controls defensive prompt envelope wrapping for tool outputs)
 - **`SessionConfig`** — Session management: `store` (memory/sqlite), `max_concurrent_sessions` (0 = unlimited), `idle_timeout` (1800s), `absolute_timeout` (43200s), `allowed_ips` (CIDR or exact; empty = allow all), `log_session_events` (bool)
 - **`AuditConfig`** — Structured audit log: `enabled` (default false), `log_path`, `tamper_protection` (hmac/none), `rotation` (daily/size), `retention_days` (90), `redact_content` (true), per-event-type toggles
 

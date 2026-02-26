@@ -131,11 +131,9 @@ def format_rag_context(chunks: list[RetrievedChunk]) -> str:
         label = chunk.source_label
         # SECURITY-REVIEW: chunk.content is user-controlled (past messages / uploaded sources).
         # Wrapped in a defensive prompt envelope to mitigate indirect prompt injection.
-        # Closing tags sanitized to prevent content from breaking out of XML blocks.
         from .context_trust import wrap_untrusted
 
-        safe_content = chunk.content.replace("</retrieved-context>", "[/retrieved-context]")
-        parts.append(wrap_untrusted(safe_content, f"rag:{label}", "retrieved"))
+        parts.append(wrap_untrusted(chunk.content, f"rag:{label}", "retrieved"))
 
     return (
         "\n\n## Retrieved Context (RAG)\n"

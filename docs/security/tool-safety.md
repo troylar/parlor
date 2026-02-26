@@ -173,3 +173,38 @@ MCP tool arguments are also protected:
 
 - **SSRF protection**: DNS resolution validates that target URLs don't point to private IP addresses
 - **Shell metacharacter rejection**: Tool arguments are sanitized to prevent command injection
+
+## Context Trust Tagging (Prompt Injection Defense)
+
+To mitigate prompt injection attacks via untrusted content (e.g., file contents retrieved via RAG, external tool outputs), Anteroom tags all context with trust metadata:
+
+**Trust Sources:**
+
+- **Trusted**: User input (prompts, uploaded files), project configuration, internal system prompts, conversation history
+- **Untrusted**: RAG retrieval results, MCP tool outputs (unless configured as trusted), external API responses
+
+**Per-Server Configuration:**
+
+Each MCP server has a `trust_level` setting (see [MCP Servers](../configuration/mcp-servers.md)):
+
+```yaml
+mcp_servers:
+  - name: "trusted-tools"
+    transport: "stdio"
+    command: "npx"
+    args: ["-y", "@my-org/internal-tools"]
+    trust_level: "trusted"      # Outputs treated as trustworthy
+
+  - name: "external-api"
+    transport: "stdio"
+    command: "npx"
+    args: ["-y", "@external/api-wrapper"]
+    trust_level: "untrusted"    # Outputs flagged for validation
+```
+
+**Implementation Details:**
+
+- Trust metadata is attached via internal keys (`_context_trust`, `_context_origin`) on tool results
+- These keys are stripped before sending to the LLM — they do not reach the model
+- Untrusted content is wrapped in defensive XML envelopes (`<untrusted-content>`) instructing the model to treat it as data only
+- Default is `"untrusted"` (fail-closed); set `"trusted"` for internal MCP servers you control
