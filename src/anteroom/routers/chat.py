@@ -903,7 +903,7 @@ async def _stream_chat_events(ctx: StreamContext):
         if _injection_detector is not None and _injection_detector.enabled:
             _canary_segment = _injection_detector.canary_prompt_segment()
             if _canary_segment and _extra_prompt:
-                _extra_prompt = _canary_segment + _extra_prompt
+                _extra_prompt = _extra_prompt + _canary_segment
             elif _canary_segment:
                 _extra_prompt = _canary_segment
 

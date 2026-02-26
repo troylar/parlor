@@ -1347,7 +1347,7 @@ async def _run_one_shot(
     if injection_detector is not None and injection_detector.enabled:
         _canary_seg = injection_detector.canary_prompt_segment()
         if _canary_seg:
-            _effective_prompt = _canary_seg + _effective_prompt
+            _effective_prompt = _effective_prompt + _canary_seg
 
     async def _get_token_totals() -> tuple[int, int]:
         return (

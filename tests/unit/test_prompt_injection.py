@@ -84,7 +84,7 @@ class TestCanaryTokenGeneration:
 
     def test_canary_hex_format(self) -> None:
         canary = _generate_canary(16)
-        hex_part = canary[len(_CANARY_PREFIX):]
+        hex_part = canary[len(_CANARY_PREFIX) :]
         assert re.fullmatch(r"[0-9a-f]+", hex_part)
 
 

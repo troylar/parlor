@@ -94,7 +94,7 @@ _ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\ufeff\u2060]")
 
 # Base64-encoded common injection phrases (precomputed for matching)
 # We look for base64 strings that decode to injection-like content
-_BASE64_BLOCK_RE = re.compile(r"[A-Za-z0-9+/]{20,}={0,2}")
+_BASE64_BLOCK_RE = re.compile(r"[A-Za-z0-9+/]{20,4096}={0,2}")
 
 # Unicode confusable characters (Cyrillic/Greek lookalikes for Latin)
 _HOMOGLYPH_RE = re.compile(
@@ -102,7 +102,7 @@ _HOMOGLYPH_RE = re.compile(
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class InjectionVerdict:
     """Result of scanning content for prompt injection attempts."""
 
