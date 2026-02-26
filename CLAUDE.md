@@ -54,7 +54,7 @@ CLI (cli/)         ──┘         │
 #### Entry Points & Core
 - **`__main__.py`** — Argparse dispatch: `init`, `config`, `chat`, `exec`, `db`, `usage`, `audit` subcommands. Global flags: `--version`, `--test`, `--allowed-tools`, `--approval-mode`, `--port`, `--debug`, `--team-config`. Chat flags: `--trust-project`, `--no-project-context`, `--plan`. Audit flags: `audit {verify,purge}`
 - **`app.py`** — FastAPI app factory, middleware stack (auth, rate limiting, CSRF, security headers, body size limit). Auth token derived from Ed25519 identity key via HMAC-SHA256
-- **`config.py`** — YAML config loader with layered precedence: defaults < team < personal < project < env vars < CLI flags. Dataclass hierarchy: `AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `PlanningConfig`, `SkillsConfig`, `McpServerConfig`, `SafetyConfig`, `SubagentConfig`, `EmbeddingsConfig`, `UsageConfig`, `ProxyConfig`, `ReferencesConfig`, `CodebaseIndexConfig`, `AuditConfig`. Enforces locked fields from team `enforce` list. Config validated via `services/config_validator.py` before parsing
+- **`config.py`** — YAML config loader with layered precedence: defaults < team < personal < project < env vars < CLI flags. Dataclass hierarchy: `AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `PlanningConfig`, `SkillsConfig`, `McpServerConfig`, `SafetyConfig`, `SubagentConfig`, `EmbeddingsConfig`, `UsageConfig`, `ProxyConfig`, `ReferencesConfig`, `CodebaseIndexConfig`, `SessionConfig`, `AuditConfig`. Enforces locked fields from team `enforce` list. Config validated via `services/config_validator.py` before parsing
 - **`identity.py`** — Ed25519 keypair generation, UUID4 user IDs, PEM serialization
 - **`tls.py`** — Self-signed cert generation for localhost HTTPS
 
@@ -78,6 +78,8 @@ CLI (cli/)         ──┘         │
 - **`services/project_config.py`** — Project-scoped config discovery with SHA-256 trust verification
 - **`services/required_keys.py`** — Required keys validation and interactive prompting
 - **`services/audit.py`** — Structured audit log with HMAC-SHA256 chain tamper protection. JSONL format for SIEM integration (Splunk, ELK/OpenSearch). Async writer, file locking, rotation by date, retention policy. Genesis chain start. Verification and purge subcommands
+- **`services/session_store.py`** — Session persistence backends: `MemorySessionStore` (volatile, in-process) and `SQLiteSessionStore` (durable, survives restart). Protocol-based design with `create()`, `get()`, `touch()`, `delete()`, `count_active()`, `cleanup_expired()`. Session state: id, user_id, ip_address, created_at, last_activity_at. Timeouts (idle/absolute) configurable via `SessionConfig`
+- **`services/ip_allowlist.py`** — IP allowlist checking with CIDR and exact address support. `check_ip_allowed()` validates client IPs against allowlist. Returns `True` if list is empty (no restrictions) or IP matches any entry. Both IPv4 and IPv6 supported. Fails closed on invalid input
 
 #### Web UI (routers/)
 - **`routers/chat.py`** — SSE chat streaming with dataclass-based architecture: `ChatRequestContext`, `WebConfirmContext`, `ToolExecutorContext`, `StreamContext`. Extracted functions: `_parse_chat_request()`, `_resolve_sources()`, `_build_tool_list()`, `_build_chat_system_prompt()`, `_web_confirm_tool()`, `_execute_web_tool()`, `_stream_chat_events()`. Supports prompt queuing (max 10), source injection (50K char limit), plan mode, sub-agents
@@ -114,7 +116,7 @@ CLI (cli/)         ──┘         │
 
 ### Security Model
 
-Single-user local app, OWASP ASVS Level 1. Auth: HttpOnly session cookies + CSRF double-submit + Origin validation. Stable auth token from Ed25519 key via HMAC-SHA256. Middleware: rate limiting (120 req/min), body size (15MB), security headers. Tool safety: 4 risk tiers, 4 approval modes, 3 permission scopes (once/session/always). Path traversal and hard-block detection. MCP tools gated at parent and sub-agent levels. Fails closed: no approval channel = blocked.
+Single-user local app, OWASP ASVS Level 2. Auth: HttpOnly session cookies + CSRF double-submit + Origin validation. Stable auth token from Ed25519 key via HMAC-SHA256. Session store (memory or SQLite-backed) tracks creation time, last activity, and client IP for session validation and lifecycle management. IP allowlisting (CIDR or exact) gates access at middleware. Concurrent session limits prevent token reuse abuse. Session timeouts: 12-hour absolute, 30-minute idle. Middleware: rate limiting (120 req/min), body size (15MB), security headers. Tool safety: 4 risk tiers, 4 approval modes, 3 permission scopes (once/session/always). Path traversal and hard-block detection. MCP tools gated at parent and sub-agent levels. Fails closed: no approval channel = blocked.
 
 ### Database
 
@@ -138,6 +140,7 @@ Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`CodebaseIndexConfig`** — Tree-sitter index: `map_tokens` (1000), auto-detect languages. Optional dependency
 - **`ProxyConfig`** — OpenAI-compatible proxy (opt-in), CORS allowlist
 - **`McpServerConfig`** — Per-server `tools_include`/`tools_exclude` (fnmatch)
+- **`SessionConfig`** — Session management: `store` (memory/sqlite), `max_concurrent_sessions` (0 = unlimited), `idle_timeout` (1800s), `absolute_timeout` (43200s), `allowed_ips` (CIDR or exact; empty = allow all), `log_session_events` (bool)
 - **`AuditConfig`** — Structured audit log: `enabled` (default false), `log_path`, `tamper_protection` (hmac/none), `rotation` (daily/size), `retention_days` (90), `redact_content` (true), per-event-type toggles
 
 ### Developer Workflow

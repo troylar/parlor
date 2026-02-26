@@ -18,6 +18,33 @@ Security headers and protections applied to every response.
 
 All vendor scripts (marked.js, highlight.js, KaTeX, DOMPurify) include SHA-384 hashes. If a CDN or file is tampered with, the browser refuses to execute it.
 
+## Session Management & IP Allowlisting
+
+### Session Stores
+Sessions can be stored in-memory or persisted to SQLite:
+- **In-memory** (default): Sessions are volatile and lost on server restart. Suitable for single-machine dev/test deployments
+- **SQLite**: Sessions persist across restarts. Stores session ID, user ID, client IP, creation time, and last activity time for full lifecycle tracking
+
+### IP Allowlisting
+Network-level access control via CIDR and exact IP matching:
+- Allowlist entries can be exact IPs (`192.168.1.5`) or CIDR ranges (`10.0.0.0/8`)
+- Both IPv4 and IPv6 supported
+- Empty allowlist permits all IPs (no restrictions)
+- Fails closed: invalid IP addresses are denied
+- Enforced before session validation in request processing pipeline
+
+### Concurrent Session Limits
+Prevent token reuse and excessive session proliferation:
+- Configurable limit on concurrent active sessions (default: unlimited)
+- When limit is exceeded, returns 429 Too Many Sessions
+- Useful in enterprise deployments to limit damage from token leakage
+
+### Idle & Absolute Timeouts
+Sessions automatically expire via two mechanisms:
+- **Idle timeout** (default: 30 minutes) — expires after period of inactivity
+- **Absolute timeout** (default: 12 hours) — forces re-authentication after fixed duration
+- Expired sessions are cleaned up on next request (cheap operation on small stores)
+
 ## Rate Limiting
 
 - **120 requests per minute** per IP address

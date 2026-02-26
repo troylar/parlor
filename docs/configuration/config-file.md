@@ -30,6 +30,14 @@ app:
   data_dir: "~/.anteroom"   # Where DB + attachments live
   tls: false              # Set true for HTTPS with self-signed cert
 
+session:
+  store: "memory"                      # "memory" or "sqlite" (default: memory)
+  max_concurrent_sessions: 0           # 0 = unlimited (default: 0)
+  idle_timeout: 1800                   # Seconds (default: 1800 = 30 minutes)
+  absolute_timeout: 43200              # Seconds (default: 43200 = 12 hours)
+  allowed_ips: []                      # CIDR or exact addresses; empty = allow all (default: empty)
+  log_session_events: false            # Log session lifecycle events (default: false)
+
 cli:
   builtin_tools: true              # Enable built-in tools (default: true)
   max_tool_iterations: 50          # Max tool calls per response (default: 50)
@@ -162,6 +170,17 @@ required:
 | `port` | integer | `8080` | Port for the web server; env: `AI_CHAT_PORT` |
 | `data_dir` | string | `~/.anteroom` | Directory for database, attachments, config |
 | `tls` | boolean | `false` | Enable HTTPS with self-signed certificate |
+
+### session
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `store` | string | `memory` | Session storage backend: `memory` (volatile, in-process) or `sqlite` (persistent); env: `AI_CHAT_SESSION_STORE` |
+| `max_concurrent_sessions` | integer | `0` | Max concurrent sessions per user; `0` = unlimited. Enforced at middleware. When exceeded, returns 429 Too Many Sessions; env: `AI_CHAT_SESSION_MAX_CONCURRENT` |
+| `idle_timeout` | integer | `1800` | Session idle timeout in seconds (default: 1800 = 30 minutes). Automatically cleaned up on next request; env: `AI_CHAT_SESSION_IDLE_TIMEOUT` |
+| `absolute_timeout` | integer | `43200` | Absolute session lifetime in seconds (default: 43200 = 12 hours). After this period, session is invalidated regardless of activity; env: `AI_CHAT_SESSION_ABSOLUTE_TIMEOUT` |
+| `allowed_ips` | list[string] | `[]` | IP allowlist for access control. Supports exact addresses (`192.168.1.5`) and CIDR ranges (`10.0.0.0/8`). Both IPv4 and IPv6. Empty list allows all IPs; env: `AI_CHAT_SESSION_ALLOWED_IPS` (comma-separated) |
+| `log_session_events` | boolean | `false` | Log session lifecycle events (create, touch, delete) to audit log; env: `AI_CHAT_SESSION_LOG_EVENTS` |
 
 ### cli
 
