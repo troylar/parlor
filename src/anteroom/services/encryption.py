@@ -75,7 +75,8 @@ def open_encrypted_db(db_path: Path, key: bytes) -> sqlite3.Connection:
         conn.execute("SELECT count(*) FROM sqlite_master")
     except Exception as e:
         conn.close()
-        raise ValueError(f"Failed to open encrypted database (wrong key?): {e}") from e
+        logger.error("Failed to open encrypted database: %s", e)
+        raise ValueError("Failed to open encrypted database (wrong key?)") from e
     return conn
 
 
@@ -128,6 +129,9 @@ def migrate_plaintext_to_encrypted(
 
     # Step 1: Backup the original
     shutil.copy2(db_path, backup_path)
+    import os
+
+    os.chmod(backup_path, 0o600)
     logger.info("Backed up plaintext database to %s", backup_path)
 
     # Step 2: Create encrypted copy in a temp file

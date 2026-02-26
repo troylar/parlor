@@ -158,14 +158,16 @@ class TestPurgeConversationsBefore:
 class TestPurgeOrphanedAttachments:
     def test_removes_orphaned_directories(self, tmp_path: Path) -> None:
         conn = _create_test_db(tmp_path)
-        _insert_conversation(conn, "active-conv", "2026-01-01T00:00:00")
+        active_id = "a1b2c3d4-1111-2222-3333-444444444444"
+        orphan_id = "b2c3d4e5-5555-6666-7777-888888888888"
+        _insert_conversation(conn, active_id, "2026-01-01T00:00:00")
 
         # Active conversation's attachments
-        active_dir = tmp_path / "attachments" / "active-conv"
+        active_dir = tmp_path / "attachments" / active_id
         active_dir.mkdir(parents=True)
 
         # Orphaned directory (no matching conversation)
-        orphan_dir = tmp_path / "attachments" / "deleted-conv"
+        orphan_dir = tmp_path / "attachments" / orphan_id
         orphan_dir.mkdir(parents=True)
         (orphan_dir / "leftover.txt").write_text("orphan")
 
@@ -177,8 +179,9 @@ class TestPurgeOrphanedAttachments:
 
     def test_no_orphans(self, tmp_path: Path) -> None:
         conn = _create_test_db(tmp_path)
-        _insert_conversation(conn, "active", "2026-01-01T00:00:00")
-        att_dir = tmp_path / "attachments" / "active"
+        active_id = "a1b2c3d4-1111-2222-3333-444444444444"
+        _insert_conversation(conn, active_id, "2026-01-01T00:00:00")
+        att_dir = tmp_path / "attachments" / active_id
         att_dir.mkdir(parents=True)
 
         count = purge_orphaned_attachments(tmp_path, conn)
@@ -191,12 +194,23 @@ class TestPurgeOrphanedAttachments:
 
     def test_dry_run_does_not_remove(self, tmp_path: Path) -> None:
         conn = _create_test_db(tmp_path)
-        orphan_dir = tmp_path / "attachments" / "gone-conv"
+        orphan_id = "c3d4e5f6-9999-aaaa-bbbb-cccccccccccc"
+        orphan_dir = tmp_path / "attachments" / orphan_id
         orphan_dir.mkdir(parents=True)
 
         count = purge_orphaned_attachments(tmp_path, conn, dry_run=True)
         assert count == 1
         assert orphan_dir.exists()
+
+    def test_skips_non_uuid_directory_names(self, tmp_path: Path) -> None:
+        """Non-UUID directory names under attachments/ are ignored."""
+        conn = _create_test_db(tmp_path)
+        bad_dir = tmp_path / "attachments" / "not-a-uuid"
+        bad_dir.mkdir(parents=True)
+
+        count = purge_orphaned_attachments(tmp_path, conn)
+        assert count == 0
+        assert bad_dir.exists()
 
 
 class TestRetentionWorker:

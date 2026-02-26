@@ -89,6 +89,8 @@ def purge_orphaned_attachments(data_dir: Path, db: object, *, dry_run: bool = Fa
     for entry in attachments_root.iterdir():
         if not entry.is_dir():
             continue
+        if not _UUID_RE.match(entry.name):
+            continue
         row = conn.execute("SELECT 1 FROM conversations WHERE id = ?", (entry.name,)).fetchone()
         if row is None:
             if not dry_run:
