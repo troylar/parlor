@@ -23,6 +23,13 @@ security_logger = logging.getLogger("anteroom.security")
 # Max text length to scan (bytes). Truncated to prevent excessive processing.
 MAX_SCAN_LENGTH = 512_000  # 512 KB
 
+# Max system prompt length (chars) for n-gram extraction.
+# Prevents quadratic memory from excessively large system prompts.
+MAX_PROMPT_LENGTH = 50_000
+
+# Max redaction string length to prevent output expansion DoS.
+MAX_REDACTION_LENGTH = 256
+
 # N-gram window size for system prompt leak detection.
 # Smaller = more false positives; larger = misses paraphrased leaks.
 NGRAM_WINDOW = 8
@@ -78,7 +85,7 @@ class OutputContentFilter:
     def __init__(self, config: OutputFilterConfig, system_prompt: str | None = None) -> None:
         self._enabled = config.enabled
         self._action = config.action
-        self._redaction_string = config.redaction_string
+        self._redaction_string = config.redaction_string[:MAX_REDACTION_LENGTH]
         self._log_detections = config.log_detections
         self._leak_detection = config.system_prompt_leak_detection
         self._leak_threshold = config.leak_threshold
@@ -90,7 +97,7 @@ class OutputContentFilter:
 
         # Build system prompt n-grams for leak detection
         if self._leak_detection and system_prompt:
-            prompt_tokens = _tokenize(system_prompt)
+            prompt_tokens = _tokenize(system_prompt[:MAX_PROMPT_LENGTH])
             if len(prompt_tokens) >= MIN_PROMPT_WORDS:
                 self._prompt_ngrams = _build_ngrams(prompt_tokens, NGRAM_WINDOW)
 

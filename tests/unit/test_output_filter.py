@@ -259,15 +259,19 @@ class TestSystemPromptLeakDetection:
 
     def test_leak_with_custom_threshold(self) -> None:
         prompt = _long_prompt(30)
-        # With very low threshold, even partial overlap triggers
         scanner = _make_scanner(system_prompt=prompt, leak_threshold=0.1)
-        # Repeat a portion of the prompt
+        # Use enough of the prompt that the n-gram overlap ratio exceeds 0.1
         tokens = prompt.split()
-        partial = " ".join(tokens[: NGRAM_WINDOW + 3])
+        partial = " ".join(tokens[: NGRAM_WINDOW + 5])
         result = scanner.scan(partial)
-        # Whether this triggers depends on the ratio — at 0.1, a small overlap should trigger
-        if result.matched:
-            assert any(m.rule_name == "system_prompt_leak" for m in result.matches)
+        assert result.matched
+        assert any(m.rule_name == "system_prompt_leak" for m in result.matches)
+
+    def test_short_output_skips_leak_check(self) -> None:
+        prompt = _long_prompt(30)
+        scanner = _make_scanner(system_prompt=prompt)
+        result = scanner.scan("short")
+        assert not result.matched
 
     def test_min_prompt_words_boundary(self) -> None:
         # Exactly MIN_PROMPT_WORDS should enable detection
