@@ -137,6 +137,25 @@ Ask the user a question and pause execution to wait for their response. Use this
 
 The user's response is returned in the tool result and execution resumes. In the CLI REPL, users can type their answer at the prompt. In the web UI, an inline input field appears in the chat. Use this tool instead of asking questions in text output — the user cannot respond to text mid-turn.
 
+### introspect
+
+Examine the AI's own runtime context — config, tools, safety settings, instructions, skills, and token budget. The AI calls this automatically when you ask about your setup.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `section` | string | `config`, `instructions`, `tools`, `safety`, `skills`, or `budget`. Omit for a summary of all sections. |
+
+Example prompts that trigger this tool:
+
+- "What model am I using?"
+- "What tools are available?"
+- "What's my approval mode?"
+- "How much context am I using?"
+- "What instructions are loaded?"
+- "What skills do I have?"
+
+Secrets (API keys, tokens, passwords) are automatically redacted in the output.
+
 ## How Tools Work
 
 All file tools resolve paths relative to the working directory (or accept absolute paths). Every tool returns structured JSON that the AI uses to inform its next action.
@@ -156,4 +175,4 @@ cli:
   builtin_tools: false
 ```
 
-This disables all ten built-in tools. MCP tools (if configured) still work.
+This disables all built-in tools. MCP tools (if configured) still work.

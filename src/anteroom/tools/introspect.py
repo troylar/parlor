@@ -19,9 +19,10 @@ DEFINITION: dict[str, Any] = {
     "name": "introspect",
     "description": (
         "Examine your own runtime context: loaded instructions, available tools, "
-        "MCP servers, config settings, safety gates, skills, and token budget. "
-        "Use this when the user asks about your setup, capabilities, or why "
-        "something is enabled/disabled."
+        "MCP servers, config settings, safety gates, skills, and token/context budget. "
+        "Use this when the user asks about your setup, capabilities, context window usage, "
+        "how much context is being used, remaining tokens, or why something is enabled/disabled. "
+        "Use section='budget' for context window and token usage questions."
     ),
     "parameters": {
         "type": "object",
@@ -29,7 +30,10 @@ DEFINITION: dict[str, Any] = {
             "section": {
                 "type": "string",
                 "enum": ["config", "instructions", "tools", "safety", "skills", "budget"],
-                "description": ("Which section to inspect. Omit to get a summary of all sections."),
+                "description": (
+                    "Which section to inspect. 'budget' shows context window usage and token counts. "
+                    "Omit to get a summary of all sections."
+                ),
             },
         },
         "required": [],
