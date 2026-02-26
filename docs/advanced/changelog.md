@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.54.0
+
+**New:**
+
+- Tool call rate limiting: per-minute, per-conversation, and consecutive failure limits to prevent runaway agent loops (#451)
+- Two action modes (block or warn) with limits shared across parent and child sub-agents (#451)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.54.0)
+
 ### v1.53.0
 
 **New:**
