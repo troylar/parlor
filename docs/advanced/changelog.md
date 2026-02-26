@@ -5,6 +5,19 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## February 26, 2026
+
+### v1.52.0
+
+**New:**
+
+- Read-only mode: lock Anteroom to read-only operations via config, env var, or `--read-only` CLI flag (#454)
+- Defense-in-depth: two-layer security with tool-list filtering and execution-time hard-deny backstop (#454)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.52.0)
+
+---
+
 ## February 25, 2026
 
 ### v1.51.1
