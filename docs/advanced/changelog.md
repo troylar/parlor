@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.60.0
+
+**New:**
+
+- Prompt injection detection with canary tokens: multi-layered defense scanning tool outputs for canary leakage, encoding attacks, and instruction override attempts (#448)
+- Three detection techniques: CSPRNG canary tokens, base64/zero-width/homoglyph encoding attacks, and 6 ReDoS-safe heuristic patterns (#448)
+- Configurable action modes (block/warn/log) with adjustable confidence thresholds, disabled by default (#448)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.60.0)
+
 ### v1.59.0
 
 **New:**
