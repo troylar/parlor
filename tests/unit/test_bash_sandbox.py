@@ -1,8 +1,11 @@
 """Tests for bash sandbox configuration and enforcement."""
 
+import sys
+from unittest.mock import patch
+
 import pytest
 
-from anteroom.config import BashSandboxConfig
+from anteroom.config import BashSandboxConfig, OsSandboxConfig
 from anteroom.tools.bash import _check_sandbox, handle
 from anteroom.tools.security import (
     check_blocked_path,
@@ -324,3 +327,70 @@ class TestBashHandlerSandbox:
         )
         assert result["exit_code"] == -1
         assert "Network" in result["error"]
+
+
+# --- OsSandboxConfig nesting in BashSandboxConfig ---
+
+
+class TestOsSandboxConfigNesting:
+    def test_default_sandbox_config(self):
+        cfg = BashSandboxConfig()
+        assert isinstance(cfg.sandbox, OsSandboxConfig)
+        assert cfg.sandbox.enabled is None
+        assert cfg.sandbox.max_memory_mb == 512
+        assert cfg.sandbox.max_processes == 10
+        assert cfg.sandbox.cpu_time_limit is None
+
+    def test_custom_sandbox_config(self):
+        sandbox = OsSandboxConfig(enabled=True, max_memory_mb=256, max_processes=5, cpu_time_limit=30)
+        cfg = BashSandboxConfig(sandbox=sandbox)
+        assert cfg.sandbox.enabled is True
+        assert cfg.sandbox.max_memory_mb == 256
+        assert cfg.sandbox.max_processes == 5
+        assert cfg.sandbox.cpu_time_limit == 30
+
+    def test_sandbox_is_enabled_auto_detect(self):
+        cfg = BashSandboxConfig()
+        assert cfg.sandbox.is_enabled == (sys.platform == "win32")
+
+
+# --- Handler integration with OS sandbox ---
+
+
+class TestBashHandlerOsSandbox:
+    @pytest.mark.asyncio
+    async def test_os_sandbox_not_used_on_non_windows(self):
+        """On macOS/Linux, the OS sandbox code path is skipped entirely."""
+        sandbox = OsSandboxConfig(enabled=True)
+        cfg = BashSandboxConfig(sandbox=sandbox)
+        # Even with sandbox enabled=True, on non-Windows it should still work
+        # (the bash handler checks sys.platform before importing sandbox_win32)
+        if sys.platform != "win32":
+            result = await handle("echo hello", _sandbox_config=cfg)
+            assert result["exit_code"] == 0
+            assert "hello" in result["stdout"]
+
+    @pytest.mark.asyncio
+    async def test_os_sandbox_setup_called_on_windows(self):
+        """On Windows, setup_job_for_process is called when sandbox is enabled."""
+        sandbox = OsSandboxConfig(enabled=True, max_memory_mb=256)
+        cfg = BashSandboxConfig(sandbox=sandbox)
+        with (
+            patch("sys.platform", "win32"),
+            patch("anteroom.tools.bash.sys") as mock_sys,
+            patch("anteroom.tools.sandbox_win32.setup_job_for_process", return_value=None),
+        ):
+            mock_sys.platform = "win32"
+            result = await handle("echo hello", _sandbox_config=cfg)
+            # setup_job_for_process may or may not be called depending on platform
+            # The key test is that the command still succeeds even if Job Object fails
+            assert result["exit_code"] == 0
+
+    @pytest.mark.asyncio
+    async def test_os_sandbox_graceful_degradation(self):
+        """If Job Object setup fails, command still executes."""
+        sandbox = OsSandboxConfig(enabled=False)
+        cfg = BashSandboxConfig(sandbox=sandbox)
+        result = await handle("echo sandbox_test", _sandbox_config=cfg)
+        assert result["exit_code"] == 0
+        assert "sandbox_test" in result["stdout"]

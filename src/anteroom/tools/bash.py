@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from typing import TYPE_CHECKING, Any
 
 from .security import (
@@ -110,6 +111,9 @@ async def handle(
     if _sandbox_config is not None and _sandbox_config.log_all_commands:
         security_logger.info("bash command: %s", command[:500])
 
+    # Set up OS-level sandbox (Win32 Job Object) if configured
+    use_os_sandbox = sys.platform == "win32" and _sandbox_config is not None and _sandbox_config.sandbox.is_enabled
+
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
@@ -117,12 +121,31 @@ async def handle(
             stderr=asyncio.subprocess.PIPE,
             cwd=_working_dir,
         )
+
+        # Assign process to Job Object for kernel-level resource limits
+        job_handle: int | None = None
+        if use_os_sandbox and proc.pid is not None:
+            from .sandbox_win32 import setup_job_for_process
+
+            job_handle = setup_job_for_process(_sandbox_config.sandbox, proc.pid)  # type: ignore[union-attr]
+            if job_handle is None:
+                security_logger.warning("Job Object setup failed, running without OS sandbox")
+
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
+            if job_handle is not None:
+                from .sandbox_win32 import terminate_job
+
+                terminate_job(job_handle)
             proc.kill()
             await proc.wait()
             return {"error": f"Command timed out after {timeout}s", "exit_code": -1}
+        finally:
+            if job_handle is not None:
+                from .sandbox_win32 import close_job
+
+                close_job(job_handle)
 
         stdout_str = stdout.decode("utf-8", errors="replace")
         stderr_str = stderr.decode("utf-8", errors="replace")
