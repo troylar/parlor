@@ -11,6 +11,7 @@ from anteroom.cli.skills import (
     MAX_SKILLS,
     SkillRegistry,
     _expand_args,
+    _load_skills_from_dir,
     _validate_skill_name,
     load_skills,
 )
@@ -580,3 +581,95 @@ class TestSkillDirs:
             dirs = _skill_dirs(tmpdir)
             dir_strs = [str(d) for d in dirs]
             assert any(".parlor" in d for d in dir_strs)
+
+
+class TestYmlExtension:
+    """Tests for .yml file support."""
+
+    def test_yml_files_loaded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "greet.yml").write_text("name: greet\nprompt: Hello\n")
+            result = _load_skills_from_dir(skills_dir, "project")
+            assert len(result.skills) == 1
+            assert result.skills[0].name == "greet"
+
+    def test_yaml_and_yml_both_loaded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "alpha.yaml").write_text("name: alpha\nprompt: A\n")
+            (skills_dir / "beta.yml").write_text("name: beta\nprompt: B\n")
+            result = _load_skills_from_dir(skills_dir, "project")
+            names = {s.name for s in result.skills}
+            assert names == {"alpha", "beta"}
+
+    def test_yml_via_load_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "deploy.yml").write_text("name: deploy\nprompt: Ship it\n")
+            result = load_skills(tmpdir)
+            names = {s.name for s in result.skills}
+            assert "deploy" in names
+
+    def test_yml_via_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "deploy.yml").write_text("name: deploy\nprompt: Ship it\n")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert reg.has_skill("deploy")
+
+
+class TestSearchedDirs:
+    """Tests for searched directory diagnostic output."""
+
+    def test_searched_dirs_populated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "greet.yaml").write_text("name: greet\nprompt: Hi\n")
+            result = _load_skills_from_dir(skills_dir, "project")
+            assert len(result.searched_dirs) == 1
+            assert result.searched_dirs[0].exists is True
+            assert result.searched_dirs[0].skill_count == 1
+            assert result.searched_dirs[0].source == "project"
+
+    def test_searched_dirs_nonexistent(self) -> None:
+        result = _load_skills_from_dir(Path("/nonexistent/path"), "global")
+        assert len(result.searched_dirs) == 1
+        assert result.searched_dirs[0].exists is False
+        assert result.searched_dirs[0].skill_count == 0
+
+    def test_searched_dirs_empty_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _load_skills_from_dir(Path(tmpdir), "project")
+            assert len(result.searched_dirs) == 1
+            assert result.searched_dirs[0].exists is True
+            assert result.searched_dirs[0].skill_count == 0
+
+    def test_load_skills_propagates_searched_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "test.yaml").write_text("name: test-skill\nprompt: Test\n")
+            result = load_skills(tmpdir)
+            # Should have global dir + project dir
+            assert len(result.searched_dirs) >= 2
+            sources = {sd.source for sd in result.searched_dirs}
+            assert "global" in sources
+            assert "project" in sources
+
+    def test_registry_searched_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir) / ".anteroom" / "skills"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "test.yaml").write_text("name: test-skill\nprompt: Test\n")
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            # Should have default + global + project
+            assert len(reg.searched_dirs) >= 3
+            sources = {sd.source for sd in reg.searched_dirs}
+            assert "default" in sources
+            assert "global" in sources
+            assert "project" in sources

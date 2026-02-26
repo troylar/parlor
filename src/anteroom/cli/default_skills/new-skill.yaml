@@ -71,5 +71,6 @@ prompt: |
   5. Determine the save location:
      - Project-specific: `.anteroom/skills/` or `.claude/skills/`
      - Global (all projects): `~/.anteroom/skills/`
-  6. Write the YAML file to disk
-  7. Tell the user to run `/skills` to verify it loaded correctly
+  6. Write the YAML file to disk. IMPORTANT: use `.yaml` extension (not `.yml`)
+  7. After writing, read the file back and parse it as YAML to confirm it is valid
+  8. Tell the user to run `/skills` to see it in the list (shows searched directories)

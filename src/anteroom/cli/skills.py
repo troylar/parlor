@@ -79,9 +79,20 @@ class Skill:
 
 
 @dataclass
+class _SearchedDir:
+    """Record of a directory that was checked during skill loading."""
+
+    path: str
+    source: str  # "default", "global", or "project"
+    skill_count: int
+    exists: bool
+
+
+@dataclass
 class _LoadResult:
     skills: list[Skill] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    searched_dirs: list[_SearchedDir] = field(default_factory=list)
 
 
 def _yaml_error_hint(error: yaml.YAMLError) -> str:
@@ -120,18 +131,20 @@ def _validate_skill_name(raw_name: str, stem: str) -> tuple[str, str | None]:
     if not name:
         name = stem
     if not _VALID_SKILL_NAME.match(name):
-        return "", f"Skipped {stem}.yaml: invalid skill name '{name}' (must match [a-z0-9][a-z0-9_-]*)"
+        return "", f"Skipped {stem}: invalid skill name '{name}' (must match [a-z0-9][a-z0-9_-]*)"
     if name in _BUILTIN_COMMANDS:
-        return "", f"Skipped {stem}.yaml: skill name '{name}' conflicts with built-in /{name} command"
+        return "", f"Skipped {stem}: skill name '{name}' conflicts with built-in /{name} command"
     return name, None
 
 
 def _load_skills_from_dir(skills_dir: Path, source: str) -> _LoadResult:
-    """Load all .yaml skill files from a directory."""
+    """Load all .yaml/.yml skill files from a directory."""
     result = _LoadResult()
     if not skills_dir.is_dir():
+        result.searched_dirs.append(_SearchedDir(str(skills_dir), source, 0, False))
         return result
-    for path in sorted(skills_dir.glob("*.yaml")):
+    paths = sorted(set(skills_dir.glob("*.yaml")) | set(skills_dir.glob("*.yml")), key=lambda p: p.name)
+    for path in paths:
         try:
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
@@ -176,6 +189,7 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> _LoadResult:
             result.warnings.append(_format_yaml_error(path, e))
         except Exception as e:
             result.warnings.append(f"Failed to load {path.name}: {e}")
+    result.searched_dirs.append(_SearchedDir(str(skills_dir), source, len(result.skills), True))
     return result
 
 
@@ -216,6 +230,7 @@ def load_skills(working_dir: str | None = None) -> _LoadResult:
         result = _load_skills_from_dir(d, source)
         combined.skills.extend(result.skills)
         combined.warnings.extend(result.warnings)
+        combined.searched_dirs.extend(result.searched_dirs)
     return combined
 
 
@@ -258,6 +273,7 @@ class SkillRegistry:
     def __init__(self) -> None:
         self._skills: dict[str, Skill] = {}
         self.load_warnings: list[str] = []
+        self.searched_dirs: list[_SearchedDir] = []
 
     def load(self, working_dir: str | None = None) -> list[Skill]:
         """Load skills from default, global, and project directories.
@@ -269,10 +285,12 @@ class SkillRegistry:
         """
         new_skills: dict[str, Skill] = {}
         new_warnings: list[str] = []
+        new_searched: list[_SearchedDir] = []
 
         default_dir = Path(__file__).parent / "default_skills"
         default_result = _load_skills_from_dir(default_dir, "default")
         new_warnings.extend(default_result.warnings)
+        new_searched.extend(default_result.searched_dirs)
         default_names = set()
         for skill in default_result.skills:
             new_skills[skill.name] = skill
@@ -280,6 +298,7 @@ class SkillRegistry:
 
         user_result = load_skills(working_dir)
         new_warnings.extend(user_result.warnings)
+        new_searched.extend(user_result.searched_dirs)
         for skill in user_result.skills:
             if skill.name in default_names:
                 new_warnings.append(f"User skill '{skill.name}' ({skill.source}) overrides built-in")
@@ -293,6 +312,7 @@ class SkillRegistry:
         # Atomic swap — Python dict assignment is GIL-protected
         self._skills = new_skills
         self.load_warnings = new_warnings
+        self.searched_dirs = new_searched
 
         return sorted(new_skills.values(), key=lambda s: s.name)
 

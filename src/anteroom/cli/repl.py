@@ -2714,6 +2714,15 @@ async def _run_repl(
                             renderer.console.print(f"\n[yellow]Warnings ({n}):[/yellow]")
                             for warn in skill_registry.load_warnings:
                                 renderer.console.print(f"  [yellow]- {warn}[/yellow]")
+                        if skill_registry.searched_dirs:
+                            renderer.console.print(f"\n[{CHROME}]Searched directories:[/{CHROME}]")
+                            for sd in skill_registry.searched_dirs:
+                                if sd.source == "default":
+                                    continue
+                                status = f"{sd.skill_count} skill(s)" if sd.exists else "not found"
+                                renderer.console.print(
+                                    f"  [{CHROME}]{sd.path} ({sd.source}) — {status}[/{CHROME}]"
+                                )
                         renderer.console.print()
                         # Rebuild invoke_skill tool schema so LLM sees updated skill list
                         if config.cli.skills.auto_invoke and tools_openai is not None:
