@@ -646,6 +646,68 @@ def _run_projects(config: object) -> None:
     console.print(table)
 
 
+def _run_artifact(config: object, args: object) -> None:
+    """Handle `aroom artifact` subcommands."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from .db import get_db
+    from .services import artifact_storage
+
+    action = getattr(args, "artifact_action", None)
+    if not action:
+        print("Usage: aroom artifact {list,show}")
+        return
+
+    db = get_db(config.app.data_dir / "anteroom.db")
+    console = Console()
+
+    if action == "list":
+        arts = artifact_storage.list_artifacts(
+            db,
+            artifact_type=getattr(args, "type", None),
+            namespace=getattr(args, "namespace", None),
+            source=getattr(args, "source", None),
+        )
+        if not arts:
+            console.print("[dim]No artifacts found.[/dim]")
+            return
+        table = Table(title="Artifacts")
+        table.add_column("FQN", style="bold")
+        table.add_column("Type")
+        table.add_column("Source")
+        table.add_column("Hash", max_width=12)
+        table.add_column("Updated")
+        for a in arts:
+            table.add_row(
+                a["fqn"],
+                a["type"],
+                a["source"],
+                a.get("content_hash", "")[:12],
+                a.get("updated_at", "")[:10],
+            )
+        console.print(table)
+
+    elif action == "show":
+        fqn = args.fqn
+        art = artifact_storage.get_artifact_by_fqn(db, fqn)
+        if not art:
+            console.print(f"[red]Artifact not found:[/red] {fqn}")
+            sys.exit(1)
+        console.print(f"[bold]FQN:[/bold]       {art['fqn']}")
+        console.print(f"[bold]Type:[/bold]      {art['type']}")
+        console.print(f"[bold]Namespace:[/bold] {art['namespace']}")
+        console.print(f"[bold]Name:[/bold]      {art['name']}")
+        console.print(f"[bold]Source:[/bold]    {art['source']}")
+        console.print(f"[bold]Hash:[/bold]      {art['content_hash']}")
+        console.print(f"[bold]Updated:[/bold]   {art['updated_at']}")
+        versions = artifact_storage.list_artifact_versions(db, art["id"])
+        console.print(f"[bold]Versions:[/bold]  {len(versions)}")
+        console.print()
+        console.print("[bold]Content:[/bold]")
+        console.print(art["content"])
+
+
 def _run_chat(
     config,
     prompt: str | None = None,
@@ -983,6 +1045,16 @@ def main() -> None:
     # `aroom projects` subcommand
     subparsers.add_parser("projects", help="List named projects")
 
+    artifact_parser = subparsers.add_parser("artifact", help="Manage artifacts")
+    artifact_subparsers = artifact_parser.add_subparsers(dest="artifact_action")
+    art_list_parser = artifact_subparsers.add_parser("list", help="List all artifacts")
+    _art_types = ["skill", "rule", "instruction", "context", "memory", "mcp_server", "config_overlay"]
+    art_list_parser.add_argument("--type", choices=_art_types)
+    art_list_parser.add_argument("--namespace")
+    art_list_parser.add_argument("--source", choices=["built_in", "global", "team", "project", "local", "inline"])
+    art_show_parser = artifact_subparsers.add_parser("show", help="Show artifact details by FQN")
+    art_show_parser.add_argument("fqn", help="Fully-qualified name, e.g. @core/skill/greet")
+
     args = parser.parse_args()
 
     # Configure logging early, before any module-level loggers are used.
@@ -1108,6 +1180,10 @@ def main() -> None:
 
     if args.command == "projects":
         _run_projects(config)
+        return
+
+    if args.command == "artifact":
+        _run_artifact(config, args)
         return
 
     # Resolve --project <name> to project_id

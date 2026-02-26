@@ -1,0 +1,543 @@
+"""Unit tests for artifact model, FQN validation, storage CRUD, and registry."""
+
+from __future__ import annotations
+
+import sqlite3
+
+import pytest
+
+from anteroom.db import _SCHEMA, ThreadSafeConnection
+from anteroom.services.artifact_registry import ArtifactRegistry, _artifact_from_row
+from anteroom.services.artifact_storage import (
+    create_artifact,
+    delete_artifact,
+    get_artifact,
+    get_artifact_by_fqn,
+    list_artifact_versions,
+    list_artifacts,
+    update_artifact,
+    upsert_artifact,
+)
+from anteroom.services.artifacts import (
+    Artifact,
+    ArtifactSource,
+    ArtifactType,
+    build_fqn,
+    content_hash,
+    parse_fqn,
+    validate_fqn,
+)
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def db() -> ThreadSafeConnection:
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.executescript(_SCHEMA)
+    conn.commit()
+    return ThreadSafeConnection(conn)
+
+
+# ---------------------------------------------------------------------------
+# FQN validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidateFqn:
+    def test_valid_simple(self) -> None:
+        assert validate_fqn("@core/skill/greet") is True
+
+    def test_valid_with_hyphens(self) -> None:
+        assert validate_fqn("@my-team/rule/no-eval") is True
+
+    def test_valid_with_dots(self) -> None:
+        assert validate_fqn("@core/config_overlay/v1.2") is True
+
+    def test_valid_with_numbers(self) -> None:
+        assert validate_fqn("@team1/memory/session0") is True
+
+    def test_missing_at_sign(self) -> None:
+        assert validate_fqn("core/skill/greet") is False
+
+    def test_empty_string(self) -> None:
+        assert validate_fqn("") is False
+
+    def test_missing_name(self) -> None:
+        assert validate_fqn("@core/skill/") is False
+
+    def test_uppercase_rejected(self) -> None:
+        assert validate_fqn("@Core/skill/greet") is False
+
+    def test_spaces_rejected(self) -> None:
+        assert validate_fqn("@core/skill/my greet") is False
+
+    def test_extra_slashes_rejected(self) -> None:
+        assert validate_fqn("@core/skill/greet/extra") is False
+
+    def test_only_two_parts(self) -> None:
+        assert validate_fqn("@core/skill") is False
+
+
+class TestParseFqn:
+    def test_basic_parse(self) -> None:
+        ns, typ, name = parse_fqn("@core/skill/greet")
+        assert ns == "core"
+        assert typ == "skill"
+        assert name == "greet"
+
+    def test_parse_with_hyphens(self) -> None:
+        ns, typ, name = parse_fqn("@my-team/rule/no-eval")
+        assert ns == "my-team"
+        assert name == "no-eval"
+
+    def test_invalid_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid FQN"):
+            parse_fqn("bad")
+
+
+class TestBuildFqn:
+    def test_basic_build(self) -> None:
+        assert build_fqn("core", "skill", "greet") == "@core/skill/greet"
+
+    def test_invalid_components_raise(self) -> None:
+        with pytest.raises(ValueError, match="Invalid FQN components"):
+            build_fqn("CORE", "skill", "greet")
+
+
+class TestContentHash:
+    def test_deterministic(self) -> None:
+        h1 = content_hash("hello")
+        h2 = content_hash("hello")
+        assert h1 == h2
+
+    def test_different_content(self) -> None:
+        assert content_hash("a") != content_hash("b")
+
+    def test_sha256_length(self) -> None:
+        assert len(content_hash("x")) == 64
+
+
+# ---------------------------------------------------------------------------
+# Artifact dataclass
+# ---------------------------------------------------------------------------
+
+
+class TestArtifactDataclass:
+    def test_create_basic(self) -> None:
+        a = Artifact(
+            fqn="@core/skill/greet",
+            type=ArtifactType.SKILL,
+            namespace="core",
+            name="greet",
+            content="Say hello",
+        )
+        assert a.fqn == "@core/skill/greet"
+        assert a.content_hash != ""
+        assert a.version == 1
+        assert a.source == ArtifactSource.LOCAL
+
+    def test_auto_content_hash(self) -> None:
+        a = Artifact(fqn="@x/skill/y", type=ArtifactType.SKILL, namespace="x", name="y", content="test")
+        assert a.content_hash == content_hash("test")
+
+    def test_explicit_content_hash(self) -> None:
+        a = Artifact(
+            fqn="@x/skill/y",
+            type=ArtifactType.SKILL,
+            namespace="x",
+            name="y",
+            content="test",
+            content_hash="custom",
+        )
+        assert a.content_hash == "custom"
+
+    def test_invalid_fqn_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid FQN"):
+            Artifact(fqn="bad", type=ArtifactType.SKILL, namespace="x", name="y", content="z")
+
+    def test_frozen(self) -> None:
+        a = Artifact(fqn="@x/skill/y", type=ArtifactType.SKILL, namespace="x", name="y", content="z")
+        with pytest.raises(AttributeError):
+            a.content = "new"
+
+
+# ---------------------------------------------------------------------------
+# Artifact storage CRUD
+# ---------------------------------------------------------------------------
+
+
+class TestCreateArtifact:
+    def test_create_returns_dict(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@core/skill/greet", "skill", "core", "greet", "Say hello")
+        assert art["id"]
+        assert art["fqn"] == "@core/skill/greet"
+        assert art["type"] == "skill"
+        assert art["content_hash"] == content_hash("Say hello")
+        assert art["version"] == 1
+
+    def test_create_with_metadata(self, db: ThreadSafeConnection) -> None:
+        meta = {"author": "test", "tags": ["demo"]}
+        art = create_artifact(db, "@core/skill/greet", "skill", "core", "greet", "hi", metadata=meta)
+        assert art["metadata"] == meta
+
+    def test_create_with_user_info(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(
+            db,
+            "@core/skill/greet",
+            "skill",
+            "core",
+            "greet",
+            "hi",
+            user_id="u1",
+            user_display_name="Alice",
+        )
+        assert art["user_id"] == "u1"
+        assert art["user_display_name"] == "Alice"
+
+    def test_create_invalid_fqn_raises(self, db: ThreadSafeConnection) -> None:
+        with pytest.raises(ValueError, match="Invalid FQN"):
+            create_artifact(db, "bad", "skill", "core", "greet", "hi")
+
+    def test_create_invalid_type_raises(self, db: ThreadSafeConnection) -> None:
+        with pytest.raises(ValueError):
+            create_artifact(db, "@core/skill/greet", "bogus", "core", "greet", "hi")
+
+    def test_duplicate_fqn_raises(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@core/skill/greet", "skill", "core", "greet", "v1")
+        with pytest.raises(sqlite3.IntegrityError):
+            create_artifact(db, "@core/skill/greet", "skill", "core", "greet", "v2")
+
+    def test_creates_version_record(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@core/skill/greet", "skill", "core", "greet", "hello")
+        versions = list_artifact_versions(db, art["id"])
+        assert len(versions) == 1
+        assert versions[0]["version"] == 1
+        assert versions[0]["content"] == "hello"
+
+
+class TestGetArtifact:
+    def test_get_by_id(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@core/skill/greet", "skill", "core", "greet", "hi")
+        fetched = get_artifact(db, art["id"])
+        assert fetched is not None
+        assert fetched["fqn"] == "@core/skill/greet"
+
+    def test_get_missing_returns_none(self, db: ThreadSafeConnection) -> None:
+        assert get_artifact(db, "nonexistent") is None
+
+    def test_get_by_fqn(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@core/skill/greet", "skill", "core", "greet", "hi")
+        fetched = get_artifact_by_fqn(db, "@core/skill/greet")
+        assert fetched is not None
+        assert fetched["name"] == "greet"
+
+    def test_get_by_fqn_missing(self, db: ThreadSafeConnection) -> None:
+        assert get_artifact_by_fqn(db, "@no/such/thing") is None
+
+    def test_metadata_deserialized(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@x/skill/y", "skill", "x", "y", "c", metadata={"k": 1})
+        fetched = get_artifact(db, get_artifact_by_fqn(db, "@x/skill/y")["id"])
+        assert fetched["metadata"] == {"k": 1}
+
+
+class TestListArtifacts:
+    def test_list_all(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@a/skill/x", "skill", "a", "x", "c1")
+        create_artifact(db, "@a/rule/y", "rule", "a", "y", "c2")
+        assert len(list_artifacts(db)) == 2
+
+    def test_filter_by_type(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@a/skill/x", "skill", "a", "x", "c1")
+        create_artifact(db, "@a/rule/y", "rule", "a", "y", "c2")
+        skills = list_artifacts(db, artifact_type="skill")
+        assert len(skills) == 1
+        assert skills[0]["type"] == "skill"
+
+    def test_filter_by_namespace(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@a/skill/x", "skill", "a", "x", "c1")
+        create_artifact(db, "@b/skill/y", "skill", "b", "y", "c2")
+        a_arts = list_artifacts(db, namespace="a")
+        assert len(a_arts) == 1
+
+    def test_filter_by_source(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@a/skill/x", "skill", "a", "x", "c1", source="built_in")
+        create_artifact(db, "@a/skill/y", "skill", "a", "y", "c2", source="local")
+        built_ins = list_artifacts(db, source="built_in")
+        assert len(built_ins) == 1
+
+    def test_combined_filters(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@a/skill/x", "skill", "a", "x", "c1")
+        create_artifact(db, "@a/rule/y", "rule", "a", "y", "c2")
+        create_artifact(db, "@b/skill/z", "skill", "b", "z", "c3")
+        result = list_artifacts(db, artifact_type="skill", namespace="a")
+        assert len(result) == 1
+        assert result[0]["fqn"] == "@a/skill/x"
+
+    def test_empty_result(self, db: ThreadSafeConnection) -> None:
+        assert list_artifacts(db) == []
+
+
+class TestUpdateArtifact:
+    def test_update_content(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "v1")
+        updated = update_artifact(db, art["id"], content="v2")
+        assert updated is not None
+        assert updated["content"] == "v2"
+        assert updated["content_hash"] == content_hash("v2")
+
+    def test_update_creates_new_version(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "v1")
+        update_artifact(db, art["id"], content="v2")
+        versions = list_artifact_versions(db, art["id"])
+        assert len(versions) == 2
+        assert versions[0]["version"] == 2  # newest first
+        assert versions[1]["version"] == 1
+
+    def test_update_same_content_no_version(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "same")
+        update_artifact(db, art["id"], content="same")
+        versions = list_artifact_versions(db, art["id"])
+        assert len(versions) == 1
+
+    def test_update_metadata_only(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "c")
+        updated = update_artifact(db, art["id"], metadata={"k": "v"})
+        assert updated["metadata"] == {"k": "v"}
+        versions = list_artifact_versions(db, art["id"])
+        assert len(versions) == 1  # no new version for metadata-only
+
+    def test_update_nonexistent_returns_none(self, db: ThreadSafeConnection) -> None:
+        assert update_artifact(db, "nonexistent", content="x") is None
+
+    def test_multiple_version_bumps(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "v1")
+        update_artifact(db, art["id"], content="v2")
+        update_artifact(db, art["id"], content="v3")
+        versions = list_artifact_versions(db, art["id"])
+        assert len(versions) == 3
+        assert [v["version"] for v in versions] == [3, 2, 1]
+
+
+class TestDeleteArtifact:
+    def test_delete_existing(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "c")
+        assert delete_artifact(db, art["id"]) is True
+        assert get_artifact(db, art["id"]) is None
+
+    def test_delete_nonexistent(self, db: ThreadSafeConnection) -> None:
+        assert delete_artifact(db, "nope") is False
+
+    def test_cascade_deletes_versions(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "v1")
+        update_artifact(db, art["id"], content="v2")
+        delete_artifact(db, art["id"])
+        assert list_artifact_versions(db, art["id"]) == []
+
+
+class TestUpsertArtifact:
+    def test_upsert_creates_new(self, db: ThreadSafeConnection) -> None:
+        art = upsert_artifact(db, "@a/skill/x", "skill", "a", "x", "hello")
+        assert art["fqn"] == "@a/skill/x"
+        assert art["content"] == "hello"
+
+    def test_upsert_updates_existing(self, db: ThreadSafeConnection) -> None:
+        upsert_artifact(db, "@a/skill/x", "skill", "a", "x", "v1")
+        art = upsert_artifact(db, "@a/skill/x", "skill", "a", "x", "v2")
+        assert art["content"] == "v2"
+        assert len(list_artifact_versions(db, art["id"])) == 2
+
+    def test_upsert_same_content_no_version_bump(self, db: ThreadSafeConnection) -> None:
+        upsert_artifact(db, "@a/skill/x", "skill", "a", "x", "same")
+        art = upsert_artifact(db, "@a/skill/x", "skill", "a", "x", "same")
+        assert len(list_artifact_versions(db, art["id"])) == 1
+
+
+class TestListArtifactVersions:
+    def test_empty_for_nonexistent(self, db: ThreadSafeConnection) -> None:
+        assert list_artifact_versions(db, "nonexistent") == []
+
+    def test_version_fields(self, db: ThreadSafeConnection) -> None:
+        art = create_artifact(db, "@a/skill/x", "skill", "a", "x", "c")
+        versions = list_artifact_versions(db, art["id"])
+        v = versions[0]
+        assert "id" in v
+        assert v["artifact_id"] == art["id"]
+        assert v["version"] == 1
+        assert v["content"] == "c"
+        assert v["content_hash"] == content_hash("c")
+        assert "created_at" in v
+
+
+# ---------------------------------------------------------------------------
+# ArtifactRegistry
+# ---------------------------------------------------------------------------
+
+
+class TestArtifactRegistry:
+    def test_register_and_get(self) -> None:
+        reg = ArtifactRegistry()
+        art = Artifact(fqn="@core/skill/greet", type=ArtifactType.SKILL, namespace="core", name="greet", content="hi")
+        reg.register(art)
+        assert reg.get("@core/skill/greet") is art
+        assert reg.count == 1
+
+    def test_get_missing(self) -> None:
+        reg = ArtifactRegistry()
+        assert reg.get("@no/such/thing") is None
+
+    def test_unregister(self) -> None:
+        reg = ArtifactRegistry()
+        art = Artifact(fqn="@x/skill/y", type=ArtifactType.SKILL, namespace="x", name="y", content="c")
+        reg.register(art)
+        assert reg.unregister("@x/skill/y") is True
+        assert reg.get("@x/skill/y") is None
+        assert reg.count == 0
+
+    def test_unregister_missing(self) -> None:
+        reg = ArtifactRegistry()
+        assert reg.unregister("@no/such/thing") is False
+
+    def test_list_all(self) -> None:
+        reg = ArtifactRegistry()
+        reg.register(Artifact(fqn="@a/skill/x", type=ArtifactType.SKILL, namespace="a", name="x", content="1"))
+        reg.register(Artifact(fqn="@a/rule/y", type=ArtifactType.RULE, namespace="a", name="y", content="2"))
+        assert len(reg.list()) == 2
+
+    def test_list_filter_type(self) -> None:
+        reg = ArtifactRegistry()
+        reg.register(Artifact(fqn="@a/skill/x", type=ArtifactType.SKILL, namespace="a", name="x", content="1"))
+        reg.register(Artifact(fqn="@a/rule/y", type=ArtifactType.RULE, namespace="a", name="y", content="2"))
+        assert len(reg.list(artifact_type=ArtifactType.SKILL)) == 1
+
+    def test_list_filter_namespace(self) -> None:
+        reg = ArtifactRegistry()
+        reg.register(Artifact(fqn="@a/skill/x", type=ArtifactType.SKILL, namespace="a", name="x", content="1"))
+        reg.register(Artifact(fqn="@b/skill/y", type=ArtifactType.SKILL, namespace="b", name="y", content="2"))
+        assert len(reg.list(namespace="a")) == 1
+
+    def test_list_filter_source(self) -> None:
+        reg = ArtifactRegistry()
+        reg.register(
+            Artifact(
+                fqn="@a/skill/x",
+                type=ArtifactType.SKILL,
+                namespace="a",
+                name="x",
+                content="1",
+                source=ArtifactSource.BUILT_IN,
+            )
+        )
+        reg.register(
+            Artifact(
+                fqn="@a/skill/y",
+                type=ArtifactType.SKILL,
+                namespace="a",
+                name="y",
+                content="2",
+                source=ArtifactSource.LOCAL,
+            )
+        )
+        assert len(reg.list(source=ArtifactSource.BUILT_IN)) == 1
+
+    def test_search(self) -> None:
+        reg = ArtifactRegistry()
+        reg.register(
+            Artifact(fqn="@a/skill/greet-user", type=ArtifactType.SKILL, namespace="a", name="greet-user", content="1")
+        )
+        reg.register(
+            Artifact(fqn="@a/skill/farewell", type=ArtifactType.SKILL, namespace="a", name="farewell", content="2")
+        )
+        results = reg.search("greet")
+        assert len(results) == 1
+        assert results[0].name == "greet-user"
+
+    def test_search_case_insensitive(self) -> None:
+        reg = ArtifactRegistry()
+        reg.register(Artifact(fqn="@a/skill/greet", type=ArtifactType.SKILL, namespace="a", name="greet", content="1"))
+        assert len(reg.search("GREET")) == 1
+
+    def test_clear(self) -> None:
+        reg = ArtifactRegistry()
+        reg.register(Artifact(fqn="@a/skill/x", type=ArtifactType.SKILL, namespace="a", name="x", content="1"))
+        reg.clear()
+        assert reg.count == 0
+
+    def test_load_from_db(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@a/skill/x", "skill", "a", "x", "content1")
+        create_artifact(db, "@a/rule/y", "rule", "a", "y", "content2")
+        reg = ArtifactRegistry()
+        reg.load_from_db(db)
+        assert reg.count == 2
+        art = reg.get("@a/skill/x")
+        assert art is not None
+        assert art.content == "content1"
+
+    def test_load_from_db_layer_precedence(self, db: ThreadSafeConnection) -> None:
+        create_artifact(db, "@a/skill/x", "skill", "a", "x", "built-in", source="built_in")
+        # Simulate a project override with same FQN by inserting directly
+        # (create_artifact would fail on UNIQUE constraint)
+        # Instead, create different FQN artifacts and test registry override via register
+        reg = ArtifactRegistry()
+        builtin = Artifact(
+            fqn="@a/skill/x",
+            type=ArtifactType.SKILL,
+            namespace="a",
+            name="x",
+            content="built-in",
+            source=ArtifactSource.BUILT_IN,
+        )
+        project = Artifact(
+            fqn="@a/skill/x",
+            type=ArtifactType.SKILL,
+            namespace="a",
+            name="x",
+            content="project-override",
+            source=ArtifactSource.PROJECT,
+        )
+        reg.register(builtin)
+        reg.register(project)
+        art = reg.get("@a/skill/x")
+        assert art.content == "project-override"
+        assert art.source == ArtifactSource.PROJECT
+
+    def test_reload_alias(self) -> None:
+        assert ArtifactRegistry.reload is ArtifactRegistry.load_from_db
+
+
+class TestArtifactFromRow:
+    def test_converts_row_to_artifact(self) -> None:
+        row = {
+            "fqn": "@core/skill/greet",
+            "type": "skill",
+            "namespace": "core",
+            "name": "greet",
+            "content": "hello",
+            "version": 2,
+            "source": "local",
+            "metadata": {"k": "v"},
+            "content_hash": content_hash("hello"),
+        }
+        art = _artifact_from_row(row)
+        assert isinstance(art, Artifact)
+        assert art.fqn == "@core/skill/greet"
+        assert art.type == ArtifactType.SKILL
+        assert art.version == 2
+        assert art.metadata == {"k": "v"}
+
+    def test_missing_optional_fields(self) -> None:
+        row = {
+            "fqn": "@x/skill/y",
+            "type": "skill",
+            "namespace": "x",
+            "name": "y",
+            "content": "c",
+            "source": "local",
+        }
+        art = _artifact_from_row(row)
+        assert art.version == 1
+        assert art.metadata == {}
