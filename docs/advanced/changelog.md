@@ -17,6 +17,21 @@ Release highlights for every Anteroom version. For full details including develo
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.66.0)
 
+### v1.65.2
+
+**New:**
+
+- `/new-skill` built-in skill: interactive guide for creating custom skills with best practices (#489)
+- `{args}` template variable support in skill prompts (#489)
+- `/reload-skills` command and auto-reload on `/skills` for hot-reload without restart (#489)
+
+**Fixed:**
+
+- YAML parse errors when skills use `{args}` template variables (#489)
+- Actionable error messages with line/column numbers for skill YAML syntax errors (#489)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.65.2)
+
 ### v1.65.0
 
 **New:**
