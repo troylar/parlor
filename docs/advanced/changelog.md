@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 25, 2026
 
+### v1.51.1
+
+**New:**
+
+- Structured JSONL audit log with HMAC-SHA256 chain tamper protection for enterprise security compliance (#444)
+- `aroom audit verify` and `aroom audit purge` CLI commands for log integrity and retention management (#444)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.51.1)
+
 ### v1.51.0
 
 **New:**
