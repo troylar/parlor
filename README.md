@@ -188,6 +188,7 @@ Built to [OWASP ASVS Level 1](SECURITY.md) standards. Not bolted on &mdash; bake
 - **Configurable approval modes**: auto, ask_for_writes, ask_for_dangerous
 - **Session + CSRF + rate limiting + CSP**
 - **Destructive command detection** before execution
+- **Bash sandboxing**: execution timeouts, output limits, path/command blocking, network/package restrictions
 - **MCP SSRF protection** built in
 
 ---
