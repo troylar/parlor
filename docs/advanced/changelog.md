@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.57.0
+
+**New:**
+
+- Context trust tagging: all LLM context classified as trusted or untrusted with defensive XML envelopes to prevent indirect prompt injection (#366)
+- Per-MCP-server trust levels configurable via `trust_level` field (default: untrusted) (#366)
+- Structural system prompt separation with `[SYSTEM INSTRUCTIONS - TRUSTED]` / `[EXTERNAL CONTEXT - UNTRUSTED]` markers (#366)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.57.0)
+
 ### v1.56.0
 
 **New:**
