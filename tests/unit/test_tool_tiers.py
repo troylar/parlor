@@ -25,9 +25,9 @@ class TestToolTier:
         assert DEFAULT_TOOL_TIERS["edit_file"] == ToolTier.WRITE
         assert DEFAULT_TOOL_TIERS["bash"] == ToolTier.EXECUTE
 
-    def test_canvas_tools_are_write_tier(self) -> None:
+    def test_canvas_tools_are_read_tier(self) -> None:
         for name in ("create_canvas", "update_canvas", "patch_canvas"):
-            assert DEFAULT_TOOL_TIERS[name] == ToolTier.WRITE
+            assert DEFAULT_TOOL_TIERS[name] == ToolTier.READ
 
 
 class TestGetToolTier:

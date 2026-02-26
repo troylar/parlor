@@ -138,7 +138,7 @@ class TestCanvasNeedsApproval:
         registry._session_allowed = set()
         assert _canvas_needs_approval(safety, registry) is False
 
-    def test_returns_true_in_ask_for_writes_mode(self) -> None:
+    def test_returns_false_in_ask_for_writes_mode(self) -> None:
         from anteroom.tools.tiers import ApprovalMode
 
         safety = MagicMock()
@@ -147,7 +147,7 @@ class TestCanvasNeedsApproval:
         safety.allowed_tools = None
         registry = MagicMock()
         registry._session_allowed = set()
-        assert _canvas_needs_approval(safety, registry) is True
+        assert _canvas_needs_approval(safety, registry) is False
 
     def test_returns_false_when_session_allowed(self) -> None:
         from anteroom.tools.tiers import ApprovalMode
@@ -178,7 +178,7 @@ class TestCanvasNeedsApproval:
         safety.allowed_tools = None
         registry = MagicMock()
         registry._session_allowed = set()
-        assert _canvas_needs_approval(safety, registry) is True
+        assert _canvas_needs_approval(safety, registry) is False
 
     def test_handles_string_auto_mode(self) -> None:
         safety = MagicMock()

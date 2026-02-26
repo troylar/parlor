@@ -733,13 +733,17 @@ async def _execute_web_tool(ctx: ToolExecutorContext, tool_name: str, arguments:
 
 
 def _canvas_needs_approval(safety_config: Any, tool_registry: Any) -> bool:
-    """Check whether canvas tools would require approval in the current session."""
-    from ..tools.tiers import ApprovalMode, get_tool_tier, parse_approval_mode, should_require_approval
+    """Check whether canvas tools would require approval in the current session.
+
+    Canvas tools are READ tier by default, so this returns False unless the
+    user has explicitly overridden the tier via config or denied them.
+    """
+    from ..tools.tiers import get_tool_tier, parse_approval_mode, should_require_approval
 
     if safety_config is None:
         return True
     raw_mode = safety_config.approval_mode
-    mode = raw_mode if isinstance(raw_mode, ApprovalMode) else parse_approval_mode(str(raw_mode))
+    mode = parse_approval_mode(str(raw_mode)) if not isinstance(raw_mode, int) else raw_mode
     tier = get_tool_tier("create_canvas", getattr(safety_config, "tool_tiers", None))
     allowed = getattr(tool_registry, "_session_allowed", None) or set()
     config_allowed = set(safety_config.allowed_tools) if safety_config.allowed_tools else None
