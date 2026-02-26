@@ -51,7 +51,39 @@ def _load_config_or_exit(
         print(f"Configuration error: {e}", file=sys.stderr)
         print("Run 'aroom config' to fix your configuration.", file=sys.stderr)
         sys.exit(1)
+
+    # Compliance rules validation (fail closed)
+    from .services.compliance import validate_compliance
+
+    compliance_result = validate_compliance(config)
+    if not compliance_result.is_compliant:
+        print(f"Configuration compliance failure:\n{compliance_result.format_report()}", file=sys.stderr)
+        print("\nFix the configuration or contact your team administrator.", file=sys.stderr)
+        sys.exit(1)
+
     return config_path, config, enforced_fields
+
+
+def _run_config_validate(team_config_path: Path | None = None) -> None:
+    """Run compliance validation and report results."""
+    _config_path, config, _enforced = _load_config_or_exit(
+        team_config_path,
+        interactive=False,
+    )
+
+    from .services.compliance import validate_compliance
+
+    result = validate_compliance(config)
+    rule_count = len(config.compliance.rules)
+    if result.is_compliant:
+        if rule_count == 0:
+            print("Compliance: no rules defined. Add rules to compliance.rules in config.")
+        else:
+            print(f"Compliance: OK ({rule_count} rule(s) passed)")
+        sys.exit(0)
+    else:
+        print(result.format_report(), file=sys.stderr)
+        sys.exit(1)
 
 
 async def _validate_ai_connection(config) -> None:
@@ -705,7 +737,9 @@ def main() -> None:
     )
 
     # `aroom config` subcommand
-    subparsers.add_parser("config", help="View and edit configuration")
+    config_parser = subparsers.add_parser("config", help="View and edit configuration")
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    config_subparsers.add_parser("validate", help="Check compliance rules without starting the app")
 
     # `aroom chat` subcommand
     chat_parser = subparsers.add_parser("chat", help="Interactive CLI chat mode")
@@ -915,6 +949,11 @@ def main() -> None:
         return
 
     if args.command == "config":
+        if getattr(args, "config_command", None) == "validate":
+            tc_arg = getattr(args, "team_config", None)
+            tc_path = Path(tc_arg) if tc_arg else None
+            _run_config_validate(team_config_path=tc_path)
+            return
         from .cli.setup import run_config_editor
 
         run_config_editor()

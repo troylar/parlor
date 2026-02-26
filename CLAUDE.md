@@ -77,6 +77,7 @@ CLI (cli/)         ──┘         │
 - **`services/trust.py`** — Trust store for ANTEROOM.md files. SHA-256 hash verification. Fails closed
 - **`services/team_config.py`** — Team config discovery, loading, merging (deep_merge with named-list support), enforcement
 - **`services/config_validator.py`** — Schema validation for raw YAML config dicts. Collects all errors/warnings
+- **`services/compliance.py`** — Compliance rules engine: declarative config policy validation. `validate_compliance()` evaluates `ComplianceRule` entries (must_be, must_not_be, must_match, must_not_be_empty, must_contain) against the final merged `AppConfig`. Fails closed at startup. `aroom config validate` CLI subcommand. Redacts sensitive fields in violation output
 - **`services/config_watcher.py`** — Mtime-based config file watcher for live reload
 - **`services/discovery.py`** — Walk-up directory discovery. Searches `.anteroom/`, `.claude/`, `.parlor/` with precedence
 - **`services/project_config.py`** — Project-scoped config discovery with SHA-256 trust verification
@@ -152,9 +153,8 @@ Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`SessionConfig`** — Session management: `store` (memory/sqlite), `max_concurrent_sessions` (0 = unlimited), `idle_timeout` (1800s), `absolute_timeout` (43200s), `allowed_ips` (CIDR or exact; empty = allow all), `log_session_events` (bool)
 - **`StorageConfig`** — Data retention and encryption: `retention_days` (0 = disabled), `retention_check_interval` (default 3600s), `purge_attachments` (default true), `purge_embeddings` (default true), `encrypt_at_rest` (default false, requires sqlcipher3), `encryption_kdf` (default hkdf-sha256)
 - **`AuditConfig`** — Structured audit log: `enabled` (default false), `log_path`, `tamper_protection` (hmac/none), `rotation` (daily/size), `retention_days` (90), `redact_content` (true), per-event-type toggles
-- **`DlpConfig`** — Data Loss Prevention: `enabled` (default false), `scan_output` (default true), `scan_input` (default false), `action` (redact/block/warn, default redact), `patterns`/`custom_patterns` (regex list), `redaction_string` (default `[REDACTED]`), `log_detections` (default true)
-- **`PromptInjectionConfig`** — Prompt injection detection (nested in `SafetyConfig`): `enabled` (default false), `action` (block/warn/log, default warn), `canary_length` (default 16 bytes), `detect_encoding_attacks` (default true), `detect_instruction_override` (default true), `heuristic_threshold` (default 0.7), `log_detections` (default true). Emits `injection_detected` events when attacks are detected
 - **`OutputFilterConfig`** — Output content filtering: `enabled` (default false), `system_prompt_leak_detection` (default true), `leak_threshold` (0.0-1.0, default 0.4), `custom_patterns` (regex list for forbidden patterns), `action` (redact/block/warn, default warn), `redaction_string` (default `[FILTERED]`), `log_detections` (default true). Nested `OutputFilterPatternConfig`: `name`, `pattern` (regex), `description`
+- **`ComplianceConfig`** — Declarative compliance rules: `rules` (list of `ComplianceRule`). Each rule: `field` (dot-path), `must_be`, `must_not_be`, `must_match` (regex), `must_not_be_empty`, `must_contain`, `message`. Evaluated at startup; non-compliant configs fail closed
 
 ### Developer Workflow
 
