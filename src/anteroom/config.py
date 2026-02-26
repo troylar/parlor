@@ -275,6 +275,10 @@ class McpServerConfig:
     tools_exclude: list[str] = field(default_factory=list)  # blocklist; fnmatch patterns
     trust_level: str = "untrusted"  # "trusted" or "untrusted"; controls defensive prompt envelopes on tool results
 
+    def __post_init__(self) -> None:
+        if self.trust_level not in ("trusted", "untrusted"):
+            raise ValueError(f"trust_level must be 'trusted' or 'untrusted', got {self.trust_level!r}")
+
 
 @dataclass
 class SharedDatabaseConfig:

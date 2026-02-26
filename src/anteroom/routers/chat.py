@@ -25,6 +25,7 @@ from ..config import build_runtime_context
 from ..models import ChatRequest
 from ..services import storage
 from ..services.ai_service import AIService, create_ai_service
+from ..services.context_trust import trusted_section_marker, untrusted_section_marker, wrap_untrusted
 from ..tools.path_utils import safe_resolve_pathlib
 
 logger = logging.getLogger(__name__)
@@ -292,11 +293,9 @@ def _resolve_sources(
             break
         if len(content) > remaining:
             content = content[:remaining] + "\n[...truncated...]"
-        from ..services.context_trust import wrap_untrusted as _wrap_src
-
         safe_title = str(src.get("title", ""))[:200]
         src_id = src["id"]
-        source_parts.append(f"### {safe_title}\n" + _wrap_src(content, f"source:{src_id}", "reference"))
+        source_parts.append(f"### {safe_title}\n" + wrap_untrusted(content, f"source:{src_id}", "reference"))
         total_chars += len(content)
     if source_parts:
         return (
@@ -375,8 +374,6 @@ async def _build_chat_system_prompt(
         interface="web",
         tls_enabled=config.app.tls,
     )
-    from ..services.context_trust import trusted_section_marker, untrusted_section_marker
-
     extra = trusted_section_marker() + runtime_ctx + ("\n\n" + project_instructions if project_instructions else "")
 
     # ANTEROOM.md conventions
@@ -402,8 +399,6 @@ async def _build_chat_system_prompt(
         truncation_notice = "[...truncated, full content available via canvas tools...]\n" if truncated else ""
         # SECURITY-REVIEW: title, language, and content are all user-controlled data.
         # Wrapped in defensive prompt envelope to mitigate indirect prompt injection.
-        from ..services.context_trust import wrap_untrusted as _wrap_untrusted
-
         safe_title = str(canvas_data["title"] or "")[:200]
         safe_lang = str(canvas_data.get("language") or "text")[:50]
         canvas_body = f"{content}\n{truncation_notice}"
@@ -412,7 +407,7 @@ async def _build_chat_system_prompt(
             f"Title: {safe_title}\n"
             f"Language: {safe_lang}\n"
             f"Version: {canvas_data['version']}\n"
-            f"{_wrap_untrusted(canvas_body, 'canvas', 'user-data')}\n"
+            f"{wrap_untrusted(canvas_body, 'canvas', 'user-data')}\n"
             f"Use patch_canvas for small targeted edits or update_canvas for full rewrites."
         )
         extra += canvas_context

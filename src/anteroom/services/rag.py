@@ -9,6 +9,7 @@ from typing import Any
 
 from ..config import RagConfig
 from . import storage
+from .context_trust import wrap_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +132,6 @@ def format_rag_context(chunks: list[RetrievedChunk]) -> str:
         label = chunk.source_label
         # SECURITY-REVIEW: chunk.content is user-controlled (past messages / uploaded sources).
         # Wrapped in a defensive prompt envelope to mitigate indirect prompt injection.
-        from .context_trust import wrap_untrusted
-
         parts.append(wrap_untrusted(chunk.content, f"rag:{label}", "retrieved"))
 
     return (

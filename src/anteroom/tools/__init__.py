@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 ToolHandler = Callable[..., Coroutine[Any, Any, dict[str, Any]]]
 ConfirmCallback = Callable[[SafetyVerdict], Coroutine[Any, Any, bool]]
 
+# Tools whose output contains external/filesystem content — tagged untrusted for prompt injection defense.
+_UNTRUSTED_TOOLS = {"read_file", "grep", "glob_files", "bash", "write_file", "edit_file", "run_agent"}
+
 
 class ToolRegistry:
     """Registry of built-in tools with OpenAI function-call format."""
@@ -249,7 +252,9 @@ class ToolRegistry:
             extra_kwargs["_sandbox_config"] = self._safety_config.bash
         result = await handler(**arguments, **extra_kwargs)
         result["_approval_decision"] = approval_decision
-        result["_context_trust"] = "trusted"
+        result["_context_trust"] = "untrusted" if name in _UNTRUSTED_TOOLS else "trusted"
+        if name in _UNTRUSTED_TOOLS:
+            result["_context_origin"] = f"builtin:{name}"
 
         # Record the call for rate limiting
         if self._rate_limiter:

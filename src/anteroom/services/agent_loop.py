@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
 from .ai_service import AIService
+from .context_trust import wrap_untrusted
 from .token_budget import BudgetCheckResult, check_all_budgets
 
 logger = logging.getLogger(__name__)
@@ -449,8 +450,6 @@ async def run_agent_loop(
                     # Wrap untrusted tool results in a defensive envelope
                     context_trust = result.get("_context_trust")
                     if context_trust == "untrusted":
-                        from .context_trust import wrap_untrusted
-
                         origin = result.get("_context_origin", "unknown")
                         for key in ("content", "result"):
                             if key in result and isinstance(result[key], str):
