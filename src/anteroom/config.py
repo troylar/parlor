@@ -535,6 +535,36 @@ class PromptInjectionConfig:
 
 
 @dataclass
+class OutputFilterPatternConfig:
+    """A custom output filter pattern rule."""
+
+    name: str = ""
+    pattern: str = ""
+    description: str = ""
+
+
+@dataclass
+class OutputFilterConfig:
+    """Output content filter configuration (system prompt leak detection + custom patterns)."""
+
+    enabled: bool = False
+    system_prompt_leak_detection: bool = True
+    leak_threshold: float = 0.4
+    custom_patterns: list[OutputFilterPatternConfig] = field(default_factory=list)
+    action: str = "warn"  # "warn", "block", "redact"
+    redaction_string: str = "[FILTERED]"
+    log_detections: bool = True
+
+    def __post_init__(self) -> None:
+        if self.action not in ("warn", "block", "redact"):
+            logger.warning("Invalid output_filter action '%s', defaulting to 'warn'", self.action)
+            object.__setattr__(self, "action", "warn")
+        if not 0.0 < self.leak_threshold <= 1.0:
+            logger.warning("Invalid leak_threshold %s, defaulting to 0.4", self.leak_threshold)
+            object.__setattr__(self, "leak_threshold", 0.4)
+
+
+@dataclass
 class SafetyConfig:
     enabled: bool = True
     approval_mode: str = "ask_for_writes"
@@ -551,6 +581,7 @@ class SafetyConfig:
     tool_rate_limit: ToolRateLimitConfig = field(default_factory=ToolRateLimitConfig)
     dlp: DlpConfig = field(default_factory=DlpConfig)
     prompt_injection: PromptInjectionConfig = field(default_factory=PromptInjectionConfig)
+    output_filter: OutputFilterConfig = field(default_factory=OutputFilterConfig)
 
 
 @dataclass
@@ -679,6 +710,7 @@ class AuditConfig:
             "auth": True,
             "tool_calls": True,
             "dlp": True,
+            "output_filter": True,
         }
     )
 
@@ -1470,6 +1502,48 @@ def load_config(
         log_detections=dlp_log_detections,
     )
 
+    # Output filter config
+    of_raw = safety_raw.get("output_filter", {})
+    if not isinstance(of_raw, dict):
+        of_raw = {}
+    of_enabled = str(of_raw.get("enabled", os.environ.get("AI_CHAT_OUTPUT_FILTER_ENABLED", "false"))).lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    of_leak_detection = str(of_raw.get("system_prompt_leak_detection", "true")).lower() not in ("false", "0", "no")
+    try:
+        of_leak_threshold = max(0.01, min(1.0, float(of_raw.get("leak_threshold", 0.4))))
+    except (ValueError, TypeError):
+        of_leak_threshold = 0.4
+    of_action = str(of_raw.get("action", os.environ.get("AI_CHAT_OUTPUT_FILTER_ACTION", "warn"))).lower()
+    if of_action not in ("warn", "block", "redact"):
+        of_action = "warn"
+    of_redaction_string = str(of_raw.get("redaction_string", "[FILTERED]"))
+    of_log_detections = str(of_raw.get("log_detections", "true")).lower() not in ("false", "0", "no")
+
+    of_custom: list[OutputFilterPatternConfig] = []
+    for rule_raw in of_raw.get("custom_patterns", []):
+        if not isinstance(rule_raw, dict) or not rule_raw.get("name") or not rule_raw.get("pattern"):
+            continue
+        of_custom.append(
+            OutputFilterPatternConfig(
+                name=str(rule_raw["name"]),
+                pattern=str(rule_raw["pattern"]),
+                description=str(rule_raw.get("description", "")),
+            )
+        )
+
+    output_filter_config = OutputFilterConfig(
+        enabled=of_enabled,
+        system_prompt_leak_detection=of_leak_detection,
+        leak_threshold=of_leak_threshold,
+        custom_patterns=of_custom,
+        action=of_action,
+        redaction_string=of_redaction_string,
+        log_detections=of_log_detections,
+    )
+
     safety_config = SafetyConfig(
         enabled=safety_enabled,
         approval_mode=safety_approval_mode,
@@ -1485,6 +1559,7 @@ def load_config(
         subagent=subagent_config,
         tool_rate_limit=tool_rate_limit_config,
         dlp=dlp_config,
+        output_filter=output_filter_config,
     )
 
     # RAG config
@@ -1688,7 +1763,7 @@ def load_config(
     if not isinstance(audit_events_raw, dict):
         audit_events_raw = {}
     audit_events: dict[str, bool] = {}
-    for evt_key in ("auth", "tool_calls"):
+    for evt_key in ("auth", "tool_calls", "dlp", "output_filter"):
         audit_events[evt_key] = str(audit_events_raw.get(evt_key, "true")).lower() not in ("false", "0", "no")
     audit_config = AuditConfig(
         enabled=audit_enabled,

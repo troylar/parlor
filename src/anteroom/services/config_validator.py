@@ -161,6 +161,7 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "tool_rate_limit",
         "dlp",
         "prompt_injection",
+        "output_filter",
     },
     "safety.dlp": {
         "enabled",
@@ -179,6 +180,15 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "detect_encoding_attacks",
         "detect_instruction_override",
         "heuristic_threshold",
+        "log_detections",
+    },
+    "safety.output_filter": {
+        "enabled",
+        "system_prompt_leak_detection",
+        "leak_threshold",
+        "custom_patterns",
+        "action",
+        "redaction_string",
         "log_detections",
     },
     "safety.tool_rate_limit": {
@@ -271,6 +281,7 @@ _ENUM_FIELDS: list[tuple[str, str, set[str]]] = [
     ("safety.tool_rate_limit", "action", {"block", "warn"}),
     ("safety.dlp", "action", {"redact", "block", "warn"}),
     ("safety.prompt_injection", "action", {"block", "warn", "log"}),
+    ("safety.output_filter", "action", {"warn", "block", "redact"}),
     ("embeddings", "provider", {"local", "api"}),
     ("storage", "encryption_kdf", {"hkdf-sha256"}),
 ]

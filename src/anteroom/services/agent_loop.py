@@ -215,6 +215,7 @@ async def run_agent_loop(
     get_token_totals: Any | None = None,
     dlp_scanner: Any | None = None,
     injection_detector: Any | None = None,
+    output_filter: Any | None = None,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -412,6 +413,20 @@ async def run_agent_loop(
                             kind="dlp_warning",
                             data={"direction": "output", "matches": [m.rule_name for m in dlp_final.matches]},
                         )
+                # Output content filter scan (system prompt leak + custom patterns)
+                if output_filter is not None and output_filter.enabled:
+                    assistant_content, of_result = output_filter.apply(assistant_content)
+                    if of_result.matched and of_result.action == "block":
+                        yield AgentEvent(
+                            kind="output_filter_blocked",
+                            data={"matches": [m.rule_name for m in of_result.matches]},
+                        )
+                        return
+                    if of_result.matched and of_result.action == "warn":
+                        yield AgentEvent(
+                            kind="output_filter_warning",
+                            data={"matches": [m.rule_name for m in of_result.matches]},
+                        )
                 yield AgentEvent(kind="assistant_message", data={"content": assistant_content})
             yield AgentEvent(kind="done", data={})
 
@@ -429,6 +444,9 @@ async def run_agent_loop(
         # Final DLP scan on complete assistant text before storage (tool-call turn)
         if dlp_scanner is not None and dlp_scanner.enabled and dlp_scanner.scan_output and assistant_content:
             assistant_content, _ = dlp_scanner.apply(assistant_content, "output")
+        # Output filter scan on tool-call turn text
+        if output_filter is not None and output_filter.enabled and assistant_content:
+            assistant_content, _ = output_filter.apply(assistant_content)
 
         # Save assistant message with tool calls into message history
         yield AgentEvent(kind="assistant_message", data={"content": assistant_content})

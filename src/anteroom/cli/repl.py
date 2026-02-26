@@ -1208,6 +1208,13 @@ async def run_cli(
         if convs:
             resume_conversation_id = convs[0]["id"]
 
+    # Construct output content filter if configured (needs system prompt for leak detection)
+    _output_filter = None
+    if config.safety.output_filter.enabled:
+        from ..services.output_filter import OutputContentFilter
+
+        _output_filter = OutputContentFilter(config.safety.output_filter, system_prompt=extra_system_prompt)
+
     try:
         if prompt:
             await _run_one_shot(
@@ -1223,6 +1230,7 @@ async def run_cli(
                 cancel_event_ref=_active_cancel_event,
                 dlp_scanner=_dlp_scanner,
                 injection_detector=_injection_detector,
+                output_filter=_output_filter,
             )
         else:
             git_branch = _detect_git_branch()
@@ -1285,6 +1293,7 @@ async def run_cli(
                 skill_msg_queue_ref=_active_msg_queue,
                 dlp_scanner=_dlp_scanner,
                 injection_detector=_injection_detector,
+                output_filter=_output_filter,
             )
     finally:
         if retention_worker:
@@ -1310,6 +1319,7 @@ async def _run_one_shot(
     cancel_event_ref: list[asyncio.Event | None] | None = None,
     dlp_scanner: Any | None = None,
     injection_detector: Any | None = None,
+    output_filter: Any | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     id_kw = _identity_kwargs(config)
@@ -1367,6 +1377,7 @@ async def _run_one_shot(
                 get_token_totals=_get_token_totals,
                 dlp_scanner=dlp_scanner,
                 injection_detector=injection_detector,
+                output_filter=output_filter,
             ):
                 if event.kind == "thinking":
                     if not thinking:
@@ -1410,6 +1421,15 @@ async def _run_one_shot(
                         renderer.render_error(f"Tool output blocked: {detail}")
                     else:
                         renderer.render_error(f"Injection warning: {detail}")
+                elif event.kind == "output_filter_blocked":
+                    if thinking:
+                        await renderer.stop_thinking(error_msg="Response blocked by output content filter")
+                        thinking = False
+                    else:
+                        renderer.render_error("Response blocked by output content filter")
+                elif event.kind == "output_filter_warning":
+                    rules = ", ".join(event.data.get("matches", []))
+                    renderer.render_error(f"Output filter warning: forbidden content detected [{rules}]")
                 elif event.kind == "error":
                     error_msg = event.data.get("message", "Unknown error")
                     retryable = event.data.get("retryable", False)
@@ -1567,6 +1587,7 @@ async def _run_repl(
     skill_msg_queue_ref: list[asyncio.Queue[dict[str, Any]] | None] | None = None,
     dlp_scanner: Any | None = None,
     injection_detector: Any | None = None,
+    output_filter: Any | None = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -2980,6 +3001,7 @@ async def _run_repl(
                         get_token_totals=_get_token_totals,
                         dlp_scanner=dlp_scanner,
                         injection_detector=injection_detector,
+                        output_filter=output_filter,
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(
@@ -3097,6 +3119,17 @@ async def _run_repl(
                                 renderer.render_error(f"Tool output blocked: {detail}")
                             else:
                                 renderer.render_error(f"Injection warning: {detail}")
+                        elif event.kind == "output_filter_blocked":
+                            if thinking:
+                                total_elapsed += await renderer.stop_thinking(
+                                    error_msg="Response blocked by output content filter"
+                                )
+                                thinking = False
+                            else:
+                                renderer.render_error("Response blocked by output content filter")
+                        elif event.kind == "output_filter_warning":
+                            rules = ", ".join(event.data.get("matches", []))
+                            renderer.render_error(f"Output filter warning: forbidden content detected [{rules}]")
                         elif event.kind == "queued_message":
                             if thinking:
                                 total_elapsed += await renderer.stop_thinking()

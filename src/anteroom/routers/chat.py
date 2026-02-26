@@ -905,6 +905,15 @@ async def _stream_chat_events(ctx: StreamContext):
         # Retrieve app-scoped injection detector
         _injection_detector = getattr(getattr(ctx.request.app, "state", None), "injection_detector", None)
 
+        # Construct per-request output content filter (needs system prompt for leak detection)
+        _output_filter = None
+        _app_config = getattr(getattr(ctx.request.app, "state", None), "config", None)
+        _of_cfg = getattr(getattr(_app_config, "safety", None), "output_filter", None)
+        if _of_cfg is not None and _of_cfg.enabled:
+            from ..services.output_filter import OutputContentFilter
+
+            _output_filter = OutputContentFilter(_of_cfg, system_prompt=ctx.extra_system_prompt)
+
         agent_gen = run_agent_loop(
             ai_service=ctx.ai_service,
             messages=ctx.ai_messages,
@@ -921,6 +930,7 @@ async def _stream_chat_events(ctx: StreamContext):
             get_token_totals=_get_token_totals,
             dlp_scanner=_dlp_scanner,
             injection_detector=_injection_detector,
+            output_filter=_output_filter,
         )
         async for agent_event in _with_keepalive(agent_gen):
             if isinstance(agent_event, dict) and "comment" in agent_event:
@@ -1241,6 +1251,29 @@ async def _stream_chat_events(ctx: StreamContext):
                             }
                         ),
                     }
+
+            elif kind == "output_filter_blocked":
+                yield {
+                    "event": "error",
+                    "data": json.dumps(
+                        {
+                            "message": "Response blocked by output content filter",
+                            "code": "output_filter_blocked",
+                            "rules": data.get("matches", []),
+                        }
+                    ),
+                }
+
+            elif kind == "output_filter_warning":
+                yield {
+                    "event": "output_filter_warning",
+                    "data": json.dumps(
+                        {
+                            "message": "Forbidden content detected in response",
+                            "rules": data.get("matches", []),
+                        }
+                    ),
+                }
 
             elif kind == "queued_message":
                 current_assistant_msg = None
