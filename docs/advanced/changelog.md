@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.58.0
+
+**New:**
+
+- Data retention policy: auto-purge old conversations with configurable `storage.retention_days`, background worker, and `aroom db purge` CLI command (#455)
+- Encryption at rest: SQLCipher-based database encryption with HKDF-SHA256 key derivation from Ed25519 identity key, `aroom db encrypt` migration (#455)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.58.0)
+
 ### v1.57.1
 
 **Improved:**
