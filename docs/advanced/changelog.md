@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.67.0
+
+**New:**
+
+- Pack source git cache: clone, pull, and manage remote git repositories as pack sources (#509)
+- URL scheme allowlist and credential sanitization for secure git operations (#509)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.67.0)
+
 ### v1.66.2
 
 **Fixed:**
