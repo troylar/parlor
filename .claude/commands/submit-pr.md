@@ -275,6 +275,14 @@ This is the authoritative doc review — identifies stale/missing docs AND appli
 **docs/ pages:** For each changed source file, check corresponding docs:
 - `src/anteroom/cli/` → `docs/cli/`, `routers/` → `docs/api/` + `docs/web-ui/`, `tools/` → `docs/cli/tools.md`, `config.py` → `docs/configuration/`, security → `docs/security/`, `app.py` → `docs/security/` + `docs/advanced/architecture.md`
 
+**a-help skill** (`src/anteroom/cli/default_skills/a-help.yaml`): This is the inline quick-reference that ships with Anteroom. If any of the following source files changed, verify the corresponding a-help sections are current:
+- `tools/__init__.py` or `tools/*.py` → Built-in Tools table (tool names, descriptions, tiers)
+- `__main__.py` → CLI Flags table (all argparse flags)
+- `cli/commands.py` or `cli/repl.py` → REPL Commands table (slash commands)
+- `config.py` → Configuration Sections table (all dataclass fields and defaults)
+- `docs/` → Documentation Index (file list and descriptions)
+- If a-help is stale, update it directly. Cross-check against the actual source files, not just the diff.
+
 4. **Apply fixes** for MISSING/STALE items directly.
 5. Rate: UP TO DATE / FIXED (list files) / NEEDS MANUAL REVIEW.
 
@@ -314,7 +322,7 @@ If Agent C in Step 5 flagged documentation as FIXED (it applied updates to CLAUD
 
 1. Stage and commit the doc fixes. Extract the primary issue number from the branch name:
    ```bash
-   git add CLAUDE.md README.md VISION.md docs/
+   git add CLAUDE.md README.md VISION.md docs/ src/anteroom/cli/default_skills/a-help.yaml
    git commit -m "docs: update documentation for current changes (#<primary issue>)"
    ```
 2. Update the validation report to show docs as fixed rather than stale.

@@ -76,83 +76,270 @@ prompt: |
   - Missing required keys trigger an interactive prompt on startup (CLI) or return a structured error (web UI / exec mode)
   - Sensitive keys (containing `key`, `secret`, `password`, `token`) use masked input
 
-  **Team onboarding** — new team members bootstrap from team config:
-  ```bash
-  pip install anteroom
-  aroom init --team-config /path/to/team.yaml
-  ```
-  This loads the team config, skips prompts for enforced/provided fields, prompts only for
-  `required` keys, saves `team_config_path` in personal config, and runs a connection test.
-
-  Example team config (`.anteroom/team.yaml`):
-  ```yaml
-  ai:
-    base_url: https://api.company.com/v1
-    model: gpt-4-turbo
-  safety:
-    approval_mode: ask_for_writes
-  enforce:
-    - ai.base_url
-    - ai.model
-    - safety.approval_mode
-  required:
-    - path: ai.api_key
-      description: "Your personal API key — request at https://internal.company.com/api-keys"
-    - path: identity.display_name
-      description: "Your display name for conversation attribution"
-  ```
-
   See `docs/configuration/team-config.md` for full documentation.
 
   ### Personal Config File (~/.anteroom/config.yaml)
 
-  | Section       | Field                   | Type    | Default                    | Env Override                        |
-  |---------------|-------------------------|---------|----------------------------|-------------------------------------|
-  | ai            | base_url                | str     | (required)                 | AI_CHAT_BASE_URL                    |
-  | ai            | api_key                 | str     | (required)                 | AI_CHAT_API_KEY                     |
-  | ai            | api_key_command          | str     | —                          | —                                   |
-  | ai            | model                   | str     | (required)                 | AI_CHAT_MODEL                       |
-  | ai            | connect_timeout         | int     | 5s (1–30)                  | AI_CHAT_CONNECT_TIMEOUT             |
-  | ai            | write_timeout           | int     | 30s (5–120)                | AI_CHAT_WRITE_TIMEOUT               |
-  | ai            | pool_timeout            | int     | 10s (1–60)                 | AI_CHAT_POOL_TIMEOUT                |
-  | ai            | first_token_timeout     | int     | 30s (5–120)                | AI_CHAT_FIRST_TOKEN_TIMEOUT         |
-  | ai            | request_timeout         | int     | 120s (10–600)              | AI_CHAT_REQUEST_TIMEOUT             |
-  | ai            | chunk_stall_timeout     | int     | 30s (10–600)               | AI_CHAT_CHUNK_STALL_TIMEOUT         |
-  | ai            | retry_max_attempts      | int     | 3 (0–10)                   | AI_CHAT_RETRY_MAX_ATTEMPTS          |
-  | ai            | retry_backoff_base      | float   | 1.0s (0.1–30.0)           | AI_CHAT_RETRY_BACKOFF_BASE          |
-  | ai            | narration_cadence       | int     | 5 (0=off)                  | AI_CHAT_NARRATION_CADENCE           |
-  | app           | tls                     | bool    | false                      | —                                   |
-  | app           | port                    | int     | 8080                       | AI_CHAT_PORT                        |
-  | cli           | context_warn_tokens     | int     | 80000                      | —                                   |
-  | cli           | context_auto_compact_tokens | int | 100000                     | —                                   |
-  | cli           | tool_dedup              | bool    | true                       | AI_CHAT_TOOL_DEDUP                  |
-  | cli           | retry_delay             | float   | 5.0s (1–60)               | —                                   |
-  | cli           | max_retries             | int     | 3 (0–10)                   | —                                   |
-  | cli           | esc_hint_delay          | float   | 3.0s                       | —                                   |
-  | cli           | stall_display_threshold | float   | 5.0s (1+)                  | —                                   |
-  | cli           | stall_warning_threshold | float   | 15.0s (1+)                 | —                                   |
-  | cli           | tool_output_max_chars   | int     | 2000 (100+)                | —                                   |
-  | cli           | file_reference_max_chars| int     | 100000 (1000+)             | —                                   |
-  | cli           | model_context_window    | int     | 128000 (1000+)             | —                                   |
-  | safety        | enabled                 | bool    | true                       | —                                   |
-  | safety        | approval_mode           | str     | ask_for_writes             | AI_CHAT_SAFETY_APPROVAL_MODE        |
-  | safety        | approval_timeout        | int     | 120s (10–600)              | —                                   |
-  | safety        | allowed_tools           | list    | []                         | —                                   |
-  | safety        | denied_tools            | list    | []                         | —                                   |
-  | safety.subagent | max_concurrent        | int     | 5                          | —                                   |
-  | safety.subagent | max_total             | int     | 10                         | —                                   |
-  | safety.subagent | max_depth             | int     | 3                          | —                                   |
-  | safety.subagent | max_iterations        | int     | 15                         | —                                   |
-  | safety.subagent | timeout               | int     | 120s (10–600)              | —                                   |
-  | safety.subagent | max_output_chars      | int     | 4000                       | —                                   |
-  | safety.subagent | max_prompt_chars      | int     | 32000                      | —                                   |
-  | embeddings    | enabled                 | bool    | true                       | —                                   |
-  | embeddings    | provider                | str     | local                      | —                                   |
-  | embeddings    | local_model             | str     | BAAI/bge-small-en-v1.5     | —                                   |
-  | embeddings    | model                   | str     | —                          | —                                   |
-  | embeddings    | dimensions              | int     | 0 (auto)                   | —                                   |
-  | identity      | user_id                 | str     | (auto UUID4)               | AI_CHAT_USER_ID                     |
-  | identity      | display_name            | str     | —                          | AI_CHAT_DISPLAY_NAME                |
+  #### AI Settings (ai section)
+
+  | Field                   | Type    | Default                    | Env Override                        |
+  |-------------------------|---------|----------------------------|-------------------------------------|
+  | base_url                | str     | (required)                 | AI_CHAT_BASE_URL                    |
+  | api_key                 | str     | (required)                 | AI_CHAT_API_KEY                     |
+  | api_key_command          | str     | —                          | AI_CHAT_API_KEY_COMMAND             |
+  | model                   | str     | (required)                 | AI_CHAT_MODEL                       |
+  | system_prompt           | str     | (built-in)                 | AI_CHAT_SYSTEM_PROMPT               |
+  | user_system_prompt      | str     | ""                         | —                                   |
+  | verify_ssl              | bool    | true                       | AI_CHAT_VERIFY_SSL                  |
+  | max_tools               | int     | 128                        | AI_CHAT_MAX_TOOLS                   |
+  | temperature             | float   | None (provider default)    | AI_CHAT_TEMPERATURE                 |
+  | top_p                   | float   | None (provider default)    | AI_CHAT_TOP_P                       |
+  | seed                    | int     | None                       | AI_CHAT_SEED                        |
+  | connect_timeout         | int     | 5s (1-30)                  | AI_CHAT_CONNECT_TIMEOUT             |
+  | write_timeout           | int     | 30s (5-120)                | AI_CHAT_WRITE_TIMEOUT               |
+  | pool_timeout            | int     | 10s (1-60)                 | AI_CHAT_POOL_TIMEOUT                |
+  | first_token_timeout     | int     | 30s (5-120)                | AI_CHAT_FIRST_TOKEN_TIMEOUT         |
+  | request_timeout         | int     | 120s (10-600)              | AI_CHAT_REQUEST_TIMEOUT             |
+  | chunk_stall_timeout     | int     | 30s (10-600)               | AI_CHAT_CHUNK_STALL_TIMEOUT         |
+  | retry_max_attempts      | int     | 3 (0-10)                   | AI_CHAT_RETRY_MAX_ATTEMPTS          |
+  | retry_backoff_base      | float   | 1.0s (0.1-30.0)           | AI_CHAT_RETRY_BACKOFF_BASE          |
+  | narration_cadence       | int     | 5 (0=off)                  | AI_CHAT_NARRATION_CADENCE           |
+  | allowed_domains         | list    | [] (no restriction)        | AI_CHAT_ALLOWED_DOMAINS             |
+  | block_localhost_api     | bool    | false                      | AI_CHAT_BLOCK_LOCALHOST_API         |
+
+  #### App Settings (app section)
+
+  | Field  | Type | Default     | Env Override   |
+  |--------|------|-------------|----------------|
+  | host   | str  | 127.0.0.1   | —              |
+  | port   | int  | 8080        | AI_CHAT_PORT   |
+  | tls    | bool | false       | —              |
+
+  #### CLI Settings (cli section)
+
+  | Field                       | Type  | Default | Env Override         |
+  |-----------------------------|-------|---------|----------------------|
+  | builtin_tools               | bool  | true    | —                    |
+  | max_tool_iterations         | int   | 50      | —                    |
+  | context_warn_tokens         | int   | 80000   | —                    |
+  | context_auto_compact_tokens | int   | 100000  | —                    |
+  | tool_dedup                  | bool  | true    | AI_CHAT_TOOL_DEDUP   |
+  | retry_delay                 | float | 5.0s    | —                    |
+  | max_retries                 | int   | 3       | —                    |
+  | tool_output_max_chars       | int   | 2000    | —                    |
+  | file_reference_max_chars    | int   | 100000  | —                    |
+  | model_context_window        | int   | 128000  | —                    |
+
+  #### Planning Mode (cli.planning section)
+
+  | Field                | Type | Default | Description                          |
+  |----------------------|------|---------|--------------------------------------|
+  | enabled              | bool | true    | Enable planning mode                 |
+  | auto_threshold_tools | int  | 15      | Tool count to suggest planning       |
+  | auto_mode            | str  | off     | off, suggest, or auto                |
+
+  #### Token Budgets (cli.usage.budgets section)
+
+  | Field                        | Type | Default | Env Override                              |
+  |------------------------------|------|---------|-------------------------------------------|
+  | enabled                      | bool | false   | AI_CHAT_BUDGET_ENABLED                    |
+  | max_tokens_per_request       | int  | 0       | AI_CHAT_BUDGET_MAX_TOKENS_PER_REQUEST     |
+  | max_tokens_per_conversation  | int  | 0       | AI_CHAT_BUDGET_MAX_TOKENS_PER_CONVERSATION|
+  | max_tokens_per_day           | int  | 0       | AI_CHAT_BUDGET_MAX_TOKENS_PER_DAY         |
+  | warn_threshold_percent       | int  | 80      | AI_CHAT_BUDGET_WARN_THRESHOLD_PERCENT     |
+  | action_on_exceed             | str  | block   | AI_CHAT_BUDGET_ACTION_ON_EXCEED           |
+
+  #### Safety Settings (safety section)
+
+  | Field           | Type | Default          | Env Override                  |
+  |-----------------|------|------------------|-------------------------------|
+  | enabled         | bool | true             | AI_CHAT_SAFETY_ENABLED        |
+  | approval_mode   | str  | ask_for_writes   | AI_CHAT_SAFETY_APPROVAL_MODE  |
+  | approval_timeout| int  | 120s             | —                             |
+  | read_only       | bool | false            | AI_CHAT_READ_ONLY             |
+  | allowed_tools   | list | []               | —                             |
+  | denied_tools    | list | []               | —                             |
+
+  #### Sub-agent Limits (safety.subagent section)
+
+  | Field          | Type | Default |
+  |----------------|------|---------|
+  | max_concurrent | int  | 5       |
+  | max_total      | int  | 10      |
+  | max_depth      | int  | 3       |
+  | max_iterations | int  | 15      |
+  | timeout        | int  | 120s    |
+  | max_output_chars | int | 4000  |
+  | max_prompt_chars | int | 32000 |
+
+  #### Bash Sandboxing (safety.bash section)
+
+  | Field                 | Type | Default | Env Override                        |
+  |-----------------------|------|---------|-------------------------------------|
+  | enabled               | bool | true    | —                                   |
+  | timeout               | int  | 120s    | AI_CHAT_BASH_TIMEOUT                |
+  | max_output_chars      | int  | 100000  | AI_CHAT_BASH_MAX_OUTPUT             |
+  | blocked_paths         | list | []      | AI_CHAT_BASH_BLOCKED_PATHS          |
+  | allowed_paths         | list | []      | AI_CHAT_BASH_ALLOWED_PATHS          |
+  | blocked_commands      | list | []      | AI_CHAT_BASH_BLOCKED_COMMANDS       |
+  | allow_network         | bool | true    | AI_CHAT_BASH_ALLOW_NETWORK          |
+  | allow_package_install | bool | true    | AI_CHAT_BASH_ALLOW_PACKAGE_INSTALL  |
+  | log_all_commands      | bool | false   | AI_CHAT_BASH_LOG_ALL_COMMANDS       |
+
+  #### Tool Rate Limiting (safety.tool_rate_limit section)
+
+  | Field                      | Type | Default | Description                  |
+  |----------------------------|------|---------|------------------------------|
+  | max_calls_per_minute       | int  | 0       | 0 = unlimited                |
+  | max_calls_per_conversation | int  | 0       | 0 = unlimited                |
+  | max_consecutive_failures   | int  | 5       | Failures before action       |
+  | action                     | str  | block   | block or warn                |
+
+  #### DLP — Data Loss Prevention (safety.dlp section)
+
+  | Field           | Type | Default    | Env Override              |
+  |-----------------|------|------------|---------------------------|
+  | enabled         | bool | false      | AI_CHAT_DLP_ENABLED       |
+  | scan_output     | bool | true       | —                         |
+  | scan_input      | bool | false      | —                         |
+  | action          | str  | redact     | AI_CHAT_DLP_ACTION        |
+  | redaction_string| str  | [REDACTED] | —                         |
+  | log_detections  | bool | true       | —                         |
+
+  Detects SSN, credit card, email, phone, IBAN patterns. Add custom patterns via
+  `custom_patterns` list (name, pattern, description). See `docs/security/dlp.md`.
+
+  #### Prompt Injection Detection (safety.prompt_injection section)
+
+  | Field                      | Type  | Default | Description                     |
+  |----------------------------|-------|---------|---------------------------------|
+  | enabled                    | bool  | false   | Enable injection detection      |
+  | action                     | str   | warn    | block, warn, or log             |
+  | canary_length              | int   | 16      | Bytes of randomness for canary  |
+  | detect_encoding_attacks    | bool  | true    | Detect base64/hex/unicode tricks|
+  | detect_instruction_override| bool  | true    | Detect instruction overrides    |
+  | heuristic_threshold        | float | 0.7     | Confidence threshold (0.0-1.0)  |
+  | log_detections             | bool  | true    | Log detections                  |
+
+  See `docs/security/prompt-injection-defense.md`.
+
+  #### Output Content Filter (safety.output_filter section)
+
+  | Field                        | Type  | Default    | Env Override                      |
+  |------------------------------|-------|------------|-----------------------------------|
+  | enabled                      | bool  | false      | AI_CHAT_OUTPUT_FILTER_ENABLED     |
+  | system_prompt_leak_detection | bool  | true       | —                                 |
+  | leak_threshold               | float | 0.4        | —                                 |
+  | action                       | str   | warn       | AI_CHAT_OUTPUT_FILTER_ACTION      |
+  | redaction_string             | str   | [FILTERED] | —                                 |
+  | log_detections               | bool  | true       | —                                 |
+
+  Scans LLM output for system prompt leakage (n-gram overlap) and custom forbidden
+  patterns. Add patterns via `custom_patterns` list. See `docs/security/output-filter.md`.
+
+  #### Embeddings (embeddings section)
+
+  | Field           | Type      | Default                | Env Override                      |
+  |-----------------|-----------|------------------------|-----------------------------------|
+  | enabled         | bool/None | None (auto-detect)     | AI_CHAT_EMBEDDINGS_ENABLED        |
+  | provider        | str       | local                  | AI_CHAT_EMBEDDINGS_PROVIDER       |
+  | local_model     | str       | BAAI/bge-small-en-v1.5 | AI_CHAT_EMBEDDINGS_LOCAL_MODEL    |
+  | model           | str       | text-embedding-3-small | AI_CHAT_EMBEDDINGS_MODEL          |
+  | dimensions      | int       | 0 (auto)               | AI_CHAT_EMBEDDINGS_DIMENSIONS     |
+  | base_url        | str       | —                      | AI_CHAT_EMBEDDINGS_BASE_URL       |
+  | api_key         | str       | —                      | AI_CHAT_EMBEDDINGS_API_KEY        |
+
+  #### RAG Pipeline (rag section)
+
+  | Field                | Type  | Default | Env Override                    |
+  |----------------------|-------|---------|---------------------------------|
+  | enabled              | bool  | true    | AI_CHAT_RAG_ENABLED             |
+  | max_chunks           | int   | 10      | AI_CHAT_RAG_MAX_CHUNKS          |
+  | max_tokens           | int   | 2000    | AI_CHAT_RAG_MAX_TOKENS          |
+  | similarity_threshold | float | 0.5     | AI_CHAT_RAG_SIMILARITY_THRESHOLD|
+  | include_sources      | bool  | true    | —                               |
+  | include_conversations| bool  | true    | —                               |
+
+  #### Codebase Index (codebase_index section)
+
+  | Field        | Type | Default                  | Description                    |
+  |--------------|------|--------------------------|--------------------------------|
+  | enabled      | bool | true                     | Auto-detect, degrades gracefully|
+  | map_tokens   | int  | 1000                     | Token budget for codebase map  |
+  | languages    | list | [] (auto-detect)         | Languages to index             |
+  | exclude_dirs | list | node_modules, .git, etc. | Directories to skip            |
+
+  Requires optional dependency: `pip install anteroom[index]`
+
+  #### Proxy (proxy section)
+
+  | Field           | Type | Default | Env Override          |
+  |-----------------|------|---------|-----------------------|
+  | enabled         | bool | false   | AI_CHAT_PROXY_ENABLED |
+  | allowed_origins | list | []      | —                     |
+
+  OpenAI-compatible proxy for external tools. Opt-in.
+
+  #### Session Management (session section)
+
+  | Field                   | Type | Default | Env Override              |
+  |-------------------------|------|---------|---------------------------|
+  | store                   | str  | memory  | AI_CHAT_SESSION_STORE     |
+  | max_concurrent_sessions | int  | 0       | —                         |
+  | idle_timeout            | int  | 1800s   | —                         |
+  | absolute_timeout        | int  | 43200s  | —                         |
+  | allowed_ips             | list | []      | —                         |
+
+  #### Storage & Retention (storage section)
+
+  | Field                    | Type | Default    | Env Override                      |
+  |--------------------------|------|------------|-----------------------------------|
+  | retention_days           | int  | 0 (off)    | AI_CHAT_STORAGE_RETENTION_DAYS    |
+  | retention_check_interval | int  | 3600s      | AI_CHAT_STORAGE_CHECK_INTERVAL    |
+  | purge_attachments        | bool | true       | AI_CHAT_STORAGE_PURGE_ATTACHMENTS |
+  | purge_embeddings         | bool | true       | AI_CHAT_STORAGE_PURGE_EMBEDDINGS  |
+  | encrypt_at_rest          | bool | false      | AI_CHAT_STORAGE_ENCRYPT           |
+  | encryption_kdf           | str  | hkdf-sha256| —                                 |
+
+  Encryption requires sqlcipher3. See `aroom db encrypt`.
+
+  #### Audit Logging (audit section)
+
+  | Field             | Type | Default | Description                       |
+  |-------------------|------|---------|-----------------------------------|
+  | enabled           | bool | false   | Enable structured audit logging   |
+  | log_path          | str  | —       | Audit dir (default: data_dir/audit)|
+  | tamper_protection | str  | hmac    | none or hmac (HMAC-SHA256 chain)  |
+  | rotation          | str  | daily   | daily or size                     |
+  | retention_days    | int  | 90      | Days to keep logs (0 = forever)   |
+  | redact_content    | bool | true    | Strip message content from logs   |
+
+  See `docs/security/audit-log.md`.
+
+  #### Compliance Rules (compliance section)
+
+  Declarative config validation rules. Each rule checks a config field:
+  ```yaml
+  compliance:
+    rules:
+      - field: safety.approval_mode
+        must_be: ask_for_writes
+        message: "Approval mode must be ask_for_writes per policy"
+      - field: ai.api_key
+        must_not_be_empty: true
+        message: "API key is required"
+  ```
+  Rule operators: `must_be`, `must_not_be`, `must_match` (regex), `must_not_be_empty`, `must_contain`.
+  Validate with: `aroom config validate`
+
+  #### Identity (identity section)
+
+  | Field        | Type | Default      | Env Override         |
+  |--------------|------|-------------|----------------------|
+  | user_id      | str  | (auto UUID4) | AI_CHAT_USER_ID      |
+  | display_name | str  | —            | AI_CHAT_DISPLAY_NAME |
+
+  Ed25519 keypair auto-generated on first run. Used for message attribution in shared databases.
 
   ### CLI Flags
 
@@ -163,51 +350,72 @@ prompt: |
   | aroom          | --port PORT             | Override web server port                       |
   | aroom          | --approval-mode MODE    | Override safety mode (auto/ask_for_dangerous/ask_for_writes/ask) |
   | aroom          | --allowed-tools LIST    | Pre-allow tools (comma-separated)              |
+  | aroom          | --read-only             | Enable read-only mode (READ-tier tools only)   |
+  | aroom          | --temperature TEMP      | Override model temperature (0.0-2.0)           |
+  | aroom          | --top-p TOP_P           | Override model top_p (0.0-1.0)                 |
+  | aroom          | --seed SEED             | Set random seed for deterministic output       |
   | aroom          | --team-config PATH      | Explicit path to team config YAML              |
   | aroom          | --debug                 | Enable debug logging to stderr                 |
   | aroom init     |                         | Interactive setup wizard                       |
+  | aroom init     | --force                 | Overwrite existing config without asking        |
   | aroom init     | --team-config PATH      | Bootstrap personal config from team config     |
   | aroom chat     | --model MODEL           | Override model for session                     |
   | aroom chat     | --no-tools              | Disable all tools                              |
-  | aroom chat     | --resume ID             | Resume a conversation                          |
-  | aroom chat     | --continue              | Continue last conversation                     |
+  | aroom chat     | -r, --resume ID         | Resume a conversation by ID or slug            |
+  | aroom chat     | -c, --continue          | Continue last conversation                     |
+  | aroom chat     | -p, --path DIR          | Project root directory (default: cwd)          |
   | aroom chat     | --trust-project         | Auto-trust ANTEROOM.md without prompting       |
   | aroom chat     | --no-project-context    | Skip loading ANTEROOM.md                       |
-  | aroom chat     | --prompt TEXT           | Start with an initial prompt                   |
-  | aroom exec     | PROMPT                  | Non-interactive single prompt                  |
+  | aroom chat     | --plan                  | Start in planning mode                         |
+  | aroom exec     | PROMPT                  | Non-interactive single prompt (required)       |
   | aroom exec     | --json                  | JSON output on stdout                          |
-  | aroom exec     | --timeout SECS          | Wall-clock timeout (default 120s)              |
+  | aroom exec     | --timeout SECS          | Wall-clock timeout (default 120s, exit 124)    |
   | aroom exec     | --no-conversation       | Don't persist conversation                     |
   | aroom exec     | --no-tools              | Disable all tools                              |
-  | aroom exec     | --quiet                 | Suppress progress output                       |
-  | aroom exec     | --verbose               | Show detailed tool execution                   |
+  | aroom exec     | -m, --model MODEL       | Override AI model                              |
+  | aroom exec     | -q, --quiet             | Suppress progress output                       |
+  | aroom exec     | -v, --verbose           | Show detailed tool execution                   |
+  | aroom exec     | --trust-project         | Trust and load ANTEROOM.md                     |
   | aroom exec     | --no-project-context    | Skip loading ANTEROOM.md                       |
-  | aroom db       |                         | Database management subcommand                 |
-  | aroom config   |                         | Configuration management subcommand            |
+  | aroom usage    | --period PERIOD         | day, week, month, or all                       |
+  | aroom usage    | --conversation ID       | Filter to specific conversation                |
+  | aroom usage    | --json                  | Output as JSON                                 |
+  | aroom audit    | verify                  | Verify HMAC chain integrity                    |
+  | aroom audit    | purge                   | Delete logs older than retention period         |
+  | aroom db       | create NAME             | Create a new database                          |
+  | aroom db       | list                    | List registered databases                      |
+  | aroom db       | connect NAME            | Connect to a database                          |
+  | aroom db       | purge                   | Delete old conversations                       |
+  | aroom db       | encrypt                 | Migrate to encrypted database                  |
+  | aroom config   | validate                | Check compliance rules                         |
 
   ### Built-in Tools
 
-  | Tool            | Tier       | Description                                   |
-  |-----------------|------------|-----------------------------------------------|
-  | read_file       | READ       | Read file contents                            |
-  | glob_files      | READ       | Find files by glob pattern                    |
-  | grep            | READ       | Search file contents with regex               |
-  | write_file      | WRITE      | Write/create a file                           |
-  | edit_file       | WRITE      | Search-and-replace edit in a file             |
-  | bash            | EXECUTE    | Run a shell command                           |
-  | create_canvas   | WRITE      | Create a rich content panel                   |
-  | update_canvas   | WRITE      | Replace canvas content                        |
-  | patch_canvas    | WRITE      | Incremental search/replace on canvas          |
-  | run_agent       | EXECUTE    | Spawn a sub-agent for parallel tasks          |
+  | Tool            | Tier       | Description                                           |
+  |-----------------|------------|-------------------------------------------------------|
+  | read_file       | READ       | Read file contents with line numbers                  |
+  | glob_files      | READ       | Find files by glob pattern (e.g. '**/*.py')           |
+  | grep            | READ       | Regex search across file contents                     |
+  | write_file      | WRITE      | Create or overwrite a file                            |
+  | edit_file       | WRITE      | Exact string replacement in files                     |
+  | bash            | EXECUTE    | Run shell commands (git, build, tests)                |
+  | create_canvas   | READ       | Create a rich content panel alongside chat            |
+  | update_canvas   | READ       | Replace canvas content entirely                       |
+  | patch_canvas    | READ       | Incremental search/replace on canvas                  |
+  | run_agent       | EXECUTE    | Spawn a sub-agent for parallel/isolated tasks         |
+  | ask_user        | READ       | Ask the user a question and wait for response         |
+  | introspect      | READ       | Let AI examine its own runtime context                |
+
+  MCP tools default to EXECUTE tier. Override tiers via `safety.tool_tiers` config.
 
   ### Tool Risk Tiers & Approval Modes
 
-  | Tier        | Level | Examples                         |
-  |-------------|-------|----------------------------------|
-  | READ        | 0     | read_file, glob_files, grep      |
-  | WRITE       | 1     | write_file, edit_file, canvas    |
-  | EXECUTE     | 2     | bash, run_agent, MCP tools       |
-  | DESTRUCTIVE | 3     | rm -rf, git reset --hard         |
+  | Tier        | Level | Examples                              |
+  |-------------|-------|---------------------------------------|
+  | READ        | 0     | read_file, glob_files, grep, canvas   |
+  | WRITE       | 1     | write_file, edit_file                 |
+  | EXECUTE     | 2     | bash, run_agent, MCP tools            |
+  | DESTRUCTIVE | 3     | rm -rf, git reset --hard              |
 
   | Approval Mode     | READ | WRITE | EXECUTE | DESTRUCTIVE |
   |-------------------|------|-------|---------|-------------|
@@ -217,6 +425,7 @@ prompt: |
   | ask               | skip | ask   | ask     | ask         |
 
   Permission scopes: Allow Once, Allow for Session, Allow Always (persists to config.yaml).
+  `--read-only` flag restricts to READ-tier tools only.
 
   ### Skill YAML Format
 
@@ -230,7 +439,7 @@ prompt: |
   Directories (highest priority first):
   1. `.anteroom/skills/` or `.claude/skills/` (project-level, walk-up discovery)
   2. `~/.anteroom/skills/` or `~/.claude/skills/` (user-level)
-  3. Built-in default skills
+  3. Built-in default skills (commit, review, explain, create-eval, a-help)
 
   ### Project Instructions (ANTEROOM.md)
 
@@ -245,31 +454,69 @@ prompt: |
 
   ### REPL Slash Commands
 
-  | Command       | Description                                      |
-  |---------------|--------------------------------------------------|
-  | /help         | Show available commands                          |
-  | /skills       | List loaded skills                               |
-  | /new          | Start a new conversation                         |
-  | /conversations| List recent conversations                        |
-  | /resume ID    | Resume a conversation                            |
-  | /continue     | Continue last conversation                       |
-  | /model NAME   | Switch model                                     |
-  | /system TEXT  | Set system prompt                                |
-  | /compact      | Compact conversation context                     |
-  | /conventions  | Show loaded ANTEROOM.md info                     |
-  | /usage        | Show token usage                                 |
-  | /clear        | Clear screen                                     |
-  | /quit         | Exit the REPL                                    |
+  | Command        | Description                                      |
+  |----------------|--------------------------------------------------|
+  | /help          | Show available commands and keybindings           |
+  | /skills        | List loaded skills                               |
+  | /new           | Start a new conversation (/new note, /new doc)   |
+  | /list          | List recent conversations with preview            |
+  | /resume ID     | Resume a conversation by ID or slug              |
+  | /continue      | Continue last conversation                       |
+  | /delete        | Delete a conversation (by number, slug, or ID)   |
+  | /rename        | Rename current or specified conversation          |
+  | /slug          | Show or regenerate conversation slug             |
+  | /search        | Search conversations by keyword or semantic query |
+  | /append        | Append text to current conversation              |
+  | /rewind        | Undo the last message pair                       |
+  | /last          | Load the last message                            |
+  | /upload        | Upload a file as context                         |
+  | /model NAME    | Switch AI model                                  |
+  | /compact       | Compact conversation to reduce token usage       |
+  | /usage         | Show token usage and cost statistics             |
+  | /tools         | Show available tools with tier assignments       |
+  | /mcp           | Show MCP server status and tools                 |
+  | /conventions   | Display project conventions (ANTEROOM.md)        |
+  | /plan          | Enter/exit planning mode                         |
+  | /verbose       | Toggle verbosity level                           |
+  | /detail        | Toggle tool call detail display                  |
+  | /clear         | Clear screen                                     |
+  | /quit          | Exit the REPL                                    |
 
   ### Environment Variables
 
-  All `AI_CHAT_*` prefix. Key variables:
-  `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_MODEL`, `AI_CHAT_PORT`,
-  `AI_CHAT_USER_ID`, `AI_CHAT_DISPLAY_NAME`, `AI_CHAT_CONNECT_TIMEOUT`,
-  `AI_CHAT_WRITE_TIMEOUT`, `AI_CHAT_POOL_TIMEOUT`, `AI_CHAT_FIRST_TOKEN_TIMEOUT`,
-  `AI_CHAT_REQUEST_TIMEOUT`, `AI_CHAT_CHUNK_STALL_TIMEOUT`, `AI_CHAT_RETRY_MAX_ATTEMPTS`,
-  `AI_CHAT_RETRY_BACKOFF_BASE`, `AI_CHAT_NARRATION_CADENCE`, `AI_CHAT_TOOL_DEDUP`,
-  `AI_CHAT_SAFETY_APPROVAL_MODE`, `AI_CHAT_TEAM_CONFIG`, `AI_CHAT_LOG_LEVEL`.
+  All use `AI_CHAT_*` prefix. Key variables by section:
+
+  **AI**: `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_API_KEY_COMMAND`, `AI_CHAT_MODEL`,
+  `AI_CHAT_SYSTEM_PROMPT`, `AI_CHAT_VERIFY_SSL`, `AI_CHAT_MAX_TOOLS`, `AI_CHAT_TEMPERATURE`,
+  `AI_CHAT_TOP_P`, `AI_CHAT_SEED`, `AI_CHAT_ALLOWED_DOMAINS`, `AI_CHAT_BLOCK_LOCALHOST_API`,
+  `AI_CHAT_CONNECT_TIMEOUT`, `AI_CHAT_WRITE_TIMEOUT`, `AI_CHAT_POOL_TIMEOUT`,
+  `AI_CHAT_FIRST_TOKEN_TIMEOUT`, `AI_CHAT_REQUEST_TIMEOUT`, `AI_CHAT_CHUNK_STALL_TIMEOUT`,
+  `AI_CHAT_RETRY_MAX_ATTEMPTS`, `AI_CHAT_RETRY_BACKOFF_BASE`, `AI_CHAT_NARRATION_CADENCE`
+
+  **App/CLI**: `AI_CHAT_PORT`, `AI_CHAT_TOOL_DEDUP`, `AI_CHAT_LOG_LEVEL`
+
+  **Safety**: `AI_CHAT_SAFETY_ENABLED`, `AI_CHAT_SAFETY_APPROVAL_MODE`, `AI_CHAT_READ_ONLY`,
+  `AI_CHAT_BASH_TIMEOUT`, `AI_CHAT_BASH_MAX_OUTPUT`, `AI_CHAT_BASH_BLOCKED_PATHS`,
+  `AI_CHAT_BASH_ALLOWED_PATHS`, `AI_CHAT_BASH_BLOCKED_COMMANDS`, `AI_CHAT_BASH_ALLOW_NETWORK`,
+  `AI_CHAT_BASH_ALLOW_PACKAGE_INSTALL`, `AI_CHAT_BASH_LOG_ALL_COMMANDS`,
+  `AI_CHAT_DLP_ENABLED`, `AI_CHAT_DLP_ACTION`,
+  `AI_CHAT_OUTPUT_FILTER_ENABLED`, `AI_CHAT_OUTPUT_FILTER_ACTION`
+
+  **Embeddings/RAG**: `AI_CHAT_EMBEDDINGS_ENABLED`, `AI_CHAT_EMBEDDINGS_PROVIDER`,
+  `AI_CHAT_EMBEDDINGS_MODEL`, `AI_CHAT_EMBEDDINGS_LOCAL_MODEL`, `AI_CHAT_EMBEDDINGS_DIMENSIONS`,
+  `AI_CHAT_EMBEDDINGS_BASE_URL`, `AI_CHAT_EMBEDDINGS_API_KEY`,
+  `AI_CHAT_RAG_ENABLED`, `AI_CHAT_RAG_MAX_CHUNKS`, `AI_CHAT_RAG_MAX_TOKENS`,
+  `AI_CHAT_RAG_SIMILARITY_THRESHOLD`
+
+  **Storage/Session**: `AI_CHAT_STORAGE_RETENTION_DAYS`, `AI_CHAT_STORAGE_CHECK_INTERVAL`,
+  `AI_CHAT_STORAGE_PURGE_ATTACHMENTS`, `AI_CHAT_STORAGE_PURGE_EMBEDDINGS`,
+  `AI_CHAT_STORAGE_ENCRYPT`, `AI_CHAT_SESSION_STORE`, `AI_CHAT_PROXY_ENABLED`
+
+  **Budgets**: `AI_CHAT_BUDGET_ENABLED`, `AI_CHAT_BUDGET_MAX_TOKENS_PER_REQUEST`,
+  `AI_CHAT_BUDGET_MAX_TOKENS_PER_CONVERSATION`, `AI_CHAT_BUDGET_MAX_TOKENS_PER_DAY`,
+  `AI_CHAT_BUDGET_WARN_THRESHOLD_PERCENT`, `AI_CHAT_BUDGET_ACTION_ON_EXCEED`
+
+  **Identity**: `AI_CHAT_USER_ID`, `AI_CHAT_DISPLAY_NAME`, `AI_CHAT_TEAM_CONFIG`
 
   ### Directory Equivalence
 
@@ -277,7 +524,7 @@ prompt: |
   - Instructions: `.anteroom.md` / `ANTEROOM.md` / `.claude.md` / `CLAUDE.md`
   - Skills: `.anteroom/skills/` / `.claude/skills/`
   - Team config: `.anteroom/team.yaml` / `.claude/team.yaml`
-  - Project config: `.anteroom/config.yaml` / `.claude/config.yaml` (planned)
+  - Project config: `.anteroom/config.yaml` / `.claude/config.yaml`
   - Rules: `.anteroom/rules/` / `.claude/rules/`
 
   ---
@@ -315,12 +562,18 @@ prompt: |
   - `docs/configuration/environment-variables.md` — all AI_CHAT_* env vars
   - `docs/configuration/mcp-servers.md` — MCP server setup and configuration
   - `docs/configuration/team-config.md` — shared team config with enforced settings
+  - `docs/configuration/project-config.md` — project-scoped config with trust verification
   - `docs/configuration/tls.md` — TLS/HTTPS, self-signed certs
   - `docs/configuration/index.md` — configuration docs overview
 
   ### Security
   - `docs/security/tool-safety.md` — risk tiers, approval modes, permission scopes
   - `docs/security/authentication.md` — auth model, cookies, CSRF, token derivation
+  - `docs/security/bash-sandboxing.md` — bash tool sandboxing controls
+  - `docs/security/dlp.md` — data loss prevention scanning
+  - `docs/security/prompt-injection-defense.md` — prompt injection detection
+  - `docs/security/output-filter.md` — output content filter and leak detection
+  - `docs/security/audit-log.md` — structured audit log with tamper protection
   - `docs/security/hardening.md` — security hardening guide
   - `docs/security/index.md` — security docs overview
 
@@ -329,17 +582,20 @@ prompt: |
   - `docs/tutorials/connect-to-azure.md` — Azure OpenAI integration
   - `docs/tutorials/add-mcp-tools.md` — adding MCP tools (stdio and SSE)
   - `docs/tutorials/build-custom-skills.md` — skill creation walkthrough
+  - `docs/tutorials/create-project-evals.md` — project-local evals tutorial
 
   ### API
   - `docs/api/conversations.md` — conversations API endpoints
   - `docs/api/messages.md` — messages API endpoints
   - `docs/api/projects.md` — projects API endpoints
   - `docs/api/config.md` — config API endpoints
+  - `docs/api/usage.md` — token usage statistics endpoint
   - `docs/api/index.md` — API docs overview
 
   ### Advanced
   - `docs/advanced/architecture.md` — system architecture, dual interface, shared core
   - `docs/advanced/developer-workflow.md` — dev setup, testing, Claude Code skills
+  - `docs/advanced/testing.md` — testing guide: unit, integration, e2e, evals
   - `docs/advanced/contributing.md` — contribution guidelines
   - `docs/advanced/changelog.md` — version history
 
