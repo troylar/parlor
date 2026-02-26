@@ -44,6 +44,9 @@ Browser / CLI
           Tool Execution
                 │
                 ▼
+          DLP Scan (redact / block / warn)
+                │
+                ▼
           Audit Log (HMAC-chained JSONL)
 ```
 
@@ -65,6 +68,7 @@ Browser / CLI
 | [Sub-Agent Isolation](hardening.md#sub-agent-safety) | `safety.subagent.*` | Concurrency, depth, iteration, timeout, and output limits |
 | [Team Config Enforcement](hardening.md#team-config-enforcement) | Team config `enforce` list | Lock security settings across team members |
 | [MCP Tool Safety](hardening.md#mcp-tool-safety) | `mcp_servers[].*` | SSRF protection, metachar rejection, tool filtering, trust levels |
+| [Data Loss Prevention](dlp.md) | `safety.dlp.*` | Regex-based PII scanning, redact/block/warn actions, custom patterns |
 
 ## Threat Model
 
@@ -96,3 +100,4 @@ Anteroom is a **single-user, local-first application** intended to run on a user
 - [Audit Log](audit-log.md) — JSONL format, HMAC chain, rotation, SIEM integration
 - [Prompt Injection Defense](prompt-injection-defense.md) — trust classification, defensive envelopes
 - [Deployment Hardening](hardening.md) — headers, TLS, budgets, sub-agents, MCP, team enforcement
+- [Data Loss Prevention](dlp.md) — sensitive data scanning and redaction

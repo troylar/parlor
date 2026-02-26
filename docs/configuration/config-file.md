@@ -133,6 +133,16 @@ embeddings:
   api_key: ""
   api_key_command: ""
 
+dlp:
+  enabled: false                       # Set true to enable DLP scanning
+  scan_output: true                    # Scan AI responses (default: true)
+  scan_input: false                    # Scan user input (default: false)
+  action: "redact"                     # "redact" | "block" | "warn" (default: redact)
+  redaction_string: "[REDACTED]"
+  log_detections: true                 # Log matches to security log (default: true)
+  # patterns: []                        # Built-in patterns loaded by default
+  custom_patterns: []                  # Add custom regex rules
+
 # Project/team config only — shared references
 references:
   instructions:
@@ -373,6 +383,21 @@ Controls vector embeddings for semantic search. Requires an OpenAI-compatible em
 | `base_url` | string | `""` | Embedding API endpoint (falls back to `ai.base_url` if empty) |
 | `api_key` | string | `""` | API key for the embedding endpoint |
 | `api_key_command` | string | `""` | External command to obtain the embedding API key dynamically |
+
+### dlp
+
+Controls Data Loss Prevention scanning for sensitive patterns (SSN, credit card, email, phone, IBAN). See [DLP documentation](../security/dlp.md) for detailed configuration and use cases.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Enable DLP scanning |
+| `scan_output` | boolean | `true` | Scan AI responses for sensitive data |
+| `scan_input` | boolean | `false` | Scan user input for sensitive data |
+| `action` | string | `redact` | Action on match: `redact` (replace with `redaction_string`), `block` (reject), or `warn` (allow + log) |
+| `redaction_string` | string | `[REDACTED]` | String to replace matched patterns when action is `redact` |
+| `log_detections` | boolean | `true` | Log all DLP detections to the security logger |
+| `patterns` | list | `[]` | Built-in patterns are loaded automatically (SSN, credit card, email, phone, IBAN) |
+| `custom_patterns` | list | `[]` | Custom regex patterns. Each is a dict with `name`, `pattern` (regex), and `description` |
 
 ### usage
 
