@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.66.0
+
+**New:**
+
+- CLI `--project` flag for loading project context into chat, exec, and REPL sessions (#391)
+- `aroom projects` command lists all projects with model, instructions, and last updated (#391)
+- Resuming a project-linked conversation auto-loads project context (#391)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.66.0)
+
 ### v1.65.0
 
 **New:**
