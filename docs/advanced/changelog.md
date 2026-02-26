@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.56.0
+
+**New:**
+
+- Win32 Job Object sandbox: kernel-level memory, process count, and CPU time limits for bash commands on Windows (#297)
+- Auto-detects Windows, no-op on macOS/Linux, zero new dependencies (ctypes only) (#297)
+- Graceful degradation: if OS sandbox setup fails, Tier 1 config-level restrictions still apply (#297)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.56.0)
+
 ### v1.55.1
 
 **Fixed:**
