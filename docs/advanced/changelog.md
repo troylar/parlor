@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.62.0
+
+**New:**
+
+- Compliance rules engine: declarative config policy validation with 5 operators (must_be, must_not_be, must_match, must_not_be_empty, must_contain) (#447)
+- Fail-closed at startup when compliance rules are violated, preventing misconfigured deployments (#447)
+- `aroom config validate` CLI command for pre-deploy policy checks (#447)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.62.0)
+
 ### v1.61.0
 
 **New:**
