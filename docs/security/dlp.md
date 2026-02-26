@@ -29,10 +29,10 @@ By default, DLP scans for:
 | Pattern | Description | Regex |
 |---------|-------------|-------|
 | `ssn` | US Social Security Number | `\b\d{3}-\d{2}-\d{4}\b` |
-| `credit_card` | Credit/debit card number | `\b(?:\d[ -]*?){13,19}\b` |
+| `credit_card` | Credit/debit card number | `\b\d(?:[ -]?\d){12,18}\b` |
 | `email` | Email address | `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b` |
-| `phone_us` | US phone number | `\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b` |
-| `iban` | International Bank Account Number | `\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:[A-Z0-9]){0,16}\b` |
+| `phone_us` | US phone number | `\b(?:\+?1[-.\s])?\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b` |
+| `iban` | International Bank Account Number | `\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}[A-Z0-9]{0,16}\b` |
 
 ## Actions
 
@@ -85,7 +85,7 @@ dlp:
 
 - **Streaming**: DLP scans streamed response chunks in real-time. If `action: block`, the stream is halted and the partial response discarded.
 - **Reassembly**: After streaming completes, a final DLP pass scans the complete assembled text (catches patterns split across chunks).
-- **Input scanning**: If `scan_input: true`, user messages are scanned before sending to the AI. Redacted input is sent to the AI; `block` rejects the message.
+- **Input scanning**: The `scan_input` config option is reserved for future use. Currently, only output scanning is implemented.
 - **Logging**: All detections are logged to the security logger (`anteroom.security`) with match counts and rules.
 - **Performance**: Regex matching is fast; impact is minimal even with many patterns.
 

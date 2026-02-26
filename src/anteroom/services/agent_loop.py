@@ -300,6 +300,7 @@ async def run_agent_loop(
 
         yield AgentEvent(kind="thinking", data={})
 
+        _dlp_blocked = False
         async for event in ai_service.stream_chat(
             messages,
             tools=tools_openai,
@@ -309,6 +310,9 @@ async def run_agent_loop(
             etype = event["event"]
             if etype == "token":
                 chunk = event["data"]["content"]
+                # Per-chunk DLP: redact inline, block breaks stream.
+                # Warn is deferred to the final assembled-text scan to
+                # avoid duplicate events (per-chunk + final).
                 if dlp_scanner is not None and dlp_scanner.enabled and dlp_scanner.scan_output:
                     chunk, dlp_result = dlp_scanner.apply(chunk, "output")
                     if dlp_result.matched and dlp_result.action == "block":
@@ -316,12 +320,8 @@ async def run_agent_loop(
                             kind="dlp_blocked",
                             data={"direction": "output", "matches": [m.rule_name for m in dlp_result.matches]},
                         )
+                        _dlp_blocked = True
                         break
-                    if dlp_result.matched and dlp_result.action == "warn":
-                        yield AgentEvent(
-                            kind="dlp_warning",
-                            data={"direction": "output", "matches": [m.rule_name for m in dlp_result.matches]},
-                        )
                 assistant_content += chunk
                 yield AgentEvent(kind="token", data={"content": chunk})
             elif etype == "tool_call":
@@ -354,6 +354,9 @@ async def run_agent_loop(
                 return
             elif etype == "done":
                 break
+
+        if _dlp_blocked:
+            return
 
         if got_context_error:
             context_recovery_attempts += 1

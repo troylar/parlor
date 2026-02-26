@@ -422,6 +422,9 @@ class TestAgentLoopIntegration:
         blocked_events = [e for e in events if e.kind == "dlp_blocked"]
         assert len(blocked_events) == 1
         assert blocked_events[0].data["direction"] == "output"
+        # Block should NOT emit a done event after blocking
+        done_events = [e for e in events if e.kind == "done"]
+        assert len(done_events) == 0
 
     @pytest.mark.asyncio
     async def test_warn_emits_dlp_warning_event(self) -> None:
@@ -453,7 +456,8 @@ class TestAgentLoopIntegration:
             events.append(event)
 
         warning_events = [e for e in events if e.kind == "dlp_warning"]
-        assert len(warning_events) >= 1
+        # Exactly 1 warning: from the final assembled-text scan only (no per-chunk duplicate)
+        assert len(warning_events) == 1
 
         # Token content should be preserved (warn doesn't modify)
         token_events = [e for e in events if e.kind == "token"]
