@@ -131,7 +131,7 @@ Single-user local app, OWASP ASVS Level 2. Auth: HttpOnly session cookies + CSRF
 
 ### Database
 
-SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Optional SQLCipher encryption at rest (via `encrypt_at_rest` config). Schema in `db.py`. `init_db()` signature: `init_db(db_path, vec_dimensions=384, encryption_key=None)`. Key tables: conversations (with `type` and `slug` columns), messages (with token usage tracking), tool_calls (`approval_decision` audit), sources/source_chunks/source_tags/source_groups, canvases, message_embeddings, source_chunk_embeddings. Optional sqlite-vec for vector similarity search. Retention worker cascades deletes conversations, messages, tool_calls, embeddings, and optionally attachment files.
+SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Optional SQLCipher encryption at rest (via `encrypt_at_rest` config). Schema in `db.py`. `init_db()` signature: `init_db(db_path, vec_dimensions=384, encryption_key=None)`. Key tables: conversations (with `type`, `slug`, and `working_dir` columns), messages (with token usage tracking), tool_calls (`approval_decision` audit), sources/source_chunks/source_tags/source_groups, canvases, message_embeddings, source_chunk_embeddings. Optional sqlite-vec for vector similarity search. Retention worker cascades deletes conversations, messages, tool_calls, embeddings, and optionally attachment files.
 
 ### Configuration
 
