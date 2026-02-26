@@ -163,7 +163,7 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> _LoadResult:
                 continue
             description = data.get("description", "")
             if not description:
-                result.warnings.append(f"Warning: {path.name} has no description")
+                result.warnings.append(f"{path.name} has no description")
             result.skills.append(
                 Skill(
                     name=name,

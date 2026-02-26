@@ -2698,8 +2698,7 @@ async def _run_repl(
                     continue
                 elif cmd in ("/skills", "/reload-skills"):
                     if skill_registry:
-                        skill_registry.reload(working_dir)
-                        skills = skill_registry.list_skills()
+                        skills = skill_registry.reload(working_dir)
                         if skills:
                             renderer.console.print("\n[bold]Available skills:[/bold]")
                             for s in skills:
