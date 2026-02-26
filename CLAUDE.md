@@ -52,9 +52,9 @@ CLI (cli/)         ──┘         │
 ### Key Modules
 
 #### Entry Points & Core
-- **`__main__.py`** — Argparse dispatch: `init`, `config`, `chat`, `exec`, `db`, `usage`, `audit` subcommands. Global flags: `--version`, `--test`, `--allowed-tools`, `--approval-mode`, `--port`, `--debug`, `--team-config`. Chat flags: `--trust-project`, `--no-project-context`, `--plan`. Audit flags: `audit {verify,purge}`
-- **`app.py`** — FastAPI app factory, middleware stack (auth, rate limiting, CSRF, security headers, body size limit). Auth token derived from Ed25519 identity key via HMAC-SHA256
-- **`config.py`** — YAML config loader with layered precedence: defaults < team < personal < project < env vars < CLI flags. Dataclass hierarchy: `AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `PlanningConfig`, `SkillsConfig`, `McpServerConfig`, `SafetyConfig`, `SubagentConfig`, `EmbeddingsConfig`, `UsageConfig`, `ProxyConfig`, `ReferencesConfig`, `CodebaseIndexConfig`, `SessionConfig`, `AuditConfig`. Enforces locked fields from team `enforce` list. Config validated via `services/config_validator.py` before parsing
+- **`__main__.py`** — Argparse dispatch: `init`, `config`, `chat`, `exec`, `db`, `usage`, `audit` subcommands. Global flags: `--version`, `--test`, `--allowed-tools`, `--approval-mode`, `--port`, `--debug`, `--team-config`. Chat flags: `--trust-project`, `--no-project-context`, `--plan`. Audit flags: `audit {verify,purge}`. DB flags: `db {list,show,purge,encrypt}` for data retention (`purge` deletes old conversations; `encrypt` initializes encryption)
+- **`app.py`** — FastAPI app factory, middleware stack (auth, rate limiting, CSRF, security headers, body size limit). Auth token derived from Ed25519 identity key via HMAC-SHA256. Lifespan management: initializes encrypted database (if enabled), starts retention worker (if configured)
+- **`config.py`** — YAML config loader with layered precedence: defaults < team < personal < project < env vars < CLI flags. Dataclass hierarchy: `AppConfig` → `AIConfig`, `AppSettings`, `CliConfig`, `PlanningConfig`, `SkillsConfig`, `McpServerConfig`, `SafetyConfig`, `SubagentConfig`, `EmbeddingsConfig`, `UsageConfig`, `ProxyConfig`, `ReferencesConfig`, `CodebaseIndexConfig`, `SessionConfig`, `StorageConfig`, `AuditConfig`. Enforces locked fields from team `enforce` list. Config validated via `services/config_validator.py` before parsing
 - **`identity.py`** — Ed25519 keypair generation, UUID4 user IDs, PEM serialization
 - **`tls.py`** — Self-signed cert generation for localhost HTTPS
 
@@ -82,6 +82,8 @@ CLI (cli/)         ──┘         │
 - **`services/tool_rate_limit.py`** — Tool call rate limiting: per-minute, per-conversation, and consecutive-failure caps. `ToolRateLimiter` tracks call timestamps, enforces configurable limits. Configurable action: `block` (return error) or `warn` (log warning, allow). Instantiated per-request (web UI) or per-session (CLI). Shared across parent and sub-agents for unified rate limiting
 - **`services/session_store.py`** — Session persistence backends: `MemorySessionStore` (volatile, in-process) and `SQLiteSessionStore` (durable, survives restart). Protocol-based design with `create()`, `get()`, `touch()`, `delete()`, `count_active()`, `cleanup_expired()`. Session state: id, user_id, ip_address, created_at, last_activity_at. Timeouts (idle/absolute) configurable via `SessionConfig`
 - **`services/ip_allowlist.py`** — IP allowlist checking with CIDR and exact address support. `check_ip_allowed()` validates client IPs against allowlist. Returns `True` if list is empty (no restrictions) or IP matches any entry. Both IPv4 and IPv6 supported. Fails closed on invalid input
+- **`services/retention.py`** — Background worker for data retention policy enforcement. `RetentionWorker` runs on configurable interval (default 1 hour), purges conversations older than configured retention days via `purge_conversations_before()`. Cascade deletes messages, tool_calls, embeddings. Optionally deletes attachment files from disk. Exponential backoff on failures. `purge_orphaned_attachments()` cleans up orphaned attachment directories
+- **`services/encryption.py`** — Encryption at rest for SQLite database via SQLCipher (optional dependency). `derive_db_key()` derives 256-bit key from Ed25519 identity key via HKDF-SHA256. `is_sqlcipher_available()` checks if sqlcipher3 is installed. `open_encrypted_db()` opens encrypted connection. Gracefully degrades to standard sqlite3 when unavailable or disabled
 
 #### Web UI (routers/)
 - **`routers/chat.py`** — SSE chat streaming with dataclass-based architecture: `ChatRequestContext`, `WebConfirmContext`, `ToolExecutorContext`, `StreamContext`. Extracted functions: `_parse_chat_request()`, `_resolve_sources()`, `_build_tool_list()`, `_build_chat_system_prompt()`, `_web_confirm_tool()`, `_execute_web_tool()`, `_stream_chat_events()`. Supports prompt queuing (max 10), source injection (50K char limit), plan mode, sub-agents
@@ -121,11 +123,11 @@ CLI (cli/)         ──┘         │
 
 ### Security Model
 
-Single-user local app, OWASP ASVS Level 2. Auth: HttpOnly session cookies + CSRF double-submit + Origin validation. Stable auth token from Ed25519 key via HMAC-SHA256. Session store (memory or SQLite-backed) tracks creation time, last activity, and client IP for session validation and lifecycle management. IP allowlisting (CIDR or exact) gates access at middleware. Concurrent session limits prevent token reuse abuse. Session timeouts: 12-hour absolute, 30-minute idle. Middleware: rate limiting (120 req/min), body size (15MB), security headers. Tool safety: 4 risk tiers, 4 approval modes, 3 permission scopes (once/session/always). Path traversal and hard-block detection. Bash sandboxing: configurable network/package/path/command restrictions, timeout caps, output limits, audit logging. MCP tools gated at parent and sub-agent levels. Fails closed: no approval channel = blocked.
+Single-user local app, OWASP ASVS Level 2. Auth: HttpOnly session cookies + CSRF double-submit + Origin validation. Stable auth token from Ed25519 key via HMAC-SHA256. Session store (memory or SQLite-backed) tracks creation time, last activity, and client IP for session validation and lifecycle management. IP allowlisting (CIDR or exact) gates access at middleware. Concurrent session limits prevent token reuse abuse. Session timeouts: 12-hour absolute, 30-minute idle. Middleware: rate limiting (120 req/min), body size (15MB), security headers. Tool safety: 4 risk tiers, 4 approval modes, 3 permission scopes (once/session/always). Path traversal and hard-block detection. Bash sandboxing: configurable network/package/path/command restrictions, timeout caps, output limits, audit logging. MCP tools gated at parent and sub-agent levels. Fails closed: no approval channel = blocked. Encryption at rest: optional SQLCipher integration (opt-in via `encrypt_at_rest`), key derived from Ed25519 identity key via HKDF-SHA256. Data retention: configurable policy with background worker, purges conversations and attachments older than retention days; cascades delete related messages, tool calls, embeddings.
 
 ### Database
 
-SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Schema in `db.py`. Key tables: conversations (with `type` and `slug` columns), messages (with token usage tracking), tool_calls (`approval_decision` audit), sources/source_chunks/source_tags/source_groups, canvases, message_embeddings, source_chunk_embeddings. Optional sqlite-vec for vector similarity search.
+SQLite with WAL journaling, FTS5 for search, foreign keys enforced. Optional SQLCipher encryption at rest (via `encrypt_at_rest` config). Schema in `db.py`. `init_db()` signature: `init_db(db_path, vec_dimensions=384, encryption_key=None)`. Key tables: conversations (with `type` and `slug` columns), messages (with token usage tracking), tool_calls (`approval_decision` audit), sources/source_chunks/source_tags/source_groups, canvases, message_embeddings, source_chunk_embeddings. Optional sqlite-vec for vector similarity search. Retention worker cascades deletes conversations, messages, tool_calls, embeddings, and optionally attachment files.
 
 ### Configuration
 
@@ -146,6 +148,7 @@ Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`ProxyConfig`** — OpenAI-compatible proxy (opt-in), CORS allowlist
 - **`McpServerConfig`** — Per-server `tools_include`/`tools_exclude` (fnmatch), `trust_level` (default `"untrusted"`; controls defensive prompt envelope wrapping for tool outputs)
 - **`SessionConfig`** — Session management: `store` (memory/sqlite), `max_concurrent_sessions` (0 = unlimited), `idle_timeout` (1800s), `absolute_timeout` (43200s), `allowed_ips` (CIDR or exact; empty = allow all), `log_session_events` (bool)
+- **`StorageConfig`** — Data retention and encryption: `retention_days` (0 = disabled), `retention_check_interval` (default 3600s), `purge_attachments` (default true), `purge_embeddings` (default true), `encrypt_at_rest` (default false, requires sqlcipher3), `encryption_kdf` (default hkdf-sha256)
 - **`AuditConfig`** — Structured audit log: `enabled` (default false), `log_path`, `tamper_protection` (hmac/none), `rotation` (daily/size), `retention_days` (90), `redact_content` (true), per-event-type toggles
 
 ### Developer Workflow
@@ -159,6 +162,9 @@ Claude Code skills (`.claude/commands/`) and auto-loaded rules (`.claude/rules/`
 ### Deployment
 
 PyPI: `anteroom`. Deploy via `/deploy` skill (merge PR, CI, version bump, build, `twine upload`).
+
+**Optional Dependencies** (declared in `pyproject.toml`):
+- **`encryption`** — `sqlcipher3>=0.5.0`. Required only if `config.storage.encrypt_at_rest: true`. Enable with: `pip install anteroom[encryption]`
 
 ## Testing Patterns
 
