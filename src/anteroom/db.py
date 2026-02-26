@@ -429,9 +429,19 @@ def _ensure_vec_dimensions(conn: sqlite3.Connection, dimensions: int) -> None:
     _ensure_vec_table_dimensions(conn, "vec_source_chunks", "source_chunk_embeddings", dimensions)
 
 
-def init_db(db_path: Path, vec_dimensions: int = 384) -> ThreadSafeConnection:
+def init_db(
+    db_path: Path,
+    vec_dimensions: int = 384,
+    encryption_key: bytes | None = None,
+) -> ThreadSafeConnection:
     is_new = not db_path.exists()
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+
+    if encryption_key is not None:
+        from .services.encryption import open_encrypted_db
+
+        conn = open_encrypted_db(db_path, encryption_key)
+    else:
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
 
     if is_new:
         _restrict_file_permissions(db_path)

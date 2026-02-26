@@ -60,6 +60,9 @@ docs = [
     "pypdf>=6.7.1",
     "python-docx>=1.0",
 ]
+encryption = [
+    "sqlcipher3>=0.5.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.23.0",

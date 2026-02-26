@@ -50,7 +50,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     db_path = config.app.data_dir / "chat.db"
     vec_dims = get_effective_dimensions(config)
-    app.state.db = init_db(db_path, vec_dimensions=vec_dims)
+
+    # Derive encryption key if encryption at rest is enabled
+    encryption_key: bytes | None = None
+    if config.storage.encrypt_at_rest:
+        from .services.encryption import derive_db_key, is_sqlcipher_available
+
+        if not is_sqlcipher_available():
+            logger.error("Encryption at rest enabled but sqlcipher3 not installed. pip install sqlcipher3")
+            raise RuntimeError("sqlcipher3 required for encrypt_at_rest but not installed")
+        private_key = config.identity.private_key if config.identity else ""
+        if not private_key:
+            raise RuntimeError("Encryption at rest requires an identity key. Run: aroom init")
+        encryption_key = derive_db_key(private_key)
+        logger.info("Database encryption at rest enabled")
+
+    app.state.db = init_db(db_path, vec_dimensions=vec_dims, encryption_key=encryption_key)
 
     db_manager = DatabaseManager()
     db_manager.add("personal", db_path)
@@ -160,6 +175,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if app.state.audit_writer.enabled:
         logger.info("Audit log enabled: %s", app.state.audit_writer.log_dir)
 
+    # Start retention worker if configured
+    app.state.retention_worker = None
+    if config.storage.retention_days > 0:
+        from .services.retention import RetentionWorker
+
+        retention_worker = RetentionWorker(
+            db=app.state.db,
+            data_dir=config.app.data_dir,
+            retention_days=config.storage.retention_days,
+            check_interval=config.storage.retention_check_interval,
+            purge_attachments=config.storage.purge_attachments,
+            purge_embeddings=config.storage.purge_embeddings,
+        )
+        retention_worker.start()
+        app.state.retention_worker = retention_worker
+        logger.info("Retention worker started (retention_days=%d)", config.storage.retention_days)
+
     # Create shared AIService for proxy if enabled
     app.state.proxy_ai_service = None
     if config.proxy.enabled:
@@ -170,6 +202,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    if hasattr(app.state, "retention_worker") and app.state.retention_worker:
+        app.state.retention_worker.stop()
     if hasattr(app.state, "embedding_worker") and app.state.embedding_worker:
         app.state.embedding_worker.stop()
     if hasattr(app.state, "event_bus"):

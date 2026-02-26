@@ -585,6 +585,29 @@ class SessionConfig:
 
 
 @dataclass
+class StorageConfig:
+    """Data retention and encryption at rest settings."""
+
+    retention_days: int = 0  # 0 = disabled (keep forever)
+    retention_check_interval: int = 3600  # seconds between retention checks
+    purge_attachments: bool = True  # also delete attachment files on disk
+    purge_embeddings: bool = True  # also purge orphaned embeddings
+    encrypt_at_rest: bool = False  # requires sqlcipher3 optional dependency
+    encryption_kdf: str = "hkdf-sha256"  # key derivation from identity key
+
+    _MIN_RETENTION_INTERVAL: int = field(default=60, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.retention_check_interval < self._MIN_RETENTION_INTERVAL:
+            logger.warning(
+                "retention_check_interval=%d is below minimum (%d), clamping",
+                self.retention_check_interval,
+                self._MIN_RETENTION_INTERVAL,
+            )
+            object.__setattr__(self, "retention_check_interval", self._MIN_RETENTION_INTERVAL)
+
+
+@dataclass
 class AuditConfig:
     """Structured audit log settings."""
 
@@ -618,6 +641,7 @@ class AppConfig:
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
     rag: RagConfig = field(default_factory=RagConfig)
     codebase_index: CodebaseIndexConfig = field(default_factory=CodebaseIndexConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     audit: AuditConfig = field(default_factory=AuditConfig)
 
@@ -1426,6 +1450,45 @@ def load_config(
         skills=[str(p) for p in refs_raw.get("skills", []) if isinstance(p, str) and p],
     )
 
+    # Storage config (retention + encryption)
+    storage_raw = raw.get("storage", {})
+    if not isinstance(storage_raw, dict):
+        storage_raw = {}
+    try:
+        storage_retention_days = max(
+            0,
+            int(storage_raw.get("retention_days", os.environ.get("AI_CHAT_STORAGE_RETENTION_DAYS", 0))),
+        )
+    except (ValueError, TypeError):
+        storage_retention_days = 0
+    try:
+        storage_check_interval = max(
+            60,
+            int(storage_raw.get("retention_check_interval", os.environ.get("AI_CHAT_STORAGE_CHECK_INTERVAL", 3600))),
+        )
+    except (ValueError, TypeError):
+        storage_check_interval = 3600
+    storage_purge_attachments = str(
+        storage_raw.get("purge_attachments", os.environ.get("AI_CHAT_STORAGE_PURGE_ATTACHMENTS", "true"))
+    ).lower() not in ("false", "0", "no")
+    storage_purge_embeddings = str(
+        storage_raw.get("purge_embeddings", os.environ.get("AI_CHAT_STORAGE_PURGE_EMBEDDINGS", "true"))
+    ).lower() not in ("false", "0", "no")
+    storage_encrypt = str(
+        storage_raw.get("encrypt_at_rest", os.environ.get("AI_CHAT_STORAGE_ENCRYPT", "false"))
+    ).lower() in ("true", "1", "yes")
+    storage_kdf = str(storage_raw.get("encryption_kdf", "hkdf-sha256"))
+    if storage_kdf not in ("hkdf-sha256",):
+        storage_kdf = "hkdf-sha256"
+    storage_config = StorageConfig(
+        retention_days=storage_retention_days,
+        retention_check_interval=storage_check_interval,
+        purge_attachments=storage_purge_attachments,
+        purge_embeddings=storage_purge_embeddings,
+        encrypt_at_rest=storage_encrypt,
+        encryption_kdf=storage_kdf,
+    )
+
     # Session config
     session_raw = raw.get("session", {})
     if not isinstance(session_raw, dict):
@@ -1562,6 +1625,7 @@ def load_config(
             rag=rag_config,
             references=refs_config,
             codebase_index=ci_config,
+            storage=storage_config,
             session=session_config,
             audit=audit_config,
         ),

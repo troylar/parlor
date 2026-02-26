@@ -191,8 +191,133 @@ def _run_db(args) -> None:
                 sys.exit(1)
         print(f"Connected to '{name}' at {db_conf.get('path', db_conf) if isinstance(db_conf, dict) else db_conf}")
 
+    elif action == "purge":
+        _run_db_purge(args)
+
+    elif action == "encrypt":
+        _run_db_encrypt(args)
+
     else:
         print(f"Unknown db action: {action}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_db_purge(args: object) -> None:
+    """Handle `aroom db purge` — delete old conversations."""
+    from datetime import datetime, timedelta, timezone
+
+    from .db import init_db
+    from .services.retention import purge_conversations_before, purge_orphaned_attachments
+
+    _config_path, config, _enforced = _load_config_or_exit()
+
+    before_str = getattr(args, "before", None)
+    older_than_str = getattr(args, "older_than", None)
+    dry_run = getattr(args, "dry_run", False)
+    skip_confirm = getattr(args, "yes", False)
+
+    if not before_str and not older_than_str:
+        if config.storage.retention_days > 0:
+            older_than_str = f"{config.storage.retention_days}d"
+            print(f"Using configured retention: {config.storage.retention_days} days")
+        else:
+            print("Error: specify --before YYYY-MM-DD or --older-than Nd", file=sys.stderr)
+            sys.exit(1)
+
+    if before_str:
+        try:
+            cutoff = datetime.strptime(before_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            print(f"Error: invalid date format '{before_str}', expected YYYY-MM-DD", file=sys.stderr)
+            sys.exit(1)
+    else:
+        assert older_than_str is not None
+        if not older_than_str.endswith("d"):
+            print(f"Error: --older-than must end with 'd' (e.g., 90d), got '{older_than_str}'", file=sys.stderr)
+            sys.exit(1)
+        try:
+            days = int(older_than_str[:-1])
+        except ValueError:
+            print(f"Error: invalid number in '{older_than_str}'", file=sys.stderr)
+            sys.exit(1)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    db = init_db(config.app.data_dir / "chat.db")
+
+    # Preview
+    count = purge_conversations_before(db, cutoff, config.app.data_dir, dry_run=True)
+    orphaned = purge_orphaned_attachments(config.app.data_dir, db, dry_run=True)
+
+    print(f"Cutoff:       {cutoff.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print(f"Conversations: {count} to purge")
+    print(f"Orphaned dirs: {orphaned} to remove")
+
+    if count == 0 and orphaned == 0:
+        print("Nothing to purge.")
+        db.close()
+        return
+
+    if dry_run:
+        print("(dry run — no changes made)")
+        db.close()
+        return
+
+    if not skip_confirm:
+        answer = input("Proceed with purge? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            db.close()
+            return
+
+    purged = purge_conversations_before(
+        db, cutoff, config.app.data_dir, purge_attachments=config.storage.purge_attachments
+    )
+    orphans_removed = purge_orphaned_attachments(config.app.data_dir, db)
+    db.close()
+    print(f"Purged {purged} conversation(s), removed {orphans_removed} orphaned attachment dir(s).")
+
+
+def _run_db_encrypt(args: object) -> None:
+    """Handle `aroom db encrypt` — migrate plaintext DB to encrypted."""
+    _config_path, config, _enforced = _load_config_or_exit()
+
+    from .services.encryption import derive_db_key, is_sqlcipher_available, migrate_plaintext_to_encrypted
+
+    if not is_sqlcipher_available():
+        print("Error: sqlcipher3 not installed. Install with: pip install sqlcipher3", file=sys.stderr)
+        sys.exit(1)
+
+    private_key = config.identity.private_key if config.identity else ""
+    if not private_key:
+        print("Error: no identity key found. Run: aroom init", file=sys.stderr)
+        sys.exit(1)
+
+    db_path = config.app.data_dir / "chat.db"
+    if not db_path.exists():
+        print(f"Error: database not found at {db_path}", file=sys.stderr)
+        sys.exit(1)
+
+    skip_confirm = getattr(args, "yes", False)
+
+    print(f"Database: {db_path}")
+    print("This will encrypt the database in place.")
+    print("A backup will be created with a .bak-plaintext suffix.")
+
+    if not skip_confirm:
+        answer = input("Proceed? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return
+
+    key = derive_db_key(private_key)
+    try:
+        backup_path = migrate_plaintext_to_encrypted(db_path, key)
+        print(f"Encryption complete. Backup at: {backup_path}")
+        print("Update your config.yaml to enable encryption:")
+        print("  storage:")
+        print("    encrypt_at_rest: true")
+    except Exception as e:
+        print(f"Error: migration failed: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -681,10 +806,18 @@ def main() -> None:
     audit_subparsers.add_parser("purge", help="Delete audit logs older than retention period")
 
     # `aroom db` subcommand
-    db_parser = subparsers.add_parser("db", help="Manage shared databases")
-    db_parser.add_argument("db_action", choices=["create", "list", "connect"], help="Database action")
+    db_parser = subparsers.add_parser("db", help="Manage shared databases and data lifecycle")
+    db_parser.add_argument(
+        "db_action", choices=["create", "list", "connect", "purge", "encrypt"], help="Database action"
+    )
     db_parser.add_argument("name", nargs="?", default=None, help="Database name")
     db_parser.add_argument("--path", default=None, help="Path to database file")
+    db_parser.add_argument("--before", default=None, help="Purge conversations before this date (YYYY-MM-DD)")
+    db_parser.add_argument(
+        "--older-than", dest="older_than", default=None, help="Purge conversations older than N days (e.g., 90d, 30d)"
+    )
+    db_parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="Preview purge without deleting")
+    db_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
 
     # Global flags
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

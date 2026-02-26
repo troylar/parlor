@@ -81,6 +81,7 @@ _KNOWN_TOP_LEVEL = {
     "enforce",
     "required",
     "references",
+    "storage",
 }
 
 # Known keys per section
@@ -175,6 +176,14 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "max_prompt_chars",
     },
     "proxy": {"enabled", "allowed_origins"},
+    "storage": {
+        "retention_days",
+        "retention_check_interval",
+        "purge_attachments",
+        "purge_embeddings",
+        "encrypt_at_rest",
+        "encryption_kdf",
+    },
     "identity": {"user_id", "display_name", "public_key", "private_key"},
     "references": {"instructions", "rules", "skills"},
 }
@@ -216,6 +225,8 @@ _INT_FIELDS: list[tuple[str, str, int, int, int]] = [
     ("safety.subagent", "timeout", 10, 600, 120),
     ("safety.subagent", "max_output_chars", 100, 100_000, 4000),
     ("safety.subagent", "max_prompt_chars", 100, 100_000, 32_000),
+    ("storage", "retention_days", 0, 36500, 0),
+    ("storage", "retention_check_interval", 60, 86400, 3600),
 ]
 
 # Float fields: (section_path, key, min, max, default)
@@ -236,6 +247,7 @@ _ENUM_FIELDS: list[tuple[str, str, set[str]]] = [
     ("cli.usage.budgets", "action_on_exceed", {"block", "warn"}),
     ("safety.tool_rate_limit", "action", {"block", "warn"}),
     ("embeddings", "provider", {"local", "api"}),
+    ("storage", "encryption_kdf", {"hkdf-sha256"}),
 ]
 
 # MCP server known keys
@@ -310,6 +322,7 @@ def validate_config(raw: dict[str, Any]) -> ValidationResult:
     _check_section_type(raw, "embeddings", dict, result)
     _check_section_type(raw, "safety", dict, result)
     _check_section_type(raw, "proxy", dict, result)
+    _check_section_type(raw, "storage", dict, result)
     _check_section_type(raw, "identity", dict, result)
     _check_section_type(raw, "mcp_servers", list, result)
 
@@ -409,6 +422,9 @@ def validate_config(raw: dict[str, Any]) -> ValidationResult:
         ("safety", "enabled"),
         ("safety", "read_only"),
         ("proxy", "enabled"),
+        ("storage", "purge_attachments"),
+        ("storage", "purge_embeddings"),
+        ("storage", "encrypt_at_rest"),
     ]:
         section = _get_section(raw, section_path)
         if section is None or key not in section:

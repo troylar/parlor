@@ -793,7 +793,24 @@ async def run_cli(
     db_path = config.app.data_dir / "chat.db"
     config.app.data_dir.mkdir(parents=True, exist_ok=True)
     vec_dims = get_effective_dimensions(config)
-    db = init_db(db_path, vec_dimensions=vec_dims)
+
+    # Derive encryption key if encryption at rest is enabled
+    encryption_key: bytes | None = None
+    if config.storage.encrypt_at_rest:
+        from ..services.encryption import derive_db_key, is_sqlcipher_available
+
+        if not is_sqlcipher_available():
+            renderer.render_error(
+                "Encryption at rest enabled but sqlcipher3 not installed. Install with: pip install sqlcipher3"
+            )
+            return
+        pk = config.identity.private_key if config.identity else ""
+        if not pk:
+            renderer.render_error("Encryption at rest requires an identity key. Run: aroom init")
+            return
+        encryption_key = derive_db_key(pk)
+
+    db = init_db(db_path, vec_dimensions=vec_dims, encryption_key=encryption_key)
 
     # Clean up empty conversations
     try:
@@ -823,6 +840,21 @@ async def run_cli(
 
     _private_key = config.identity.private_key if config.identity else ""
     audit_writer = create_audit_writer(config, private_key_pem=_private_key)
+
+    # Start retention worker if configured
+    retention_worker = None
+    if config.storage.retention_days > 0:
+        from ..services.retention import RetentionWorker
+
+        retention_worker = RetentionWorker(
+            db=db,
+            data_dir=config.app.data_dir,
+            retention_days=config.storage.retention_days,
+            check_interval=config.storage.retention_check_interval,
+            purge_attachments=config.storage.purge_attachments,
+            purge_embeddings=config.storage.purge_embeddings,
+        )
+        retention_worker.start()
 
     # Set up safety configuration and confirmation callback
     from ..tools.safety import SafetyVerdict
@@ -1232,6 +1264,8 @@ async def run_cli(
                 skill_msg_queue_ref=_active_msg_queue,
             )
     finally:
+        if retention_worker:
+            retention_worker.stop()
         if mcp_manager:
             try:
                 await mcp_manager.shutdown()
