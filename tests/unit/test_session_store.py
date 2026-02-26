@@ -87,6 +87,19 @@ class TestMemorySessionStore:
         assert removed == 0
         assert self.store.get("sess-1") is not None
 
+    def test_create_if_allowed_within_limit(self):
+        assert self.store.create_if_allowed("sess-1", "10.0.0.1", max_sessions=2) is True
+        assert self.store.get("sess-1") is not None
+
+    def test_create_if_allowed_at_limit(self):
+        self.store.create("sess-1", "10.0.0.1")
+        assert self.store.create_if_allowed("sess-2", "10.0.0.2", max_sessions=1) is False
+        assert self.store.get("sess-2") is None
+
+    def test_create_if_allowed_unlimited(self):
+        self.store.create("sess-1", "10.0.0.1")
+        assert self.store.create_if_allowed("sess-2", "10.0.0.2", max_sessions=0) is True
+
 
 class TestSQLiteSessionStore:
     """Tests for SQLiteSessionStore."""

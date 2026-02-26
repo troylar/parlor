@@ -272,6 +272,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def session_id_from_token(token: str) -> str:
+    """Derive a deterministic session ID from an auth token value."""
+    return hashlib.sha256(token.encode()).hexdigest()[:32]
+
+
 class BearerTokenMiddleware(BaseHTTPMiddleware):
     """Auth via bearer token header or HttpOnly session cookie with session expiry.
 
@@ -292,22 +297,24 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         self._auth_token = auth_token
         self._secure_cookies = secure_cookies
         self._session_config = session_config or SessionConfig()
-        self._store = create_session_store(self._session_config.store, "")
         self._store_initialized = False
 
+    @property
+    def _store(self):
+        """Access the session store — set during _ensure_store."""
+        return self.__store
+
     def _ensure_store(self, request: Request) -> None:
-        """Lazy-init: adopt the session store from app.state once available."""
+        """Adopt the session store from app.state. Falls back to in-memory."""
         if self._store_initialized:
             return
         state = getattr(request.app, "state", None)
         store = getattr(state, "session_store", None)
         if store is not None:
-            self._store = store
+            self.__store = store
+        else:
+            self.__store = create_session_store("memory", "")
         self._store_initialized = True
-
-    def _session_id_from_token(self, token: str) -> str:
-        """Derive a deterministic session ID from the auth token value."""
-        return hashlib.sha256(token.encode()).hexdigest()[:32]
 
     def _check_token(self, provided: str) -> bool:
         provided_hash = hashlib.sha256(provided.encode()).hexdigest()
@@ -319,25 +326,38 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         if session is None:
             return "new"
         now = time.time()
-        idle_timeout = self._session_config.idle_timeout
-        absolute_timeout = self._session_config.absolute_timeout
-        if now - session["created_at"] > absolute_timeout:
+        if now - session["created_at"] > self._session_config.absolute_timeout:
             security_logger.info("Session expired (absolute timeout)")
             self._store.delete(session_id)
             return "expired"
-        if now - session["last_activity_at"] > idle_timeout:
+        if now - session["last_activity_at"] > self._session_config.idle_timeout:
             security_logger.info("Session expired (idle timeout)")
             self._store.delete(session_id)
             return "expired"
         return "valid"
 
-    def _create_session_if_allowed(self, session_id: str, client_ip: str) -> bool:
-        """Create a new session if within concurrent limit. Returns False if limit exceeded."""
-        max_sessions = self._session_config.max_concurrent_sessions
-        if max_sessions > 0 and self._store.count_active() >= max_sessions:
-            return False
-        self._store.create(session_id, client_ip)
-        return True
+    def _handle_session(self, session_id: str, client_ip: str, request: Request, path: str) -> JSONResponse | None:
+        """Validate or create a session. Returns an error response, or None to proceed."""
+        # Check the specific session first (before bulk cleanup which would mask expiry)
+        state = self._check_session(session_id)
+        if state == "expired":
+            security_logger.warning("Expired session from %s: %s", client_ip, path)
+            _emit_auth_audit(request, "auth.session_expired", "warning", client_ip, path)
+            return JSONResponse(status_code=401, content={"detail": "Session expired"})
+        if state == "new":
+            # Clean up expired sessions before limit check so stale entries don't inflate count
+            self._store.cleanup_expired(
+                self._session_config.idle_timeout,
+                self._session_config.absolute_timeout,
+            )
+            max_sessions = self._session_config.max_concurrent_sessions
+            if not self._store.create_if_allowed(session_id, client_ip, max_sessions):
+                security_logger.warning("Concurrent session limit reached from %s", client_ip)
+                _emit_auth_audit(request, "auth.session_limit", "warning", client_ip, path)
+                return JSONResponse(status_code=429, content={"detail": "Too many active sessions"})
+        else:
+            self._store.touch(session_id)
+        return None
 
     def _make_401(self, detail: str = "Unauthorized") -> JSONResponse:
         """Return a 401 response with a fresh session cookie so the browser auto-recovers."""
@@ -371,38 +391,20 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         # Check Authorization header
         auth = request.headers.get("authorization", "")
         if auth.startswith("Bearer ") and self._check_token(auth[7:]):
-            session_id = self._session_id_from_token(auth[7:])
-            state = self._check_session(session_id)
-            if state == "expired":
-                security_logger.warning("Expired session from %s: %s", client_ip, path)
-                _emit_auth_audit(request, "auth.session_expired", "warning", client_ip, path)
-                return JSONResponse(status_code=401, content={"detail": "Session expired"})
-            if state == "new":
-                if not self._create_session_if_allowed(session_id, client_ip):
-                    security_logger.warning("Concurrent session limit reached from %s", client_ip)
-                    _emit_auth_audit(request, "auth.session_limit", "warning", client_ip, path)
-                    return JSONResponse(status_code=429, content={"detail": "Too many active sessions"})
-            else:
-                self._store.touch(session_id)
+            sid = session_id_from_token(auth[7:])
+            error = self._handle_session(sid, client_ip, request, path)
+            if error:
+                return error
             _emit_auth_audit(request, "auth.success", "info", client_ip, path)
             return await call_next(request)
 
         # Check HttpOnly session cookie
         cookie_token = request.cookies.get("anteroom_session", "")
         if cookie_token and self._check_token(cookie_token):
-            session_id = self._session_id_from_token(cookie_token)
-            state = self._check_session(session_id)
-            if state == "expired":
-                security_logger.warning("Expired session from %s: %s", client_ip, path)
-                _emit_auth_audit(request, "auth.session_expired", "warning", client_ip, path)
-                return JSONResponse(status_code=401, content={"detail": "Session expired"})
-            if state == "new":
-                if not self._create_session_if_allowed(session_id, client_ip):
-                    security_logger.warning("Concurrent session limit reached from %s", client_ip)
-                    _emit_auth_audit(request, "auth.session_limit", "warning", client_ip, path)
-                    return JSONResponse(status_code=429, content={"detail": "Too many active sessions"})
-            else:
-                self._store.touch(session_id)
+            sid = session_id_from_token(cookie_token)
+            error = self._handle_session(sid, client_ip, request, path)
+            if error:
+                return error
             # Verify CSRF token for state-changing requests
             if request.method in ("POST", "PATCH", "PUT", "DELETE"):
                 csrf_cookie = request.cookies.get("anteroom_csrf", "")
@@ -424,13 +426,6 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
 
         security_logger.warning("Authentication failed from %s: %s %s", client_ip, request.method, path)
         _emit_auth_audit(request, "auth.failure", "warning", client_ip, path)
-
-        # Periodic cleanup of orphaned/expired sessions (runs on failed auth to avoid
-        # overhead on every successful request). Cheap for small stores.
-        self._store.cleanup_expired(
-            self._session_config.idle_timeout,
-            self._session_config.absolute_timeout,
-        )
         return self._make_401()
 
 
@@ -601,10 +596,10 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
     async def logout(request: Request):
         cookie_token = request.cookies.get("anteroom_session", "")
         if cookie_token:
-            session_id = hashlib.sha256(cookie_token.encode()).hexdigest()[:32]
+            sid = session_id_from_token(cookie_token)
             store = getattr(request.app.state, "session_store", None)
             if store is not None:
-                store.delete(session_id)
+                store.delete(sid)
         response = JSONResponse(content={"status": "logged out"})
         response.delete_cookie("anteroom_session", path="/api/")
         response.delete_cookie("anteroom_csrf", path="/")

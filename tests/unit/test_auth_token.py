@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from anteroom.app import BearerTokenMiddleware, _derive_auth_token
+from anteroom.app import BearerTokenMiddleware, _derive_auth_token, session_id_from_token
 from anteroom.config import SessionConfig
 
 
@@ -31,7 +31,11 @@ def _make_middleware_app(
     session_config: SessionConfig | None = None,
 ) -> FastAPI:
     """Create a minimal FastAPI app with BearerTokenMiddleware for testing."""
+    from anteroom.services.session_store import MemorySessionStore
+
     app = FastAPI()
+    # Set up session store on app.state so middleware can find it
+    app.state.session_store = MemorySessionStore()
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     app.add_middleware(
         BearerTokenMiddleware,
@@ -178,16 +182,10 @@ class TestBearerTokenMiddleware:
         resp = client.get("/api/test", cookies={"anteroom_session": token})
         assert resp.status_code == 200
 
-        # Walk middleware to find the store and backdate created_at
-        mw = app.middleware_stack
-        while mw is not None:
-            if isinstance(mw, BearerTokenMiddleware):
-                session_id = mw._session_id_from_token(token)
-                session = mw._store.get(session_id)
-                if session:
-                    mw._store._sessions[session_id]["created_at"] = time.time() - 10
-                break
-            mw = getattr(mw, "app", None)
+        # Backdate created_at via the shared store
+        store = app.state.session_store
+        sid = session_id_from_token(token)
+        store._sessions[sid]["created_at"] = time.time() - 10
 
         resp = client.get("/api/test", cookies={"anteroom_session": token})
         assert resp.status_code == 401  # expired sessions are rejected, not auto-recreated
@@ -202,16 +200,10 @@ class TestBearerTokenMiddleware:
         resp = client.get("/api/test", cookies={"anteroom_session": token})
         assert resp.status_code == 200
 
-        # Walk middleware to find the store and backdate last_activity_at
-        mw = app.middleware_stack
-        while mw is not None:
-            if isinstance(mw, BearerTokenMiddleware):
-                session_id = mw._session_id_from_token(token)
-                session = mw._store.get(session_id)
-                if session:
-                    mw._store._sessions[session_id]["last_activity_at"] = time.time() - 10
-                break
-            mw = getattr(mw, "app", None)
+        # Backdate last_activity_at via the shared store
+        store = app.state.session_store
+        sid = session_id_from_token(token)
+        store._sessions[sid]["last_activity_at"] = time.time() - 10
 
         resp = client.get("/api/test", cookies={"anteroom_session": token})
         assert resp.status_code == 401  # expired sessions are rejected, not auto-recreated
@@ -476,18 +468,27 @@ class TestConcurrentSessionLimit:
         cfg = SessionConfig(max_concurrent_sessions=1)
         app = _make_middleware_app(token, session_config=cfg)
         client = TestClient(app)
+        store = app.state.session_store
 
-        # First request creates a session
+        # Fill the store with a session BEFORE the first request
+        store.create("other-session", "10.0.0.1")
+
+        # Our token has no session yet and the limit is reached
+        resp = client.get("/api/test", cookies={"anteroom_session": token})
+        assert resp.status_code == 429
+
+    def test_existing_session_within_limit(self) -> None:
+        token = "test-token"
+        cfg = SessionConfig(max_concurrent_sessions=2)
+        app = _make_middleware_app(token, session_config=cfg)
+        client = TestClient(app)
+
+        # First request creates a session (count: 1)
         resp = client.get("/api/test", cookies={"anteroom_session": token})
         assert resp.status_code == 200
 
-        # Fill the store with a different session to hit the limit
-        mw = app.middleware_stack
-        while mw is not None:
-            if isinstance(mw, BearerTokenMiddleware):
-                mw._store.create("other-session", "10.0.0.1")
-                break
-            mw = getattr(mw, "app", None)
+        # Add another session to reach the limit (count: 2)
+        app.state.session_store.create("other-session", "10.0.0.1")
 
         # Same token should still work (its session already exists)
         resp = client.get("/api/test", cookies={"anteroom_session": token})
