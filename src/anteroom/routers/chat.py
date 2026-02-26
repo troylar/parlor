@@ -1511,9 +1511,7 @@ async def chat(conversation_id: str, request: Request):
                                         f.content_type,
                                     )
                         except Exception:
-                            logger.debug(
-                                "Document extraction failed for %s", f.filename, exc_info=True
-                            )
+                            logger.debug("Document extraction failed for %s", f.filename, exc_info=True)
 
     cancel_event = asyncio.Event()
     _cancel_events[conversation_id].add(cancel_event)
