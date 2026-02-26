@@ -1069,7 +1069,7 @@ async def _stream_chat_events(ctx: StreamContext):
                                     "status": data["status"],
                                     "approval_decision": approval_decision or "auto",
                                     "server": server_name,
-                                    "tool_input": tool_input,
+                                    "tool_input": str(tool_input)[:500],
                                     "tool_output": str(tool_output)[:500] if tool_output else "",
                                 },
                             )

@@ -80,7 +80,7 @@ def _derive_hmac_key(private_key_pem: str) -> bytes:
     hkdf = HKDF(
         algorithm=SHA256(),
         length=32,
-        salt=None,
+        salt=b"anteroom-audit-hmac-salt-v1",
         info=b"anteroom-audit-v1",
     )
     return hkdf.derive(ikm)
@@ -171,7 +171,8 @@ class AuditWriter:
                 if last_line:
                     entry = json.loads(last_line)
                     self._prev_hmac = entry.get("_hmac", _GENESIS_HMAC)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to resume audit HMAC chain from %s: %s — starting new chain", path, e)
             self._prev_hmac = _GENESIS_HMAC
 
     def is_event_enabled(self, event_type: str) -> bool:
@@ -237,7 +238,7 @@ class AuditWriter:
                 except OSError:
                     size = 0
                 if size >= self.rotate_size_bytes:
-                    suffix = int(time.time())
+                    suffix = int(time.time() * 1000)
                     rotated = path.with_suffix(f".{suffix}.jsonl")
                     try:
                         path.rename(rotated)
@@ -303,7 +304,9 @@ def verify_chain(log_path: Path, private_key_pem: str) -> list[dict[str, Any]]:
 
             expected_hmac = _compute_hmac(hmac_key, verify_json, stored_prev)
 
-            valid = _hmac.compare_digest(stored_hmac, expected_hmac) and stored_prev == prev_hmac
+            hmac_ok = _hmac.compare_digest(stored_hmac, expected_hmac)
+            chain_ok = _hmac.compare_digest(stored_prev, prev_hmac)
+            valid = hmac_ok and chain_ok
             results.append(
                 {
                     "line": line_num,

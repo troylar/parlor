@@ -299,7 +299,7 @@ def _run_audit(args) -> None:
 
         audit_file = getattr(args, "audit_file", None)
         if audit_file:
-            log_path = Path(audit_file)
+            log_path = Path(audit_file).resolve()
         else:
             from datetime import datetime, timezone
 
