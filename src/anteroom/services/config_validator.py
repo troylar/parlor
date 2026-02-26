@@ -82,6 +82,11 @@ _KNOWN_TOP_LEVEL = {
     "required",
     "references",
     "storage",
+    "rag",
+    "codebase_index",
+    "session",
+    "audit",
+    "compliance",
 }
 
 # Known keys per section
@@ -217,6 +222,35 @@ _KNOWN_KEYS: dict[str, set[str]] = {
     },
     "identity": {"user_id", "display_name", "public_key", "private_key"},
     "references": {"instructions", "rules", "skills"},
+    "rag": {
+        "enabled",
+        "max_chunks",
+        "max_tokens",
+        "similarity_threshold",
+        "include_sources",
+        "include_conversations",
+        "exclude_current",
+    },
+    "codebase_index": {"enabled", "map_tokens", "languages", "exclude_dirs"},
+    "session": {
+        "store",
+        "max_concurrent_sessions",
+        "idle_timeout",
+        "absolute_timeout",
+        "allowed_ips",
+        "log_session_events",
+    },
+    "audit": {
+        "enabled",
+        "log_path",
+        "tamper_protection",
+        "rotation",
+        "rotate_size_bytes",
+        "retention_days",
+        "redact_content",
+        "events",
+    },
+    "compliance": {"rules"},
 }
 
 # Int fields: (section_path, key, min, max, default)
@@ -360,6 +394,11 @@ def validate_config(raw: dict[str, Any]) -> ValidationResult:
     _check_section_type(raw, "proxy", dict, result)
     _check_section_type(raw, "storage", dict, result)
     _check_section_type(raw, "identity", dict, result)
+    _check_section_type(raw, "rag", dict, result)
+    _check_section_type(raw, "codebase_index", dict, result)
+    _check_section_type(raw, "session", dict, result)
+    _check_section_type(raw, "audit", dict, result)
+    _check_section_type(raw, "compliance", dict, result)
     _check_section_type(raw, "mcp_servers", list, result)
 
     # Validate int fields

@@ -716,6 +716,26 @@ class AuditConfig:
 
 
 @dataclass
+class ComplianceRule:
+    """A single declarative compliance rule evaluated against the final config."""
+
+    field: str  # dot-path, e.g. "safety.approval_mode"
+    message: str = ""  # human-readable violation message
+    must_be: Any = None
+    must_not_be: Any = None
+    must_match: str = ""  # regex pattern
+    must_not_be_empty: bool = False
+    must_contain: Any = None
+
+
+@dataclass
+class ComplianceConfig:
+    """Declarative rules engine for configuration governance."""
+
+    rules: list[ComplianceRule] = field(default_factory=list)
+
+
+@dataclass
 class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
@@ -733,6 +753,7 @@ class AppConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     audit: AuditConfig = field(default_factory=AuditConfig)
+    compliance: ComplianceConfig = field(default_factory=ComplianceConfig)
 
 
 def _resolve_data_dir() -> Path:
@@ -1794,6 +1815,30 @@ def load_config(
     if ci_exclude_raw is not None and isinstance(ci_exclude_raw, list):
         ci_config.exclude_dirs = [str(d) for d in ci_exclude_raw]
 
+    # Compliance rules config
+    compliance_raw = raw.get("compliance", {})
+    if not isinstance(compliance_raw, dict):
+        compliance_raw = {}
+    compliance_rules: list[ComplianceRule] = []
+    for rule_raw in compliance_raw.get("rules", []):
+        if not isinstance(rule_raw, dict):
+            continue
+        rule_field = str(rule_raw.get("field", ""))
+        if not rule_field:
+            continue
+        compliance_rules.append(
+            ComplianceRule(
+                field=rule_field,
+                message=str(rule_raw.get("message", "")),
+                must_be=rule_raw.get("must_be"),
+                must_not_be=rule_raw.get("must_not_be"),
+                must_match=str(rule_raw.get("must_match", "")),
+                must_not_be_empty=str(rule_raw.get("must_not_be_empty", "false")).lower() not in ("false", "0", "no"),
+                must_contain=rule_raw.get("must_contain"),
+            )
+        )
+    compliance_config = ComplianceConfig(rules=compliance_rules)
+
     return (
         AppConfig(
             ai=ai,
@@ -1812,6 +1857,7 @@ def load_config(
             storage=storage_config,
             session=session_config,
             audit=audit_config,
+            compliance=compliance_config,
         ),
         enforced_fields,
     )

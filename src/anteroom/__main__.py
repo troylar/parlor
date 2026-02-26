@@ -51,7 +51,44 @@ def _load_config_or_exit(
         print(f"Configuration error: {e}", file=sys.stderr)
         print("Run 'aroom config' to fix your configuration.", file=sys.stderr)
         sys.exit(1)
+
+    # Compliance rules validation (fail closed)
+    from .services.compliance import validate_compliance
+
+    compliance_result = validate_compliance(config)
+    if not compliance_result.is_compliant:
+        print(f"Configuration compliance failure:\n{compliance_result.format_report()}", file=sys.stderr)
+        print("\nFix the configuration or contact your team administrator.", file=sys.stderr)
+        sys.exit(1)
+
     return config_path, config, enforced_fields
+
+
+def _run_config_validate(team_config_path: Path | None = None) -> None:
+    """Run compliance validation and report results."""
+    config_path = _get_config_path()
+    if not config_path.exists():
+        print(f"No configuration file found at {config_path}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        config, _enforced = load_config(
+            team_config_path=team_config_path,
+            interactive=False,
+        )
+    except ValueError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    from .services.compliance import validate_compliance
+
+    result = validate_compliance(config)
+    if result.is_compliant:
+        rule_count = len(config.compliance.rules)
+        print(f"Compliance: OK ({rule_count} rule(s) passed)")
+        sys.exit(0)
+    else:
+        print(result.format_report(), file=sys.stderr)
+        sys.exit(1)
 
 
 async def _validate_ai_connection(config) -> None:
@@ -705,7 +742,9 @@ def main() -> None:
     )
 
     # `aroom config` subcommand
-    subparsers.add_parser("config", help="View and edit configuration")
+    config_parser = subparsers.add_parser("config", help="View and edit configuration")
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    config_subparsers.add_parser("validate", help="Check compliance rules without starting the app")
 
     # `aroom chat` subcommand
     chat_parser = subparsers.add_parser("chat", help="Interactive CLI chat mode")
@@ -915,6 +954,11 @@ def main() -> None:
         return
 
     if args.command == "config":
+        if getattr(args, "config_command", None) == "validate":
+            tc_arg = getattr(args, "team_config", None)
+            tc_path = Path(tc_arg) if tc_arg else None
+            _run_config_validate(team_config_path=tc_path)
+            return
         from .cli.setup import run_config_editor
 
         run_config_editor()
