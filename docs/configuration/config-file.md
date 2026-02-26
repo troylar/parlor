@@ -124,6 +124,14 @@ safety:
     max_calls_per_conversation: 0         # Max tool calls per conversation (0 = unlimited)
     max_consecutive_failures: 5           # Max consecutive failed tool calls
     action: "block"                       # "block" to deny, "warn" to allow + log
+  prompt_injection:
+    enabled: false                        # Enable prompt injection detection (default: false)
+    action: "warn"                        # "block" | "warn" | "log" (default: warn)
+    canary_length: 16                     # Bytes of randomness for canary tokens (default: 16)
+    detect_encoding_attacks: true         # Detect base64, hex, unicode escaping (default: true)
+    detect_instruction_override: true     # Detect instruction override patterns (default: true)
+    heuristic_threshold: 0.7              # Minimum confidence to trigger action (default: 0.7)
+    log_detections: true                  # Log detected attacks to security log (default: true)
 
 embeddings:
   enabled: true
@@ -370,6 +378,35 @@ safety:
 ```
 
 See [Tool Safety](../security/tool-safety.md) for the full list of built-in patterns and the approval flow.
+
+#### safety.prompt_injection
+
+Controls prompt injection detection and defense. Detects when untrusted content (tool outputs, RAG results) attempts to override system instructions through canary token leakage, encoding attacks, and heuristic pattern matching.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Enable prompt injection detection |
+| `action` | string | `warn` | Action when injection is detected: `block` (reject content), `warn` (allow + log warning), `log` (silent audit) |
+| `canary_length` | integer | `16` | Length in bytes of random canary tokens embedded in system prompt for leakage detection |
+| `detect_encoding_attacks` | boolean | `true` | Detect obfuscated injection attempts (base64, hex, unicode escaping) |
+| `detect_instruction_override` | boolean | `true` | Detect patterns that attempt to override or ignore system instructions |
+| `heuristic_threshold` | float | `0.7` | Confidence threshold (0.0–1.0) for heuristic pattern matching; higher = fewer false positives |
+| `log_detections` | boolean | `true` | Log all detected injections to the security logger |
+
+Example to enable strict injection defense:
+
+```yaml
+safety:
+  prompt_injection:
+    enabled: true
+    action: "block"                       # hard-block injections
+    detect_encoding_attacks: true
+    detect_instruction_override: true
+    heuristic_threshold: 0.6              # lower threshold catches more attempts
+    log_detections: true
+```
+
+See [Prompt Injection Defense](../security/prompt-injection-defense.md) for technical details and threat model.
 
 ### embeddings
 
