@@ -247,7 +247,8 @@ class TestRetentionWorker:
         count = await worker.run_once()
         assert count == 0
 
-    def test_start_and_stop(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_start_and_stop(self, tmp_path: Path) -> None:
         db = MagicMock()
         worker = RetentionWorker(db, tmp_path, retention_days=30)
 
