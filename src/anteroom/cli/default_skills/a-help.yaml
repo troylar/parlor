@@ -355,6 +355,7 @@ prompt: |
   | aroom          | --top-p TOP_P           | Override model top_p (0.0-1.0)                 |
   | aroom          | --seed SEED             | Set random seed for deterministic output       |
   | aroom          | --team-config PATH      | Explicit path to team config YAML              |
+  | aroom          | --project NAME          | Load a named project (instructions, model override, source context) |
   | aroom          | --debug                 | Enable debug logging to stderr                 |
   | aroom init     |                         | Interactive setup wizard                       |
   | aroom init     | --force                 | Overwrite existing config without asking        |
@@ -388,6 +389,7 @@ prompt: |
   | aroom db       | purge                   | Delete old conversations                       |
   | aroom db       | encrypt                 | Migrate to encrypted database                  |
   | aroom config   | validate                | Check compliance rules                         |
+  | aroom projects |                         | List named projects with metadata              |
 
   ### Built-in Tools
 
