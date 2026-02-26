@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.61.0
+
+**New:**
+
+- Output content filter with system prompt leak detection: scans LLM responses for forbidden content and system prompt fragments via n-gram overlap analysis (OWASP LLM07 mitigation) (#449)
+- Custom pattern blocking catches forbidden patterns during streaming before tokens reach the user (#449)
+- Three configurable actions: warn, block, or redact — works across web UI, CLI REPL, and exec mode (#449)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.61.0)
+
 ### v1.60.0
 
 **New:**
