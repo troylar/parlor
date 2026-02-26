@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import sqlite3 as _sqlite3
 import unicodedata
@@ -129,7 +128,7 @@ async def create_conversation(request: Request):
         user_id=uid,
         user_display_name=uname,
         conversation_type=conv_type,
-        working_dir=os.getcwd(),
+        working_dir=None,
     )
 
     event_bus = _get_event_bus(request)

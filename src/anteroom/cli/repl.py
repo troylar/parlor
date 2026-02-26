@@ -387,11 +387,18 @@ def _restore_working_dir(
     stored_dir = conv.get("working_dir")
     if not stored_dir:
         return current_working_dir
+    # Resolve symlinks for consistent validation
+    stored_dir = os.path.realpath(stored_dir)
     if not os.path.isdir(stored_dir):
         logger.warning("Stored working_dir %s no longer exists, using current", stored_dir)
         renderer.console.print(
             f"[{MUTED}]Note: original directory {stored_dir} no longer exists, using current[/{MUTED}]"
         )
+        return current_working_dir
+    # Block sensitive system directories
+    _blocked_prefixes = ("/proc/", "/sys/", "/dev/")
+    if any(stored_dir.startswith(p) or stored_dir == p.rstrip("/") for p in _blocked_prefixes):
+        logger.warning("Blocked unsafe stored working_dir: %s", stored_dir)
         return current_working_dir
     # Re-scope tools to the stored directory
     from ..tools import bash, edit, glob_tool, grep, read, write

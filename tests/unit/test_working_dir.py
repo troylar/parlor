@@ -68,3 +68,10 @@ class TestRestoreWorkingDir:
         _restore_working_dir(conv, registry, "/current")
 
         assert read._working_dir == original
+
+    def test_blocks_sensitive_system_dirs(self) -> None:
+        for path in ["/proc", "/sys", "/dev", "/proc/self", "/sys/class/net"]:
+            conv: dict = {"id": "abc", "working_dir": path}
+            registry = MagicMock()
+            result = _restore_working_dir(conv, registry, "/current")
+            assert result == "/current", f"Should block {path}"
