@@ -252,3 +252,76 @@ class TestRetentionWorker:
         count = await worker.run_once()
         # Since retention_days=0, cutoff = now - 0 days = now, and 2020 < now, so it purges.
         assert count >= 1
+
+    @pytest.mark.asyncio
+    async def test_run_forever_disables_after_max_failures(self, tmp_path: Path) -> None:
+        """Worker stops after MAX_CONSECUTIVE_FAILURES errors."""
+        from anteroom.services.retention import MAX_CONSECUTIVE_FAILURES
+
+        db = MagicMock()
+        worker = RetentionWorker(db, tmp_path, retention_days=30, check_interval=60)
+
+        call_count = 0
+
+        async def _failing_run_once() -> int:
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("db error")
+
+        with patch.object(worker, "run_once", side_effect=_failing_run_once):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                await worker.run_forever()
+
+        assert call_count == MAX_CONSECUTIVE_FAILURES
+        assert worker._consecutive_failures == MAX_CONSECUTIVE_FAILURES
+
+    @pytest.mark.asyncio
+    async def test_run_forever_resets_backoff_on_success(self, tmp_path: Path) -> None:
+        """Worker resets backoff after a successful run following failures."""
+        db = MagicMock()
+        worker = RetentionWorker(db, tmp_path, retention_days=30, check_interval=60)
+
+        # Simulate: fail once, then succeed, then stop
+        call_count = 0
+
+        async def _fail_then_succeed() -> int:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient error")
+            # On second call, stop the worker to exit the loop
+            worker._running = False
+            return 0
+
+        with patch.object(worker, "run_once", side_effect=_fail_then_succeed):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                await worker.run_forever()
+
+        assert call_count == 2
+        assert worker._consecutive_failures == 0  # reset after success
+
+    def test_purge_conversation_without_attachment_dir(self, tmp_path: Path) -> None:
+        """Purge succeeds even when no attachment directory exists for the conversation."""
+        conn = _create_test_db(tmp_path)
+        _insert_conversation(conn, "old-no-att", "2024-01-01T00:00:00")
+
+        # No attachments directory created
+        cutoff = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        count = purge_conversations_before(conn, cutoff, tmp_path, purge_attachments=True)
+
+        assert count == 1
+        rows = conn.execute("SELECT id FROM conversations").fetchall()
+        assert len(rows) == 0
+
+
+class TestPurgeOrphanedSkipsFiles:
+    def test_skips_non_directory_entries(self, tmp_path: Path) -> None:
+        """Files directly in attachments root are not counted as orphaned dirs."""
+        conn = _create_test_db(tmp_path)
+        att_root = tmp_path / "attachments"
+        att_root.mkdir()
+        (att_root / "stray-file.txt").write_text("not a dir")
+
+        count = purge_orphaned_attachments(tmp_path, conn)
+        assert count == 0
+        assert (att_root / "stray-file.txt").exists()

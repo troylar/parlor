@@ -313,6 +313,11 @@ def _run_db_encrypt(args: object) -> None:
     try:
         backup_path = migrate_plaintext_to_encrypted(db_path, key)
         print(f"Encryption complete. Backup at: {backup_path}")
+        print()
+        print("WARNING: The backup contains your UNENCRYPTED data.")
+        print("After verifying the encrypted database works, securely delete it:")
+        print(f"  rm '{backup_path}'")
+        print()
         print("Update your config.yaml to enable encryption:")
         print("  storage:")
         print("    encrypt_at_rest: true")

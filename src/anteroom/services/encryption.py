@@ -64,6 +64,9 @@ def open_encrypted_db(db_path: Path, key: bytes) -> sqlite3.Connection:
     import sqlcipher3
 
     conn = sqlcipher3.connect(str(db_path))  # type: ignore[attr-defined]
+    # SECURITY-REVIEW: PRAGMA key does not support parameterized binding in SQLCipher.
+    # _key_hex() returns hex-only output (0-9a-f) from bytes.hex(), so SQL injection
+    # is not possible. The f-string is the required interface for SQLCipher PRAGMAs.
     conn.execute(f"PRAGMA key = \"x'{_key_hex(key)}'\"")
     conn.execute("PRAGMA cipher_page_size = 4096")
     conn.execute("PRAGMA kdf_iter = 256000")
@@ -141,7 +144,13 @@ def migrate_plaintext_to_encrypted(
 
         # Attach the encrypted target
         hex_key = _key_hex(key)
-        src_conn.execute(f"ATTACH DATABASE '{tmp_path}' AS encrypted KEY \"x'{hex_key}'\"")
+        # SECURITY-REVIEW: ATTACH DATABASE and KEY do not support parameterized binding
+        # in SQLCipher. tmp_path comes from tempfile.mkstemp (OS-controlled), hex_key is
+        # hex-only from bytes.hex(). Reject paths containing single quotes as a safeguard.
+        safe_path = str(tmp_path)
+        if "'" in safe_path:
+            raise ValueError(f"Database path contains unsafe characters: {safe_path}")
+        src_conn.execute(f"ATTACH DATABASE '{safe_path}' AS encrypted KEY \"x'{hex_key}'\"")
         src_conn.execute("PRAGMA encrypted.cipher_page_size = 4096")
         src_conn.execute("PRAGMA encrypted.kdf_iter = 256000")
 
