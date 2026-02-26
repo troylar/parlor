@@ -522,7 +522,8 @@ gh pr view --json number,url,title
   🔗 PR:       #<N> — <title>
   🌐 URL:      <url>
   🔀 Base:     main ← <branch>
-  📎 Issues:   Closes #<N>, Addresses #<N>
+  📎 Issues:   Closes #<N> — <issue title> (https://github.com/troylar/anteroom/issues/<N>)
+               Addresses #<N> — <issue title> (https://github.com/troylar/anteroom/issues/<N>)
   📌 Status:   <ready | draft>
   🧪 Checks:   ✅ lint, format, tests, types
   📦 Deps:     ✅ / ❌ N vulns / ⚠️ N outdated, N new to review
