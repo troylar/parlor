@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.59.0
+
+**New:**
+
+- Data Loss Prevention (DLP) scanning pipeline: detects sensitive data patterns (SSN, credit card, email, phone, IBAN) in AI responses with configurable redact/block/warn actions (#445)
+- Custom DLP regex patterns via config for domain-specific sensitive data detection (#445)
+- ReDoS-safe pattern validation with static analysis rejection of pathological regex (#445)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.59.0)
+
 ### v1.58.0
 
 **New:**
