@@ -1250,6 +1250,14 @@ async def _parse_chat_request(request: Request) -> ChatRequestContext:
         files = form.getlist("files")
         if len(files) > MAX_FILES_PER_REQUEST:
             raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_REQUEST} files per request")
+        plan_mode = str(form.get("plan_mode", "")).lower() == "true"
+        source_ids = [s for s in form.getlist("source_ids") if isinstance(s, str) and s]
+        source_tag = form.get("source_tag") or None
+        if isinstance(source_tag, str) and not source_tag.strip():
+            source_tag = None
+        source_group_id = form.get("source_group_id") or None
+        if isinstance(source_group_id, str) and not source_group_id.strip():
+            source_group_id = None
     else:
         body = ChatRequest(**(await request.json()))
         message_text = body.message
@@ -1482,6 +1490,32 @@ async def chat(conversation_id: str, request: Request):
                             )
                         except Exception:
                             pass
+                    else:
+                        try:
+                            from ..services.document_extractor import EXTRACTABLE_MIME_TYPES, extract_text
+
+                            validated_mime = att.get("mime_type") or f.content_type
+                            if validated_mime and validated_mime in EXTRACTABLE_MIME_TYPES:
+                                extracted = extract_text(file_data, validated_mime)
+                                if extracted:
+                                    max_chars = 50_000
+                                    if len(extracted) > max_chars:
+                                        extracted = extracted[:max_chars] + "\n\n[... truncated]"
+                                    attachment_contents.append(
+                                        {
+                                            "type": "text",
+                                            "filename": f.filename,
+                                            "content": extracted,
+                                        }
+                                    )
+                                else:
+                                    logger.warning(
+                                        "Could not extract text from %s (%s)",
+                                        f.filename,
+                                        validated_mime,
+                                    )
+                        except Exception:
+                            logger.debug("Document extraction failed for %s", f.filename, exc_info=True)
 
     cancel_event = asyncio.Event()
     _cancel_events[conversation_id].add(cancel_event)
