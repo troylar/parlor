@@ -160,6 +160,13 @@ class TestResolvePackId:
         assert resolve_pack_id(db, "test", "nope") is None
 
 
+class TestProjectPathValidation:
+    def test_rejects_traversal(self, db: ThreadSafeConnection) -> None:
+        _insert_pack(db)
+        with pytest.raises(ValueError, match="must not contain"):
+            attach_pack(db, "pack-1", project_path="/foo/../etc")
+
+
 class TestCascadeDelete:
     def test_deleting_pack_removes_attachments(self, db: ThreadSafeConnection) -> None:
         _insert_pack(db)

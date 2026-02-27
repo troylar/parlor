@@ -16,6 +16,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _validate_project_path(project_path: str | None) -> None:
+    """Reject project paths with traversal components."""
+    if project_path is None:
+        return
+    from pathlib import PurePosixPath
+
+    parts = PurePosixPath(project_path).parts
+    if ".." in parts:
+        msg = "project_path must not contain '..' components"
+        raise ValueError(msg)
+
+
 def attach_pack(
     db: sqlite3.Connection,
     pack_id: str,
@@ -27,6 +39,7 @@ def attach_pack(
     Raises ``ValueError`` if the pack doesn't exist or is already attached
     at the same scope.
     """
+    _validate_project_path(project_path)
     pack = db.execute("SELECT id, namespace, name FROM packs WHERE id = ?", (pack_id,)).fetchone()
     if not pack:
         msg = f"Pack not found: {pack_id}"

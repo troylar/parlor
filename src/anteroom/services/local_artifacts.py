@@ -26,6 +26,7 @@ Directory structure::
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -157,6 +158,9 @@ def load_local_artifacts(
     return count
 
 
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+
+
 def scaffold_local_artifact(
     artifact_type: str,
     name: str,
@@ -170,6 +174,10 @@ def scaffold_local_artifact(
     Returns the path to the created file.
     Raises ``ValueError`` if the type is invalid or the file already exists.
     """
+    if not _SAFE_NAME_RE.match(name) or ".." in name:
+        msg = f"Invalid artifact name: {name!r}. Use alphanumeric, hyphens, underscores, dots only."
+        raise ValueError(msg)
+
     try:
         art_type = ArtifactType(artifact_type)
     except ValueError:

@@ -136,6 +136,14 @@ class TestScaffoldLocalArtifact:
         assert ".anteroom" in str(path)
         assert path.exists()
 
+    def test_rejects_path_traversal_name(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Invalid artifact name"):
+            scaffold_local_artifact("rule", "../../evil", tmp_path)
+
+    def test_rejects_slash_in_name(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Invalid artifact name"):
+            scaffold_local_artifact("rule", "foo/bar", tmp_path)
+
     def test_invalid_type_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="Invalid artifact type"):
             scaffold_local_artifact("bogus", "test", tmp_path)
