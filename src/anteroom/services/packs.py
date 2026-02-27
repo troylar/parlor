@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import sqlite3
 import uuid
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 _MANIFEST_FILE = "pack.yaml"
 _PACKS_DIR = "packs"
 _ANTEROOM_DIR = ".anteroom"
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
 # Artifact type -> subdirectory name in pack directory
 _TYPE_DIRS: dict[str, str] = {
@@ -81,10 +83,16 @@ def parse_manifest(manifest_path: Path) -> PackManifest:
     if not name:
         msg = "Manifest missing required field: name"
         raise ValueError(msg)
+    if not _SAFE_NAME_RE.match(name):
+        msg = f"Invalid pack name: must match {_SAFE_NAME_RE.pattern}"
+        raise ValueError(msg)
 
     namespace = str(data.get("namespace", "")).strip()
     if not namespace:
         msg = "Manifest missing required field: namespace"
+        raise ValueError(msg)
+    if not _SAFE_NAME_RE.match(namespace):
+        msg = f"Invalid namespace: must match {_SAFE_NAME_RE.pattern}"
         raise ValueError(msg)
 
     version = str(data.get("version", "0.0.0")).strip()
@@ -127,9 +135,13 @@ def validate_manifest(manifest: PackManifest, pack_dir: Path) -> list[str]:
     Returns a list of error messages (empty if valid).
     """
     errors: list[str] = []
+    resolved_pack = pack_dir.resolve()
     for art in manifest.artifacts:
         if art.file:
             art_path = pack_dir / art.file
+            if not art_path.resolve().is_relative_to(resolved_pack):
+                errors.append(f"Path traversal in artifact {art.type}/{art.name}: {art.file}")
+                continue
         else:
             type_dir = _TYPE_DIRS.get(art.type, art.type)
             art_path = pack_dir / type_dir / f"{art.name}.yaml"
@@ -144,8 +156,12 @@ def validate_manifest(manifest: PackManifest, pack_dir: Path) -> list[str]:
 
 def _resolve_artifact_file(art: ManifestArtifact, pack_dir: Path) -> Path | None:
     """Resolve the file path for a manifest artifact entry."""
+    resolved_pack = pack_dir.resolve()
     if art.file:
         candidate = pack_dir / art.file
+        if not candidate.resolve().is_relative_to(resolved_pack):
+            logger.warning("Path traversal blocked: %s", art.file)
+            return None
         return candidate if candidate.is_file() else None
 
     type_dir = _TYPE_DIRS.get(art.type, art.type)
@@ -330,7 +346,9 @@ def update_pack(
 def list_packs(db: sqlite3.Connection) -> list[dict[str, Any]]:
     """List all installed packs with artifact counts."""
     rows = db.execute(
-        """SELECT p.*, COUNT(pa.artifact_id) AS artifact_count
+        """SELECT p.id, p.name, p.namespace, p.version, p.description,
+                  p.installed_at, p.updated_at,
+                  COUNT(pa.artifact_id) AS artifact_count
            FROM packs p
            LEFT JOIN pack_artifacts pa ON p.id = pa.pack_id
            GROUP BY p.id
@@ -350,7 +368,8 @@ def get_pack(db: sqlite3.Connection, namespace: str, name: str) -> dict[str, Any
     pack_id = result["id"]
 
     art_rows = db.execute(
-        """SELECT a.* FROM artifacts a
+        """SELECT a.id, a.fqn, a.type, a.namespace, a.name, a.content, a.content_hash
+           FROM artifacts a
            JOIN pack_artifacts pa ON a.id = pa.artifact_id
            WHERE pa.pack_id = ?
            ORDER BY a.type, a.name""",
@@ -412,7 +431,8 @@ def _copy_to_project(pack_dir: Path, manifest: PackManifest, project_dir: Path) 
 def _get_pack_row(db: sqlite3.Connection, namespace: str, name: str) -> Any:
     """Fetch a pack row by namespace and name."""
     return db.execute(
-        "SELECT * FROM packs WHERE namespace = ? AND name = ?",
+        "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
+        " FROM packs WHERE namespace = ? AND name = ?",
         (namespace, name),
     ).fetchone()
 

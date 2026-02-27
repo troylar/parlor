@@ -100,6 +100,16 @@ class TestParseManifest:
         with pytest.raises(ValueError, match="missing required field: namespace"):
             parse_manifest(tmp_path / "pack.yaml")
 
+    def test_invalid_name_format(self, tmp_path: Path) -> None:
+        _write_manifest(tmp_path, {"name": "../evil", "namespace": "ns", "artifacts": []})
+        with pytest.raises(ValueError, match="Invalid pack name"):
+            parse_manifest(tmp_path / "pack.yaml")
+
+    def test_invalid_namespace_format(self, tmp_path: Path) -> None:
+        _write_manifest(tmp_path, {"name": "p", "namespace": "../../etc", "artifacts": []})
+        with pytest.raises(ValueError, match="Invalid namespace"):
+            parse_manifest(tmp_path / "pack.yaml")
+
     def test_invalid_yaml(self, tmp_path: Path) -> None:
         (tmp_path / "pack.yaml").write_text("not a mapping", encoding="utf-8")
         with pytest.raises(ValueError, match="must be a YAML mapping"):
@@ -203,6 +213,22 @@ class TestValidateManifest:
         errors = validate_manifest(manifest, pack_dir)
         assert errors == []
 
+    def test_path_traversal_blocked(self, tmp_path: Path) -> None:
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        _write_manifest(
+            pack_dir,
+            {
+                "name": "p",
+                "namespace": "ns",
+                "artifacts": [{"type": "skill", "name": "evil", "file": "../../../etc/passwd"}],
+            },
+        )
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        errors = validate_manifest(manifest, pack_dir)
+        assert len(errors) == 1
+        assert "Path traversal" in errors[0]
+
 
 class TestResolveArtifactFile:
     def test_yaml_extension(self, tmp_path: Path) -> None:
@@ -229,6 +255,11 @@ class TestResolveArtifactFile:
 
     def test_not_found(self, tmp_path: Path) -> None:
         art = ManifestArtifact(type="skill", name="missing")
+        result = _resolve_artifact_file(art, tmp_path)
+        assert result is None
+
+    def test_path_traversal_blocked(self, tmp_path: Path) -> None:
+        art = ManifestArtifact(type="skill", name="evil", file="../../../etc/passwd")
         result = _resolve_artifact_file(art, tmp_path)
         assert result is None
 

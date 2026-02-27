@@ -25,4 +25,5 @@ async def get_pack(request: Request, namespace: str, name: str) -> dict[str, Any
     result = packs.get_pack(db, namespace, name)
     if not result:
         raise HTTPException(status_code=404, detail="Pack not found")
+    result.pop("source_path", None)
     return result
