@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from .artifacts import ArtifactSource
-from .packs import parse_manifest, validate_manifest
+from .packs import PackManifest, parse_manifest, validate_manifest
+
+UpsertFn = Callable[..., dict[str, Any] | None]
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +110,9 @@ def install_starter_packs(
 
 def _install_starter(
     db: sqlite3.Connection,
-    manifest: object,
+    manifest: PackManifest,
     pack_dir: Path,
-    upsert_artifact: object,
+    upsert_artifact: UpsertFn,
 ) -> None:
     """Install a single starter pack at built_in precedence."""
     import uuid

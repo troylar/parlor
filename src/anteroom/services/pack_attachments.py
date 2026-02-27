@@ -137,6 +137,21 @@ def get_active_pack_ids(
     return [r[0] if isinstance(r, (tuple, list)) else r["pack_id"] for r in rows]
 
 
+def list_attachments_for_pack(
+    db: sqlite3.Connection,
+    pack_id: str,
+) -> list[dict[str, Any]]:
+    """List all attachments for a specific pack."""
+    rows = db.execute(
+        """SELECT id, pack_id, project_path, scope, created_at
+           FROM pack_attachments WHERE pack_id = ?
+           ORDER BY scope, project_path""",
+        (pack_id,),
+    ).fetchall()
+    keys = ("id", "pack_id", "project_path", "scope", "created_at")
+    return [dict(r) if isinstance(r, sqlite3.Row) else {k: v for k, v in zip(keys, r)} for r in rows]
+
+
 def resolve_pack_id(db: sqlite3.Connection, namespace: str, name: str) -> str | None:
     """Look up pack_id from namespace/name. Returns None if not found."""
     row = db.execute(

@@ -139,21 +139,20 @@ class TestImportAll:
         self,
         db: ThreadSafeConnection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         skills = tmp_path / "skills"
         skills.mkdir()
         (skills / "greet.yaml").write_text("name: greet\ncontent: Hi\n")
 
-        anteroom_md = tmp_path / ".anteroom.md"
+        proj = tmp_path / "project"
+        proj.mkdir()
+        anteroom_md = proj / ".anteroom.md"
         anteroom_md.write_text("## Section\nContent here.\n")
 
-        monkeypatch.chdir(tmp_path)
-        results = import_all(db, tmp_path)
+        results = import_all(db, tmp_path, project_dir=proj)
         assert "skills" in results
         assert results["skills"].imported == 1
 
-    def test_empty_data_dir(self, db: ThreadSafeConnection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.chdir(tmp_path)
+    def test_empty_data_dir(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
         results = import_all(db, tmp_path)
         assert results == {}

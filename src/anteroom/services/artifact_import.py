@@ -133,27 +133,28 @@ def import_instructions(
 def import_all(
     db: sqlite3.Connection,
     data_dir: Path,
+    *,
+    project_dir: Path | None = None,
 ) -> dict[str, ImportResult]:
     """Import all existing extensibility files into the artifact system.
 
-    Looks for skills in ``~/.anteroom/skills/`` and instructions in
-    common ANTEROOM.md locations.
+    Looks for skills in ``data_dir/skills/`` and instructions in
+    common ANTEROOM.md locations under *project_dir*.
     """
     results: dict[str, ImportResult] = {}
 
-    # Import skills from global and legacy directories
-    for skills_name in ("skills",):
-        skills_dir = data_dir / skills_name
-        if skills_dir.is_dir():
-            results["skills"] = import_skills(db, skills_dir)
-            break
+    # Import skills from global directory
+    skills_dir = data_dir / "skills"
+    if skills_dir.is_dir():
+        results["skills"] = import_skills(db, skills_dir)
 
     # Import instructions from common locations
-    for inst_name in (".anteroom.md", "ANTEROOM.md", "anteroom.md"):
-        inst_path = Path.cwd() / inst_name
-        if inst_path.is_file():
-            results["instructions"] = import_instructions(db, inst_path)
-            break
+    if project_dir is not None:
+        for inst_name in (".anteroom.md", "ANTEROOM.md", "anteroom.md"):
+            inst_path = project_dir / inst_name
+            if inst_path.is_file():
+                results["instructions"] = import_instructions(db, inst_path)
+                break
 
     return results
 

@@ -214,7 +214,7 @@ class TestDetachPackEndpoint:
             patch("anteroom.services.pack_attachments.detach_pack", return_value=True),
         ):
             client = TestClient(app)
-            resp = client.request("DELETE", "/api/packs/test-ns/test-pack/attach", json={})
+            resp = client.delete("/api/packs/test-ns/test-pack/attach")
             assert resp.status_code == 200
             assert resp.json()["status"] == "detached"
 
@@ -222,7 +222,7 @@ class TestDetachPackEndpoint:
         app = _make_app()
         with patch("anteroom.services.pack_attachments.resolve_pack_id", return_value=None):
             client = TestClient(app)
-            resp = client.request("DELETE", "/api/packs/test-ns/test-pack/attach", json={})
+            resp = client.delete("/api/packs/test-ns/test-pack/attach")
             assert resp.status_code == 404
 
     def test_detach_not_attached(self) -> None:
@@ -232,7 +232,7 @@ class TestDetachPackEndpoint:
             patch("anteroom.services.pack_attachments.detach_pack", return_value=False),
         ):
             client = TestClient(app)
-            resp = client.request("DELETE", "/api/packs/test-ns/test-pack/attach", json={})
+            resp = client.delete("/api/packs/test-ns/test-pack/attach")
             assert resp.status_code == 404
 
 
@@ -258,8 +258,10 @@ class TestRemovePackEndpoint:
 class TestListPackAttachmentsEndpoint:
     def test_list_attachments(self) -> None:
         app = _make_app()
-        with patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"):
-            app.state.db.execute.return_value.fetchall.return_value = []
+        with (
+            patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"),
+            patch("anteroom.services.pack_attachments.list_attachments_for_pack", return_value=[]),
+        ):
             client = TestClient(app)
             resp = client.get("/api/packs/test-ns/test-pack/attachments")
             assert resp.status_code == 200

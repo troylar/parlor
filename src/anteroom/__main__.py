@@ -725,7 +725,7 @@ def _run_artifact(config: object, args: object) -> None:
             sys.exit(1)
 
         if do_all:
-            results = import_all(db, config.app.data_dir)
+            results = import_all(db, config.app.data_dir, project_dir=Path.cwd())
             for category, result in results.items():
                 msg = f"{result.imported} imported, {result.skipped} skipped, {result.errors} errors"
                 console.print(f"[bold]{category}:[/bold] {msg}")
@@ -1490,7 +1490,6 @@ def main() -> None:
     art_create_parser = artifact_subparsers.add_parser("create", help="Create a new local artifact from template")
     art_create_parser.add_argument("type", choices=_art_types, help="Artifact type")
     art_create_parser.add_argument("name", help="Artifact name")
-    art_create_parser.add_argument("--local", action="store_true", default=True, help="Create in local dir (default)")
     art_create_parser.add_argument("--project", action="store_true", help="Create in project .anteroom/local/")
 
     args = parser.parse_args()
