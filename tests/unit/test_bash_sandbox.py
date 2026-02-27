@@ -411,5 +411,8 @@ class TestBashStdinClosed:
         """Shell read builtin should fail immediately with closed stdin."""
         cfg = BashSandboxConfig(timeout=5)
         result = await handle('read -t 1 REPLY; echo "exit:$?"', timeout=5, _sandbox_config=cfg)
-        # read should fail (exit code 1) because stdin is /dev/null
-        assert "exit:1" in result["stdout"]
+        # read should fail (non-zero) because stdin is /dev/null
+        # exit code varies by platform: 1 on macOS, 2 on some Linux shells
+        assert result["stdout"].strip().startswith("exit:")
+        exit_code = int(result["stdout"].strip().split(":")[1])
+        assert exit_code != 0
