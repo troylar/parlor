@@ -114,6 +114,13 @@ async def create_conversation(request: Request):
     project_id = body.get("project_id") if isinstance(body, dict) else None
     if project_id:
         _validate_uuid(project_id)
+    space_id = body.get("space_id") if isinstance(body, dict) else None
+    if space_id:
+        _validate_uuid(space_id)
+        from ..services.space_storage import get_space as _get_space
+
+        if not _get_space(db, space_id):
+            raise HTTPException(status_code=404, detail="Space not found")
     conv_type = body.get("type", "chat") if isinstance(body, dict) else "chat"
     if conv_type not in ("chat", "note", "document"):
         raise HTTPException(status_code=400, detail="Invalid conversation type")
@@ -125,6 +132,7 @@ async def create_conversation(request: Request):
         db,
         title=title,
         project_id=project_id,
+        space_id=space_id,
         user_id=uid,
         user_display_name=uname,
         conversation_type=conv_type,

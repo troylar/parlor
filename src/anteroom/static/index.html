@@ -49,6 +49,28 @@
                     <!-- Database items populated by JS -->
                 </div>
             </div>
+            <div class="sidebar-spaces" id="sidebar-spaces">
+                <div class="sidebar-section-header">
+                    <span class="sidebar-section-label">Spaces</span>
+                </div>
+                <div class="space-list" id="space-list">
+                    <!-- Space items populated by JS -->
+                </div>
+                <div class="space-active-bar" id="space-active-bar" style="display:none">
+                    <div class="space-active-info">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+                        <span class="space-active-name" id="space-active-name"></span>
+                    </div>
+                    <div class="space-active-actions">
+                        <button class="btn-space-action" id="btn-space-clear" title="Clear space filter">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <select id="space-select" style="display:none">
+                    <option value="">All Spaces</option>
+                </select>
+            </div>
             <div class="sidebar-projects" id="sidebar-projects">
                 <div class="sidebar-section-header">
                     <span class="sidebar-section-label">Projects</span>

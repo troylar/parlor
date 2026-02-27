@@ -612,6 +612,20 @@ def _resolve_project_id(config: object, project_name: str) -> str:
     return project["id"]
 
 
+def _resolve_space_id(config: object, space_name: str) -> str:
+    """Resolve a space name to its ID, or exit with an error."""
+    from .db import get_db
+    from .services.space_storage import get_space_by_name
+
+    db = get_db(config.app.data_dir / "anteroom.db")
+    space = get_space_by_name(db, space_name)
+    if not space:
+        print(f"Error: Space '{space_name}' not found.", file=sys.stderr)
+        print("Run `aroom space list` to list available spaces.", file=sys.stderr)
+        sys.exit(1)
+    return space["id"]
+
+
 def _run_projects(config: object) -> None:
     """List all named projects."""
     from rich.console import Console
@@ -1088,6 +1102,201 @@ def _run_pack(config: object, args: object) -> None:
             console.print(f"[yellow]Not attached:[/yellow] {escape(args.ref)}")
 
 
+def _run_space(config: object, args: object) -> None:
+    """Handle `aroom space` subcommands."""
+    from pathlib import Path
+
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
+    from .db import get_db
+    from .services.space_storage import (
+        create_space,
+        delete_space,
+        get_space_by_name,
+        list_spaces,
+        update_space,
+    )
+    from .services.spaces import (
+        file_hash,
+        parse_space_file,
+        validate_space,
+    )
+
+    console = Console()
+    action = getattr(args, "space_action", None)
+    if not action:
+        console.print("Usage: aroom space {list,create,show,delete,refresh,clone,map,move-root}")
+        return
+
+    db = get_db(config.app.data_dir / "anteroom.db")
+
+    if action == "list":
+        spaces = list_spaces(db)
+        if not spaces:
+            console.print("[dim]No spaces found. Create one with:[/dim] aroom space create <path>")
+            return
+        table = Table(title="Spaces")
+        table.add_column("Name", style="bold")
+        table.add_column("File Path")
+        table.add_column("Last Loaded")
+        for s in spaces:
+            table.add_row(s["name"], s["file_path"], s.get("last_loaded_at", ""))
+        console.print(table)
+
+    elif action == "create":
+        path = Path(args.path).expanduser().resolve()
+        if not path.is_file():
+            console.print(f"[red]Error:[/red] File not found: {path}")
+            return
+        space_cfg = parse_space_file(path)
+        errors = validate_space(space_cfg)
+        if errors:
+            console.print("[red]Validation errors:[/red]")
+            for e in errors:
+                console.print(f"  - {e}")
+            return
+        existing = get_space_by_name(db, space_cfg.name)
+        if existing:
+            console.print(f"[red]Error:[/red] Space {escape(space_cfg.name)!r} already exists")
+            return
+        s = create_space(db, space_cfg.name, str(path), file_hash(path))
+        console.print(f"[green]Created space:[/green] {escape(s['name'])} (id: {s['id'][:8]}...)")
+
+    elif action == "show":
+        space = get_space_by_name(db, args.name)
+        if not space:
+            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
+            return
+        console.print(f"[bold]{escape(space['name'])}[/bold]")
+        console.print(f"  ID:          {space['id']}")
+        console.print(f"  File:        {space['file_path']}")
+        console.print(f"  Hash:        {space['file_hash'][:16]}...")
+        console.print(f"  Last loaded: {space['last_loaded_at']}")
+        console.print(f"  Created:     {space['created_at']}")
+
+    elif action == "delete":
+        space = get_space_by_name(db, args.name)
+        if not space:
+            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
+            return
+        delete_space(db, space["id"])
+        console.print(f"[green]Deleted space:[/green] {escape(args.name)}")
+
+    elif action == "refresh":
+        space = get_space_by_name(db, args.name)
+        if not space:
+            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
+            return
+        path = Path(space["file_path"])
+        if not path.is_file():
+            console.print(f"[red]Error:[/red] Space file not found: {path}")
+            return
+        new_hash = file_hash(path)
+        if new_hash == space["file_hash"]:
+            console.print("[dim]Space file unchanged — nothing to refresh.[/dim]")
+            return
+        update_space(db, space["id"], file_hash=new_hash)
+        console.print(f"[green]Refreshed:[/green] {escape(args.name)} (hash updated)")
+
+    elif action == "clone":
+        space = get_space_by_name(db, args.name)
+        if not space:
+            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
+            return
+        path = Path(space["file_path"])
+        if not path.is_file():
+            console.print(f"[red]Error:[/red] Space file not found: {path}")
+            return
+        space_cfg = parse_space_file(path)
+        if not space_cfg.repos:
+            console.print("[dim]No repos defined in this space.[/dim]")
+            return
+        from .services.space_bootstrap import clone_repos
+        from .services.spaces import SpaceLocalConfig, parse_local_file, resolve_local_path, write_local_file
+
+        # Resolve repos root: local config > prompt > default
+        local_path = resolve_local_path(path)
+        local_cfg = parse_local_file(local_path) if local_path else SpaceLocalConfig()
+
+        if local_cfg.repos_root:
+            repos_root = Path(local_cfg.repos_root)
+        else:
+            default_root = Path.home() / ".anteroom" / "spaces" / space_cfg.name / "repos"
+            if sys.stdin.isatty():
+                console.print("[dim]Repos root directory[/dim]")
+                try:
+                    user_input = input(f"  [{default_root}]: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    user_input = ""
+                repos_root = Path(user_input) if user_input else default_root
+            else:
+                repos_root = default_root
+            # Save to local config
+            local_cfg.repos_root = str(repos_root)
+            local_file = path.with_suffix("").with_suffix(".local.yaml")
+            write_local_file(local_file, local_cfg)
+            console.print(f"  [dim]Saved repos root to {local_file}[/dim]")
+
+        results = clone_repos(space_cfg.repos, repos_root)
+        for r in results:
+            if r.success:
+                console.print(f"  [green]OK[/green]   {r.url} → {r.local_path}")
+            else:
+                console.print(f"  [red]FAIL[/red] {r.url}: {r.error}")
+
+        # Sync paths to DB
+        from .services.space_storage import sync_space_paths
+
+        new_paths = [
+            {"repo_url": r.url, "local_path": str(r.local_path)} for r in results if r.success and r.local_path
+        ]
+        if new_paths:
+            sync_space_paths(db, space["id"], new_paths)
+
+    elif action == "map":
+        space = get_space_by_name(db, args.name)
+        if not space:
+            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
+            return
+        dir_path = Path(args.dir_path).expanduser().resolve()
+        if not dir_path.is_dir():
+            console.print(f"[red]Error:[/red] Directory not found: {dir_path}")
+            return
+        from .services.space_storage import get_space_paths, sync_space_paths
+
+        existing_paths = get_space_paths(db, space["id"])
+        new_entry = {"repo_url": "", "local_path": str(dir_path)}
+        all_paths = [{"repo_url": p.get("repo_url", ""), "local_path": p["local_path"]} for p in existing_paths]
+        # Check for duplicates
+        if str(dir_path) in {p["local_path"] for p in all_paths}:
+            console.print(f"[dim]Path already mapped: {dir_path}[/dim]")
+            return
+        all_paths.append(new_entry)
+        sync_space_paths(db, space["id"], all_paths)
+        console.print(f"[green]Mapped:[/green] {dir_path} → {escape(args.name)}")
+
+    elif action == "move-root":
+        space = get_space_by_name(db, args.name)
+        if not space:
+            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
+            return
+        new_root = Path(args.new_root).expanduser().resolve()
+        if not new_root.is_dir():
+            console.print(f"[red]Error:[/red] Directory not found: {new_root}")
+            return
+        from .services.spaces import SpaceLocalConfig, parse_local_file, resolve_local_path, write_local_file
+
+        path = Path(space["file_path"])
+        local_path = resolve_local_path(path)
+        local_cfg = parse_local_file(local_path) if local_path else SpaceLocalConfig()
+        local_cfg.repos_root = str(new_root)
+        local_file = path.with_suffix("").with_suffix(".local.yaml")
+        write_local_file(local_file, local_cfg)
+        console.print(f"[green]Repos root updated:[/green] {new_root}")
+
+
 def _run_chat(
     config,
     prompt: str | None = None,
@@ -1100,6 +1309,7 @@ def _run_chat(
     trust_project: bool = False,
     no_project_context: bool = False,
     plan_mode: bool = False,
+    space_id: str | None = None,
 ) -> None:
     """Launch the CLI chat mode."""
     import os
@@ -1130,6 +1340,7 @@ def _run_chat(
                 trust_project=trust_project,
                 no_project_context=no_project_context,
                 plan_mode=plan_mode,
+                space_id=space_id,
             )
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -1410,6 +1621,12 @@ def main() -> None:
         help="Load a named project (instructions, model override, source context)",
     )
     parser.add_argument(
+        "--space",
+        dest="space_name",
+        default=None,
+        help="Load a named space (workspace with repos, packs, sources, config)",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         default=False,
@@ -1481,6 +1698,27 @@ def main() -> None:
     pack_detach_parser = pack_subparsers.add_parser("detach", help="Detach a pack from global or project scope")
     pack_detach_parser.add_argument("ref", help="Pack reference as namespace/name")
     pack_detach_parser.add_argument("--project", action="store_true", help="Detach from current project only")
+
+    # `aroom space` subcommand
+    space_parser = subparsers.add_parser("space", help="Manage spaces")
+    space_subparsers = space_parser.add_subparsers(dest="space_action")
+    space_subparsers.add_parser("list", help="List all spaces")
+    space_create_parser = space_subparsers.add_parser("create", help="Create a space from a YAML file")
+    space_create_parser.add_argument("path", help="Path to space YAML file")
+    space_show_parser = space_subparsers.add_parser("show", help="Show space details")
+    space_show_parser.add_argument("name", help="Space name")
+    space_delete_parser = space_subparsers.add_parser("delete", help="Delete a space")
+    space_delete_parser.add_argument("name", help="Space name")
+    space_refresh_parser = space_subparsers.add_parser("refresh", help="Refresh a space from its YAML file")
+    space_refresh_parser.add_argument("name", help="Space name")
+    space_clone_parser = space_subparsers.add_parser("clone", help="Clone repos for a space")
+    space_clone_parser.add_argument("name", help="Space name")
+    space_map_parser = space_subparsers.add_parser("map", help="Map a local directory to a space")
+    space_map_parser.add_argument("name", help="Space name")
+    space_map_parser.add_argument("dir_path", help="Directory path to map")
+    space_move_root_parser = space_subparsers.add_parser("move-root", help="Change repos root for a space")
+    space_move_root_parser.add_argument("name", help="Space name")
+    space_move_root_parser.add_argument("new_root", help="New repos root directory")
 
     # `aroom artifact import` subcommand
     art_import_parser = artifact_subparsers.add_parser("import", help="Import skills/instructions into artifacts")
@@ -1629,11 +1867,21 @@ def main() -> None:
         _run_pack(config, args)
         return
 
+    if args.command == "space":
+        _run_space(config, args)
+        return
+
     # Resolve --project <name> to project_id
     _project_name = getattr(args, "project_name", None)
     _project_id: str | None = None
     if _project_name:
         _project_id = _resolve_project_id(config, _project_name)
+
+    # Resolve --space <name> to space_id
+    _space_name = getattr(args, "space_name", None)
+    _space_id: str | None = None
+    if _space_name:
+        _space_id = _resolve_space_id(config, _space_name)
 
     if args.command == "chat":
         _run_chat(
@@ -1648,6 +1896,7 @@ def main() -> None:
             trust_project=args.trust_project,
             no_project_context=args.no_project_context,
             plan_mode=args.plan,
+            space_id=_space_id,
         )
     elif args.command == "exec":
         _run_exec(

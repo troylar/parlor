@@ -857,6 +857,7 @@ async def run_cli(
     trust_project: bool = False,
     no_project_context: bool = False,
     plan_mode: bool = False,
+    space_id: str | None = None,
 ) -> None:
     """Main entry point for CLI mode."""
     working_dir = os.getcwd()
@@ -898,6 +899,36 @@ async def run_cli(
         else:
             renderer.render_error(f"Project ID {project_id} not found in database")
             project_id = None
+
+    # Load space if specified via --space or auto-detect by cwd
+    _space: dict[str, Any] | None = None
+    _space_instructions: str | None = None
+    if space_id:
+        from ..services.space_storage import get_space
+
+        _space = get_space(db, space_id)
+        if _space:
+            renderer.console.print(f"[dim]Space:[/dim] {_space['name']}")
+        else:
+            renderer.render_error(f"Space ID {space_id} not found in database")
+            space_id = None
+    if not _space:
+        from ..services.space_storage import resolve_space_by_cwd
+
+        _space = resolve_space_by_cwd(db, working_dir)
+        if _space:
+            space_id = _space["id"]
+            renderer.console.print(f"[dim]Space (auto):[/dim] {_space['name']}")
+    if _space:
+        # Load space instructions from the space YAML file
+        try:
+            from ..services.spaces import parse_space_file
+
+            space_cfg = parse_space_file(Path(_space["file_path"]))
+            if space_cfg.instructions:
+                _space_instructions = space_cfg.instructions
+        except Exception:
+            logger.debug("Failed to load space instructions", exc_info=True)
 
     # Clean up empty conversations
     try:
@@ -1409,6 +1440,8 @@ async def run_cli(
                 instructions=instructions,
                 project_instructions=_project_instructions,
                 artifact_registry=_artifact_registry,
+                space=_space,
+                space_instructions=_space_instructions,
             )
     finally:
         if retention_worker:
@@ -1710,6 +1743,8 @@ async def _run_repl(
     instructions: str | None = None,
     project_instructions: str | None = None,
     artifact_registry: Any = None,
+    space: dict[str, Any] | None = None,
+    space_instructions: str | None = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -1816,6 +1851,8 @@ async def _run_repl(
         "packs",
         "project",
         "projects",
+        "space",
+        "spaces",
         "mcp",
         "model",
         "plan",
@@ -1973,6 +2010,14 @@ async def _run_repl(
                         project_instructions=project_instructions,
                         artifact_registry=artifact_registry,
                     )
+            # Load space from resumed conversation
+            if not space and conv.get("space_id"):
+                from ..services.space_storage import get_space as _get_resumed_space
+
+                _resumed_space = _get_resumed_space(db, conv["space_id"])
+                if _resumed_space:
+                    space = _resumed_space
+                    renderer.console.print(f"[dim]Space:[/dim] {_resumed_space['name']}")
         else:
             renderer.render_error(f"Conversation {resume_conversation_id} not found, starting new")
             conv = storage.create_conversation(db, working_dir=working_dir, project_id=project_id, **id_kw)
@@ -2385,6 +2430,52 @@ async def _run_repl(
         def _strip_project_instructions(prompt: str) -> str:
             return re.sub(r"\n*<project_instructions[^>]*>.*?</project_instructions>", "", prompt, flags=re.DOTALL)
 
+        # -- Space state --
+        _active_space: list[dict[str, Any] | None] = [space]
+
+        def _resolve_space(name_or_id: str) -> dict[str, Any] | None:
+            """Look up a space by name or UUID prefix."""
+            from ..services.space_storage import get_space, get_space_by_name
+            from ..services.space_storage import list_spaces as _ls
+
+            sp = get_space_by_name(db, name_or_id)
+            if sp:
+                return sp
+            sp = get_space(db, name_or_id)
+            if sp:
+                return sp
+            all_spaces = _ls(db)
+            matches = [s for s in all_spaces if s["id"].startswith(name_or_id)]
+            if len(matches) == 1:
+                return matches[0]
+            return None
+
+        def _inject_space_instructions(sp: dict[str, Any], instr: str | None = None) -> None:
+            nonlocal extra_system_prompt
+            extra_system_prompt = _strip_space_instructions(extra_system_prompt)
+            if not instr:
+                # Load from file
+                try:
+                    from ..services.spaces import parse_space_file as _psf
+
+                    cfg = _psf(Path(sp["file_path"]))
+                    instr = cfg.instructions
+                except Exception:
+                    pass
+            if instr:
+                safe_name = sanitize_trust_tags(sp["name"]).replace('"', "&quot;")
+                safe_instr = sanitize_trust_tags(instr)
+                extra_system_prompt += (
+                    '\n\n<space_instructions space="' + safe_name + '">\n' + safe_instr + "\n</space_instructions>"
+                )
+
+        def _strip_space_instructions(prompt: str) -> str:
+            return re.sub(r"\n*<space_instructions[^>]*>.*?</space_instructions>", "", prompt, flags=re.DOTALL)
+
+        # Inject initial space instructions if space is active
+        if _active_space[0] and space_instructions:
+            _inject_space_instructions(_active_space[0], space_instructions)
+
         # Apply plan mode at startup if --plan was passed
         if _plan_active[0]:
             _apply_plan_mode(conv["id"])
@@ -2415,6 +2506,7 @@ async def _run_repl(
                         conv_type = "document" if parts[1] in ("doc", "document") else "note"
                         conv_title = parts[2].strip() if len(parts) >= 3 else f"New {conv_type.title()}"
                     active_pid = _active_project[0]["id"] if _active_project[0] else None
+                    active_sid = _active_space[0]["id"] if _active_space[0] else None
                     conv = storage.create_conversation(
                         db,
                         title=conv_title,
@@ -2423,6 +2515,10 @@ async def _run_repl(
                         project_id=active_pid,
                         **id_kw,
                     )
+                    if active_sid:
+                        from ..services.space_storage import update_conversation_space
+
+                        update_conversation_space(db, conv["id"], active_sid)
                     ai_messages = []
                     is_first_message = conv_type == "chat"
                     if _plan_active[0]:
@@ -2983,6 +3079,158 @@ async def _run_repl(
                             renderer.console.print(f"[{CHROME}]Active project: {_active_project[0]['name']}[/{CHROME}]")
                         renderer.console.print(
                             f"[{CHROME}]Usage: /project [list|create|select|edit|delete|clear|sources][/{CHROME}]\n"
+                        )
+                    continue
+                elif cmd in ("/spaces", "/space"):
+                    from ..services.space_storage import (
+                        count_space_conversations,
+                    )
+                    from ..services.space_storage import (
+                        get_space_by_name as _get_space_by_name,
+                    )
+                    from ..services.space_storage import (
+                        list_spaces as _list_spaces,
+                    )
+                    from ..services.space_storage import (
+                        update_conversation_space as _update_conv_space,
+                    )
+
+                    parts = user_input.split(maxsplit=2)
+                    sub = parts[1].lower() if len(parts) >= 2 else ""
+                    if cmd == "/spaces":
+                        sub = "list"
+
+                    if sub == "list" or (cmd == "/space" and not sub):
+                        spaces = _list_spaces(db)
+                        if not spaces:
+                            renderer.console.print(
+                                f"[{CHROME}]No spaces. Create one with: aroom space create <path>[/{CHROME}]\n"
+                            )
+                            continue
+                        renderer.console.print("\n[bold]Spaces:[/bold]")
+                        for s in spaces:
+                            cnt = count_space_conversations(db, s["id"])
+                            active = (
+                                " [green](active)[/green]"
+                                if (_active_space[0] and _active_space[0]["id"] == s["id"])
+                                else ""
+                            )
+                            renderer.console.print(
+                                f"  {s['name']} — {cnt} conversations{active} [{MUTED}]{s['id'][:8]}...[/{MUTED}]"
+                            )
+                        renderer.console.print()
+
+                    elif sub in ("switch", "select", "use"):
+                        target = parts[2].strip() if len(parts) >= 3 else ""
+                        if not target:
+                            renderer.console.print(f"[{CHROME}]Usage: /space switch <name>[/{CHROME}]\n")
+                            continue
+                        sp = _resolve_space(target)
+                        if not sp:
+                            renderer.render_error(f"Space '{target}' not found. Run /spaces to list available spaces.")
+                            continue
+                        _active_space[0] = sp
+                        _update_conv_space(db, conv["id"], sp["id"])
+                        _inject_space_instructions(sp)
+                        renderer.console.print(f"[green]Active space: {sp['name']}[/green]\n")
+
+                    elif sub == "show":
+                        target = parts[2].strip() if len(parts) >= 3 else ""
+                        if not target and _active_space[0]:
+                            target = _active_space[0]["name"]
+                        if not target:
+                            renderer.console.print(f"[{CHROME}]Usage: /space show <name>[/{CHROME}]\n")
+                            continue
+                        sp = _resolve_space(target)
+                        if not sp:
+                            renderer.render_error(f"Space '{target}' not found.")
+                            continue
+                        from ..services.space_storage import get_space_paths as _get_sp_paths
+
+                        paths = _get_sp_paths(db, sp["id"])
+                        cnt = count_space_conversations(db, sp["id"])
+                        renderer.console.print(f"\n[bold]{sp['name']}[/bold]")
+                        renderer.console.print(f"  File:  {sp['file_path']}")
+                        renderer.console.print(f"  Convs: {cnt}")
+                        if paths:
+                            renderer.console.print("  Paths:")
+                            for p in paths:
+                                label = p.get("repo_url") or "(mapped)"
+                                renderer.console.print(f"    {label} → {p['local_path']}")
+                        renderer.console.print()
+
+                    elif sub == "refresh":
+                        sp = _active_space[0]
+                        if not sp:
+                            renderer.console.print(f"[{CHROME}]No active space[/{CHROME}]\n")
+                            continue
+                        from ..services.spaces import file_hash as _fh
+                        from ..services.spaces import parse_space_file as _psf2
+
+                        fpath = Path(sp["file_path"])
+                        if not fpath.is_file():
+                            renderer.render_error(f"Space file not found: {fpath}")
+                            continue
+                        from ..services.space_storage import update_space as _update_sp
+
+                        new_hash = _fh(fpath)
+                        _update_sp(db, sp["id"], file_hash=new_hash)
+                        try:
+                            cfg = _psf2(fpath)
+                            if cfg.instructions:
+                                _inject_space_instructions(sp, cfg.instructions)
+                        except Exception:
+                            pass
+                        renderer.console.print(f"[green]Refreshed: {sp['name']}[/green]\n")
+
+                    elif sub == "clear":
+                        if not _active_space[0]:
+                            renderer.console.print(f"[{CHROME}]No active space[/{CHROME}]\n")
+                            continue
+                        old_name = _active_space[0]["name"]
+                        _active_space[0] = None
+                        _update_conv_space(db, conv["id"], None)
+                        extra_system_prompt = _strip_space_instructions(extra_system_prompt)
+                        renderer.console.print(f"[{CHROME}]Cleared space: {old_name}[/{CHROME}]\n")
+
+                    elif sub == "create":
+                        target = parts[2].strip() if len(parts) >= 3 else ""
+                        if not target:
+                            renderer.console.print(f"[{CHROME}]Usage: /space create <path-to-yaml>[/{CHROME}]\n")
+                            continue
+                        from ..services.space_storage import create_space as _cs
+                        from ..services.spaces import file_hash as _fh2
+                        from ..services.spaces import parse_space_file as _psf3
+                        from ..services.spaces import validate_space as _vs
+
+                        spath = Path(target).expanduser().resolve()
+                        if not spath.is_file():
+                            renderer.render_error(f"File not found: {spath}")
+                            continue
+                        try:
+                            scfg = _psf3(spath)
+                        except (ValueError, FileNotFoundError) as e:
+                            renderer.render_error(str(e))
+                            continue
+                        errors = _vs(scfg)
+                        if errors:
+                            for e in errors:
+                                renderer.render_error(e)
+                            continue
+                        existing = _get_space_by_name(db, scfg.name)
+                        if existing:
+                            renderer.render_error(f"Space '{scfg.name}' already exists")
+                            continue
+                        sp = _cs(db, scfg.name, str(spath), _fh2(spath))
+                        renderer.console.print(
+                            f"[green]Created space: {sp['name']}[/green] [{MUTED}]{sp['id'][:8]}...[/{MUTED}]\n"
+                        )
+
+                    else:
+                        if _active_space[0]:
+                            renderer.console.print(f"[{CHROME}]Active space: {_active_space[0]['name']}[/{CHROME}]")
+                        renderer.console.print(
+                            f"[{CHROME}]Usage: /space [list|show|switch|create|refresh|clear][/{CHROME}]\n"
                         )
                     continue
                 elif cmd in ("/packs", "/pack"):

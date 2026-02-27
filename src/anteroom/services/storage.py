@@ -165,6 +165,18 @@ def update_conversation_project(
     return get_conversation(db, conversation_id)
 
 
+def update_conversation_space(
+    db: sqlite3.Connection, conversation_id: str, space_id: str | None
+) -> dict[str, Any] | None:
+    now = _now()
+    db.execute(
+        "UPDATE conversations SET space_id = ?, updated_at = ? WHERE id = ?",
+        (space_id, now, conversation_id),
+    )
+    db.commit()
+    return get_conversation(db, conversation_id)
+
+
 def count_project_conversations(db: sqlite3.Connection, project_id: str) -> int:
     row = db.execute_fetchone(
         "SELECT COUNT(*) AS cnt FROM conversations WHERE project_id = ?",
@@ -405,6 +417,7 @@ def create_conversation(
     user_display_name: str | None = None,
     conversation_type: str = "chat",
     working_dir: str | None = None,
+    space_id: str | None = None,
 ) -> dict[str, Any]:
     if conversation_type not in VALID_CONVERSATION_TYPES:
         raise ValueError(f"Invalid conversation type: {conversation_type!r}")
@@ -413,9 +426,10 @@ def create_conversation(
     slug = generate_slug(db)
     db.execute(
         "INSERT INTO conversations"
-        " (id, title, slug, type, project_id, user_id, user_display_name, working_dir, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (cid, title, slug, conversation_type, project_id, user_id, user_display_name, working_dir, now, now),
+        " (id, title, slug, type, project_id, user_id, user_display_name,"
+        " working_dir, space_id, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (cid, title, slug, conversation_type, project_id, user_id, user_display_name, working_dir, space_id, now, now),
     )
     db.commit()
     return {
@@ -428,6 +442,7 @@ def create_conversation(
         "user_id": user_id,
         "user_display_name": user_display_name,
         "working_dir": working_dir,
+        "space_id": space_id,
         "created_at": now,
         "updated_at": now,
     }
@@ -2213,6 +2228,118 @@ def get_project_sources(db: sqlite3.Connection, project_id: str) -> list[dict[st
         elif link["tag_filter"]:
             tagged = db.execute_fetchall(
                 "SELECT s.* FROM sources s JOIN source_tags st ON st.source_id = s.id"
+                " JOIN tags t ON t.id = st.tag_id WHERE t.name = ?",
+                (link["tag_filter"],),
+            )
+            for t in tagged:
+                t = dict(t)
+                if t["id"] not in seen:
+                    seen.add(t["id"])
+                    sources.append(t)
+
+    return sources
+
+
+# --- Space Sources ---
+
+
+def link_source_to_space(
+    db: sqlite3.Connection,
+    space_id: str,
+    source_id: str | None = None,
+    group_id: str | None = None,
+    tag_filter: str | None = None,
+) -> dict[str, Any]:
+    """Link a source, group, or tag to a space. Exactly one must be provided."""
+    non_null = sum(1 for v in (source_id, group_id, tag_filter) if v is not None)
+    if non_null != 1:
+        raise ValueError("Exactly one of source_id, group_id, or tag_filter must be provided")
+    now = _now()
+    db.execute(
+        "INSERT OR IGNORE INTO space_sources"
+        " (space_id, source_id, group_id, tag_filter, created_at) VALUES (?, ?, ?, ?, ?)",
+        (space_id, source_id, group_id, tag_filter, now),
+    )
+    db.commit()
+    return {
+        "space_id": space_id,
+        "source_id": source_id,
+        "group_id": group_id,
+        "tag_filter": tag_filter,
+        "created_at": now,
+    }
+
+
+def unlink_source_from_space(
+    db: sqlite3.Connection,
+    space_id: str,
+    source_id: str | None = None,
+    group_id: str | None = None,
+    tag_filter: str | None = None,
+) -> bool:
+    """Unlink a source from a space. Returns True if a row was deleted."""
+    if source_id:
+        db.execute(
+            "DELETE FROM space_sources WHERE space_id = ? AND source_id = ?",
+            (space_id, source_id),
+        )
+    elif group_id:
+        db.execute(
+            "DELETE FROM space_sources WHERE space_id = ? AND group_id = ?",
+            (space_id, group_id),
+        )
+    elif tag_filter:
+        db.execute(
+            "DELETE FROM space_sources WHERE space_id = ? AND tag_filter = ?",
+            (space_id, tag_filter),
+        )
+    else:
+        return False
+    db.commit()
+    return True
+
+
+def get_space_sources(db: sqlite3.Connection, space_id: str) -> list[dict[str, Any]]:
+    """Resolve all space source links to a flat list of sources."""
+    ss_cols = "space_id, source_id, group_id, tag_filter, created_at"
+    src_cols = (
+        "s.id, s.type, s.title, s.content, s.mime_type, s.filename, s.url, "
+        "s.storage_path, s.size_bytes, s.content_hash, s.user_id, "
+        "s.user_display_name, s.created_at, s.updated_at"
+    )
+
+    links = db.execute_fetchall(
+        f"SELECT {ss_cols} FROM space_sources WHERE space_id = ?",
+        (space_id,),
+    )
+    seen: set[str] = set()
+    sources: list[dict[str, Any]] = []
+
+    for link in links:
+        link = dict(link)
+        if link["source_id"]:
+            if link["source_id"] not in seen:
+                row = db.execute_fetchone(
+                    f"SELECT {src_cols} FROM sources s WHERE s.id = ?",
+                    (link["source_id"],),
+                )
+                if row:
+                    seen.add(link["source_id"])
+                    sources.append(dict(row))
+        elif link["group_id"]:
+            members = db.execute_fetchall(
+                f"SELECT {src_cols} FROM sources s JOIN source_group_members sgm ON sgm.source_id = s.id"
+                " WHERE sgm.group_id = ?",
+                (link["group_id"],),
+            )
+            for m in members:
+                m = dict(m)
+                if m["id"] not in seen:
+                    seen.add(m["id"])
+                    sources.append(m)
+        elif link["tag_filter"]:
+            tagged = db.execute_fetchall(
+                f"SELECT {src_cols} FROM sources s JOIN source_tags st ON st.source_id = s.id"
                 " JOIN tags t ON t.id = st.tag_id WHERE t.name = ?",
                 (link["tag_filter"],),
             )

@@ -356,6 +356,7 @@ async def _build_chat_system_prompt(
     db: Any,
     conversation_id: str,
     project_instructions: str | None,
+    space_instructions: str | None = None,
     plan_prompt: str,
     plan_mode: bool,
     message_text: str,
@@ -368,6 +369,8 @@ async def _build_chat_system_prompt(
     artifact_registry: Any = None,
 ) -> str:
     """Assemble the extra system prompt from all context sources."""
+    from ..services.context_trust import sanitize_trust_tags
+
     # Runtime context for self-awareness
     runtime_ctx = build_runtime_context(
         model=ai_service.config.model,
@@ -376,7 +379,15 @@ async def _build_chat_system_prompt(
         interface="web",
         tls_enabled=config.app.tls,
     )
-    extra = trusted_section_marker() + runtime_ctx + ("\n\n" + project_instructions if project_instructions else "")
+    extra = trusted_section_marker() + runtime_ctx
+
+    # Space instructions (before project, lower precedence)
+    if space_instructions:
+        safe_instr = sanitize_trust_tags(space_instructions)
+        extra += "\n\n<space_instructions>\n" + safe_instr + "\n</space_instructions>"
+
+    if project_instructions:
+        extra += "\n\n" + project_instructions
 
     # ANTEROOM.md conventions
     file_instructions = load_instructions()
@@ -1641,6 +1652,31 @@ async def chat(conversation_id: str, request: Request):
     # Resolve model override: conversation model > project model > global default
     model_override = conv.get("model") or None
     project_instructions: str | None = None
+    space_instructions: str | None = None
+
+    # Resolve space context
+    space_id = conv.get("space_id")
+    if space_id:
+        from ..services.space_storage import get_space as _get_space_by_id
+
+        _space = _get_space_by_id(db, space_id)
+        if _space:
+            try:
+                from ..services.spaces import parse_space_file
+
+                _scfg = parse_space_file(Path(_space["file_path"]))
+                if _scfg.instructions:
+                    space_instructions = _scfg.instructions
+            except Exception:
+                logger.warning("Failed to load space file for space %s", space_id)
+            # Auto-inject space sources
+            space_sources = storage.get_space_sources(db, space_id)
+            space_source_ids = {s["id"] for s in space_sources}
+            existing_ids = set(source_ids)
+            for sid in space_source_ids:
+                if sid not in existing_ids:
+                    source_ids.append(sid)
+
     project_id = conv.get("project_id")
     if project_id:
         project = storage.get_project(db, project_id)
@@ -1702,6 +1738,7 @@ async def chat(conversation_id: str, request: Request):
         db=db,
         conversation_id=conversation_id,
         project_instructions=project_instructions,
+        space_instructions=space_instructions,
         plan_prompt=plan_prompt,
         plan_mode=plan_mode,
         message_text=message_text,

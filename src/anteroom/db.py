@@ -33,11 +33,33 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
 
+CREATE TABLE IF NOT EXISTS spaces (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_hash TEXT NOT NULL DEFAULT '',
+    last_loaded_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name);
+
+CREATE TABLE IF NOT EXISTS space_paths (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    repo_url TEXT NOT NULL DEFAULT '',
+    local_path TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_space_paths_space ON space_paths(space_id);
+
 CREATE TABLE IF NOT EXISTS folders (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     parent_id TEXT DEFAULT NULL,
     project_id TEXT DEFAULT NULL,
+    space_id TEXT DEFAULT NULL,
     position INTEGER NOT NULL DEFAULT 0,
     collapsed INTEGER NOT NULL DEFAULT 0,
     user_id TEXT DEFAULT NULL,
@@ -45,7 +67,8 @@ CREATE TABLE IF NOT EXISTS folders (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS tags (
@@ -72,6 +95,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     type TEXT NOT NULL DEFAULT 'chat' CHECK(type IN ('chat', 'note', 'document')),
     model TEXT DEFAULT NULL,
     project_id TEXT DEFAULT NULL,
+    space_id TEXT DEFAULT NULL,
     folder_id TEXT DEFAULT NULL,
     user_id TEXT DEFAULT NULL,
     user_display_name TEXT DEFAULT NULL,
@@ -79,7 +103,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
-    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
+    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -291,14 +316,41 @@ CREATE TABLE IF NOT EXISTS pack_attachments (
     id TEXT PRIMARY KEY,
     pack_id TEXT NOT NULL,
     project_path TEXT,
-    scope TEXT NOT NULL CHECK(scope IN ('global', 'project')),
+    space_id TEXT DEFAULT NULL,
+    scope TEXT NOT NULL CHECK(scope IN ('global', 'project', 'space')),
     created_at TEXT NOT NULL,
-    UNIQUE(pack_id, project_path),
-    FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE
+    FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE,
+    FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_attachments_unique
+    ON pack_attachments(pack_id, COALESCE(project_path, ''), COALESCE(space_id, ''));
 
 CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id);
 CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path);
+CREATE INDEX IF NOT EXISTS idx_pack_attachments_space ON pack_attachments(space_id);
+
+CREATE TABLE IF NOT EXISTS space_sources (
+    space_id TEXT NOT NULL,
+    source_id TEXT,
+    group_id TEXT,
+    tag_filter TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES source_groups(id) ON DELETE CASCADE,
+    CHECK (
+        (source_id IS NOT NULL AND group_id IS NULL AND tag_filter IS NULL) OR
+        (source_id IS NULL AND group_id IS NOT NULL AND tag_filter IS NULL) OR
+        (source_id IS NULL AND group_id IS NULL AND tag_filter IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_space_sources_unique
+    ON space_sources(space_id, COALESCE(source_id, ''), COALESCE(group_id, ''), COALESCE(tag_filter, ''));
+
+CREATE INDEX IF NOT EXISTS idx_conversations_space ON conversations(space_id);
+CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id);
 """
 
 _FTS_SCHEMA = """
@@ -903,14 +955,83 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             id TEXT PRIMARY KEY,
             pack_id TEXT NOT NULL,
             project_path TEXT,
-            scope TEXT NOT NULL CHECK(scope IN ('global', 'project')),
+            space_id TEXT DEFAULT NULL,
+            scope TEXT NOT NULL CHECK(scope IN ('global', 'project', 'space')),
             created_at TEXT NOT NULL,
-            UNIQUE(pack_id, project_path),
             FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE
         )"""
     )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_attachments_unique "
+        "ON pack_attachments(pack_id, COALESCE(project_path, ''), COALESCE(space_id, ''))"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path)")
+
+    # Add space_id column to pack_attachments if missing (v1.74.0)
+    # Note: SQLite cannot add FK via ALTER TABLE. Fresh installs get the FK in the
+    # CREATE TABLE statement. Migrated DBs rely on application-level validation in
+    # attach_pack_to_space() to enforce referential integrity for space_id.
+    pa_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "pack_attachments" in pa_tables:
+        pa_cols = {row[1] for row in conn.execute("PRAGMA table_info(pack_attachments)").fetchall()}
+        if "space_id" not in pa_cols:
+            conn.execute("ALTER TABLE pack_attachments ADD COLUMN space_id TEXT DEFAULT NULL")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_space ON pack_attachments(space_id)")
+
+    # Spaces tables (v1.74.0)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS spaces (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_hash TEXT NOT NULL DEFAULT '',
+            last_loaded_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS space_paths (
+            id TEXT PRIMARY KEY,
+            space_id TEXT NOT NULL,
+            repo_url TEXT NOT NULL DEFAULT '',
+            local_path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_space_paths_space ON space_paths(space_id)")
+
+    # Space sources junction table (v1.74.0)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS space_sources (
+            space_id TEXT NOT NULL,
+            source_id TEXT,
+            group_id TEXT,
+            tag_filter TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+            FOREIGN KEY (group_id) REFERENCES source_groups(id) ON DELETE CASCADE,
+            CHECK (
+                (source_id IS NOT NULL AND group_id IS NULL AND tag_filter IS NULL) OR
+                (source_id IS NULL AND group_id IS NOT NULL AND tag_filter IS NULL) OR
+                (source_id IS NULL AND group_id IS NULL AND tag_filter IS NOT NULL)
+            )
+        )"""
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_space_sources_unique "
+        "ON space_sources(space_id, COALESCE(source_id, ''), COALESCE(group_id, ''), COALESCE(tag_filter, ''))"
+    )
+
+    # Add space_id to conversations and folders
+    if "space_id" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN space_id TEXT DEFAULT NULL")
+    if "space_id" not in folder_cols:
+        conn.execute("ALTER TABLE folders ADD COLUMN space_id TEXT DEFAULT NULL")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:

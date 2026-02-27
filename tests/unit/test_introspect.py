@@ -103,7 +103,7 @@ class TestIntrospectDefinition:
 
     def test_valid_sections(self) -> None:
         sections = DEFINITION["parameters"]["properties"]["section"]["enum"]
-        assert set(sections) == {"config", "instructions", "tools", "safety", "skills", "budget"}
+        assert set(sections) == {"config", "instructions", "tools", "safety", "skills", "budget", "spaces"}
 
 
 # --- Registration tests ---

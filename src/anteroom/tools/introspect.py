@@ -29,9 +29,10 @@ DEFINITION: dict[str, Any] = {
         "properties": {
             "section": {
                 "type": "string",
-                "enum": ["config", "instructions", "tools", "safety", "skills", "budget"],
+                "enum": ["config", "instructions", "tools", "safety", "skills", "budget", "spaces"],
                 "description": (
                     "Which section to inspect. 'budget' shows context window usage and token counts. "
+                    "'spaces' shows active space and loaded spaces. "
                     "Omit to get a summary of all sections."
                 ),
             },
@@ -259,6 +260,77 @@ def _gather_budget(
     return result
 
 
+def _gather_spaces(
+    active_space: dict[str, Any] | None = None,
+    db: Any | None = None,
+) -> dict[str, Any]:
+    """Gather space information."""
+    result: dict[str, Any] = {"available": db is not None}
+
+    if active_space:
+        active_info: dict[str, Any] = {
+            "name": active_space.get("name", ""),
+            "id": active_space.get("id", ""),
+            "file_path": active_space.get("file_path", ""),
+        }
+        # Enrich with repo paths, pack count, source count
+        if db:
+            try:
+                from ..services.space_storage import get_space_paths
+
+                paths = get_space_paths(db, active_space["id"])
+                active_info["repo_paths"] = [p["local_path"] for p in paths if p.get("local_path")]
+            except Exception:
+                active_info["repo_paths"] = []
+            try:
+                from ..services.pack_attachments import get_active_pack_ids_for_space
+
+                pack_ids = get_active_pack_ids_for_space(db, active_space["id"])
+                active_info["pack_count"] = len(pack_ids)
+            except Exception:
+                active_info["pack_count"] = 0
+            try:
+                from ..services.storage import get_space_sources
+
+                sources = get_space_sources(db, active_space["id"])
+                active_info["source_count"] = len(sources)
+            except Exception:
+                active_info["source_count"] = 0
+            # Include instructions if available
+            try:
+                from pathlib import Path
+
+                from ..services.spaces import parse_space_file
+
+                cfg = parse_space_file(Path(active_space["file_path"]))
+                if cfg.instructions:
+                    instr = cfg.instructions
+                    if len(instr) > 200:
+                        instr = instr[:200] + "... (truncated)"
+                    active_info["instructions_preview"] = instr
+            except Exception:
+                pass
+        result["active"] = active_info
+    else:
+        result["active"] = None
+
+    if db:
+        try:
+            from ..services.space_storage import list_spaces
+
+            spaces = list_spaces(db)
+            result["total"] = len(spaces)
+            result["names"] = [s["name"] for s in spaces]
+        except Exception:
+            result["total"] = 0
+            result["names"] = []
+    else:
+        result["total"] = 0
+        result["names"] = []
+
+    return result
+
+
 async def handle(
     section: str | None = None,
     _config: Any | None = None,
@@ -268,6 +340,8 @@ async def handle(
     _instructions_info: dict[str, Any] | None = None,
     _tools_openai: list[dict[str, Any]] | None = None,
     _working_dir: str | None = None,
+    _active_space: dict[str, Any] | None = None,
+    _db: Any | None = None,
     **_: Any,
 ) -> dict[str, Any]:
     """Inspect the current session's runtime context."""
@@ -278,6 +352,7 @@ async def handle(
         "safety": lambda: _gather_safety(_config),
         "skills": lambda: _gather_skills(_skill_registry),
         "budget": lambda: _gather_budget(_tools_openai, _instructions_info, _config),
+        "spaces": lambda: _gather_spaces(_active_space, _db),
     }
 
     if section:

@@ -117,8 +117,9 @@ def load_local_artifacts(
     data_dir: Path,
     *,
     project_dir: Path | None = None,
+    space_dirs: list[Path] | None = None,
 ) -> int:
-    """Discover and upsert local artifacts from global and project directories.
+    """Discover and upsert local artifacts from global, project, and space directories.
 
     Returns the number of artifacts loaded.
     """
@@ -152,6 +153,24 @@ def load_local_artifacts(
                 source=ArtifactSource.LOCAL,
             )
             count += 1
+
+    # Space local artifacts: <repo_path>/.anteroom/local/
+    if space_dirs:
+        for space_dir in space_dirs:
+            if not space_dir.is_dir():
+                continue
+            space_local = space_dir / _ANTEROOM_DIR / _LOCAL_DIR
+            for art in discover_local_artifacts(space_local):
+                upsert_artifact(
+                    db,
+                    fqn=art["fqn"],
+                    artifact_type=art["type"],
+                    namespace=art["namespace"],
+                    name=art["name"],
+                    content=art["content"],
+                    source=ArtifactSource.LOCAL,
+                )
+                count += 1
 
     if count:
         logger.info("Loaded %d local artifact(s)", count)

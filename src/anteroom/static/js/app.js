@@ -5,6 +5,7 @@ const App = (() => {
         currentConversationId: null,
         currentConversationType: 'chat',
         currentProjectId: null,
+        currentSpaceId: null,
         currentDatabase: null,
         isStreaming: false,
         isPlanMode: false,
@@ -249,7 +250,8 @@ const App = (() => {
         await loadDatabases();
         document.getElementById('btn-db-add').addEventListener('click', addDatabase);
 
-        // Load projects
+        // Load spaces and projects
+        await loadSpaces();
         await loadProjects();
 
         // Read URL params for shared DB links
@@ -522,6 +524,7 @@ const App = (() => {
     async function newConversation() {
         const payload = {};
         if (state.currentProjectId) payload.project_id = state.currentProjectId;
+        if (state.currentSpaceId) payload.space_id = state.currentSpaceId;
         const opts = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -791,6 +794,92 @@ const App = (() => {
             document.getElementById('settings-modal').style.display = 'none';
         } catch (e) {
             alert('Failed to save settings: ' + e.message);
+        }
+    }
+
+    // --- Spaces ---
+    let _spacesLoaded = false;
+
+    async function loadSpaces() {
+        const list = document.getElementById('space-list');
+        const activeBar = document.getElementById('space-active-bar');
+        const activeName = document.getElementById('space-active-name');
+        const select = document.getElementById('space-select');
+        if (!list || !select) return;
+
+        let spaces = [];
+        try {
+            spaces = await api('/api/spaces');
+            while (select.options.length > 1) select.remove(1);
+            spaces.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.name;
+                select.appendChild(opt);
+            });
+            if (state.currentSpaceId) {
+                select.value = state.currentSpaceId;
+            }
+        } catch {
+            // ignore — spaces feature may not be available
+        }
+
+        _renderSpaceList(spaces);
+
+        if (!_spacesLoaded) {
+            _spacesLoaded = true;
+            const clearBtn = document.getElementById('btn-space-clear');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', async () => {
+                    state.currentSpaceId = null;
+                    select.value = '';
+                    await loadSpaces();
+                    await Sidebar.refresh();
+                });
+            }
+        }
+    }
+
+    function _renderSpaceList(spaces) {
+        const list = document.getElementById('space-list');
+        const activeBar = document.getElementById('space-active-bar');
+        const activeName = document.getElementById('space-active-name');
+        if (!list) return;
+        list.innerHTML = '';
+
+        // "All" item
+        const allItem = document.createElement('div');
+        allItem.className = 'project-item project-all' + (!state.currentSpaceId ? ' active' : '');
+        allItem.innerHTML = '<span>All Spaces</span>';
+        allItem.addEventListener('click', async () => {
+            state.currentSpaceId = null;
+            document.getElementById('space-select').value = '';
+            await loadSpaces();
+            await Sidebar.refresh();
+        });
+        list.appendChild(allItem);
+
+        spaces.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'project-item' + (state.currentSpaceId === s.id ? ' active' : '');
+            item.innerHTML = `<span>${DOMPurify.sanitize(s.name)}</span>`;
+            item.addEventListener('click', async () => {
+                state.currentSpaceId = s.id;
+                document.getElementById('space-select').value = s.id;
+                await loadSpaces();
+                await Sidebar.refresh();
+            });
+            list.appendChild(item);
+        });
+
+        if (state.currentSpaceId) {
+            const active = spaces.find(s => s.id === state.currentSpaceId);
+            if (active && activeBar && activeName) {
+                activeName.textContent = active.name;
+                activeBar.style.display = 'flex';
+            }
+        } else if (activeBar) {
+            activeBar.style.display = 'none';
         }
     }
 
