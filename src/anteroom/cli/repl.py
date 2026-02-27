@@ -23,6 +23,7 @@ from rich.markup import escape
 from .. import __version__
 from ..config import AppConfig, build_runtime_context
 from ..db import init_db
+from ..services import packs as packs_service
 from ..services import storage
 from ..services.agent_loop import _build_compaction_history, run_agent_loop
 from ..services.ai_service import AIService, create_ai_service
@@ -1306,6 +1307,10 @@ async def run_cli(
             build_date = renderer._get_build_date()
             with renderer.startup_step("Checking for updates..."):
                 latest_version = await _check_for_update(__version__)
+            installed_packs = packs_service.list_packs(db)
+            pack_count = len(installed_packs)
+            pack_names = [p["name"] for p in installed_packs] if installed_packs else None
+            is_first_run = not storage.list_conversations(db, limit=1)
             renderer.render_welcome(
                 model=config.ai.model,
                 tool_count=len(all_tool_names),
@@ -1314,6 +1319,10 @@ async def run_cli(
                 git_branch=git_branch,
                 version=__version__,
                 build_date=build_date,
+                skill_count=len(skill_registry.list_skills()),
+                pack_count=pack_count,
+                pack_names=pack_names,
+                is_first_run=is_first_run,
             )
             if latest_version:
                 renderer.render_update_available(__version__, latest_version)

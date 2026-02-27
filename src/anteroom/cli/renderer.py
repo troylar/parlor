@@ -1272,6 +1272,10 @@ def render_welcome(
     git_branch: str | None = None,
     version: str = "",
     build_date: str = "",
+    skill_count: int = 0,
+    pack_count: int = 0,
+    pack_names: list[str] | None = None,
+    is_first_run: bool = False,
 ) -> None:
     display_dir = _short_path(working_dir)
     branch = f" ({git_branch})" if git_branch else ""
@@ -1295,11 +1299,20 @@ def render_welcome(
 
     console.print(f"  [{SLATE}]{escape(display_dir)}{branch}[/]")
     parts = [escape(model), f"{tool_count} tools"]
+    if skill_count > 0:
+        parts.append(f"{skill_count} skills")
+    if pack_count > 0:
+        parts.append(f"{pack_count} packs")
     if instructions_loaded:
         parts.append("instructions")
     console.print(f"  [{MUTED}]{_SEP.join(parts)}[/{MUTED}]")
+    if pack_names:
+        console.print(f"  [{MUTED}]Packs: {', '.join(pack_names)}[/{MUTED}]")
     console.print()
-    console.print(f"  [{MUTED}]Type /help for commands[/{MUTED}]\n")
+    if is_first_run:
+        console.print(f"  [{MUTED}]New here? Type /help for commands, or ask me anything.[/{MUTED}]\n")
+    else:
+        console.print(f"  [{MUTED}]Type /help for commands[/{MUTED}]\n")
 
 
 def render_update_available(current: str, latest: str) -> None:

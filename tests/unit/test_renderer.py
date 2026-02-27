@@ -2864,3 +2864,123 @@ class TestPlanChecklistWithThinking:
         assert "\033[3A" in output
         assert "First" in output
         assert "\u2713" in output  # checkmark for complete
+
+
+class TestRenderWelcome:
+    """Tests for render_welcome() banner output (#526)."""
+
+    @staticmethod
+    def _printed(mock_console: object) -> str:
+        parts = []
+        for c in mock_console.print.call_args_list:  # type: ignore[union-attr]
+            if c[0]:
+                parts.append(str(c[0][0]))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _render(**kwargs: object) -> None:
+        from anteroom.cli.renderer import render_welcome
+
+        defaults: dict[str, object] = {
+            "model": "gpt-4o",
+            "tool_count": 12,
+            "instructions_loaded": False,
+            "working_dir": "/tmp",
+        }
+        defaults.update(kwargs)
+        render_welcome(**defaults)  # type: ignore[arg-type]
+
+    def test_basic_output(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(instructions_loaded=True, working_dir="/home/user/project")
+            output = self._printed(mc)
+            assert "A N T E R O O M" in output
+            assert "gpt-4o" in output
+            assert "12 tools" in output
+            assert "instructions" in output
+            assert "Type /help for commands" in output
+
+    def test_backward_compat_no_new_params(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(tool_count=5)
+            output = self._printed(mc)
+            assert "skills" not in output
+            assert "packs" not in output
+            assert "Packs:" not in output
+            assert "New here?" not in output
+            assert "Type /help for commands" in output
+
+    def test_shows_skill_count(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(skill_count=7)
+            output = self._printed(mc)
+            assert "7 skills" in output
+
+    def test_omits_zero_skills(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(skill_count=0)
+            output = self._printed(mc)
+            assert "skills" not in output
+
+    def test_shows_pack_count_and_names(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(pack_count=3, pack_names=["python-dev", "security-baseline", "docs"])
+            output = self._printed(mc)
+            assert "3 packs" in output
+            assert "Packs: python-dev, security-baseline, docs" in output
+
+    def test_omits_zero_packs(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(pack_count=0)
+            output = self._printed(mc)
+            assert "packs" not in output
+            assert "Packs:" not in output
+
+    def test_first_run_hint(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(is_first_run=True)
+            output = self._printed(mc)
+            assert "New here? Type /help for commands, or ask me anything." in output
+            assert output.count("Type /help") == 1
+
+    def test_returning_user_hint(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(is_first_run=False)
+            output = self._printed(mc)
+            assert "Type /help for commands" in output
+            assert "New here?" not in output
+
+    def test_full_banner(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(
+                model="claude-3-opus",
+                tool_count=15,
+                instructions_loaded=True,
+                working_dir="/home/dev/myproject",
+                git_branch="main",
+                version="1.72.1",
+                build_date="Feb 27, 2026",
+                skill_count=10,
+                pack_count=2,
+                pack_names=["python-dev", "security"],
+            )
+            output = self._printed(mc)
+            assert "claude-3-opus" in output
+            assert "15 tools" in output
+            assert "10 skills" in output
+            assert "2 packs" in output
+            assert "instructions" in output
+            assert "(main)" in output
+            assert "v1.72.1" in output
+            assert "Packs: python-dev, security" in output
+
+    def test_info_line_order(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mc:
+            self._render(skill_count=7, pack_count=3, instructions_loaded=True)
+            output = self._printed(mc)
+            info_line = [line for line in output.split("\n") if "12 tools" in line][0]
+            tools_pos = info_line.index("12 tools")
+            skills_pos = info_line.index("7 skills")
+            packs_pos = info_line.index("3 packs")
+            instructions_pos = info_line.index("instructions")
+            assert tools_pos < skills_pos < packs_pos < instructions_pos
