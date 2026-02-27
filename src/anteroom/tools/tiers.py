@@ -52,6 +52,9 @@ DEFAULT_TOOL_TIERS: dict[str, ToolTier] = {
     # invoke_skill expands a skill prompt and queues it — no direct action,
     # but the expanded prompt may trigger tool calls that are individually gated.
     "invoke_skill": ToolTier.READ,
+    "docx": ToolTier.WRITE,
+    "xlsx": ToolTier.WRITE,
+    "pptx": ToolTier.WRITE,
 }
 
 # MCP tools and unknown tools default to this tier

@@ -60,6 +60,11 @@ docs = [
     "pypdf>=6.7.1",
     "python-docx>=1.0",
 ]
+office = [
+    "python-docx>=1.0",
+    "openpyxl>=3.1.0",
+    "python-pptx>=1.0",
+]
 encryption = [
     "sqlcipher3>=0.5.0",
 ]

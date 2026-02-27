@@ -86,6 +86,26 @@ All checks passed.
 
     An interactive REPL starts in your terminal.
 
+## Optional Extras
+
+Anteroom has optional dependency groups for additional capabilities:
+
+```bash
+$ pip install anteroom[office]       # MS Office tools (docx, xlsx, pptx)
+$ pip install anteroom[docs]         # PDF and DOCX text extraction
+$ pip install anteroom[embeddings]   # Local embeddings via fastembed
+$ pip install anteroom[index]        # Codebase indexing via tree-sitter
+$ pip install anteroom[encryption]   # Database encryption at rest (SQLCipher)
+```
+
+Install multiple extras at once:
+
+```bash
+$ pip install anteroom[office,embeddings]
+```
+
+All extras are optional — Anteroom works without them, and features degrade gracefully when their dependencies are missing.
+
 ## Data Directory
 
 Anteroom creates `~/.anteroom/` on first run:

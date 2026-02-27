@@ -19,11 +19,21 @@ from .security import (
 if TYPE_CHECKING:
     from ..config import BashSandboxConfig
 
+import re
+import shutil
+import tempfile
+
 logger = logging.getLogger(__name__)
 security_logger = logging.getLogger("anteroom.security")
 
 _MAX_OUTPUT = 100_000
 _DEFAULT_TIMEOUT = 120
+
+# Regex to detect `python -c "..."` or `python3 -c '...'` with multiline content
+_PYTHON_C_RE = re.compile(
+    r"""^(python3?)\s+-c\s+(['"])(.*)\2\s*$""",
+    re.DOTALL,
+)
 
 _working_dir: str = os.getcwd()
 
@@ -78,6 +88,46 @@ def _check_sandbox(command: str, config: BashSandboxConfig) -> str | None:
     return None
 
 
+def _rewrite_python_c_for_windows(command: str) -> tuple[str, str | None]:
+    """On Windows, rewrite multiline ``python -c`` to a temp .py file.
+
+    Returns (possibly rewritten command, temp_file_path or None).
+    The caller is responsible for cleaning up the temp file.
+    """
+    m = _PYTHON_C_RE.match(command.strip())
+    if not m:
+        return command, None
+
+    python_bin = m.group(1)
+    script_body = m.group(3)
+
+    # Only rewrite if the script is multiline (contains actual newlines)
+    if "\n" not in script_body:
+        return command, None
+
+    # Write to a temp file (suffix .py so Windows knows it's Python)
+    fd, tmp_path = tempfile.mkstemp(suffix=".py", prefix="anteroom_")
+    try:
+        os.write(fd, script_body.encode("utf-8"))
+    finally:
+        os.close(fd)
+
+    return f'{python_bin} "{tmp_path}"', tmp_path
+
+
+def _resolve_python_binary(command: str) -> str:
+    """On Windows, rewrite ``python3`` to ``python`` if python3 is not on PATH."""
+    if sys.platform != "win32":
+        return command
+    if not command.lstrip().startswith("python3"):
+        return command
+    if shutil.which("python3") is not None:
+        return command
+    if shutil.which("python") is None:
+        return command
+    return re.sub(r"\bpython3\b", "python", command, count=1)
+
+
 async def handle(
     command: str,
     timeout: int = _DEFAULT_TIMEOUT,
@@ -110,6 +160,12 @@ async def handle(
     # Log command if configured
     if _sandbox_config is not None and _sandbox_config.log_all_commands:
         security_logger.info("bash command: %s", command[:500])
+
+    # Windows: rewrite python3 → python if needed, and multiline python -c to temp file
+    tmp_script: str | None = None
+    if sys.platform == "win32":
+        command = _resolve_python_binary(command)
+        command, tmp_script = _rewrite_python_c_for_windows(command)
 
     # Set up OS-level sandbox (Win32 Job Object) if configured
     use_os_sandbox = sys.platform == "win32" and _sandbox_config is not None and _sandbox_config.sandbox.is_enabled
@@ -163,3 +219,9 @@ async def handle(
         }
     except OSError as e:
         return {"error": str(e), "exit_code": -1}
+    finally:
+        if tmp_script is not None:
+            try:
+                os.unlink(tmp_script)
+            except OSError:
+                pass

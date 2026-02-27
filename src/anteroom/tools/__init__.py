@@ -18,7 +18,18 @@ ToolHandler = Callable[..., Coroutine[Any, Any, dict[str, Any]]]
 ConfirmCallback = Callable[[SafetyVerdict], Coroutine[Any, Any, bool]]
 
 # Tools whose output contains external/filesystem content — tagged untrusted for prompt injection defense.
-_UNTRUSTED_TOOLS = {"read_file", "grep", "glob_files", "bash", "write_file", "edit_file", "run_agent"}
+_UNTRUSTED_TOOLS = {
+    "read_file",
+    "grep",
+    "glob_files",
+    "bash",
+    "write_file",
+    "edit_file",
+    "run_agent",
+    "docx",
+    "xlsx",
+    "pptx",
+}
 
 
 class ToolRegistry:
@@ -332,3 +343,21 @@ def register_default_tools(registry: ToolRegistry, working_dir: str | None = Non
     registry.register(subagent.DEFINITION["name"], subagent.handle, subagent.DEFINITION)
     registry.register(ask_user.DEFINITION["name"], ask_user.handle, ask_user.DEFINITION)
     registry.register(introspect.DEFINITION["name"], introspect.handle, introspect.DEFINITION)
+
+    _register_optional_office_tools(registry, working_dir)
+
+
+def _register_optional_office_tools(registry: ToolRegistry, working_dir: str | None = None) -> None:
+    """Register office tools if their optional dependencies are installed."""
+    import importlib
+
+    for mod_name in ("office_docx", "office_xlsx", "office_pptx"):
+        try:
+            module = importlib.import_module(f".{mod_name}", package=__package__)
+        except ImportError:
+            continue
+        if not getattr(module, "AVAILABLE", False):
+            continue
+        if working_dir and hasattr(module, "set_working_dir"):
+            module.set_working_dir(working_dir)
+        registry.register(module.DEFINITION["name"], module.handle, module.DEFINITION)
