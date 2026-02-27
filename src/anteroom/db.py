@@ -286,6 +286,19 @@ CREATE TABLE IF NOT EXISTS pack_artifacts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pack_artifacts_artifact_id ON pack_artifacts(artifact_id);
+
+CREATE TABLE IF NOT EXISTS pack_attachments (
+    id TEXT PRIMARY KEY,
+    pack_id TEXT NOT NULL,
+    project_path TEXT,
+    scope TEXT NOT NULL CHECK(scope IN ('global', 'project')),
+    created_at TEXT NOT NULL,
+    UNIQUE(pack_id, project_path),
+    FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id);
+CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path);
 """
 
 _FTS_SCHEMA = """
@@ -883,6 +896,21 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         )"""
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_artifacts_artifact_id ON pack_artifacts(artifact_id)")
+
+    # Pack attachments table (v1.70.0)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS pack_attachments (
+            id TEXT PRIMARY KEY,
+            pack_id TEXT NOT NULL,
+            project_path TEXT,
+            scope TEXT NOT NULL CHECK(scope IN ('global', 'project')),
+            created_at TEXT NOT NULL,
+            UNIQUE(pack_id, project_path),
+            FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path)")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:
