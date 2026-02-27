@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -259,6 +260,55 @@ class TestPackRefreshWorkerRunOnce:
         assert len(results) == 1
         assert not results[0].success
         assert "network error" in results[0].error
+
+
+class TestPackRefreshWorkerBackoff:
+    def test_is_due_applies_backoff_on_failures(self, tmp_path: Path) -> None:
+        """After failures, _is_due should require longer intervals."""
+        source = PackSourceConfig(url="https://a.com/repo.git", refresh_interval=5)
+        worker = PackRefreshWorker(db=MagicMock(), data_dir=tmp_path, sources=[source])
+        state = worker._sources[0]
+
+        # Simulate a refresh that just happened
+        state.last_refreshed = time.monotonic()
+        state.consecutive_failures = 0
+        assert not worker._is_due(state)
+
+        # With 0 failures, due after 5*60 = 300s
+        state.last_refreshed = time.monotonic() - 301
+        assert worker._is_due(state)
+
+        # With 3 failures, interval = 300 * 2^3 = 2400s (capped at MAX_INTERVAL=7200)
+        state.last_refreshed = time.monotonic() - 301
+        state.consecutive_failures = 3
+        assert not worker._is_due(state)  # 301s < 2400s
+
+        # After enough time with 3 failures (2400s)
+        state.last_refreshed = time.monotonic() - 2401
+        assert worker._is_due(state)
+
+    def test_backoff_caps_at_max_interval(self, tmp_path: Path) -> None:
+        """Backoff interval should never exceed MAX_INTERVAL (7200s)."""
+        source = PackSourceConfig(url="https://a.com/repo.git", refresh_interval=5)
+        worker = PackRefreshWorker(db=MagicMock(), data_dir=tmp_path, sources=[source])
+        state = worker._sources[0]
+
+        # With 20 failures, the raw backoff would be 300 * 2^20 = huge, but capped at 7200
+        state.consecutive_failures = 20
+        state.last_refreshed = time.monotonic() - 7201
+        assert worker._is_due(state)
+
+        state.last_refreshed = time.monotonic() - 7199
+        assert not worker._is_due(state)
+
+    def test_no_backoff_on_success(self, tmp_path: Path) -> None:
+        """With 0 consecutive failures, normal interval applies."""
+        source = PackSourceConfig(url="https://a.com/repo.git", refresh_interval=5)
+        worker = PackRefreshWorker(db=MagicMock(), data_dir=tmp_path, sources=[source])
+        state = worker._sources[0]
+        state.consecutive_failures = 0
+        state.last_refreshed = time.monotonic() - 301  # 5 min + 1s
+        assert worker._is_due(state)
 
 
 class TestPackRefreshWorkerLifecycle:

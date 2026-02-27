@@ -548,3 +548,65 @@ class TestLoadProjectPacks:
 
         results = load_project_packs(db, project_dir)
         assert len(results) == 0
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: _read_artifact_content YAML crash (#522)
+# ---------------------------------------------------------------------------
+
+
+class TestReadArtifactContentYamlError:
+    def test_invalid_yaml_returns_raw(self, tmp_path: Path) -> None:
+        """Invalid YAML should fall back to raw content instead of crashing."""
+        p = tmp_path / "bad.yaml"
+        p.write_text("content: [\ninvalid yaml {{{\n")
+        content, metadata = _read_artifact_content(p)
+        assert "invalid yaml" in content
+        assert metadata == {}
+
+    def test_yaml_with_tabs_returns_raw(self, tmp_path: Path) -> None:
+        """YAML with tab indentation (common error) should degrade gracefully."""
+        p = tmp_path / "tabbed.yaml"
+        p.write_text("key:\n\t- invalid tab indent\n")
+        content, metadata = _read_artifact_content(p)
+        assert "invalid tab indent" in content
+        assert metadata == {}
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: install_pack skipped_artifacts reporting (#522)
+# ---------------------------------------------------------------------------
+
+
+class TestInstallPackSkippedArtifacts:
+    def test_skipped_artifacts_in_result(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        """install_pack should report which artifacts were skipped."""
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        (pack_dir / "skills").mkdir()
+        (pack_dir / "skills" / "found.yaml").write_text("content: hi\n")
+        # 'missing' artifact has no file
+        _write_manifest(
+            pack_dir,
+            {
+                "name": "p",
+                "namespace": "ns",
+                "version": "1.0.0",
+                "artifacts": [
+                    {"type": "skill", "name": "found"},
+                    {"type": "skill", "name": "missing"},
+                ],
+            },
+        )
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        assert result["artifact_count"] == 1
+        assert "skill/missing" in result["skipped_artifacts"]
+        assert len(result["skipped_artifacts"]) == 1
+
+    def test_no_skipped_artifacts(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        """When all artifacts resolve, skipped_artifacts should be empty."""
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        assert result["skipped_artifacts"] == []

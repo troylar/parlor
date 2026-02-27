@@ -9,6 +9,7 @@ import pytest
 from anteroom.db import _SCHEMA, ThreadSafeConnection
 from anteroom.services.artifact_registry import ArtifactRegistry, _artifact_from_row
 from anteroom.services.artifact_storage import (
+    _row_to_dict,
     create_artifact,
     delete_artifact,
     get_artifact,
@@ -541,3 +542,72 @@ class TestArtifactFromRow:
         art = _artifact_from_row(row)
         assert art.version == 1
         assert art.metadata == {}
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: upsert_artifact IntegrityError race condition (#522)
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertArtifactRaceCondition:
+    def test_upsert_handles_integrity_error(self, db: ThreadSafeConnection) -> None:
+        """If create fails with IntegrityError (concurrent insert), upsert retries as update."""
+        from unittest.mock import patch
+
+        # Pre-insert an artifact
+        create_artifact(db, "@a/skill/race", "skill", "a", "race", "original")
+
+        # Patch get_artifact_by_fqn to return None on first call (simulating race window),
+        # then return the real row on second call (after IntegrityError)
+        original_get = get_artifact_by_fqn
+        call_count = {"n": 0}
+
+        def mock_get(conn: object, fqn: str) -> object:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return None  # Simulate "not found" in race window
+            return original_get(conn, fqn)
+
+        with patch("anteroom.services.artifact_storage.get_artifact_by_fqn", side_effect=mock_get):
+            result = upsert_artifact(db, "@a/skill/race", "skill", "a", "race", "updated")
+
+        assert result is not None
+        assert result["content"] == "updated"
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: _row_to_dict malformed JSON (#522)
+# ---------------------------------------------------------------------------
+
+
+class TestRowToDictMalformedJson:
+    def test_valid_json_metadata(self) -> None:
+        """Normal case: valid JSON metadata is deserialized."""
+
+        db_conn = sqlite3.connect(":memory:")
+        db_conn.row_factory = sqlite3.Row
+        db_conn.execute("CREATE TABLE t (id TEXT, fqn TEXT, metadata TEXT)")
+        db_conn.execute("INSERT INTO t VALUES (?, ?, ?)", ("123", "@a/skill/x", '{"key": "value"}'))
+        row = db_conn.execute("SELECT * FROM t").fetchone()
+        result = _row_to_dict(row)
+        assert result["metadata"] == {"key": "value"}
+
+    def test_malformed_json_metadata_returns_empty_dict(self) -> None:
+        """Malformed JSON metadata should fall back to {} instead of crashing."""
+        db_conn = sqlite3.connect(":memory:")
+        db_conn.row_factory = sqlite3.Row
+        db_conn.execute("CREATE TABLE t (id TEXT, fqn TEXT, metadata TEXT)")
+        db_conn.execute("INSERT INTO t VALUES (?, ?, ?)", ("123", "@a/skill/x", "{not valid json"))
+        row = db_conn.execute("SELECT * FROM t").fetchone()
+        result = _row_to_dict(row)
+        assert result["metadata"] == {}
+
+    def test_empty_string_metadata_returns_empty_dict(self) -> None:
+        """Empty string metadata should fall back to {}."""
+        db_conn = sqlite3.connect(":memory:")
+        db_conn.row_factory = sqlite3.Row
+        db_conn.execute("CREATE TABLE t (id TEXT, fqn TEXT, metadata TEXT)")
+        db_conn.execute("INSERT INTO t VALUES (?, ?, ?)", ("123", "@a/skill/x", ""))
+        row = db_conn.execute("SELECT * FROM t").fetchone()
+        result = _row_to_dict(row)
+        assert result["metadata"] == {}

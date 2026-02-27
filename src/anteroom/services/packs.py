@@ -181,7 +181,11 @@ def _read_artifact_content(path: Path) -> tuple[str, dict[str, Any]]:
     raw = path.read_text(encoding="utf-8")
 
     if path.suffix in (".yaml", ".yml"):
-        data = yaml.safe_load(raw)
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError as e:
+            logger.warning("Invalid YAML in %s, treating as raw content: %s", path, e)
+            return raw, {}
         if isinstance(data, dict):
             content = str(data.get("content", raw))
             metadata = data.get("metadata", {})
@@ -221,9 +225,11 @@ def install_pack(
 
     # Install artifacts
     artifact_ids: list[str] = []
+    skipped: list[str] = []
     for art in manifest.artifacts:
         art_path = _resolve_artifact_file(art, pack_dir)
         if art_path is None:
+            skipped.append(f"{art.type}/{art.name}")
             logger.warning("Skipping %s/%s: file not found", art.type, art.name)
             continue
 
@@ -279,6 +285,7 @@ def install_pack(
         "namespace": manifest.namespace,
         "version": manifest.version,
         "artifact_count": len(artifact_ids),
+        "skipped_artifacts": skipped,
     }
 
 

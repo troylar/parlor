@@ -72,11 +72,23 @@ class PackRefreshWorker:
         return self._running
 
     def _is_due(self, state: _SourceState) -> bool:
-        """Check if a source is due for refresh."""
+        """Check if a source is due for refresh.
+
+        Applies exponential backoff when consecutive failures occur, up to
+        ``MAX_INTERVAL``.
+        """
         if state.last_refreshed == 0.0:
             return True
+        base_interval = state.config.refresh_interval * 60
+        if state.consecutive_failures > 0:
+            interval = min(
+                base_interval * (BACKOFF_MULTIPLIER**state.consecutive_failures),
+                MAX_INTERVAL,
+            )
+        else:
+            interval = base_interval
         elapsed = time.monotonic() - state.last_refreshed
-        return elapsed >= state.config.refresh_interval * 60
+        return elapsed >= interval
 
     def refresh_source(self, source: PackSourceConfig) -> SourceRefreshResult:
         """Refresh a single pack source (synchronous).

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from .artifacts import ArtifactSource, ArtifactType, content_hash, validate_fqn
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -223,23 +226,41 @@ def upsert_artifact(
             content=content,
             metadata=metadata if metadata is not None else existing["metadata"],
         )
-    return create_artifact(
-        db,
-        fqn,
-        artifact_type,
-        namespace,
-        name,
-        content,
-        source,
-        metadata,
-        user_id,
-        user_display_name,
-    )
+    try:
+        return create_artifact(
+            db,
+            fqn,
+            artifact_type,
+            namespace,
+            name,
+            content,
+            source,
+            metadata,
+            user_id,
+            user_display_name,
+        )
+    except sqlite3.IntegrityError:
+        # Another thread/process inserted the same FQN between our check and
+        # insert (TOCTOU race).  Retry as an update.
+        logger.debug("IntegrityError on create for %s, retrying as update", fqn)
+        existing = get_artifact_by_fqn(db, fqn)
+        if existing:
+            return update_artifact(
+                db,
+                existing["id"],
+                content=content,
+                metadata=metadata if metadata is not None else existing["metadata"],
+            )
+        return None
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a Row to dict, deserializing the metadata JSON."""
     d = dict(row)
     if "metadata" in d and isinstance(d["metadata"], str):
-        d["metadata"] = json.loads(d["metadata"])
+        try:
+            d["metadata"] = json.loads(d["metadata"])
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Malformed metadata JSON for artifact %s, defaulting to {}", d.get("fqn", d.get("id", "?")))
+            d["metadata"] = {}
     return d
