@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.82.0
+
+**New:**
+
+- Built-in MS Office tools (`docx`, `xlsx`, `pptx`) for creating, reading, and editing Word, Excel, and PowerPoint files directly from the agent — install with `pip install anteroom[office]` (#585)
+- Windows bash tool fix: multiline `python -c` commands are automatically written to temp files to avoid `cmd.exe` truncation; `python3` resolves to `python` when needed (#583)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.82.0)
+
 ### v1.81.0
 
 **New:**

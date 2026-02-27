@@ -21,7 +21,7 @@ Before committing README changes, verify:
 
 1. **Test count**: Run `pytest tests/ --collect-only -q | tail -1` and round down to nearest hundred
 2. **ASVS level**: Must match `SECURITY.md` (currently Level 2, ASVS v5.0)
-3. **Tool count**: Count entries in `DEFAULT_TOOL_TIERS` in `tools/tiers.py` (currently 12 user-facing built-in tools: read_file, write_file, edit_file, bash, glob_files, grep, create_canvas, update_canvas, patch_canvas, run_agent, ask_user, introspect)
+3. **Tool count**: Count entries in `DEFAULT_TOOL_TIERS` in `tools/tiers.py` (currently 12 user-facing built-in tools + 3 optional office tools: read_file, write_file, edit_file, bash, glob_files, grep, create_canvas, update_canvas, patch_canvas, run_agent, ask_user, introspect; optional: docx, xlsx, pptx)
 4. **Approval mode count**: Count entries in `APPROVAL_MODE_NAMES` in `tools/tiers.py` (currently 4: auto, ask_for_dangerous, ask_for_writes, ask)
 5. **Hard-block pattern count**: Count entries in `_HARD_BLOCK_PATTERNS` in `tools/security.py` (currently 16)
 6. **YAML examples**: Verify field names match actual config dataclass fields in `config.py`

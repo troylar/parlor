@@ -44,8 +44,10 @@ Every tool is assigned one of four risk tiers:
 | Tier | Level | Description | Default Tools |
 |------|-------|-------------|---------------|
 | `READ` | 0 | Read-only operations | `read_file`, `glob_files`, `grep`, `ask_user`, `introspect`, `create_canvas`, `update_canvas`, `patch_canvas`, `invoke_skill` |
-| `WRITE` | 1 | Modifies files or state | `write_file`, `edit_file` |
+| `WRITE` | 1 | Modifies files or state | `write_file`, `edit_file`, `docx`*, `xlsx`*, `pptx`* |
 | `EXECUTE` | 2 | Runs arbitrary code | `bash`, `run_agent` |
+
+\* Optional — registered only when `anteroom[office]` is installed.
 | `DESTRUCTIVE` | 3 | Irreversible or dangerous | (promoted by pattern detection) |
 
 Unknown tools and MCP tools default to `EXECUTE`.

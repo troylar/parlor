@@ -135,15 +135,18 @@ CLI (cli/)         ──┘         │
 - **`cli/skills.py`** — Skills registry: loads YAML skill files from `cli/default_skills/` (built-in), `~/.anteroom/skills/` (global), and `.anteroom/skills/` or `.claude/skills/` (project-level, walk-up discovery). Strict name validation (`[a-z0-9][a-z0-9_-]*`, rejects reserved slash-command names). Code-fence-aware `{args}` template interpolation (replaces outside fenced code blocks only). YAML error hints for common issues (flow mapping, colon escaping). Collision detection and warnings for skill shadowing. `MAX_SKILLS` hard limit (100). `SkillRegistry` class: `load(working_dir)` with atomic swap, `reload()`, `resolve_input(user_input)` returns (is_skill, expanded_prompt), `get_skill_descriptions()`, `get_invoke_skill_definition()`. Prompt size validation (`MAX_PROMPT_SIZE` 50KB). Auto-invocation via synthetic `invoke_skill` tool with OpenAI function schema
 
 #### Tools
-- **`tools/`** — ToolRegistry: `_handlers` + `_definitions`. Built-in: read_file, write_file, edit_file, bash, glob_files, grep, create_canvas, update_canvas, patch_canvas, run_agent, ask_user, introspect. Safety gate: tier check → pattern detection → hard-block. File-modifying tools return `_old_content`/`_new_content` for diff rendering (stripped before LLM)
+- **`tools/`** — ToolRegistry: `_handlers` + `_definitions`. Built-in: read_file, write_file, edit_file, bash, glob_files, grep, create_canvas, update_canvas, patch_canvas, run_agent, ask_user, introspect. Optional (with `anteroom[office]`): docx, xlsx, pptx. Safety gate: tier check → pattern detection → hard-block. File-modifying tools return `_old_content`/`_new_content` for diff rendering (stripped before LLM)
 - **`tools/tiers.py`** — Risk tiers: READ/WRITE/EXECUTE/DESTRUCTIVE. Approval modes: AUTO/ASK_FOR_DANGEROUS/ASK_FOR_WRITES/ASK. Unknown/MCP tools default to EXECUTE
-- **`tools/bash.py`** — Shell command execution with configurable sandboxing. `_check_sandbox()` enforces network/package/path/command restrictions before execution. Accepts `_sandbox_config: BashSandboxConfig` from `call_tool()`. On Windows, assigns subprocess to Win32 Job Object for kernel-level resource limits. Configurable timeout caps, output truncation, and audit logging via `security_logger`
+- **`tools/bash.py`** — Shell command execution with configurable sandboxing. `_check_sandbox()` enforces network/package/path/command restrictions before execution. Accepts `_sandbox_config: BashSandboxConfig` from `call_tool()`. On Windows: assigns subprocess to Win32 Job Object for kernel-level resource limits; rewrites multiline `python -c` commands to temp `.py` files to avoid `cmd.exe` truncation; resolves `python3` → `python` when `python3` is unavailable. Configurable timeout caps, output truncation, and audit logging via `security_logger`
 - **`tools/security.py`** — Security utilities: hard-block patterns, path validation, `check_network_command()`, `check_package_install()`, `check_blocked_path()`, `check_custom_patterns()` for sandbox enforcement. Cross-platform: Unix tools, PowerShell, Windows package managers
 - **`tools/sandbox_win32.py`** — Win32 Job Object sandbox via ctypes (no dependencies). `create_job_object()`, `assign_process()`, `terminate_job()`, `close_job()`, `setup_job_for_process()`. Enforces memory, process count, and CPU time limits. No-op on non-Windows. All functions return success/failure, never raise
 - **`tools/safety.py`** — Pure detection: `check_bash_command()` (regex patterns), `check_write_path()` (sensitive paths). Returns `SafetyVerdict` with `is_hard_blocked`
 - **`tools/canvas.py`** — Canvas create/update/patch with SSE streaming support
 - **`tools/subagent.py`** — `run_agent` tool: isolated child AI sessions, same safety gates. Guarded by `SubagentLimiter`. Configurable via `safety.subagent`
 - **`tools/introspect.py`** — Lets AI examine its own runtime context. READ tier (auto-allowed)
+- **`tools/office_docx.py`** — DOCX (Word) create/read/edit tool via python-docx. WRITE tier. Graceful degradation when library unavailable. Actions: create (heading/paragraph/table blocks), read (extract text/tables), edit (find-replace + append)
+- **`tools/office_xlsx.py`** — XLSX (Excel) create/read/edit tool via openpyxl. WRITE tier. Graceful degradation. Actions: create (named sheets with headers/rows), read (cell data as JSON, optional range/sheet), edit (cell updates, row append, sheet add)
+- **`tools/office_pptx.py`** — PPTX (PowerPoint) create/read/edit tool via python-pptx. WRITE tier. Graceful degradation. Actions: create (slides with title/content/bullets/notes), read (extract slide text/notes), edit (find-replace + append slides)
 
 ### Security Model
 
@@ -191,6 +194,7 @@ Claude Code skills (`.claude/commands/`) and auto-loaded rules (`.claude/rules/`
 PyPI: `anteroom`. Deploy via `/deploy` skill (merge PR, CI, version bump, build, `twine upload`).
 
 **Optional Dependencies** (declared in `pyproject.toml`):
+- **`office`** — `python-docx>=1.0`, `openpyxl>=3.1.0`, `python-pptx>=1.0`. Required for built-in docx/xlsx/pptx tools. Enable with: `pip install anteroom[office]`
 - **`encryption`** — `sqlcipher3>=0.5.0`. Required only if `config.storage.encrypt_at_rest: true`. Enable with: `pip install anteroom[encryption]`
 
 ## Testing Patterns

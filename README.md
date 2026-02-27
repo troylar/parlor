@@ -93,7 +93,7 @@ A full-featured chat interface with projects, folders, tags, file attachments, c
 
 ### CLI REPL
 
-An agentic terminal with **12 built-in tools**, MCP integration, sub-agent orchestration, a skills system, and planning mode &mdash; all with Rich markdown rendering. Type while the AI works; messages queue automatically.
+An agentic terminal with **12 built-in tools** (+ 3 optional MS Office tools), MCP integration, sub-agent orchestration, a skills system, and planning mode &mdash; all with Rich markdown rendering. Type while the AI works; messages queue automatically.
 
 ```
 $ aroom chat
@@ -147,6 +147,8 @@ echo "review this" | aroom exec - --quiet      # pipe stdin
 The AI reads files, edits code, runs commands, searches your codebase, and spawns parallel sub-agents &mdash; with safety gates at every step. Not a chatbot. A collaborator.
 
 **Built-in tools:** `read_file` `write_file` `edit_file` `bash` `glob_files` `grep` `create_canvas` `update_canvas` `patch_canvas` `run_agent` `ask_user` `introspect`
+
+**Optional tools** (install with `pip install anteroom[office]`): `docx` `xlsx` `pptx` &mdash; create, read, and edit Word, Excel, and PowerPoint files directly
 
 ---
 
@@ -242,7 +244,7 @@ Any endpoint that speaks the OpenAI protocol:
 |---|---|
 | **Web UI** | Conversations with auto-generated slugs, projects, folders, tags, attachments, canvas, themes, keyboard shortcuts |
 | **CLI** | REPL, one-shot, exec mode, planning, skills, @file references, Rich rendering, slug-based conversation lookup |
-| **Tools** | 12 built-in + unlimited MCP tools, parallel execution, sub-agent orchestration |
+| **Tools** | 12 built-in + 3 optional office tools + unlimited MCP tools, parallel execution, sub-agent orchestration |
 | **Tool Safety** | 4 risk tiers, 4 approval modes, 16 hard-block patterns, destructive command detection |
 | **Bash Sandbox** | Execution timeouts, output limits, path/command blocking, network/package restrictions, OS-level sandbox |
 | **Prompt Defense** | Trust classification, defensive XML envelopes, tag breakout prevention, per-server trust levels |

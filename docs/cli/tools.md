@@ -1,6 +1,6 @@
 # Built-in Tools
 
-Twelve tools ship out of the box with no MCP server required.
+Twelve tools ship out of the box with no MCP server required. Three additional office tools (`docx`, `xlsx`, `pptx`) are available with the optional `anteroom[office]` install.
 
 ## Tool Reference
 
@@ -213,8 +213,10 @@ Each tool is assigned a risk tier that determines when approval is required:
 | Tier | Tools | Behavior |
 |---|---|---|
 | **READ** | `read_file`, `glob_files`, `grep`, `create_canvas`, `update_canvas`, `patch_canvas`, `ask_user`, `introspect` | Auto-allowed in all approval modes |
-| **WRITE** | `write_file`, `edit_file` | Requires approval in `ask_for_writes` and `ask` modes |
+| **WRITE** | `write_file`, `edit_file`, `docx`*, `xlsx`*, `pptx`* | Requires approval in `ask_for_writes` and `ask` modes |
 | **EXECUTE** | `bash`, `run_agent` | Requires approval in `ask_for_dangerous`, `ask_for_writes`, and `ask` modes |
+
+\* Optional — requires `pip install anteroom[office]`
 
 See [Tool Safety](../security/tool-safety.md) for full details on approval modes and tier overrides.
 
@@ -231,4 +233,58 @@ cli:
   builtin_tools: false
 ```
 
-This disables all twelve built-in tools. MCP tools (if configured) still work.
+This disables all built-in tools (including optional office tools). MCP tools (if configured) still work.
+
+## Optional Office Tools
+
+Install `anteroom[office]` to enable three additional tools for creating, reading, and editing MS Office files:
+
+```bash
+$ pip install anteroom[office]
+```
+
+### docx
+
+Create, read, or edit Word documents (.docx).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | yes | `create`, `read`, or `edit` |
+| `path` | string | yes | File path (relative to working directory or absolute) |
+| `content_blocks` | array | no | Content blocks for create/edit. Each: `{type: "heading"\|"paragraph"\|"table", text?, level?, rows?}` |
+| `replacements` | array | no | Find/replace pairs for edit: `[{old: str, new: str}]` |
+
+**create** builds a new document from content blocks (headings, paragraphs, tables). **read** extracts text with heading levels and tables as JSON. **edit** performs find/replace across paragraphs and optionally appends new blocks. Max 200 content blocks per call. Output truncated at 100,000 characters.
+
+### xlsx
+
+Create, read, or edit Excel spreadsheets (.xlsx).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | yes | `create`, `read`, or `edit` |
+| `path` | string | yes | File path (relative to working directory or absolute) |
+| `sheets` | array | no | Sheets for create: `[{name, headers?, rows}]` |
+| `sheet_name` | string | no | Sheet to read/edit (default: active sheet) |
+| `cell_range` | string | no | Cell range to read, e.g. `A1:C10` |
+| `updates` | array | no | Cell updates for edit: `[{cell: "A1", value: 42}]` |
+| `append_rows` | array | no | Rows to append for edit: `[[value, ...]]` |
+| `add_sheets` | array | no | New sheets for edit: `[{name, rows?}]` |
+
+**create** builds a new workbook with named sheets and row data. **read** returns cell data as JSON rows (uses `read_only=True` for safety). **edit** updates cells, appends rows, or adds sheets. Max 10,000 rows. Output truncated at 100,000 characters.
+
+### pptx
+
+Create, read, or edit PowerPoint presentations (.pptx).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | yes | `create`, `read`, or `edit` |
+| `path` | string | yes | File path (relative to working directory or absolute) |
+| `slides` | array | no | Slides for create/edit: `[{title?, content?, bullets?, notes?, layout?}]` |
+| `replacements` | array | no | Find/replace pairs for edit: `[{old: str, new: str}]` |
+
+**create** builds a new presentation with slides (title, content, bullets, notes). **read** extracts slide text and speaker notes. **edit** performs find/replace across all slides and optionally appends new slides. Max 100 slides. Output truncated at 100,000 characters.
+
+!!! note "Graceful Degradation"
+    If the office libraries are not installed, these tools are not registered — they won't appear in the tool list. If you attempt to call them directly, the tool returns an install instruction.
