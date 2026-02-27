@@ -5,6 +5,20 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## February 27, 2026
+
+### v1.72.1
+
+**Fixed:**
+
+- Artifact upsert race condition: concurrent creation no longer crashes with IntegrityError (#522)
+- Malformed JSON metadata and invalid YAML in pack artifacts no longer crash reads/installs (#522)
+- Pack refresh worker now uses exponential backoff on failures instead of retrying at normal interval (#522)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.72.1)
+
+---
+
 ## February 26, 2026
 
 ### v1.72.0
