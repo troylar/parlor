@@ -67,7 +67,13 @@ class TestInstallFromSource:
 
         # First install
         install_from_source(db, source_dir)
-        # Second run should update
+        # Bump version so install_from_source detects a change
+        manifest_path = source_dir / "test-ns" / "test-pack" / "pack.yaml"
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        data["version"] = "2.0.0"
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f)
+        # Second run should update due to version change
         installed, updated = install_from_source(db, source_dir)
         assert installed == 0
         assert updated == 1
