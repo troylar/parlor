@@ -47,9 +47,11 @@ from anteroom.cli.renderer import (
     set_verbosity,
     start_plan,
     start_thinking,
+    start_tool_ticker,
     startup_step,
     stop_thinking,
     stop_thinking_sync,
+    stop_tool_ticker_sync,
     thinking_countdown,
     update_plan_step,
 )
@@ -2984,3 +2986,84 @@ class TestRenderWelcome:
             packs_pos = info_line.index("3 packs")
             instructions_pos = info_line.index("instructions")
             assert tools_pos < skills_pos < packs_pos < instructions_pos
+
+
+class TestToolTicker:
+    """Tests for tool call elapsed timer (#581)."""
+
+    @pytest.mark.asyncio
+    async def test_start_tool_ticker_creates_task(self) -> None:
+        """start_tool_ticker() should create a background ticker task."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        try:
+            start_tool_ticker("Running bash")
+            assert r._tool_ticker_task is not None
+            assert not r._tool_ticker_task.done()
+        finally:
+            stop_tool_ticker_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_stop_tool_ticker_cancels_task(self) -> None:
+        """stop_tool_ticker_sync() should cancel the ticker task."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        try:
+            start_tool_ticker("Running bash")
+            task = r._tool_ticker_task
+            assert task is not None
+            stop_tool_ticker_sync()
+            assert r._tool_ticker_task is None
+        finally:
+            r._repl_mode = False
+            r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_tool_ticker_updates_elapsed(self) -> None:
+        """Background ticker should show elapsed time in REPL mode."""
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._repl_mode = True
+        r._stdout = buf
+        try:
+            r._tool_start = time.monotonic() - 5.0
+            start_tool_ticker("Running bash")
+            await asyncio.sleep(0.6)
+            output = buf.getvalue()
+            assert "5s" in output or "6s" in output
+            assert "Running bash" in output
+        finally:
+            stop_tool_ticker_sync()
+            r._tool_start = 0
+            r._repl_mode = False
+            r._stdout = None
+
+    @pytest.mark.asyncio
+    async def test_tool_ticker_non_repl_uses_spinner(self) -> None:
+        """In non-REPL mode, tool ticker should use Rich Status spinner."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = False
+        r._stdout = None
+        try:
+            start_tool_ticker("Reading file")
+            assert r._tool_spinner is not None
+            assert r._tool_ticker_task is not None
+        finally:
+            stop_tool_ticker_sync()
+            assert r._tool_spinner is None
+
+    def test_stop_tool_ticker_without_start_is_safe(self) -> None:
+        """stop_tool_ticker_sync() should be safe to call without start."""
+        import anteroom.cli.renderer as r
+
+        r._tool_ticker_task = None
+        r._tool_spinner = None
+        stop_tool_ticker_sync()  # should not raise

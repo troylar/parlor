@@ -1430,7 +1430,15 @@ const Chat = (() => {
             const spinner = document.createElement('span');
             spinner.className = 'tool-spinner';
             summary.appendChild(spinner);
+            const elapsed = document.createElement('span');
+            elapsed.className = 'tool-elapsed';
+            summary.appendChild(elapsed);
             details.appendChild(summary);
+            const startTime = Date.now();
+            details._toolTimer = setInterval(() => {
+                const secs = Math.floor((Date.now() - startTime) / 1000);
+                elapsed.textContent = ` ${secs}s`;
+            }, 500);
 
             const toolContent = document.createElement('div');
             toolContent.className = 'tool-content';
@@ -1453,7 +1461,15 @@ const Chat = (() => {
             const spinner = document.createElement('span');
             spinner.className = 'tool-spinner';
             summary.appendChild(spinner);
+            const elapsed = document.createElement('span');
+            elapsed.className = 'tool-elapsed';
+            summary.appendChild(elapsed);
             details.appendChild(summary);
+            const startTime = Date.now();
+            details._toolTimer = setInterval(() => {
+                const secs = Math.floor((Date.now() - startTime) / 1000);
+                elapsed.textContent = ` ${secs}s`;
+            }, 500);
 
             const toolContent = document.createElement('div');
             toolContent.className = 'tool-content';
@@ -1512,6 +1528,10 @@ const Chat = (() => {
     function renderToolCallEnd(data) {
         const details = document.getElementById(`tool-${_sanitizeId(data.id)}`);
         if (!details) return;
+        if (details._toolTimer) {
+            clearInterval(details._toolTimer);
+            details._toolTimer = null;
+        }
         const spinner = details.querySelector('.tool-spinner');
         if (spinner) spinner.remove();
 
