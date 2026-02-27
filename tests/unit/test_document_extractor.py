@@ -191,6 +191,7 @@ def _make_slide(shape_texts: list[list[str]]) -> MagicMock:
     for paras_text in shape_texts:
         shape = MagicMock()
         shape.has_text_frame = True
+        shape.has_table = False
         paragraphs = []
         for text in paras_text:
             para = MagicMock()
@@ -204,6 +205,29 @@ def _make_slide(shape_texts: list[list[str]]) -> MagicMock:
     return slide
 
 
+def _make_table_shape(rows_data: list[list[str]]) -> MagicMock:
+    """Create a mock shape with a table.
+
+    rows_data is a list of rows, each a list of cell text values.
+    Example: [["Name", "Age"], ["Alice", "30"]] creates a 2x2 table.
+    """
+    shape = MagicMock()
+    shape.has_table = True
+    shape.has_text_frame = False
+    rows = []
+    for row_texts in rows_data:
+        row = MagicMock()
+        cells = []
+        for text in row_texts:
+            cell = MagicMock()
+            cell.text = text
+            cells.append(cell)
+        row.cells = cells
+        rows.append(row)
+    shape.table.rows = rows
+    return shape
+
+
 class TestPptxExtraction:
     def test_extracts_text_from_pptx(self) -> None:
         slide = _make_slide([["Hello from PPTX"]])
@@ -212,7 +236,8 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx-bytes")
-            assert result == "Hello from PPTX"
+            assert "Hello from PPTX" in result
+            assert "--- Slide 1 ---" in result
 
     def test_multi_slide_pptx(self) -> None:
         slide1 = _make_slide([["Slide one"]])
@@ -222,7 +247,10 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result == "Slide one\n\nSlide two"
+            assert "--- Slide 1 ---" in result
+            assert "Slide one" in result
+            assert "--- Slide 2 ---" in result
+            assert "Slide two" in result
 
     def test_multiple_shapes_per_slide(self) -> None:
         slide = _make_slide([["Title"], ["Body text"]])
@@ -231,12 +259,14 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result == "Title\nBody text"
+            assert "Title" in result
+            assert "Body text" in result
 
     def test_skips_shapes_without_text_frame(self) -> None:
         slide = MagicMock()
         shape_with_text = MagicMock()
         shape_with_text.has_text_frame = True
+        shape_with_text.has_table = False
         para = MagicMock()
         run = MagicMock()
         run.text = "Has text"
@@ -245,6 +275,7 @@ class TestPptxExtraction:
 
         shape_no_text = MagicMock()
         shape_no_text.has_text_frame = False
+        shape_no_text.has_table = False
 
         slide.shapes = [shape_no_text, shape_with_text]
         mock_prs = MagicMock()
@@ -252,7 +283,43 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result == "Has text"
+            assert "Has text" in result
+
+    def test_table_extraction(self) -> None:
+        table_shape = _make_table_shape([["Name", "Age"], ["Alice", "30"], ["Bob", "25"]])
+        slide = MagicMock()
+        slide.shapes = [table_shape]
+        mock_prs = MagicMock()
+        mock_prs.slides = [slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert "| Name | Age |" in result
+            assert "| --- | --- |" in result
+            assert "| Alice | 30 |" in result
+            assert "| Bob | 25 |" in result
+
+    def test_mixed_text_and_tables(self) -> None:
+        text_shape = MagicMock()
+        text_shape.has_text_frame = True
+        text_shape.has_table = False
+        para = MagicMock()
+        run = MagicMock()
+        run.text = "Title text"
+        para.runs = [run]
+        text_shape.text_frame.paragraphs = [para]
+
+        table_shape = _make_table_shape([["Col A", "Col B"], ["1", "2"]])
+
+        slide = MagicMock()
+        slide.shapes = [text_shape, table_shape]
+        mock_prs = MagicMock()
+        mock_prs.slides = [slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert "Title text" in result
+            assert "| Col A | Col B |" in result
 
     def test_empty_pptx_returns_none(self) -> None:
         mock_prs = MagicMock()
@@ -266,6 +333,7 @@ class TestPptxExtraction:
         slide = MagicMock()
         shape = MagicMock()
         shape.has_text_frame = True
+        shape.has_table = False
         para = MagicMock()
         run = MagicMock()
         run.text = "   "

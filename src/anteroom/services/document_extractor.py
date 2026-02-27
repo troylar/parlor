@@ -95,16 +95,27 @@ def _extract_pptx(data: bytes) -> str | None:
     try:
         prs = Presentation(BytesIO(data))
         slides: list[str] = []
-        for slide in prs.slides:
+        for slide_idx, slide in enumerate(prs.slides, 1):
             texts: list[str] = []
             for shape in slide.shapes:
-                if shape.has_text_frame:
+                if shape.has_table:
+                    table = shape.table
+                    rows: list[str] = []
+                    for row in table.rows:
+                        cells = [cell.text.strip() for cell in row.cells]
+                        rows.append("| " + " | ".join(cells) + " |")
+                    if rows:
+                        header = rows[0]
+                        separator = "| " + " | ".join("---" for _ in table.rows[0].cells) + " |"
+                        table_text = "\n".join([header, separator] + rows[1:])
+                        texts.append(table_text)
+                elif shape.has_text_frame:
                     for para in shape.text_frame.paragraphs:
                         text = "".join(run.text for run in para.runs).strip()
                         if text:
                             texts.append(text)
             if texts:
-                slides.append("\n".join(texts))
+                slides.append(f"--- Slide {slide_idx} ---\n" + "\n".join(texts))
         result = "\n\n".join(slides).strip()
         return result if result else None
     except Exception:
