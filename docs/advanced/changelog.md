@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.77.1
+
+**Fixed:**
+
+- Startup crash (`no such column: space_id`) on databases created before v1.74.0 (#562)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.77.1)
+
 ### v1.77.0
 
 **New:**
