@@ -262,6 +262,30 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_id ON artifact_versions(artifact_id);
+
+CREATE TABLE IF NOT EXISTS packs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '0.0.0',
+    description TEXT NOT NULL DEFAULT '',
+    source_path TEXT NOT NULL DEFAULT '',
+    installed_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(namespace, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace);
+
+CREATE TABLE IF NOT EXISTS pack_artifacts (
+    pack_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    PRIMARY KEY(pack_id, artifact_id),
+    FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE,
+    FOREIGN KEY(artifact_id) REFERENCES artifacts(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pack_artifacts_artifact_id ON pack_artifacts(artifact_id);
 """
 
 _FTS_SCHEMA = """
@@ -833,6 +857,32 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         )"""
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_id ON artifact_versions(artifact_id)")
+
+    # Packs tables (v1.69.0)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS packs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            version TEXT NOT NULL DEFAULT '0.0.0',
+            description TEXT NOT NULL DEFAULT '',
+            source_path TEXT NOT NULL DEFAULT '',
+            installed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(namespace, name)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS pack_artifacts (
+            pack_id TEXT NOT NULL,
+            artifact_id TEXT NOT NULL,
+            PRIMARY KEY(pack_id, artifact_id),
+            FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE,
+            FOREIGN KEY(artifact_id) REFERENCES artifacts(id)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_artifacts_artifact_id ON pack_artifacts(artifact_id)")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:
