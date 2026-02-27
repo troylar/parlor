@@ -2,6 +2,8 @@
 
 Common problems and their solutions when working with packs and artifacts.
 
+> **Tip:** For a comprehensive, AI-guided diagnostic, use `/pack-doctor` in the REPL. It runs health checks, interprets issues, checks source connectivity, validates lock files, and provides specific remediation steps.
+
 ---
 
 ### Pack install fails with "Artifact file not found"

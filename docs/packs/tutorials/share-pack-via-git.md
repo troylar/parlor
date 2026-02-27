@@ -2,6 +2,8 @@
 
 Publish a pack to a git repository, configure it as a pack source, and have team members consume it automatically.
 
+> **Tip:** For an AI-guided version of this workflow, use `/pack-publish ./my-pack/` in the REPL. It walks you through validation, git setup, pushing, and generating consumer configuration.
+
 ## Prerequisites
 
 - A pack directory (see [Create a Pack from Scratch](create-pack-from-scratch.md))

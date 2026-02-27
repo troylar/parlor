@@ -76,4 +76,4 @@ prompt: |
   8. Tell the user to run `/skills` to see it in the list (shows searched directories)
   9. Mention: "Skills are one of 7 artifact types in Anteroom (alongside rules,
      instructions, context, memory, MCP servers, and config overlays). To share
-     this skill with your team, bundle it into a pack with `/pack-create`."
+     this skill with your team, bundle it into a pack with `/new-pack`."

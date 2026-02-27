@@ -109,6 +109,16 @@ $ aroom pack install my-first-pack/ --project
 
 This copies the pack directory to `.anteroom/packs/demo/my-first-pack/` so teammates get the same artifacts when they clone the repo.
 
+## Alternative: AI-Guided Creation
+
+Instead of creating pack files manually, use the `/new-pack` skill in the REPL for an interactive, AI-guided experience:
+
+```
+> /new-pack security rules for our Python projects
+```
+
+The AI walks you through choosing a namespace, designing artifacts, creating files, and validating the manifest. After creating a pack, use `/pack-lint` to validate it before install.
+
 ## Next Steps
 
 - [Create a Pack from Scratch](tutorials/create-pack-from-scratch.md) — build a realistic multi-artifact pack

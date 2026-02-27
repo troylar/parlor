@@ -1,0 +1,96 @@
+name: pack-doctor
+description: Diagnose pack ecosystem issues with guided remediation
+prompt: |
+  Run a comprehensive diagnostic on the Anteroom pack and artifact ecosystem.
+  Go beyond listing issues — interpret each one, explain why it matters, and
+  provide specific remediation steps.
+
+  ## Diagnostic Steps
+
+  1. **Run the artifact health check.** Execute with `bash`:
+
+     ```
+     aroom artifact check --project --json-output
+     ```
+
+     If `--json-output` is not available, run without it:
+
+     ```
+     aroom artifact check --project
+     ```
+
+     Parse and interpret every issue found.
+
+  2. **Interpret each issue category.** For every issue reported, explain:
+
+     | Category | What it means | Why it matters | How to fix |
+     |----------|--------------|----------------|------------|
+     | config_conflict | Two config overlays set the same key to different values | Runtime behavior is unpredictable | Remove one overlay or merge them |
+     | skill_collision | Same skill name in multiple packs/sources | User gets wrong skill version | Rename one or set precedence via source layer |
+     | shadow | Higher-precedence artifact hides a lower one | Intentional override, but verify | Confirm it is intentional; remove if not |
+     | empty_artifact | Artifact has minimal or no content | Wastes a registry slot, confuses users | Add content or remove the artifact |
+     | malformed | Artifact fails to parse or has invalid structure | Will not load at runtime | Fix the YAML/MD syntax |
+     | lock_drift | Lock file does not match installed state | Reproducibility broken | Regenerate with `aroom pack install` |
+     | orphaned | Artifact in DB not referenced by any pack | Leftover from removed pack | Delete with `--fix` or reinstall the pack |
+     | duplicate_content | Two artifacts have identical content hashes | Redundant, inflates token budget | Merge into one and reference from both packs |
+     | bloat | Artifacts consuming excessive tokens | Slows every request | Trim content or split into smaller artifacts |
+
+  3. **Check pack source health.** Run with `bash`:
+
+     ```
+     aroom pack sources
+     ```
+
+     For each configured source:
+     - Is it cached? (If not, run `aroom pack refresh`)
+     - Is the URL reachable? (Check with `git ls-remote <url>` if accessible)
+     - Is the branch correct?
+     - When was it last refreshed?
+
+     If no sources are configured, note this — it means packs are local-only.
+
+  4. **Check lock file.** Look for `.anteroom/anteroom.lock.yaml` in the current directory:
+     - Does it exist? If not, suggest creating one for reproducibility
+     - If it exists, is it valid? (Check with `aroom artifact check --project`)
+     - Does it match the currently installed packs?
+
+  5. **Check for common problems:**
+     - Are there packs installed but not attached? (`aroom pack list` vs active config)
+     - Are there skills from packs that shadow built-in skills?
+     - Are there very large artifacts (>50KB) that could be trimmed?
+
+  6. **Provide a summary with next steps.** Format as:
+
+     ```
+     Pack Ecosystem Health
+     =====================
+
+     Artifacts: <count>  Packs: <count>  Sources: <count>
+
+     Issues:
+       <severity> <category> — <plain language explanation>
+       Fix: <specific command or action>
+       ...
+
+     Auto-fixable Issues:
+       <list of issues that --fix can resolve>
+       Run: aroom artifact check --project --fix
+
+     Next Steps:
+       1. <most important action>
+       2. <second action>
+       ...
+     ```
+
+  ## Difference from /artifact-check
+
+  `/artifact-check` runs the health check and shows raw output. `/pack-doctor` is
+  a comprehensive diagnostic that also checks sources, lock files, attachment state,
+  and provides guided remediation for every issue found.
+
+  ## Constraints
+
+  - Do NOT modify any files or database state — this is diagnostic only
+  - Do NOT run `--fix` unless the user explicitly asks for it
+  - Report ALL findings, even minor ones — let the user prioritize
+  - If a command fails, explain what the failure means and suggest alternatives

@@ -1795,7 +1795,7 @@ async def _run_repl(
                         yield Completion(f"/{cmd}", start_position=-len(word))
                 for sname in self._skill_names:
                     if sname.startswith(prefix):
-                        yield Completion(f"/{sname}", start_position=-len(word))
+                        yield Completion(f"/{sname} ", start_position=-len(word))
             elif text.lstrip().startswith("/"):
                 # Check if we're completing an argument after a slug-accepting command
                 parts = text.lstrip().split(None, 2)

@@ -261,6 +261,54 @@ Run artifact health checks from within the CLI REPL.
 
 Equivalent to `aroom artifact check` but runs inside the active session.
 
+---
+
+## AI-Guided Pack Skills
+
+These built-in skills provide AI-guided workflows for pack management. Unlike CLI commands that execute directly, skills use the AI to walk you through multi-step processes with context-aware guidance.
+
+### /new-pack
+
+Scaffold a new pack interactively. The AI asks what you want to package, designs the artifact structure, creates files, validates the manifest, and shows how to install.
+
+```
+> /new-pack
+> /new-pack security rules for our Python projects
+```
+
+### /pack-lint
+
+Validate a pack directory before installation. Checks manifest parsing, artifact file existence and validity, naming conventions, unreferenced files, and file sizes — without touching the database.
+
+```
+> /pack-lint ./my-pack/
+```
+
+### /pack-publish
+
+Guide sharing a pack via git. Validates the pack, checks git status, helps initialize or push a repo, and shows teammates how to configure `pack_sources` to consume the pack.
+
+```
+> /pack-publish ./my-pack/
+```
+
+### /pack-doctor
+
+Comprehensive pack ecosystem diagnostics. Runs health checks, interprets every issue with context, checks pack source health, validates lock files, and provides specific remediation steps. Richer than `/artifact-check` — it covers sources, lock files, and attachment state.
+
+```
+> /pack-doctor
+```
+
+### /pack-update
+
+Check configured pack sources for updates and pull the latest versions. Compares before/after state and reports what changed: new packs installed, existing packs updated, and unchanged packs. If no sources are configured, explains how to add one.
+
+```
+> /pack-update
+> /pack-update acme/python-conventions
+```
+
 ## Next Steps
 
 - [Health Check](health-check.md) — details on all 9 health check types

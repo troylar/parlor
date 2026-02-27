@@ -103,3 +103,13 @@ you> /skills
 ```
 
 Shows all available skills with their descriptions and source (default, global, or project).
+
+## Packaging Skills as Packs
+
+To share skills with your team, bundle them into a pack using `/new-pack`:
+
+```
+you> /new-pack security rules for our Python projects
+```
+
+The AI walks you through creating a pack with skills and other artifacts. See [Packs & Artifacts](../packs/index.md) for details.

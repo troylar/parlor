@@ -1,0 +1,97 @@
+name: pack-lint
+description: Validate a pack directory before install — catch errors early
+prompt: |
+  Validate an Anteroom pack directory before installation. Catch errors early
+  without touching the database.
+
+  ## Target
+
+  The pack directory to validate: {args}
+
+  If no directory was provided above, ask the user for the path to the pack directory.
+
+  ## Validation Steps
+
+  1. **Parse and validate the manifest.** Run with `bash`:
+
+     ```
+     python3 -c "
+     import json, sys
+     from pathlib import Path
+     from anteroom.services.packs import parse_manifest, validate_manifest
+     pack_dir = Path('<pack-dir>')
+     manifest_path = pack_dir / 'pack.yaml'
+     if not manifest_path.exists():
+         print('ERROR: No pack.yaml found in ' + str(pack_dir))
+         sys.exit(1)
+     m = parse_manifest(manifest_path)
+     errors = validate_manifest(m, pack_dir)
+     if errors:
+         for e in errors:
+             print(f'MANIFEST ERROR: {e}')
+     else:
+         print(f'Manifest OK: {m.namespace}/{m.name} v{m.version} ({len(m.artifacts)} artifacts)')
+     for a in m.artifacts:
+         print(f'ARTIFACT: type={a.type} name={a.name} file={a.file or \"(convention)\"}')
+     "
+     ```
+
+     Replace `<pack-dir>` with the actual path.
+
+  2. **Check each artifact file.** For every artifact listed in the manifest:
+     - Verify the file exists (use `read_file`)
+     - For `.yaml` files (skills, mcp_servers, config_overlays): verify it parses as valid YAML
+     - For `.md` files (rules, instructions, context, memory): verify it is non-empty
+     - Check that skill YAML files have the required `prompt` field
+
+  3. **Check naming conventions.** For each artifact name and the pack name/namespace:
+     - Must be lowercase
+     - Must use kebab-case (hyphens, not underscores or camelCase)
+     - Must match `^[a-z0-9][a-z0-9._-]*$`
+     - Warn if names contain dots or underscores (prefer hyphens)
+
+  4. **Check for unreferenced files.** List all files in the pack directory
+     (using `glob_files`) and warn about any `.yaml` or `.md` files not referenced
+     in the manifest.
+
+  5. **Check file sizes.** Warn about any artifact file larger than 50KB — large
+     artifacts inflate context windows and slow down loading.
+
+  ## Output Format
+
+  Report results using structured format:
+
+  ```
+  Pack: <namespace>/<name> v<version>
+
+  Manifest:
+    [PASS/FAIL] pack.yaml parses correctly
+    [PASS/FAIL] namespace/name format valid
+    [PASS/FAIL] all artifact files exist
+
+  Artifacts:
+    [PASS/WARN/FAIL] <artifact-name> — <details>
+    ...
+
+  Naming:
+    [PASS/WARN] <check description>
+
+  Files:
+    [PASS/WARN] unreferenced files check
+    [PASS/WARN] file size check
+
+  Result: <PASS / N warnings / N errors>
+  ```
+
+  6. **Suggest fixes** for any issues found. Be specific — show the exact change needed.
+
+  7. **If clean**, suggest the next step:
+     ```
+     aroom pack install <path>
+     ```
+
+  ## Constraints
+
+  - Do NOT modify any files — this is a read-only validation
+  - Do NOT install the pack — only validate
+  - Report ALL issues found, not just the first one

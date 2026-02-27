@@ -2,6 +2,8 @@
 
 Run a health check on a messy artifact ecosystem, interpret every issue type, fix each one, and verify clean.
 
+> **Tip:** For an AI-guided version of this workflow, use `/pack-doctor` in the REPL. It runs the health check, interprets every issue, checks pack sources and lock files, and walks you through remediation steps.
+
 ## The Setup
 
 You have several packs installed from different sources, and things have gotten messy. Let's diagnose and fix everything.

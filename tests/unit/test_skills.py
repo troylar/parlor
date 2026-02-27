@@ -622,6 +622,83 @@ class TestYmlExtension:
             assert reg.has_skill("deploy")
 
 
+class TestDefaultPackSkills:
+    """Tests for pack-related built-in skills."""
+
+    def test_new_pack_skill_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert reg.has_skill("new-pack")
+            skill = reg.get("new-pack")
+            assert skill is not None
+            assert "pack" in skill.description.lower()
+
+    def test_pack_create_no_longer_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert not reg.has_skill("pack-create")
+
+    def test_pack_lint_skill_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert reg.has_skill("pack-lint")
+            skill = reg.get("pack-lint")
+            assert skill is not None
+            assert "validate" in skill.description.lower() or "lint" in skill.description.lower()
+
+    def test_pack_publish_skill_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert reg.has_skill("pack-publish")
+            skill = reg.get("pack-publish")
+            assert skill is not None
+            assert "git" in skill.description.lower() or "shar" in skill.description.lower()
+
+    def test_pack_doctor_skill_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert reg.has_skill("pack-doctor")
+            skill = reg.get("pack-doctor")
+            assert skill is not None
+            assert "diagnos" in skill.description.lower() or "doctor" in skill.description.lower()
+
+    def test_pack_update_skill_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            assert reg.has_skill("pack-update")
+            skill = reg.get("pack-update")
+            assert skill is not None
+            assert "update" in skill.description.lower() or "pull" in skill.description.lower()
+
+    def test_pack_skill_names_not_reserved(self) -> None:
+        """Pack skill names should not conflict with reserved command names."""
+        for name in ["new-pack", "pack-lint", "pack-publish", "pack-doctor", "pack-update"]:
+            result_name, warning = _validate_skill_name(name, name)
+            assert result_name == name, f"Skill name '{name}' should be valid"
+            assert warning is None, f"Skill name '{name}' should not produce a warning"
+
+    def test_all_default_skills_count(self) -> None:
+        """Verify the expected number of built-in default skills."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = SkillRegistry()
+            reg.load(tmpdir)
+            names = [s.name for s in reg.list_skills()]
+            expected = {
+                "commit", "review", "explain", "create-eval",
+                "new-pack", "new-skill", "artifact-check",
+                "pack-lint", "pack-publish", "pack-doctor", "pack-update",
+                "a-help",
+            }
+            for skill_name in expected:
+                assert skill_name in names, f"Expected default skill '{skill_name}' not found"
+
+
 class TestSearchedDirs:
     """Tests for searched directory diagnostic output."""
 

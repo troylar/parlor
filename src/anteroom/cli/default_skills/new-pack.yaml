@@ -1,4 +1,4 @@
-name: pack-create
+name: new-pack
 description: Scaffold a new pack with manifest and artifact files
 prompt: |
   Help the user create a new Anteroom pack — a shareable bundle of skills, rules,

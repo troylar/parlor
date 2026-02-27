@@ -1,0 +1,88 @@
+name: pack-publish
+description: Guide sharing a pack via git for team consumption
+prompt: |
+  Guide the user through publishing an Anteroom pack via git so teammates can
+  consume it through `pack_sources` configuration.
+
+  ## Target
+
+  The pack directory to publish: {args}
+
+  If no directory was provided above, ask the user for the path to the pack directory.
+
+  ## Workflow
+
+  1. **Validate the pack first.** Run manifest validation with `bash`:
+
+     ```
+     python3 -c "
+     from pathlib import Path
+     from anteroom.services.packs import parse_manifest, validate_manifest
+     pack_dir = Path('<pack-dir>')
+     m = parse_manifest(pack_dir / 'pack.yaml')
+     errors = validate_manifest(m, pack_dir)
+     if errors:
+         for e in errors:
+             print(f'ERROR: {e}')
+     else:
+         print(f'Valid: {m.namespace}/{m.name} v{m.version} ({len(m.artifacts)} artifacts)')
+     "
+     ```
+
+     If validation fails, show the errors and help fix them before proceeding.
+     Do NOT continue to publishing steps with a broken pack.
+
+  2. **Check git status.** Determine if the pack directory is already in a git repo:
+     - Run `git -C <pack-dir> rev-parse --is-inside-work-tree` with `bash`
+     - If yes: check for uncommitted changes, show current remote
+
+  3. **If NOT in a git repo**, guide the user through initialization:
+     - `git init` in the pack directory (or a parent repo containing multiple packs)
+     - Create a `.gitignore` (suggest ignoring `__pycache__/`, `.DS_Store`, `*.pyc`)
+     - `git add .` and initial commit
+     - Help set up a remote: `git remote add origin <url>`
+     - Push: `git push -u origin main`
+
+  4. **If already in a git repo**, guide through publishing updates:
+     - Show uncommitted changes with `git status`
+     - Stage and commit changes
+     - Push to remote
+
+  5. **Show consumer configuration.** After pushing, show how teammates consume the pack:
+
+     ```yaml
+     # Add to ~/.anteroom/config.yaml or .anteroom/team.yaml
+     pack_sources:
+       - url: <repo-url>
+         branch: main
+         refresh_interval: 30  # minutes; 0 = manual only
+     ```
+
+     Explain:
+     - `refresh_interval: 30` means Anteroom auto-pulls every 30 minutes
+     - `refresh_interval: 0` means manual only (`aroom pack refresh`)
+     - Team config (`enforce` list) can lock the source URL so users cannot remove it
+
+  6. **Show consumer onboarding steps:**
+     - Add the `pack_sources` config entry
+     - Run `aroom pack refresh` to pull immediately (or wait for background refresh)
+     - Run `aroom pack list` to verify the pack appeared
+     - Attach the pack: `aroom pack attach <namespace>/<name>` (or `--project` for project scope)
+
+  7. **Suggest a README.** If the repo does not have a README.md, suggest creating one with:
+     - Pack name and description
+     - What artifacts are included
+     - Installation instructions for consumers
+     - Version history or changelog
+
+  8. **Mention lock files.** For reproducible installations, consumers can use:
+     - `aroom pack list` shows installed versions
+     - The `.anteroom/anteroom.lock.yaml` file tracks exact content hashes
+     - Lock files can be committed to version control for reproducibility
+
+  ## Constraints
+
+  - Do NOT push to a remote without asking the user first — confirm the remote URL
+  - Do NOT create commits without showing what will be committed
+  - URL schemes must be https://, git://, ssh://, or git@host:path — reject file:// and ext::
+  - If the user does not have a remote set up, help them create one but let them choose the URL

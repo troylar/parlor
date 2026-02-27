@@ -4,7 +4,7 @@ Skills are reusable prompt templates invoked with `/name` in the REPL. They let 
 
 ## Built-in Skills
 
-Six skills ship by default:
+Twelve skills ship by default:
 
 | Skill | What it does |
 |---|---|
@@ -14,6 +14,12 @@ Six skills ship by default:
 | `/a-help` | Look up Anteroom documentation — config layers, CLI, tools, skills, architecture |
 | `/create-eval` | Create a promptfoo eval, shell test script, or VHS demo recording |
 | `/new-skill` | Interactive guide to create a new custom skill with best practices |
+| `/new-pack` | Scaffold a new pack with manifest and artifact files |
+| `/artifact-check` | Run artifact health check for quality, conflicts, and optimization |
+| `/pack-lint` | Validate a pack directory before install — catch errors early |
+| `/pack-publish` | Guide sharing a pack via git for team consumption |
+| `/pack-doctor` | Diagnose pack ecosystem issues with guided remediation |
+| `/pack-update` | Check for and pull latest pack versions from configured sources |
 
 Built-in skills are bundled in the package at `cli/default_skills/`. They can be overridden by user-defined skills with the same name.
 

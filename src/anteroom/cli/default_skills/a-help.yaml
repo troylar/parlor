@@ -466,7 +466,7 @@ prompt: |
   Directories (highest priority first):
   1. `.anteroom/skills/` or `.claude/skills/` (project-level, walk-up discovery)
   2. `~/.anteroom/skills/` or `~/.claude/skills/` (user-level)
-  3. Built-in default skills (commit, review, explain, create-eval, pack-create, new-skill, artifact-check, a-help)
+  3. Built-in default skills (commit, review, explain, create-eval, new-pack, new-skill, artifact-check, pack-lint, pack-publish, pack-doctor, pack-update, a-help)
 
   ### Project Instructions (ANTEROOM.md)
 

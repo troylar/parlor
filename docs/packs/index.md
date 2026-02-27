@@ -61,6 +61,20 @@ Git Repos (pack sources)
 - [Config Reference](config-reference.md) — `pack_sources` configuration
 - [API Reference](api-reference.md) — HTTP endpoints
 
+### AI-Guided Skills
+
+Built-in skills for AI-guided pack workflows:
+
+| Skill | Purpose |
+|-------|---------|
+| `/new-pack` | Scaffold a new pack interactively |
+| `/pack-lint` | Validate a pack directory before install |
+| `/pack-publish` | Guide sharing a pack via git |
+| `/pack-doctor` | Diagnose ecosystem issues with guided remediation |
+| `/pack-update` | Check for and pull latest versions from sources |
+
+These complement the CLI commands — skills walk you through multi-step workflows with context-aware AI guidance.
+
 ### Distribution & Operations
 
 - [Pack Sources](pack-sources.md) — git-based distribution

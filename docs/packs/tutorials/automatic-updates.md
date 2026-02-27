@@ -2,6 +2,8 @@
 
 Configure background refresh for pack sources, understand failure behavior, and pin packs when stability matters.
 
+> **Tip:** For on-demand updates with AI-guided feedback, use `/pack-update` in the REPL. It shows source status, pulls latest versions, and reports what changed.
+
 ## How Auto-Refresh Works
 
 When `refresh_interval > 0`, Anteroom runs a background worker that:

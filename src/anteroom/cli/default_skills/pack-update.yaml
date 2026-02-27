@@ -1,0 +1,101 @@
+name: pack-update
+description: Check for and pull latest pack versions from configured sources
+prompt: |
+  Check for pack updates from configured git sources and pull the latest versions.
+
+  ## Target
+
+  Specific pack to update: {args}
+
+  If a specific pack namespace/name was provided above, focus on that pack only.
+  If no argument was provided, check ALL configured sources for updates.
+
+  ## Workflow
+
+  1. **Show current source status.** Run with `bash`:
+
+     ```
+     aroom pack sources
+     ```
+
+     This shows configured source URLs, branches, refresh intervals, and cache state.
+
+     If no sources are configured, explain how to add one:
+
+     **Via config file** (`~/.anteroom/config.yaml` or `.anteroom/team.yaml`):
+     ```yaml
+     pack_sources:
+       - url: https://github.com/org/packs.git
+         branch: main
+         refresh_interval: 30
+     ```
+
+     **Via REPL:**
+     ```
+     /pack add-source https://github.com/org/packs.git
+     ```
+
+     Then stop — there is nothing to update without sources.
+
+  2. **Show currently installed packs.** Run with `bash`:
+
+     ```
+     aroom pack list
+     ```
+
+     Note the current versions for comparison after refresh.
+
+  3. **Pull latest from sources.** Run with `bash`:
+
+     ```
+     aroom pack refresh
+     ```
+
+     This clones or pulls all configured source repos and installs/updates packs
+     found in them.
+
+  4. **Show what changed.** After refresh, run `aroom pack list` again and compare:
+     - New packs that were installed (not previously in the list)
+     - Existing packs that were updated (version number changed)
+     - Packs that were unchanged
+
+     Report in a clear format:
+     ```
+     Pack Updates
+     ============
+
+     Updated:
+       acme/python-conventions  v1.0.0 -> v1.1.0
+       acme/security-baseline   v2.0.0 -> v2.1.0
+
+     New:
+       acme/onboarding-rules    v1.0.0 (3 artifacts)
+
+     Unchanged:
+       demo/my-pack             v1.0.0
+
+     No changes:
+       (none — everything is up to date)
+     ```
+
+  5. **If a specific pack was requested** but not found in any source:
+     - Check if the pack name is correct (show similar names if any)
+     - Check if the source repo containing it is configured
+     - Suggest adding the source: show the config entry needed
+
+  6. **Check lock file status.** After updates:
+     - If `.anteroom/anteroom.lock.yaml` exists, note that it may be stale
+     - Suggest regenerating: reinstall packs or run health check
+     - If it does not exist, mention it as an option for reproducibility
+
+  7. **Show attachment status.** After updates, remind the user:
+     - New packs need to be attached to be active: `aroom pack attach <namespace>/<name>`
+     - Use `--project` flag for project-scoped attachment
+     - Already-attached packs pick up updates automatically
+
+  ## Constraints
+
+  - Do NOT modify pack source configuration — only read and refresh
+  - Do NOT attach or detach packs — only report what changed
+  - If `aroom pack refresh` fails, show the error and suggest checking network/URL
+  - If no sources exist, do NOT attempt to refresh — just explain how to add sources
