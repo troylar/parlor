@@ -7,6 +7,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.78.0
+
+**New:**
+
+- `aroom space create <name>` now scaffolds a YAML template instead of requiring a pre-existing file; old behavior preserved as `aroom space load <path>` (#532)
+
+**Fixed:**
+
+- UnicodeEncodeError in terminals with restricted locale settings — all Unicode arrows replaced with ASCII (#568)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.78.0)
+
 ### v1.77.2
 
 **New:**
