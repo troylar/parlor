@@ -703,7 +703,6 @@ class TestDefaultPackSkills:
                 "new-space",
                 "space-doctor",
                 "space-lint",
-                "space-setup",
                 "space-edit",
             }
             for skill_name in expected:

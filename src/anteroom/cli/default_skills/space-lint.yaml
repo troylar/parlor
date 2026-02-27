@@ -132,7 +132,7 @@ prompt: |
 
   10. **If clean**, suggest the next step:
       ```
-      aroom space create <path>
+      aroom space load <path>
       ```
 
   ## Constraints

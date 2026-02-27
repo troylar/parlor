@@ -123,7 +123,7 @@ prompt: |
   7. **Register the space.** Run with `bash`:
 
      ```
-     aroom space create <space-file-path>
+     aroom space load <space-file-path>
      ```
 
   8. **Map existing repos (if applicable).** If the user mentioned they already have
