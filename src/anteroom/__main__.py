@@ -894,7 +894,23 @@ def _run_pack(config: object, args: object) -> None:
 
     action = getattr(args, "pack_action", None)
     if not action:
-        print("Usage: aroom pack {list,install,show,remove,update,sources,refresh,attach,detach}")
+        print("Usage: aroom pack {list,install,show,remove,update,sources,refresh,attach,detach,add-source}")
+        return
+
+    if action == "add-source":
+        from .services.pack_sources import add_pack_source
+
+        url = args.url.strip()
+        result = add_pack_source(url)
+        console = Console()
+        if not result.ok:
+            console.print(f"[red]{escape(result.message)}[/red]")
+            sys.exit(1)
+        if result.message:
+            console.print(f"[yellow]{escape(result.message)}[/yellow]")
+            return
+        console.print(f"[green]Added pack source:[/green] {escape(url)}")
+        console.print("Run [bold]aroom pack refresh[/bold] to clone and install packs.")
         return
 
     db = get_db(config.app.data_dir / "anteroom.db")
@@ -1698,6 +1714,8 @@ def main() -> None:
     pack_detach_parser = pack_subparsers.add_parser("detach", help="Detach a pack from global or project scope")
     pack_detach_parser.add_argument("ref", help="Pack reference as namespace/name")
     pack_detach_parser.add_argument("--project", action="store_true", help="Detach from current project only")
+    pack_add_source_parser = pack_subparsers.add_parser("add-source", help="Add a git pack source to config")
+    pack_add_source_parser.add_argument("url", help="Git repository URL (https:// or ssh://)")
 
     # `aroom space` subcommand
     space_parser = subparsers.add_parser("space", help="Manage spaces")

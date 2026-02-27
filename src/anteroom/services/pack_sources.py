@@ -31,7 +31,7 @@ _SOURCE_URL_FILE = ".source_url"
 _SOURCE_BRANCH_FILE = ".source_branch"
 
 # URL scheme allowlist — reject ext:: (arbitrary command exec) and file:// (local FS read)
-_ALLOWED_SCHEMES = ("https://", "git://", "ssh://", "http://")
+_ALLOWED_SCHEMES = ("https://", "git://", "ssh://")
 _GIT_AT_PATTERN = re.compile(r"^[\w.-]+@[\w.-]+:")  # git@host:path SSH shorthand
 
 # Regex to strip embedded credentials from URLs in error messages
@@ -39,10 +39,15 @@ _CREDENTIAL_PATTERN = re.compile(r"((?:https?|ssh|git)://)[^@/\s:]+(?::[^@/\s]+)
 
 
 def _validate_url_scheme(url: str) -> str | None:
-    """Validate that a URL uses an allowed scheme. Returns error message or None."""
+    """Validate that a URL uses an allowed scheme. Returns error message or None.
+
+    Rejects ``http://`` (MITM risk), ``ext::`` (arbitrary command execution),
+    and ``file://`` (local filesystem reads).  Only ``https://``, ``ssh://``,
+    ``git://`` and ``git@host:path`` shorthand are accepted.
+    """
+    if url.startswith("http://"):
+        return "Plaintext HTTP is not allowed for pack sources (MITM risk). Use https:// instead."
     if any(url.startswith(scheme) for scheme in _ALLOWED_SCHEMES):
-        if url.startswith("http://"):
-            logger.warning("Pack source URL uses plaintext HTTP (MITM risk): %s", _sanitize_url(url))
         return None
     if _GIT_AT_PATTERN.match(url):
         return None
@@ -59,6 +64,51 @@ def _sanitize_git_stderr(stderr: str) -> str:
 def _sanitize_url(url: str) -> str:
     """Strip embedded credentials from a URL for safe logging."""
     return _CREDENTIAL_PATTERN.sub(r"\1***@", url)
+
+
+@dataclass
+class AddSourceResult:
+    """Result of adding a pack source URL to config."""
+
+    ok: bool
+    message: str = ""
+
+
+def add_pack_source(url: str) -> AddSourceResult:
+    """Validate *url* and append it to the user's ``pack_sources`` config.
+
+    Returns an ``AddSourceResult`` indicating success or providing a message.
+    """
+    import stat
+
+    import yaml
+
+    from ..config import _get_config_path
+
+    err = _validate_url_scheme(url)
+    if err:
+        return AddSourceResult(ok=False, message=err)
+
+    config_path = _get_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    raw: dict[str, object] = {}
+    if config_path.exists():
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+
+    sources_list: list[dict[str, object]] = raw.setdefault("pack_sources", [])  # type: ignore[assignment]
+    existing_urls = [s.get("url") for s in sources_list if isinstance(s, dict)]
+    if url in existing_urls:
+        return AddSourceResult(ok=True, message=f"Source already configured: {url}")
+
+    sources_list.append({"url": url, "branch": "main", "refresh_interval": 30})
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+    try:
+        config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+    return AddSourceResult(ok=True)
 
 
 _CACHE_DIR_NAME = "cache"

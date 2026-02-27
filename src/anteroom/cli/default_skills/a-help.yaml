@@ -414,6 +414,7 @@ prompt: |
   | aroom pack     | refresh                 | Pull all configured pack sources and update    |
   | aroom pack     | attach NAMESPACE/NAME   | Attach a pack to global/project scope (--project) |
   | aroom pack     | detach NAMESPACE/NAME   | Detach a pack from global/project scope (--project) |
+  | aroom pack     | add-source URL          | Add a git pack source to personal config       |
   | aroom projects |                         | List named projects with metadata              |
 
   ### Built-in Tools
@@ -504,7 +505,7 @@ prompt: |
   | /tools         | Show available tools with tier assignments       |
   | /project       | Manage projects (list/create/select/edit/delete) |
   | /projects      | List all projects (shortcut for /project list)   |
-  | /pack          | Manage packs (list/show/install/remove/sources/refresh/add-source) |
+  | /pack          | Manage packs (list/show/install/update/remove/attach/detach/sources/refresh/add-source) |
   | /packs         | List installed packs (shortcut for /pack list)   |
   | /mcp           | Show MCP server status and tools                 |
   | /conventions   | Display project conventions (ANTEROOM.md)        |
@@ -590,6 +591,9 @@ prompt: |
   - `aroom pack update PATH [--project]` — update existing pack
   - `aroom pack sources` — list configured pack sources
   - `aroom pack refresh` — manually refresh all sources
+  - `aroom pack attach NAMESPACE/NAME [--project]` — attach pack to scope
+  - `aroom pack detach NAMESPACE/NAME [--project]` — detach pack from scope
+  - `aroom pack add-source URL` — add a git pack source to config
 
   ### Artifact Commands
   - `aroom artifact list [--type TYPE] [--namespace NS] [--source SOURCE]` — list artifacts

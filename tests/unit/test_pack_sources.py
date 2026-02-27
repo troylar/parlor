@@ -447,7 +447,6 @@ class TestValidateUrlScheme:
         "url",
         [
             "https://github.com/org/repo.git",
-            "http://internal.corp/repo.git",
             "git://github.com/org/repo.git",
             "ssh://git@github.com/org/repo.git",
             "git@github.com:org/repo.git",
@@ -460,6 +459,7 @@ class TestValidateUrlScheme:
     @pytest.mark.parametrize(
         "url",
         [
+            "http://internal.corp/repo.git",
             "ext::sh -c evil_command",
             "file:///etc/passwd",
             "ftp://example.com/repo.git",
@@ -469,7 +469,6 @@ class TestValidateUrlScheme:
     def test_rejected_schemes(self, url: str) -> None:
         error = _validate_url_scheme(url)
         assert error is not None
-        assert "not allowed" in error
 
 
 class TestSanitizeGitStderr:

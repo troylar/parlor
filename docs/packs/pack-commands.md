@@ -96,6 +96,57 @@ Updated pack acme/my-pack v1.0.0 -> v1.1.0 (3 artifacts)
 |------|-------------|
 | `--project` | Copy the updated pack into `.anteroom/packs/` |
 
+### aroom pack attach NAMESPACE/NAME
+
+Attach a pack to global or project scope. Attached packs have their artifacts active in the registry.
+
+```bash
+$ aroom pack attach acme/python-conventions
+```
+
+```
+Attached acme/python-conventions (global)
+```
+
+**Flags**:
+
+| Flag | Description |
+|------|-------------|
+| `--project` | Attach to current project only (scoped to working directory) |
+
+### aroom pack detach NAMESPACE/NAME
+
+Detach a pack from global or project scope.
+
+```bash
+$ aroom pack detach acme/python-conventions --project
+```
+
+```
+Detached acme/python-conventions (project)
+```
+
+**Flags**:
+
+| Flag | Description |
+|------|-------------|
+| `--project` | Detach from current project only |
+
+### aroom pack add-source URL
+
+Add a git pack source to your personal config (`~/.anteroom/config.yaml`).
+
+```bash
+$ aroom pack add-source https://github.com/acme/anteroom-packs.git
+```
+
+```
+Added pack source: https://github.com/acme/anteroom-packs.git
+Run aroom pack refresh to clone and install packs.
+```
+
+URL scheme validation: only `https://`, `ssh://`, and `git@host:path` are allowed. Plaintext `http://`, `file://`, and `ext::` are rejected.
+
 ### aroom pack sources
 
 List configured pack sources and their cache status.
@@ -250,6 +301,21 @@ See [Health Check](health-check.md) for details on all 9 check types.
 ---
 
 ## REPL Commands
+
+All `/pack` subcommands are available in the CLI REPL:
+
+| Command | Description |
+|---------|-------------|
+| `/pack list` (or `/packs`) | List installed packs |
+| `/pack show <ns/name>` | Show pack details and artifacts |
+| `/pack install <path>` | Install a pack from a local directory |
+| `/pack update <path>` | Update an installed pack from a local directory |
+| `/pack remove <ns/name>` | Remove a pack |
+| `/pack attach <ns/name> [--project]` | Attach a pack to global or project scope |
+| `/pack detach <ns/name> [--project]` | Detach a pack from global or project scope |
+| `/pack sources` | List configured pack sources |
+| `/pack refresh` | Pull latest from all pack sources |
+| `/pack add-source <url>` | Add a git pack source to config |
 
 ### /artifact-check
 

@@ -174,14 +174,13 @@ class TestPackAddSourceValidation:
 
         assert _validate_url_scheme("git@github.com:org/repo.git") is None
 
-    def test_http_returns_none_but_repl_rejects(self) -> None:
-        """_validate_url_scheme allows http:// (with warning), but the REPL handler
-        explicitly rejects it for pack sources to prevent MITM attacks."""
+    def test_http_rejected_by_validator(self) -> None:
+        """_validate_url_scheme rejects http:// to prevent MITM attacks."""
         from anteroom.services.pack_sources import _validate_url_scheme
 
-        # The low-level validator allows http with a warning
-        assert _validate_url_scheme("http://example.com/repo.git") is None
-        # The REPL handler adds a second gate: url.startswith("http://") → reject
+        result = _validate_url_scheme("http://example.com/repo.git")
+        assert result is not None
+        assert "HTTP" in result
 
 
 class TestPackAddSource:
@@ -236,6 +235,103 @@ class TestPackSources:
         from anteroom.services.pack_sources import list_cached_sources
 
         assert list_cached_sources(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# /pack attach + /pack detach — service-level tests (#559)
+# ---------------------------------------------------------------------------
+
+
+class TestPackAttachRepl:
+    def test_attach_global(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+        from anteroom.services.pack_attachments import attach_pack, list_attachments, resolve_pack_id
+
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        pack_id = resolve_pack_id(db, "myteam", "test-pack")
+        assert pack_id is not None
+        attach_pack(db, pack_id, project_path=None)
+        attachments = list_attachments(db, project_path=None)
+        assert len(attachments) == 1
+        assert attachments[0]["scope"] == "global"
+
+    def test_attach_project(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+        from anteroom.services.pack_attachments import attach_pack, list_attachments, resolve_pack_id
+
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        pack_id = resolve_pack_id(db, "myteam", "test-pack")
+        assert pack_id is not None
+        attach_pack(db, pack_id, project_path="/tmp/my-project")
+        attachments = list_attachments(db, project_path="/tmp/my-project")
+        assert any(a["scope"] == "project" for a in attachments)
+
+    def test_attach_not_found(self, db: ThreadSafeConnection) -> None:
+        from anteroom.services.pack_attachments import resolve_pack_id
+
+        assert resolve_pack_id(db, "no", "such-pack") is None
+
+    def test_attach_already_attached(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+        from anteroom.services.pack_attachments import attach_pack, resolve_pack_id
+
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        pack_id = resolve_pack_id(db, "myteam", "test-pack")
+        assert pack_id is not None
+        attach_pack(db, pack_id, project_path=None)
+        with pytest.raises(ValueError, match="already attached"):
+            attach_pack(db, pack_id, project_path=None)
+
+
+class TestPackDetachRepl:
+    def test_detach_success(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+        from anteroom.services.pack_attachments import attach_pack, detach_pack, resolve_pack_id
+
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        pack_id = resolve_pack_id(db, "myteam", "test-pack")
+        assert pack_id is not None
+        attach_pack(db, pack_id, project_path=None)
+        assert detach_pack(db, pack_id, project_path=None) is True
+
+    def test_detach_not_attached(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+        from anteroom.services.pack_attachments import detach_pack, resolve_pack_id
+
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        pack_id = resolve_pack_id(db, "myteam", "test-pack")
+        assert pack_id is not None
+        assert detach_pack(db, pack_id, project_path=None) is False
+
+    def test_detach_project(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+        from anteroom.services.pack_attachments import attach_pack, detach_pack, resolve_pack_id
+
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        pack_id = resolve_pack_id(db, "myteam", "test-pack")
+        assert pack_id is not None
+        attach_pack(db, pack_id, project_path="/tmp/proj")
+        assert detach_pack(db, pack_id, project_path="/tmp/proj") is True
+
+
+# ---------------------------------------------------------------------------
+# /pack update — service-level tests (#559)
+# ---------------------------------------------------------------------------
+
+
+class TestPackUpdateRepl:
+    def test_update_success(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+        from anteroom.services.packs import update_pack
+
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        result = update_pack(db, manifest, pack_dir)
+        assert result["name"] == "test-pack"
+        assert result["namespace"] == "myteam"
+
+    def test_update_missing_pack_yaml(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError):
+            parse_manifest(tmp_path / "nonexistent" / "pack.yaml")
 
 
 # ---------------------------------------------------------------------------

@@ -489,3 +489,90 @@ class TestRunPackRefresh:
         captured = capsys.readouterr()
         assert "FAIL" in captured.out
         assert "git not found" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# aroom pack add-source (#559)
+# ---------------------------------------------------------------------------
+
+
+class TestRunPackAddSource:
+    def test_adds_source_to_config(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        config.pack_sources = []
+        args = MagicMock()
+        args.pack_action = "add-source"
+        args.url = "https://github.com/acme/packs.git"
+
+        config_path = tmp_path / "config.yaml"
+
+        from anteroom.__main__ import _run_pack
+
+        with (
+            patch("anteroom.db.get_db", return_value=MagicMock()),
+            patch("anteroom.config._get_config_path", return_value=config_path),
+        ):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "Added pack source" in captured.out
+
+        data = yaml.safe_load(config_path.read_text())
+        assert len(data["pack_sources"]) == 1
+        assert data["pack_sources"][0]["url"] == "https://github.com/acme/packs.git"
+
+    def test_rejects_http(self, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        args = MagicMock()
+        args.pack_action = "add-source"
+        args.url = "http://example.com/packs.git"
+
+        from anteroom.__main__ import _run_pack
+
+        with (
+            patch("anteroom.db.get_db", return_value=MagicMock()),
+            pytest.raises(SystemExit),
+        ):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "Plaintext HTTP" in captured.out
+
+    def test_rejects_ext_scheme(self, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        args = MagicMock()
+        args.pack_action = "add-source"
+        args.url = "ext::sh -c exploit"
+
+        from anteroom.__main__ import _run_pack
+
+        with (
+            patch("anteroom.db.get_db", return_value=MagicMock()),
+            pytest.raises(SystemExit),
+        ):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "not allowed" in captured.out
+
+    def test_duplicate_source_skipped(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        args = MagicMock()
+        args.pack_action = "add-source"
+        args.url = "https://github.com/acme/packs.git"
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.dump({"pack_sources": [{"url": "https://github.com/acme/packs.git", "branch": "main"}]})
+        )
+
+        from anteroom.__main__ import _run_pack
+
+        with (
+            patch("anteroom.db.get_db", return_value=MagicMock()),
+            patch("anteroom.config._get_config_path", return_value=config_path),
+        ):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "already configured" in captured.out
