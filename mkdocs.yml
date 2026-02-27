@@ -117,6 +117,28 @@ nav:
     - api/messages.md
     - api/projects.md
     - api/config.md
+  - Packs & Artifacts:
+    - packs/index.md
+    - packs/concepts.md
+    - packs/quickstart.md
+    - packs/artifact-types.md
+    - packs/manifest-format.md
+    - packs/pack-commands.md
+    - packs/pack-sources.md
+    - packs/lock-file.md
+    - packs/health-check.md
+    - packs/config-reference.md
+    - packs/api-reference.md
+    - packs/troubleshooting.md
+    - Pack Tutorials:
+      - packs/tutorials/install-first-pack.md
+      - packs/tutorials/create-pack-from-scratch.md
+      - packs/tutorials/share-pack-via-git.md
+      - packs/tutorials/team-standardization.md
+      - packs/tutorials/automatic-updates.md
+      - packs/tutorials/manage-conflicts.md
+      - packs/tutorials/health-check-diagnosis.md
+      - packs/tutorials/ci-cd-integration.md
   - Tutorials:
     - tutorials/connect-to-ollama.md
     - tutorials/connect-to-azure.md

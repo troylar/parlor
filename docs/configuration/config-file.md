@@ -546,6 +546,25 @@ In interactive mode, missing required keys trigger a prompt. Sensitive fields (c
 
 In non-interactive mode, missing keys produce an error message listing each missing path and its equivalent `AI_CHAT_*` environment variable.
 
+### pack_sources
+
+Configure git repositories containing packs for automatic cloning and refresh.
+
+```yaml
+pack_sources:
+  - url: https://github.com/acme/anteroom-packs.git
+    branch: main
+    refresh_interval: 30  # minutes; 0 = manual only
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `url` | string | (required) | Git remote URL. Accepts `https://`, `ssh://`, `git://`, `http://`, SSH shorthand. Rejects `ext::` and `file://` |
+| `branch` | string | `"main"` | Git branch to clone and track |
+| `refresh_interval` | integer | `30` | Minutes between auto-refresh. `0` = manual only. Minimum: 5 (values below 5 are clamped) |
+
+The background worker clones sources on first encounter, then pulls periodically. After 10 consecutive failures, a source is auto-disabled until restart. See [Pack Sources](../packs/pack-sources.md) for the full lifecycle.
+
 ## API Key Command
 
 The `api_key_command` field runs an external command to obtain API keys with automatic transparent refresh:

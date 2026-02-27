@@ -549,6 +549,55 @@ prompt: |
 
   ---
 
+  ## Artifact Model & Packs
+
+  ### 7 Artifact Types
+  | Type | Purpose |
+  |------|---------|
+  | skill | Reusable prompt template (`/skill-name`) |
+  | rule | Always-on instruction injected every turn |
+  | instruction | Static system prompt context |
+  | context | Dynamic per-turn reference material |
+  | memory | Persistent cross-session knowledge |
+  | mcp_server | MCP server connection config |
+  | config_overlay | YAML config fragment merged at runtime |
+
+  ### FQN Format
+  `@namespace/type/name` — e.g., `@acme/skill/commit`
+  Regex: `^@[a-z0-9_-]+/[a-z_]+/[a-z0-9_][a-z0-9_.-]*$`
+
+  ### 6-Layer Precedence (highest → lowest)
+  inline (5) > local (4) > project (3) > team (2) > global (1) > built_in (0)
+
+  ### Pack Commands
+  - `aroom pack list` — list installed packs
+  - `aroom pack install PATH [--project]` — install from directory
+  - `aroom pack show NAMESPACE/NAME` — show pack details
+  - `aroom pack remove NAMESPACE/NAME` — remove pack
+  - `aroom pack update PATH [--project]` — update existing pack
+  - `aroom pack sources` — list configured pack sources
+  - `aroom pack refresh` — manually refresh all sources
+
+  ### Artifact Commands
+  - `aroom artifact list [--type TYPE] [--namespace NS] [--source SOURCE]` — list artifacts
+  - `aroom artifact show FQN` — show artifact details + version history
+  - `aroom artifact check [--json] [--fix] [--project]` — health checks
+
+  ### Config: pack_sources
+  ```yaml
+  pack_sources:
+    - url: https://github.com/org/packs.git
+      branch: main           # default: main
+      refresh_interval: 30   # minutes; 0 = manual only; min: 5
+  ```
+
+  ### Health Check Categories
+  config_conflict (ERROR), skill_collision (WARN), shadow (INFO),
+  empty_artifact (WARN), malformed (ERROR), lock_drift (ERROR/WARN),
+  bloat (INFO), orphaned (WARN), duplicate_content (WARN, fixable)
+
+  ---
+
   ## Documentation Index
 
   Use `read_file` on these paths when the inline reference isn't enough.
@@ -596,6 +645,30 @@ prompt: |
   - `docs/security/audit-log.md` — structured audit log with tamper protection
   - `docs/security/hardening.md` — security hardening guide
   - `docs/security/index.md` — security docs overview
+
+  ### Packs & Artifacts
+  - `docs/packs/index.md` — packs and artifacts overview
+  - `docs/packs/concepts.md` — core concepts (types, FQN, precedence, registry)
+  - `docs/packs/quickstart.md` — zero to packs in 5 minutes
+  - `docs/packs/artifact-types.md` — all 7 artifact types with examples
+  - `docs/packs/manifest-format.md` — pack.yaml field reference
+  - `docs/packs/pack-commands.md` — CLI and REPL commands
+  - `docs/packs/pack-sources.md` — git-based distribution
+  - `docs/packs/lock-file.md` — reproducibility and tamper detection
+  - `docs/packs/health-check.md` — 9 automated quality checks
+  - `docs/packs/config-reference.md` — pack_sources configuration
+  - `docs/packs/api-reference.md` — HTTP endpoints for packs/artifacts
+  - `docs/packs/troubleshooting.md` — common problems and fixes
+
+  ### Pack Tutorials
+  - `docs/packs/tutorials/install-first-pack.md` — install your first pack
+  - `docs/packs/tutorials/create-pack-from-scratch.md` — build a multi-artifact pack
+  - `docs/packs/tutorials/share-pack-via-git.md` — publish via git
+  - `docs/packs/tutorials/team-standardization.md` — enforce standards across a team
+  - `docs/packs/tutorials/automatic-updates.md` — background refresh configuration
+  - `docs/packs/tutorials/manage-conflicts.md` — precedence and conflict resolution
+  - `docs/packs/tutorials/health-check-diagnosis.md` — diagnose and fix every issue type
+  - `docs/packs/tutorials/ci-cd-integration.md` — GitHub Actions workflow
 
   ### Tutorials
   - `docs/tutorials/connect-to-ollama.md` — local LLM setup with Ollama

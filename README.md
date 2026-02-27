@@ -252,6 +252,7 @@ Any endpoint that speaks the OpenAI protocol:
 | **Security** | OWASP ASVS L2, CSRF, CSP, HSTS, SRI, rate limiting, parameterized queries |
 | **Identity** | Ed25519 keypairs, HMAC-SHA256 session tokens, stable across restarts |
 | **Sessions** | Memory or SQLite stores, idle/absolute timeouts, concurrent limits, IP allowlisting |
+| **Packs** | 7 artifact types, 6-layer precedence, pack manifests, git distribution, background refresh, lock files, health checks |
 | **Config** | YAML + env vars, per-project ANTEROOM.md conventions, team config enforcement, dynamic API key refresh |
 | **Teams** | Shared databases, team config with enforced fields, project configs with SHA-256 trust, skills system |
 | **Deployment** | `pip install anteroom` &mdash; one command, no infrastructure |

@@ -45,6 +45,8 @@ Anteroom gives you two ways to interact with your AI --- a polished **web UI** a
 | **Projects & folders** | Organize conversations with project-scoped system prompts, folders, and color-coded tags |
 | **4 themes** | Midnight, Dawn, Aurora, Ember --- switch instantly via command palette |
 | **Security-first** | OWASP ASVS L1 compliant: CSP, CSRF, SRI, rate limiting, HSTS |
+| **Packs & artifacts** | Package skills, rules, instructions, and config overlays into installable packs. Distribute via git, auto-refresh in background |
+| **6-layer precedence** | Built-in → global → team → project → local → inline. Higher layers override lower. Fine-grained control over what the agent sees |
 | **Local-first** | SQLite-backed, no cloud, no telemetry. Everything stays on your machine |
 
 ## Quick Install

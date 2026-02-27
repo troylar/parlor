@@ -311,6 +311,40 @@ aroom exec "task" --no-project-context
 | Exit (EOF) | `Ctrl+D` |
 | Autocomplete | `Tab` |
 
+## Pack Management
+
+### aroom pack
+
+Manage installed packs.
+
+| Subcommand | Action |
+|---|---|
+| `aroom pack list` | List all installed packs |
+| `aroom pack install PATH [--project]` | Install a pack from a local directory |
+| `aroom pack show NAMESPACE/NAME` | Show pack details and artifacts |
+| `aroom pack remove NAMESPACE/NAME` | Remove a pack and its orphaned artifacts |
+| `aroom pack update PATH [--project]` | Update an existing pack |
+| `aroom pack sources` | List configured pack sources with cache status |
+| `aroom pack refresh` | Manually refresh all pack sources |
+
+The `--project` flag copies the pack into `.anteroom/packs/` for version control.
+
+### aroom artifact
+
+Manage artifacts in the registry.
+
+| Subcommand | Action |
+|---|---|
+| `aroom artifact list [--type TYPE] [--namespace NS] [--source SOURCE]` | List artifacts with optional filters |
+| `aroom artifact show FQN` | Show artifact details and version history |
+| `aroom artifact check [--json] [--fix] [--project]` | Run health checks on all artifacts |
+
+Filter values for `--type`: `skill`, `rule`, `instruction`, `context`, `memory`, `mcp_server`, `config_overlay`
+
+Filter values for `--source`: `built_in`, `global`, `team`, `project`, `local`, `inline`
+
+See [Pack Commands](../packs/pack-commands.md) for detailed examples and output.
+
 ## Tab Completion
 
 Tab completion works for three categories:

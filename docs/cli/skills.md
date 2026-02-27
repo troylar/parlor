@@ -201,6 +201,20 @@ When you type `/commit fix the auth bug`:
 
 Skills are purely prompt templates — they don't have special permissions or capabilities beyond what you'd get by typing the same text manually.
 
+## Skills from Packs
+
+Skills can also be distributed as pack artifacts. When a pack containing skill artifacts is installed, those skills are registered in the artifact registry and become available as `/skill-name` commands, just like file-based skills.
+
+Pack skills participate in the same precedence system. A pack skill installed at the `project` layer overrides a built-in skill with the same name. A local skill file overrides a pack skill.
+
+To see which skills come from packs:
+
+```bash
+$ aroom artifact list --type skill
+```
+
+See [Packs & Artifacts](../packs/index.md) for details on creating and installing packs with skills.
+
 ## Compatibility
 
 The `.anteroom` and `.claude` directories are fully interchangeable for skills:

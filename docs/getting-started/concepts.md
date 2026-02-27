@@ -126,6 +126,14 @@ Rules are useful for enforcing conventions that should always be active:
 - Security patterns
 - Test requirements
 
+### Artifact Registry
+
+Skills, rules, instructions, and other content types are all **artifacts** in Anteroom's unified model. The artifact registry is the in-memory index that resolves what the agent sees at runtime. It loads artifacts from the database on startup and resolves precedence conflicts using a 6-layer stack: built_in < global < team < project < local < inline.
+
+Artifacts can be installed individually or bundled into **packs** — versioned directories with a `pack.yaml` manifest. Packs can be distributed via git repositories (pack sources) that Anteroom clones and auto-refreshes in the background. This is how teams standardize development conventions: publish a pack with skills, rules, and config overlays, and every team member gets the same artifacts automatically.
+
+See [Packs & Artifacts](../packs/index.md) for the full guide, including the 7 artifact types, manifest format, and tutorials.
+
 ### Directory Equivalence
 
 Anteroom treats `.anteroom` and `.claude` directories as interchangeable throughout the system:
