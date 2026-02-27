@@ -1090,7 +1090,7 @@ class TestThinkingEventFirstIteration:
 
 class TestBuildCompactionHistory:
     def test_includes_tool_result_success(self):
-        """Successful tool results must appear as 'tool_result: <name> → SUCCESS'."""
+        """Successful tool results must appear as 'tool_result: <name> -> SUCCESS'."""
         messages = [
             {
                 "role": "assistant",
@@ -1106,10 +1106,10 @@ class TestBuildCompactionHistory:
             {"role": "tool", "tool_call_id": "tc1", "content": '{"written": true}'},
         ]
         history = _build_compaction_history(messages)
-        assert "tool_result: write_file → SUCCESS" in history
+        assert "tool_result: write_file -> SUCCESS" in history
 
     def test_includes_tool_result_error(self):
-        """Failed tool results must appear as 'tool_result: <name> → ERROR'."""
+        """Failed tool results must appear as 'tool_result: <name> -> ERROR'."""
         messages = [
             {
                 "role": "assistant",
@@ -1121,7 +1121,7 @@ class TestBuildCompactionHistory:
             {"role": "tool", "tool_call_id": "tc2", "content": '{"error": "permission denied"}'},
         ]
         history = _build_compaction_history(messages)
-        assert "tool_result: bash → ERROR" in history
+        assert "tool_result: bash -> ERROR" in history
         assert "permission denied" in history
 
     def test_tool_call_includes_args_preview(self):
