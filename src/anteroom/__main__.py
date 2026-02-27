@@ -709,6 +709,147 @@ def _run_artifact(config: object, args: object) -> None:
         console.print(escape(art["content"]))
 
 
+def _run_pack(config: object, args: object) -> None:
+    """Handle `aroom pack` subcommands."""
+    from pathlib import Path
+
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
+    from .db import get_db
+    from .services import packs
+
+    action = getattr(args, "pack_action", None)
+    if not action:
+        print("Usage: aroom pack {list,install,show,remove,update}")
+        return
+
+    db = get_db(config.app.data_dir / "anteroom.db")
+    console = Console()
+
+    if action == "list":
+        pack_list = packs.list_packs(db)
+        if not pack_list:
+            console.print("[dim]No packs installed.[/dim]")
+            return
+        table = Table(title="Installed Packs")
+        table.add_column("Namespace", style="bold")
+        table.add_column("Name", style="bold")
+        table.add_column("Version")
+        table.add_column("Artifacts", justify="right")
+        table.add_column("Installed")
+        for p in pack_list:
+            table.add_row(
+                p["namespace"],
+                p["name"],
+                p["version"],
+                str(p.get("artifact_count", 0)),
+                p.get("installed_at", "")[:10],
+            )
+        console.print(table)
+
+    elif action == "install":
+        pack_path = Path(args.path).resolve()
+        manifest_path = pack_path / "pack.yaml"
+        try:
+            manifest = packs.parse_manifest(manifest_path)
+        except ValueError as e:
+            console.print(f"[red]Invalid manifest:[/red] {e}")
+            sys.exit(1)
+
+        errors = packs.validate_manifest(manifest, pack_path)
+        if errors:
+            console.print("[red]Manifest validation errors:[/red]")
+            for err in errors:
+                console.print(f"  - {err}")
+            sys.exit(1)
+
+        project_dir = Path.cwd() if getattr(args, "project", False) else None
+        try:
+            result = packs.install_pack(db, manifest, pack_path, project_dir=project_dir)
+        except ValueError as e:
+            console.print(f"[red]Install failed:[/red] {e}")
+            sys.exit(1)
+
+        console.print(
+            f"[green]Installed[/green] {escape(result['namespace'])}/{escape(result['name'])} "
+            f"v{escape(result['version'])} ({result['artifact_count']} artifacts)"
+        )
+
+    elif action == "show":
+        ref = args.ref
+        parts = ref.split("/", 1)
+        if len(parts) != 2:
+            console.print("[red]Invalid pack reference. Use namespace/name format.[/red]")
+            sys.exit(1)
+        namespace, name = parts
+        pack_info = packs.get_pack(db, namespace, name)
+        if not pack_info:
+            console.print(f"[red]Pack not found:[/red] {escape(ref)}")
+            sys.exit(1)
+
+        console.print(f"[bold]Name:[/bold]        {escape(pack_info['namespace'])}/{escape(pack_info['name'])}")
+        console.print(f"[bold]Version:[/bold]     {escape(pack_info['version'])}")
+        console.print(f"[bold]Description:[/bold] {escape(pack_info.get('description', ''))}")
+        console.print(f"[bold]Source:[/bold]      {escape(pack_info.get('source_path', ''))}")
+        console.print(f"[bold]Installed:[/bold]   {escape(pack_info.get('installed_at', ''))}")
+        console.print(f"[bold]Artifacts:[/bold]   {pack_info.get('artifact_count', 0)}")
+
+        artifacts = pack_info.get("artifacts", [])
+        if artifacts:
+            console.print()
+            table = Table(title="Artifacts")
+            table.add_column("FQN", style="bold")
+            table.add_column("Type")
+            table.add_column("Hash", max_width=12)
+            for a in artifacts:
+                table.add_row(a["fqn"], a["type"], a.get("content_hash", "")[:12])
+            console.print(table)
+
+    elif action == "remove":
+        ref = args.ref
+        parts = ref.split("/", 1)
+        if len(parts) != 2:
+            console.print("[red]Invalid pack reference. Use namespace/name format.[/red]")
+            sys.exit(1)
+        namespace, name = parts
+        removed = packs.remove_pack(db, namespace, name)
+        if removed:
+            console.print(f"[green]Removed[/green] {escape(ref)}")
+        else:
+            console.print(f"[red]Pack not found:[/red] {escape(ref)}")
+            sys.exit(1)
+
+    elif action == "update":
+        pack_path = Path(args.path).resolve()
+        manifest_path = pack_path / "pack.yaml"
+        try:
+            manifest = packs.parse_manifest(manifest_path)
+        except ValueError as e:
+            console.print(f"[red]Invalid manifest:[/red] {e}")
+            sys.exit(1)
+
+        errors = packs.validate_manifest(manifest, pack_path)
+        if errors:
+            console.print("[red]Manifest validation errors:[/red]")
+            for err in errors:
+                console.print(f"  - {err}")
+            sys.exit(1)
+
+        project_dir = Path.cwd() if getattr(args, "project", False) else None
+        try:
+            result = packs.update_pack(db, manifest, pack_path, project_dir=project_dir)
+        except ValueError as e:
+            console.print(f"[red]Update failed:[/red] {e}")
+            sys.exit(1)
+
+        console.print(
+            f"[green]Updated[/green] {escape(result['namespace'])}/{escape(result['name'])} "
+            f"v{escape(result['version'])} ({result['artifact_count']} artifacts)"
+        )
+
+
 def _run_chat(
     config,
     prompt: str | None = None,
@@ -1056,6 +1197,28 @@ def main() -> None:
     art_show_parser = artifact_subparsers.add_parser("show", help="Show artifact details by FQN")
     art_show_parser.add_argument("fqn", help="Fully-qualified name, e.g. @core/skill/greet")
 
+    pack_parser = subparsers.add_parser("pack", help="Manage artifact packs")
+    pack_subparsers = pack_parser.add_subparsers(dest="pack_action")
+    pack_subparsers.add_parser("list", help="List installed packs")
+    pack_install_parser = pack_subparsers.add_parser("install", help="Install a pack from a local directory")
+    pack_install_parser.add_argument("path", help="Path to pack directory containing pack.yaml")
+    pack_install_parser.add_argument(
+        "--project",
+        action="store_true",
+        help="Copy pack into .anteroom/packs/",
+    )
+    pack_show_parser = pack_subparsers.add_parser("show", help="Show pack details")
+    pack_show_parser.add_argument("ref", help="Pack reference as namespace/name")
+    pack_remove_parser = pack_subparsers.add_parser("remove", help="Remove an installed pack")
+    pack_remove_parser.add_argument("ref", help="Pack reference as namespace/name")
+    pack_update_parser = pack_subparsers.add_parser("update", help="Update a pack from a local directory")
+    pack_update_parser.add_argument("path", help="Path to pack directory containing pack.yaml")
+    pack_update_parser.add_argument(
+        "--project",
+        action="store_true",
+        help="Copy pack into .anteroom/packs/",
+    )
+
     args = parser.parse_args()
 
     # Configure logging early, before any module-level loggers are used.
@@ -1185,6 +1348,10 @@ def main() -> None:
 
     if args.command == "artifact":
         _run_artifact(config, args)
+        return
+
+    if args.command == "pack":
+        _run_pack(config, args)
         return
 
     # Resolve --project <name> to project_id
