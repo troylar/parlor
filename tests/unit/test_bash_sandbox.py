@@ -1,12 +1,13 @@
 """Tests for bash sandbox configuration and enforcement."""
 
+import os
 import sys
 from unittest.mock import patch
 
 import pytest
 
 from anteroom.config import BashSandboxConfig, OsSandboxConfig
-from anteroom.tools.bash import _check_sandbox, handle
+from anteroom.tools.bash import _check_sandbox, _rewrite_multiline_python, handle
 from anteroom.tools.security import (
     check_blocked_path,
     check_custom_patterns,
@@ -416,3 +417,92 @@ class TestBashStdinClosed:
         assert result["stdout"].strip().startswith("exit:")
         exit_code = int(result["stdout"].strip().split(":")[1])
         assert exit_code != 0
+
+
+# --- Multiline python -c rewriter for Windows ---
+
+
+class TestRewriteMultilinePython:
+    def test_single_line_no_rewrite(self) -> None:
+        cmd = 'python -c "print(42)"'
+        with patch("anteroom.tools.bash.shutil.which", return_value="/usr/bin/python3"):
+            result = _rewrite_multiline_python(cmd)
+        assert result == 'python -c "print(42)"'
+
+    def test_multiline_writes_temp_file(self) -> None:
+        code = 'import sys\nfor i in range(3):\n    print(i)'
+        cmd = f'python -c "{code}"'
+        with patch("anteroom.tools.bash.shutil.which", return_value="/usr/bin/python3"):
+            result = _rewrite_multiline_python(cmd)
+        assert result.startswith("python3 ")
+        tmp_path = result.split(" ", 1)[1]
+        assert tmp_path.endswith(".py")
+        assert os.path.isfile(tmp_path)
+        with open(tmp_path) as f:
+            assert f.read() == code
+        os.unlink(tmp_path)
+
+    def test_python3_rewritten_when_unavailable(self) -> None:
+        cmd = 'python3 -c "print(1)"'
+        with patch("anteroom.tools.bash.shutil.which", return_value=None):
+            result = _rewrite_multiline_python(cmd)
+        assert result.startswith("python -c")
+        assert "python3" not in result
+
+    def test_python3_preserved_when_available(self) -> None:
+        cmd = 'python3 -c "print(1)"'
+        with patch("anteroom.tools.bash.shutil.which", return_value="/usr/bin/python3"):
+            result = _rewrite_multiline_python(cmd)
+        assert result == 'python3 -c "print(1)"'
+
+    def test_non_python_command_unchanged(self) -> None:
+        cmd = "echo hello world"
+        with patch("anteroom.tools.bash.shutil.which", return_value=None):
+            result = _rewrite_multiline_python(cmd)
+        assert result == "echo hello world"
+
+    def test_multiline_with_python3_unavailable(self) -> None:
+        code = 'import os\nprint(os.getcwd())'
+        cmd = f'python3 -c "{code}"'
+        with patch("anteroom.tools.bash.shutil.which", return_value=None):
+            result = _rewrite_multiline_python(cmd)
+        assert result.startswith("python ")
+        tmp_path = result.split(" ", 1)[1]
+        assert os.path.isfile(tmp_path)
+        with open(tmp_path) as f:
+            assert f.read() == code
+        os.unlink(tmp_path)
+
+    def test_single_quoted_multiline(self) -> None:
+        code = "import sys\nprint(sys.version)"
+        cmd = f"python -c '{code}'"
+        with patch("anteroom.tools.bash.shutil.which", return_value="/usr/bin/python3"):
+            result = _rewrite_multiline_python(cmd)
+        assert result.startswith("python3 ")
+        tmp_path = result.split(" ", 1)[1]
+        assert os.path.isfile(tmp_path)
+        with open(tmp_path) as f:
+            assert f.read() == code
+        os.unlink(tmp_path)
+
+
+class TestBashHandlerWindowsRewrite:
+    @pytest.mark.asyncio
+    async def test_rewriter_called_on_win32(self) -> None:
+        with patch("anteroom.tools.bash.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            with patch(
+                "anteroom.tools.bash._rewrite_multiline_python",
+                side_effect=lambda cmd: cmd,
+            ) as mock_rewrite:
+                await handle("echo hello")
+                mock_rewrite.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rewriter_not_called_on_posix(self) -> None:
+        with patch(
+            "anteroom.tools.bash._rewrite_multiline_python",
+        ) as mock_rewrite:
+            await handle("echo hello")
+            if sys.platform != "win32":
+                mock_rewrite.assert_not_called()

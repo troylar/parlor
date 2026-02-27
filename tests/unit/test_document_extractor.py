@@ -9,6 +9,7 @@ from anteroom.services.document_extractor import (
     EXTRACTABLE_MIME_TYPES,
     _extract_docx,
     _extract_pdf,
+    _extract_pptx,
     extract_text,
 )
 
@@ -37,6 +38,18 @@ class TestExtractText:
         with patch("anteroom.services.document_extractor._extract_docx", return_value="docx text") as mock:
             result = extract_text(b"data", docx_mime)
             assert result == "docx text"
+            mock.assert_called_once_with(b"data")
+
+    def test_extractable_mime_types_contains_pptx(self) -> None:
+        assert (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" in EXTRACTABLE_MIME_TYPES
+        )
+
+    def test_dispatches_to_pptx(self) -> None:
+        pptx_mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        with patch("anteroom.services.document_extractor._extract_pptx", return_value="pptx text") as mock:
+            result = extract_text(b"data", pptx_mime)
+            assert result == "pptx text"
             mock.assert_called_once_with(b"data")
 
 
@@ -157,4 +170,123 @@ class TestDocxExtraction:
         mock_mod.Document.side_effect = Exception("Corrupt DOCX")
         with patch.dict(sys.modules, {"docx": mock_mod}):
             result = _extract_docx(b"corrupt-data")
+            assert result is None
+
+
+def _make_pptx_mock(prs_instance: MagicMock) -> MagicMock:
+    """Create a mock pptx module where Presentation returns the given instance."""
+    mod = MagicMock()
+    mod.Presentation.return_value = prs_instance
+    return mod
+
+
+def _make_slide(shape_texts: list[list[str]]) -> MagicMock:
+    """Create a mock slide with shapes containing paragraph runs.
+
+    shape_texts is a list of shapes, each a list of paragraph texts.
+    Example: [["Title", "Subtitle"], ["Body text"]] creates 2 shapes.
+    """
+    slide = MagicMock()
+    shapes = []
+    for paras_text in shape_texts:
+        shape = MagicMock()
+        shape.has_text_frame = True
+        paragraphs = []
+        for text in paras_text:
+            para = MagicMock()
+            run = MagicMock()
+            run.text = text
+            para.runs = [run]
+            paragraphs.append(para)
+        shape.text_frame.paragraphs = paragraphs
+        shapes.append(shape)
+    slide.shapes = shapes
+    return slide
+
+
+class TestPptxExtraction:
+    def test_extracts_text_from_pptx(self) -> None:
+        slide = _make_slide([["Hello from PPTX"]])
+        mock_prs = MagicMock()
+        mock_prs.slides = [slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx-bytes")
+            assert result == "Hello from PPTX"
+
+    def test_multi_slide_pptx(self) -> None:
+        slide1 = _make_slide([["Slide one"]])
+        slide2 = _make_slide([["Slide two"]])
+        mock_prs = MagicMock()
+        mock_prs.slides = [slide1, slide2]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result == "Slide one\n\nSlide two"
+
+    def test_multiple_shapes_per_slide(self) -> None:
+        slide = _make_slide([["Title"], ["Body text"]])
+        mock_prs = MagicMock()
+        mock_prs.slides = [slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result == "Title\nBody text"
+
+    def test_skips_shapes_without_text_frame(self) -> None:
+        slide = MagicMock()
+        shape_with_text = MagicMock()
+        shape_with_text.has_text_frame = True
+        para = MagicMock()
+        run = MagicMock()
+        run.text = "Has text"
+        para.runs = [run]
+        shape_with_text.text_frame.paragraphs = [para]
+
+        shape_no_text = MagicMock()
+        shape_no_text.has_text_frame = False
+
+        slide.shapes = [shape_no_text, shape_with_text]
+        mock_prs = MagicMock()
+        mock_prs.slides = [slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result == "Has text"
+
+    def test_empty_pptx_returns_none(self) -> None:
+        mock_prs = MagicMock()
+        mock_prs.slides = []
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is None
+
+    def test_slides_with_empty_text_returns_none(self) -> None:
+        slide = MagicMock()
+        shape = MagicMock()
+        shape.has_text_frame = True
+        para = MagicMock()
+        run = MagicMock()
+        run.text = "   "
+        para.runs = [run]
+        shape.text_frame.paragraphs = [para]
+        slide.shapes = [shape]
+        mock_prs = MagicMock()
+        mock_prs.slides = [slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is None
+
+    def test_missing_pptx_returns_none(self) -> None:
+        with patch.dict(sys.modules, {"pptx": None}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is None
+
+    def test_corrupt_pptx_returns_none(self) -> None:
+        mock_mod = MagicMock()
+        mock_mod.Presentation.side_effect = Exception("Corrupt PPTX")
+        with patch.dict(sys.modules, {"pptx": mock_mod}):
+            result = _extract_pptx(b"corrupt-data")
             assert result is None

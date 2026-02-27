@@ -59,6 +59,7 @@ index = [
 docs = [
     "pypdf>=6.7.1",
     "python-docx>=1.0",
+    "python-pptx>=1.0",
 ]
 encryption = [
     "sqlcipher3>=0.5.0",

@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import shutil
 import sys
+import tempfile
 from typing import TYPE_CHECKING, Any
 
 from .security import (
@@ -46,6 +49,58 @@ DEFINITION: dict[str, Any] = {
         "required": ["command"],
     },
 }
+
+
+_PYTHON_C_RE = re.compile(
+    r"""(python(?:3(?:\.\d+)?)?(?:\.exe)?\s+-c\s+)(["'])(.*?)\2""",
+    re.DOTALL,
+)
+
+
+def _rewrite_multiline_python(command: str) -> str:
+    """Rewrite multiline ``python -c`` commands for Windows compatibility.
+
+    ``cmd.exe`` truncates quoted strings at newlines.  When a ``python -c``
+    payload contains embedded newlines we write it to a temporary ``.py`` file
+    and invoke ``python <tmpfile>`` instead.
+
+    Also rewrites ``python3`` to ``python`` on Windows when ``python3`` is not
+    on PATH (Windows installers register ``python``, not ``python3``).
+    """
+    python3_available = shutil.which("python3") is not None
+
+    def _replace(m: re.Match[str]) -> str:
+        prefix = m.group(1)
+        code = m.group(3)
+
+        if python3_available:
+            interpreter = "python3"
+        else:
+            interpreter = "python"
+
+        if "\n" not in code:
+            if not python3_available:
+                prefix = re.sub(r"python3(?:\.\d+)?", "python", prefix, count=1)
+            return f'{prefix}"{code}"'
+
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".py",
+            delete=False,
+            encoding="utf-8",
+        )
+        try:
+            tmp.write(code)
+        finally:
+            tmp.close()
+        return f"{interpreter} {tmp.name}"
+
+    result = _PYTHON_C_RE.sub(_replace, command)
+
+    if not python3_available:
+        result = re.sub(r"\bpython3(?:\.\d+)?\b", "python", result, count=1)
+
+    return result
 
 
 def set_working_dir(d: str) -> None:
@@ -92,6 +147,9 @@ async def handle(
         command, error = sanitize_command(command)
         if error:
             return {"error": error, "exit_code": -1}
+
+    if sys.platform == "win32":
+        command = _rewrite_multiline_python(command)
 
     # Apply sandbox restrictions (runs even when hard-block is bypassed)
     if _sandbox_config is not None:

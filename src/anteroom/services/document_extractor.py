@@ -19,8 +19,13 @@ _DOCX_TYPES = frozenset(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
 )
+_PPTX_TYPES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+)
 
-EXTRACTABLE_MIME_TYPES = _PDF_TYPES | _DOCX_TYPES
+EXTRACTABLE_MIME_TYPES = _PDF_TYPES | _DOCX_TYPES | _PPTX_TYPES
 
 
 def extract_text(data: bytes, mime_type: str) -> str | None:
@@ -33,6 +38,8 @@ def extract_text(data: bytes, mime_type: str) -> str | None:
         return _extract_pdf(data)
     if mime_type in _DOCX_TYPES:
         return _extract_docx(data)
+    if mime_type in _PPTX_TYPES:
+        return _extract_pptx(data)
     return None
 
 
@@ -73,4 +80,33 @@ def _extract_docx(data: bytes) -> str | None:
         return result if result else None
     except Exception:
         logger.warning("Failed to extract text from DOCX", exc_info=True)
+        return None
+
+
+def _extract_pptx(data: bytes) -> str | None:
+    try:
+        from pptx import Presentation
+    except ImportError:
+        logger.warning(
+            "python-pptx not installed — PPTX text extraction unavailable. "
+            "Install with: pip install anteroom[docs]"
+        )
+        return None
+    try:
+        prs = Presentation(BytesIO(data))
+        slides: list[str] = []
+        for slide in prs.slides:
+            texts: list[str] = []
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        text = "".join(run.text for run in para.runs).strip()
+                        if text:
+                            texts.append(text)
+            if texts:
+                slides.append("\n".join(texts))
+        result = "\n\n".join(slides).strip()
+        return result if result else None
+    except Exception:
+        logger.warning("Failed to extract text from PPTX", exc_info=True)
         return None
