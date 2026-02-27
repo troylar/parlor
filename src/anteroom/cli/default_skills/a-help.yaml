@@ -402,6 +402,7 @@ prompt: |
   | aroom config   | validate                | Check compliance rules                         |
   | aroom artifact | list                    | List artifacts with type/namespace/source filters |
   | aroom artifact | show FQN                | Show artifact details with version history    |
+  | aroom artifact | check                   | Run artifact health check (--fix, --json)      |
   | aroom projects |                         | List named projects with metadata              |
 
   ### Built-in Tools
@@ -495,6 +496,7 @@ prompt: |
   | /mcp           | Show MCP server status and tools                 |
   | /conventions   | Display project conventions (ANTEROOM.md)        |
   | /plan          | Enter/exit planning mode                         |
+  | /artifact-check| Run artifact health check (built-in skill)      |
   | /verbose       | Toggle verbosity level                           |
   | /detail        | Toggle tool call detail display                  |
   | /clear         | Clear screen                                     |
