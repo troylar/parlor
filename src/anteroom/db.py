@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
 
 CREATE TABLE IF NOT EXISTS spaces (
     id TEXT PRIMARY KEY,
@@ -42,7 +41,6 @@ CREATE TABLE IF NOT EXISTS spaces (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name);
 
 CREATE TABLE IF NOT EXISTS space_paths (
     id TEXT PRIMARY KEY,
@@ -52,7 +50,6 @@ CREATE TABLE IF NOT EXISTS space_paths (
     created_at TEXT NOT NULL,
     FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_space_paths_space ON space_paths(space_id);
 
 CREATE TABLE IF NOT EXISTS folders (
     id TEXT PRIMARY KEY,
@@ -123,9 +120,6 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_conversation
-    ON messages(conversation_id, position);
-
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL,
@@ -172,8 +166,6 @@ CREATE TABLE IF NOT EXISTS change_log (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_change_log_id ON change_log(id);
-
 CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL CHECK(type IN ('file', 'text', 'url')),
@@ -200,9 +192,6 @@ CREATE TABLE IF NOT EXISTS source_chunks (
     created_at TEXT NOT NULL,
     FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_source_chunks_source
-    ON source_chunks(source_id, chunk_index);
 
 CREATE TABLE IF NOT EXISTS source_tags (
     source_id TEXT NOT NULL,
@@ -271,10 +260,6 @@ CREATE TABLE IF NOT EXISTS artifacts (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_artifacts_fqn ON artifacts(fqn);
-CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(type);
-CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace);
-
 CREATE TABLE IF NOT EXISTS artifact_versions (
     id TEXT PRIMARY KEY,
     artifact_id TEXT NOT NULL,
@@ -285,8 +270,6 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     UNIQUE(artifact_id, version),
     FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_id ON artifact_versions(artifact_id);
 
 CREATE TABLE IF NOT EXISTS packs (
     id TEXT PRIMARY KEY,
@@ -300,8 +283,6 @@ CREATE TABLE IF NOT EXISTS packs (
     UNIQUE(namespace, name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace);
-
 CREATE TABLE IF NOT EXISTS pack_artifacts (
     pack_id TEXT NOT NULL,
     artifact_id TEXT NOT NULL,
@@ -309,8 +290,6 @@ CREATE TABLE IF NOT EXISTS pack_artifacts (
     FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE,
     FOREIGN KEY(artifact_id) REFERENCES artifacts(id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_pack_artifacts_artifact_id ON pack_artifacts(artifact_id);
 
 CREATE TABLE IF NOT EXISTS pack_attachments (
     id TEXT PRIMARY KEY,
@@ -322,12 +301,6 @@ CREATE TABLE IF NOT EXISTS pack_attachments (
     FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE,
     FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id);
-CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path);
--- NOTE: idx_pack_attachments_unique and idx_pack_attachments_space are created in
--- _run_migrations() because they reference space_id, which may not exist on databases
--- created before v1.74.0.  The migration adds the column first, then the indexes.
 
 CREATE TABLE IF NOT EXISTS space_sources (
     space_id TEXT NOT NULL,
@@ -345,12 +318,6 @@ CREATE TABLE IF NOT EXISTS space_sources (
     )
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_space_sources_unique
-    ON space_sources(space_id, COALESCE(source_id, ''), COALESCE(group_id, ''), COALESCE(tag_filter, ''));
-
--- NOTE: idx_conversations_space and idx_folders_space are created in
--- _run_migrations() because they reference space_id, which may not exist on
--- databases created before v1.74.0.
 """
 
 _FTS_SCHEMA = """
@@ -554,6 +521,42 @@ def _ensure_vec_dimensions(conn: sqlite3.Connection, dimensions: int) -> None:
     _ensure_vec_table_dimensions(conn, "vec_source_chunks", "source_chunk_embeddings", dimensions)
 
 
+def _create_indexes(conn: sqlite3.Connection) -> None:
+    """Create all indexes.
+
+    Called after _run_migrations() so that all columns and tables are
+    guaranteed to exist — even on databases created before those columns
+    were introduced.  Every statement uses IF NOT EXISTS, making this
+    safe to run unconditionally on both fresh and migrated databases.
+    """
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_space_paths_space ON space_paths(space_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, position)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_change_log_id ON change_log(id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, chunk_index)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_fqn ON artifacts(fqn)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_id ON artifact_versions(artifact_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_artifacts_artifact_id ON pack_artifacts(artifact_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_space ON pack_attachments(space_id)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_attachments_unique "
+        "ON pack_attachments(pack_id, COALESCE(project_path, ''), COALESCE(space_id, ''))"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_space_sources_unique "
+        "ON space_sources(space_id, COALESCE(source_id, ''), COALESCE(group_id, ''), COALESCE(tag_filter, ''))"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_space ON conversations(space_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_slug ON conversations(slug)")
+
+
 def init_db(
     db_path: Path,
     vec_dimensions: int = 384,
@@ -609,6 +612,7 @@ def init_db(
         pass  # sqlite-vec not loaded
 
     _run_migrations(conn, vec_dimensions=vec_dimensions)
+    _create_indexes(conn)
 
     conn.commit()
 
@@ -640,7 +644,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
 
     if "slug" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN slug TEXT DEFAULT NULL")
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_slug ON conversations(slug)")
 
     if "working_dir" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN working_dir TEXT DEFAULT NULL")
@@ -730,7 +733,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_change_log_id ON change_log(id)")
 
     # Ensure canvases table exists for existing databases
     conn.execute(
@@ -798,7 +800,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_source_chunks_source ON source_chunks(source_id, chunk_index)")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS source_tags (
             source_id TEXT NOT NULL,
@@ -884,9 +885,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             if "status" not in emb_cols:
                 conn.execute(f"ALTER TABLE {emb_table} ADD COLUMN status TEXT NOT NULL DEFAULT 'embedded'")
 
-    # Add unique index on projects.name for name-based lookup (--project <name>)
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
-
     # Artifacts tables (v1.67.0)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS artifacts (
@@ -906,9 +904,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             updated_at TEXT NOT NULL
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_fqn ON artifacts(fqn)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(type)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace)")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS artifact_versions (
             id TEXT PRIMARY KEY,
@@ -921,8 +916,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_id ON artifact_versions(artifact_id)")
-
     # Packs tables (v1.69.0)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS packs (
@@ -937,7 +930,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             UNIQUE(namespace, name)
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS pack_artifacts (
             pack_id TEXT NOT NULL,
@@ -947,8 +939,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             FOREIGN KEY(artifact_id) REFERENCES artifacts(id)
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_artifacts_artifact_id ON pack_artifacts(artifact_id)")
-
     # Pack attachments table (v1.70.0)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS pack_attachments (
@@ -961,9 +951,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path)")
-
     # Add space_id column to pack_attachments if missing (v1.74.0)
     # Note: SQLite cannot add FK via ALTER TABLE. Fresh installs get the FK in the
     # CREATE TABLE statement. Migrated DBs rely on application-level validation in
@@ -973,13 +960,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         pa_cols = {row[1] for row in conn.execute("PRAGMA table_info(pack_attachments)").fetchall()}
         if "space_id" not in pa_cols:
             conn.execute("ALTER TABLE pack_attachments ADD COLUMN space_id TEXT DEFAULT NULL")
-    # Indexes referencing space_id — created here (not _SCHEMA) so they run after the
-    # column is guaranteed to exist on databases migrated from pre-v1.74.0.
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_space ON pack_attachments(space_id)")
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_attachments_unique "
-        "ON pack_attachments(pack_id, COALESCE(project_path, ''), COALESCE(space_id, ''))"
-    )
 
     # Spaces tables (v1.74.0)
     conn.execute(
@@ -993,7 +973,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             updated_at TEXT NOT NULL
         )"""
     )
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name)")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS space_paths (
             id TEXT PRIMARY KEY,
@@ -1004,8 +983,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
         )"""
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_space_paths_space ON space_paths(space_id)")
-
     # Space sources junction table (v1.74.0)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS space_sources (
@@ -1024,20 +1001,13 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             )
         )"""
     )
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_space_sources_unique "
-        "ON space_sources(space_id, COALESCE(source_id, ''), COALESCE(group_id, ''), COALESCE(tag_filter, ''))"
-    )
-
     # Add space_id to conversations and folders (v1.74.0)
     # Note: SQLite ALTER TABLE cannot add FK constraints. Fresh installs get the FK in
     # CREATE TABLE. Migrated DBs rely on application-level cascade in space_storage.py.
     if "space_id" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN space_id TEXT DEFAULT NULL")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_space ON conversations(space_id)")
     if "space_id" not in folder_cols:
         conn.execute("ALTER TABLE folders ADD COLUMN space_id TEXT DEFAULT NULL")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id)")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:

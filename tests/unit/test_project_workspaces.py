@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from anteroom.db import _SCHEMA, ThreadSafeConnection
+from anteroom.db import _SCHEMA, ThreadSafeConnection, _create_indexes
 from anteroom.services.storage import (
     create_conversation,
     create_project,
@@ -23,6 +23,7 @@ def db() -> ThreadSafeConnection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
+    _create_indexes(conn)
     conn.commit()
     return ThreadSafeConnection(conn)
 

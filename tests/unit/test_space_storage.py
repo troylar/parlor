@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA
+from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, _create_indexes
 from anteroom.services.space_storage import (
     count_space_conversations,
     create_space,
@@ -24,6 +24,7 @@ def _make_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
+    _create_indexes(conn)
     try:
         conn.executescript(_FTS_SCHEMA)
         conn.executescript(_FTS_TRIGGERS)
