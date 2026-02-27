@@ -2,7 +2,9 @@
 
 The lock file (``anteroom.lock.yaml``) records content hashes and source
 paths for every artifact installed via packs, providing reproducibility
-and tamper detection.
+and tamper detection.  When packs are installed from git sources, the
+lock records ``source_url`` and ``source_ref`` (commit SHA) so that new
+team members can ``aroom pack restore`` to clone the exact revisions.
 """
 
 from __future__ import annotations
@@ -13,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .pack_sources import _SOURCE_URL_FILE, get_source_ref
 
 logger = logging.getLogger(__name__)
 
@@ -75,15 +79,26 @@ def generate_lock(db: sqlite3.Connection) -> dict[str, Any]:
                 }
             )
 
-        packs.append(
-            {
-                "name": p_dict["name"],
-                "namespace": p_dict["namespace"],
-                "version": p_dict["version"],
-                "source_path": p_dict["source_path"],
-                "artifacts": artifacts,
-            }
-        )
+        entry: dict[str, Any] = {
+            "name": p_dict["name"],
+            "namespace": p_dict["namespace"],
+            "version": p_dict["version"],
+            "source_path": p_dict["source_path"],
+            "artifacts": artifacts,
+        }
+
+        # Enrich with git source info when the pack came from a cached source
+        source_path = p_dict.get("source_path", "")
+        if source_path:
+            source_dir = Path(source_path)
+            url_file = source_dir / _SOURCE_URL_FILE
+            if url_file.is_file():
+                entry["source_url"] = url_file.read_text(encoding="utf-8").strip()
+                ref = get_source_ref(source_dir)
+                if ref:
+                    entry["source_ref"] = ref
+
+        packs.append(entry)
 
     return {
         "version": 1,

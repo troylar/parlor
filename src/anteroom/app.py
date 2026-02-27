@@ -191,6 +191,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.retention_worker = retention_worker
         logger.info("Retention worker started (retention_days=%d)", config.storage.retention_days)
 
+    # Start pack refresh worker if configured
+    app.state.pack_refresh_worker = None
+    if config.pack_sources:
+        from .services.pack_refresh import PackRefreshWorker
+
+        pack_refresh_worker = PackRefreshWorker(
+            db=app.state.db,
+            data_dir=config.app.data_dir,
+            sources=config.pack_sources,
+        )
+        pack_refresh_worker.start()
+        app.state.pack_refresh_worker = pack_refresh_worker
+        logger.info("Pack refresh worker started (%d sources)", len(config.pack_sources))
+
     # Create shared AIService for proxy if enabled
     app.state.proxy_ai_service = None
     if config.proxy.enabled:
@@ -201,6 +215,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    if hasattr(app.state, "pack_refresh_worker") and app.state.pack_refresh_worker:
+        app.state.pack_refresh_worker.stop()
     if hasattr(app.state, "retention_worker") and app.state.retention_worker:
         app.state.retention_worker.stop()
     if hasattr(app.state, "embedding_worker") and app.state.embedding_worker:

@@ -9,7 +9,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+from anteroom.config import PackSourceConfig
 from anteroom.db import _SCHEMA, ThreadSafeConnection
+from anteroom.services.pack_refresh import SourceRefreshResult
+from anteroom.services.pack_sources import CachedSource
 from anteroom.services.packs import install_pack, parse_manifest
 
 
@@ -279,3 +282,118 @@ class TestRunPackUpdate:
 
         with patch("anteroom.db.get_db", return_value=MagicMock()), pytest.raises(SystemExit):
             _run_pack(config, args)
+
+
+class TestRunPackSources:
+    def test_sources_no_config(self, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        config.pack_sources = []
+        args = MagicMock()
+        args.pack_action = "sources"
+
+        from anteroom.__main__ import _run_pack
+
+        with patch("anteroom.db.get_db", return_value=MagicMock()):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "No pack sources configured" in captured.out
+
+    def test_sources_shows_table(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        config.pack_sources = [
+            PackSourceConfig(url="https://example.com/packs.git", branch="main", refresh_interval=30),
+        ]
+        config.app.data_dir = tmp_path
+        args = MagicMock()
+        args.pack_action = "sources"
+
+        from anteroom.__main__ import _run_pack
+
+        with (
+            patch("anteroom.db.get_db", return_value=MagicMock()),
+            patch(
+                "anteroom.services.pack_sources.list_cached_sources",
+                return_value=[
+                    CachedSource(
+                        url="https://example.com/packs.git",
+                        branch="main",
+                        path=tmp_path / "cache",
+                        ref="abc123def456",
+                    )
+                ],
+            ),
+        ):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "example.com" in captured.out
+        assert "abc123def456" in captured.out
+
+
+class TestRunPackRefresh:
+    def test_refresh_no_config(self, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        config.pack_sources = []
+        args = MagicMock()
+        args.pack_action = "refresh"
+
+        from anteroom.__main__ import _run_pack
+
+        with patch("anteroom.db.get_db", return_value=MagicMock()):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "No pack sources configured" in captured.out
+
+    def test_refresh_success(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        config.pack_sources = [
+            PackSourceConfig(url="https://example.com/packs.git"),
+        ]
+        config.app.data_dir = tmp_path
+        args = MagicMock()
+        args.pack_action = "refresh"
+
+        from anteroom.__main__ import _run_pack
+
+        mock_worker = MagicMock()
+        mock_worker.refresh_all.return_value = [
+            SourceRefreshResult(url="https://example.com/packs.git", success=True, packs_installed=1),
+        ]
+
+        with (
+            patch("anteroom.db.get_db", return_value=MagicMock()),
+            patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker),
+        ):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "OK" in captured.out
+        assert "1 installed" in captured.out
+
+    def test_refresh_failure(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        config = _make_config()
+        config.pack_sources = [
+            PackSourceConfig(url="https://example.com/packs.git"),
+        ]
+        config.app.data_dir = tmp_path
+        args = MagicMock()
+        args.pack_action = "refresh"
+
+        from anteroom.__main__ import _run_pack
+
+        mock_worker = MagicMock()
+        mock_worker.refresh_all.return_value = [
+            SourceRefreshResult(url="https://example.com/packs.git", success=False, error="git not found"),
+        ]
+
+        with (
+            patch("anteroom.db.get_db", return_value=MagicMock()),
+            patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker),
+        ):
+            _run_pack(config, args)
+
+        captured = capsys.readouterr()
+        assert "FAIL" in captured.out
+        assert "git not found" in captured.out

@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from anteroom.config import PackSourceConfig
 from anteroom.routers.packs import router
+from anteroom.services.pack_refresh import SourceRefreshResult
+from anteroom.services.pack_sources import CachedSource
 
 
-def _make_app() -> FastAPI:
+def _make_app(pack_sources: list | None = None) -> FastAPI:
     app = FastAPI()
     app.include_router(router, prefix="/api")
     app.state.db = MagicMock()
+    config = MagicMock()
+    config.pack_sources = pack_sources or []
+    config.app.data_dir = Path("/tmp/test-data")
+    app.state.config = config
     return app
 
 
@@ -109,3 +117,75 @@ class TestGetPackEndpoint:
             assert resp.status_code == 404
             assert "evil-ns" not in resp.json()["detail"]
             assert "evil-name" not in resp.json()["detail"]
+
+
+class TestListSourcesEndpoint:
+    def test_list_sources_empty(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.get("/api/packs/sources")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_list_sources_with_cached(self) -> None:
+        sources = [PackSourceConfig(url="https://example.com/packs.git", branch="main", refresh_interval=30)]
+        app = _make_app(pack_sources=sources)
+        cached = [
+            CachedSource(
+                url="https://example.com/packs.git",
+                branch="main",
+                path=Path("/tmp/cache"),
+                ref="abc123def456",
+            )
+        ]
+        with patch("anteroom.routers.packs.list_cached_sources", return_value=cached):
+            client = TestClient(app)
+            resp = client.get("/api/packs/sources")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["url"] == "https://example.com/packs.git"
+        assert data[0]["cached"] is True
+        assert data[0]["ref"] == "abc123def456"
+
+    def test_list_sources_not_cached(self) -> None:
+        sources = [PackSourceConfig(url="https://example.com/packs.git")]
+        app = _make_app(pack_sources=sources)
+        with patch("anteroom.routers.packs.list_cached_sources", return_value=[]):
+            client = TestClient(app)
+            resp = client.get("/api/packs/sources")
+
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["cached"] is False
+        assert data[0]["ref"] is None
+
+
+class TestRefreshSourcesEndpoint:
+    def test_refresh_no_sources(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.post("/api/packs/refresh")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_refresh_with_sources(self) -> None:
+        sources = [PackSourceConfig(url="https://example.com/packs.git")]
+        app = _make_app(pack_sources=sources)
+
+        mock_worker = MagicMock()
+        mock_worker.refresh_all.return_value = [
+            SourceRefreshResult(url="https://example.com/packs.git", success=True, packs_installed=2, changed=True),
+        ]
+
+        with patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker):
+            client = TestClient(app)
+            resp = client.post("/api/packs/refresh")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["success"] is True
+        assert data[0]["packs_installed"] == 2
+        assert data[0]["changed"] is True

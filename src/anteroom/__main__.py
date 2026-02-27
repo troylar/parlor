@@ -722,7 +722,7 @@ def _run_pack(config: object, args: object) -> None:
 
     action = getattr(args, "pack_action", None)
     if not action:
-        print("Usage: aroom pack {list,install,show,remove,update}")
+        print("Usage: aroom pack {list,install,show,remove,update,sources,refresh}")
         return
 
     db = get_db(config.app.data_dir / "anteroom.db")
@@ -848,6 +848,60 @@ def _run_pack(config: object, args: object) -> None:
             f"[green]Updated[/green] {escape(result['namespace'])}/{escape(result['name'])} "
             f"v{escape(result['version'])} ({result['artifact_count']} artifacts)"
         )
+
+    elif action == "sources":
+        from .services.pack_sources import list_cached_sources
+
+        sources = getattr(config, "pack_sources", [])
+        if not sources:
+            console.print("[dim]No pack sources configured in config.yaml.[/dim]")
+            return
+
+        table = Table(title="Pack Sources")
+        table.add_column("URL", style="bold")
+        table.add_column("Branch")
+        table.add_column("Refresh")
+        table.add_column("Cached", justify="center")
+        table.add_column("Ref", max_width=12)
+
+        cached = list_cached_sources(config.app.data_dir)
+        cached_urls = {c.url: c for c in cached}
+
+        for src in sources:
+            cached_src = cached_urls.get(src.url)
+            is_cached = cached_src is not None
+            ref = cached_src.ref[:12] if cached_src and cached_src.ref else "-"
+            interval = f"{src.refresh_interval}m" if src.refresh_interval > 0 else "manual"
+            table.add_row(
+                src.url,
+                src.branch,
+                interval,
+                "[green]yes[/green]" if is_cached else "[dim]no[/dim]",
+                ref,
+            )
+        console.print(table)
+
+    elif action == "refresh":
+        from .services.pack_refresh import PackRefreshWorker
+
+        sources = getattr(config, "pack_sources", [])
+        if not sources:
+            console.print("[dim]No pack sources configured in config.yaml.[/dim]")
+            return
+
+        worker = PackRefreshWorker(db=db, data_dir=config.app.data_dir, sources=sources)
+        results = worker.refresh_all()
+        for r in results:
+            if r.success:
+                parts = []
+                if r.packs_installed:
+                    parts.append(f"{r.packs_installed} installed")
+                if r.packs_updated:
+                    parts.append(f"{r.packs_updated} updated")
+                status = ", ".join(parts) if parts else "up to date"
+                console.print(f"[green]OK[/green] {escape(r.url)} — {status}")
+            else:
+                console.print(f"[red]FAIL[/red] {escape(r.url)} — {escape(r.error)}")
 
 
 def _run_chat(
@@ -1218,6 +1272,8 @@ def main() -> None:
         action="store_true",
         help="Copy pack into .anteroom/packs/",
     )
+    pack_subparsers.add_parser("sources", help="List configured pack sources and cache status")
+    pack_subparsers.add_parser("refresh", help="Pull all configured pack sources and update packs")
 
     args = parser.parse_args()
 
