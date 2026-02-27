@@ -132,7 +132,7 @@ class PackRefreshWorker:
             if not self._is_due(state):
                 continue
             try:
-                r = self.refresh_source(state.config)
+                r = await asyncio.to_thread(self.refresh_source, state.config)
                 results.append(r)
                 state.last_refreshed = time.monotonic()
                 if r.success:

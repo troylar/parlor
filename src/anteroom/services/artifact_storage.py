@@ -13,6 +13,12 @@ from .artifacts import ArtifactSource, ArtifactType, content_hash, validate_fqn
 
 logger = logging.getLogger(__name__)
 
+_ARTIFACT_COLUMNS = (
+    "id, fqn, type, namespace, name, content, content_hash, source, "
+    "metadata, user_id, user_display_name, created_at, updated_at"
+)
+_VERSION_COLUMNS = "id, artifact_id, version, content, content_hash, created_at"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -97,7 +103,7 @@ def create_artifact(
 
 def get_artifact(db: sqlite3.Connection, artifact_id: str) -> dict[str, Any] | None:
     """Fetch an artifact by primary key."""
-    row = db.execute_fetchone("SELECT * FROM artifacts WHERE id = ?", (artifact_id,))
+    row = db.execute_fetchone(f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts WHERE id = ?", (artifact_id,))
     if not row:
         return None
     return _row_to_dict(row)
@@ -105,7 +111,7 @@ def get_artifact(db: sqlite3.Connection, artifact_id: str) -> dict[str, Any] | N
 
 def get_artifact_by_fqn(db: sqlite3.Connection, fqn: str) -> dict[str, Any] | None:
     """Fetch an artifact by its fully-qualified name."""
-    row = db.execute_fetchone("SELECT * FROM artifacts WHERE fqn = ?", (fqn,))
+    row = db.execute_fetchone(f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts WHERE fqn = ?", (fqn,))
     if not row:
         return None
     return _row_to_dict(row)
@@ -130,7 +136,7 @@ def list_artifacts(
         clauses.append("source = ?")
         params.append(ArtifactSource(source).value)
 
-    sql = "SELECT * FROM artifacts"
+    sql = f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY updated_at DESC"
@@ -201,7 +207,7 @@ def delete_artifact(db: sqlite3.Connection, artifact_id: str, *, commit: bool = 
 def list_artifact_versions(db: sqlite3.Connection, artifact_id: str) -> list[dict[str, Any]]:
     """List all versions of an artifact, newest first."""
     rows = db.execute_fetchall(
-        "SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC",
+        f"SELECT {_VERSION_COLUMNS} FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC",
         (artifact_id,),
     )
     return [dict(r) for r in rows]

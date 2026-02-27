@@ -21,7 +21,10 @@ async def list_artifacts(
 ) -> list[dict[str, Any]]:
     """List all artifacts with optional filtering by type, namespace, or source."""
     db = request.app.state.db
-    return artifact_storage.list_artifacts(db, artifact_type=type, namespace=namespace, source=source)
+    results = artifact_storage.list_artifacts(db, artifact_type=type, namespace=namespace, source=source)
+    for r in results:
+        r.pop("content", None)
+    return results
 
 
 @router.get("/artifacts/{fqn:path}")

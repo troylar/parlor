@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -11,6 +12,16 @@ from ..services import packs
 from ..services.pack_sources import list_cached_sources
 
 router = APIRouter(tags=["packs"])
+
+_SAFE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def _validate_pack_path_params(namespace: str, name: str) -> None:
+    """Validate namespace and name path parameters against safe name regex."""
+    if not _SAFE_NAME_RE.match(namespace):
+        raise HTTPException(status_code=400, detail=f"Invalid namespace: {namespace!r}")
+    if not _SAFE_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail=f"Invalid pack name: {name!r}")
 
 
 @router.get("/packs")
@@ -83,6 +94,7 @@ class AttachRequest(BaseModel):
 @router.post("/packs/{namespace}/{name}/attach")
 async def attach_pack(request: Request, namespace: str, name: str, body: AttachRequest) -> dict[str, Any]:
     """Attach a pack to global or project scope."""
+    _validate_pack_path_params(namespace, name)
     from ..services.pack_attachments import attach_pack as do_attach
     from ..services.pack_attachments import resolve_pack_id
 
@@ -106,6 +118,7 @@ async def detach_pack(
     project_path: str | None = Query(default=None),
 ) -> dict[str, str]:
     """Detach a pack from global or project scope."""
+    _validate_pack_path_params(namespace, name)
     from ..services.pack_attachments import detach_pack as do_detach
     from ..services.pack_attachments import resolve_pack_id
 
@@ -123,6 +136,7 @@ async def detach_pack(
 @router.get("/packs/{namespace}/{name}/attachments")
 async def list_pack_attachments(request: Request, namespace: str, name: str) -> list[dict[str, Any]]:
     """List attachments for a specific pack."""
+    _validate_pack_path_params(namespace, name)
     from ..services.pack_attachments import (
         list_attachments_for_pack,
         resolve_pack_id,
@@ -139,6 +153,7 @@ async def list_pack_attachments(request: Request, namespace: str, name: str) -> 
 @router.delete("/packs/{namespace}/{name}")
 async def remove_pack(request: Request, namespace: str, name: str) -> dict[str, str]:
     """Remove an installed pack."""
+    _validate_pack_path_params(namespace, name)
     db = request.app.state.db
     removed = packs.remove_pack(db, namespace, name)
     if not removed:
@@ -149,6 +164,7 @@ async def remove_pack(request: Request, namespace: str, name: str) -> dict[str, 
 @router.get("/packs/{namespace}/{name}")
 async def get_pack(request: Request, namespace: str, name: str) -> dict[str, Any]:
     """Get a pack with its full artifact list."""
+    _validate_pack_path_params(namespace, name)
     db = request.app.state.db
     result = packs.get_pack(db, namespace, name)
     if not result:

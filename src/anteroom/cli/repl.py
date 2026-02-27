@@ -27,7 +27,12 @@ from ..services import packs as packs_service
 from ..services import storage
 from ..services.agent_loop import _build_compaction_history, run_agent_loop
 from ..services.ai_service import AIService, create_ai_service
-from ..services.context_trust import sanitize_trust_tags, trusted_section_marker, untrusted_section_marker
+from ..services.context_trust import (
+    sanitize_trust_tags,
+    trusted_section_marker,
+    untrusted_section_marker,
+    wrap_untrusted,
+)
 from ..services.embeddings import get_effective_dimensions
 from ..services.rewind import collect_file_paths
 from ..services.rewind import rewind_conversation as rewind_service
@@ -660,7 +665,12 @@ def _build_system_prompt(
             artifacts = artifact_registry.list_all(artifact_type=art_type)
             for art in artifacts:
                 if art.content.strip():
-                    parts.append(f"\n<!-- artifact:{art.fqn} -->\n{art.content}")
+                    if art.source == "built_in":
+                        tag = f'<artifact type="{art_type.value}" fqn="{art.fqn}">'
+                        parts.append(f"\n{tag}\n{art.content}\n</artifact>")
+                    else:
+                        wrapped = wrap_untrusted(art.content, origin=f"artifact:{art.fqn}", content_type=art_type.value)
+                        parts.append(f"\n{wrapped}")
 
     return "\n".join(parts)
 
@@ -1210,14 +1220,8 @@ async def run_cli(
     # Build introspect instructions info for the introspect tool
     _introspect_instructions_info = _build_introspect_instructions_info(working_dir)
 
-    # Initialize ArtifactRegistry with 6-layer precedence
-    from ..services.artifact_registry import ArtifactRegistry
-
-    _artifact_registry = ArtifactRegistry()
-    _artifact_registry.load_from_db(db)
-
     mcp_statuses = mcp_manager.get_server_statuses() if mcp_manager else None
-    # Initialize artifact registry
+    # Initialize artifact registry with 6-layer precedence
     _artifact_registry = None
     try:
         from ..services.artifact_registry import ArtifactRegistry

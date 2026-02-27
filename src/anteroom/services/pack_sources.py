@@ -293,13 +293,16 @@ def ensure_source(
 
     Clones the source if it is not cached, otherwise pulls updates.
     """
+    cache_path = resolve_cache_path(url, data_dir)
+    already_cached = cache_path.is_dir()
+
     clone_result = clone_source(url, branch, data_dir, timeout=clone_timeout)
     if not clone_result.success:
         return clone_result
 
-    # clone_source returns immediately on cache hit; pull to update
-    cache_path = resolve_cache_path(url, data_dir)
-    if cache_path.is_dir():
+    # Only pull if the repo was already cached (clone_source returned
+    # immediately on cache hit).  A fresh clone is already up to date.
+    if already_cached:
         return pull_source(cache_path, timeout=pull_timeout)
 
     return clone_result

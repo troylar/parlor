@@ -354,8 +354,8 @@ def check_bloat(db: sqlite3.Connection) -> list[HealthIssue]:
 
 def check_orphaned_artifacts(db: sqlite3.Connection) -> list[HealthIssue]:
     """Find artifacts not linked to any pack and not from built_in/local/inline sources."""
-    pack_count = db.execute("SELECT COUNT(*) FROM packs").fetchone()
-    pack_count_val = pack_count[0] if isinstance(pack_count, (tuple, list)) else pack_count["COUNT(*)"]
+    pack_count = db.execute("SELECT COUNT(*) AS cnt FROM packs").fetchone()
+    pack_count_val = pack_count[0] if isinstance(pack_count, (tuple, list)) else pack_count["cnt"]
     if pack_count_val == 0:
         return []
 
@@ -419,6 +419,8 @@ def check_duplicate_content(db: sqlite3.Connection) -> list[HealthIssue]:
 def fix_duplicate_content(db: sqlite3.Connection) -> int:
     """Remove exact duplicate artifacts, keeping the highest-precedence copy.
 
+    Skips artifacts referenced by packs (via pack_artifacts junction table).
+    All deletions run in a single transaction.
     Returns the number of artifacts deleted.
     """
     all_artifacts = artifact_storage.list_artifacts(db)
@@ -429,15 +431,25 @@ def fix_duplicate_content(db: sqlite3.Connection) -> int:
         if chash:
             by_hash[chash].append(a)
 
+    # Collect IDs referenced by packs so we never delete them
+    pack_ref_rows = db.execute("SELECT DISTINCT artifact_id FROM pack_artifacts").fetchall()
+    pack_artifact_ids: set[str] = {r[0] if isinstance(r, (tuple, list)) else r["artifact_id"] for r in pack_ref_rows}
+
     deleted = 0
     for group in by_hash.values():
         if len(group) < 2:
             continue
         sorted_group = sorted(group, key=lambda g: _SOURCE_PRECEDENCE.get(g.get("source", ""), 0), reverse=True)
         for dup in sorted_group[1:]:
-            artifact_storage.delete_artifact(db, dup["id"])
+            if dup["id"] in pack_artifact_ids:
+                logger.debug("Skipping duplicate %s — referenced by a pack", dup["fqn"])
+                continue
+            artifact_storage.delete_artifact(db, dup["id"], commit=False)
             deleted += 1
             logger.info("Removed duplicate artifact: %s (kept %s)", dup["fqn"], sorted_group[0]["fqn"])
+
+    if deleted > 0:
+        db.commit()
 
     return deleted
 
@@ -456,9 +468,21 @@ def run_health_check(
     report.total_size_bytes = sum(len(a.get("content", "")) for a in all_artifacts)
     report.estimated_tokens = report.total_size_bytes // 4
 
-    pack_count = db.execute("SELECT COUNT(*) FROM packs").fetchone()
-    report.pack_count = pack_count[0] if isinstance(pack_count, (tuple, list)) else pack_count["COUNT(*)"]
+    pack_count = db.execute("SELECT COUNT(*) AS cnt FROM packs").fetchone()
+    report.pack_count = pack_count[0] if isinstance(pack_count, (tuple, list)) else pack_count["cnt"]
 
+    # Run all diagnostic checks first
+    report.issues.extend(check_config_overlay_conflicts(db))
+    report.issues.extend(check_skill_name_collisions(db))
+    report.issues.extend(check_shadow_warnings(db))
+    report.issues.extend(check_empty_artifacts(db))
+    report.issues.extend(check_malformed_artifacts(db))
+    report.issues.extend(check_lock_drift(db, project_dir))
+    report.issues.extend(check_orphaned_artifacts(db))
+    report.issues.extend(check_duplicate_content(db))
+    report.issues.extend(check_bloat(db))
+
+    # Apply fixes after diagnostics so checks see pre-fix state
     if fix:
         deleted = fix_duplicate_content(db)
         if deleted > 0:
@@ -470,16 +494,6 @@ def run_health_check(
                     details={"deleted_count": deleted},
                 )
             )
-
-    report.issues.extend(check_config_overlay_conflicts(db))
-    report.issues.extend(check_skill_name_collisions(db))
-    report.issues.extend(check_shadow_warnings(db))
-    report.issues.extend(check_empty_artifacts(db))
-    report.issues.extend(check_malformed_artifacts(db))
-    report.issues.extend(check_lock_drift(db, project_dir))
-    report.issues.extend(check_orphaned_artifacts(db))
-    report.issues.extend(check_duplicate_content(db))
-    report.issues.extend(check_bloat(db))
 
     return report
 
