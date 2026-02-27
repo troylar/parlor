@@ -394,3 +394,22 @@ class TestBashHandlerOsSandbox:
         result = await handle("echo sandbox_test", _sandbox_config=cfg)
         assert result["exit_code"] == 0
         assert "sandbox_test" in result["stdout"]
+
+
+class TestBashStdinClosed:
+    @pytest.mark.asyncio
+    async def test_stdin_is_devnull(self):
+        """Commands that read from stdin should get EOF immediately, not hang."""
+        cfg = BashSandboxConfig(timeout=5)
+        result = await handle("cat -", timeout=5, _sandbox_config=cfg)
+        # cat - with no stdin should exit immediately with empty output
+        assert result["exit_code"] == 0
+        assert result["stdout"].strip() == ""
+
+    @pytest.mark.asyncio
+    async def test_read_from_stdin_gets_eof(self):
+        """Shell read builtin should fail immediately with closed stdin."""
+        cfg = BashSandboxConfig(timeout=5)
+        result = await handle("read -t 1 REPLY; echo \"exit:$?\"", timeout=5, _sandbox_config=cfg)
+        # read should fail (exit code 1) because stdin is /dev/null
+        assert "exit:1" in result["stdout"]
