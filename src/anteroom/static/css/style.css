@@ -1573,6 +1573,12 @@ body {
     vertical-align: middle;
 }
 
+.tool-call .tool-elapsed {
+    color: var(--text-muted);
+    font-size: 0.85em;
+    margin-left: 6px;
+}
+
 
 /* ============================================================
    TOOL CALL GROUPS (dedup)

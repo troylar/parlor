@@ -90,6 +90,9 @@ _MID_STREAM_STALL: float = 5.0  # seconds of silence before marking "stalled"
 
 # Tool call timing
 _tool_start: float = 0
+_tool_ticker_task: asyncio.Task[None] | None = None
+_tool_ticker_summary: str = ""
+_tool_spinner: Status | None = None
 
 # Dedup tracking for repeated similar tool calls
 _dedup_key: str = ""  # tool action type (e.g. "Editing", "Reading", "bash")
@@ -1093,6 +1096,61 @@ def _has_diff_data(tool_name: str, output: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Tool elapsed timer (mirrors _thinking_ticker for tool execution)
+# ---------------------------------------------------------------------------
+
+
+async def _tool_ticker() -> None:
+    """Background task that updates tool elapsed time every 0.5s."""
+    try:
+        while True:
+            await asyncio.sleep(0.5)
+            if _tool_start:
+                elapsed = time.monotonic() - _tool_start
+                label = f"  [{MUTED}]{escape(_tool_ticker_summary)}  {elapsed:.0f}s[/{MUTED}]"
+                if _tool_spinner:
+                    _tool_spinner.update(label)
+                elif _repl_mode and _stdout:
+                    muted = "\033[38;2;139;139;139m"
+                    rst = "\033[0m"
+                    _stdout.write(f"\r\033[2K{muted}  {_tool_ticker_summary}  {elapsed:.0f}s{rst}")
+                    _stdout.flush()
+    except asyncio.CancelledError:
+        return
+
+
+def start_tool_ticker(summary: str) -> None:
+    """Start a live elapsed timer for the current tool call."""
+    global _tool_ticker_task, _tool_ticker_summary, _tool_spinner
+    _tool_ticker_summary = summary
+    if _tool_ticker_task is not None:
+        _tool_ticker_task.cancel()
+        _tool_ticker_task = None
+    if not _repl_mode:
+        _tool_spinner = Status(f"  [{MUTED}]{escape(summary)}[/{MUTED}]", console=console, spinner="dots12")
+        _tool_spinner.start()
+    try:
+        loop = asyncio.get_running_loop()
+        _tool_ticker_task = loop.create_task(_tool_ticker())
+    except RuntimeError:
+        _tool_ticker_task = None
+
+
+def stop_tool_ticker_sync() -> None:
+    """Stop the tool ticker synchronously (safe from sync render_tool_call_end)."""
+    global _tool_ticker_task, _tool_spinner
+    if _tool_ticker_task is not None:
+        _tool_ticker_task.cancel()
+        _tool_ticker_task = None
+    if _tool_spinner:
+        _tool_spinner.stop()
+        _tool_spinner = None
+    elif _repl_mode and _stdout:
+        _stdout.write("\r\033[2K")
+        _stdout.flush()
+
+
+# ---------------------------------------------------------------------------
 # Tool call rendering (verbosity-aware)
 # ---------------------------------------------------------------------------
 
@@ -1131,9 +1189,13 @@ def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
             args_str = args_str[:200] + "..."
         console.print(f"  [{CHROME}]> {escape(tool_name)}({escape(args_str)})[/{CHROME}]")
 
+    # Start live elapsed timer for this tool call
+    start_tool_ticker(summary)
+
 
 def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
     """Show tool call result. Style depends on verbosity."""
+    stop_tool_ticker_sync()
     elapsed = time.monotonic() - _tool_start if _tool_start else 0
 
     # Update history
