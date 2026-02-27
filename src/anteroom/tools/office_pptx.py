@@ -1,21 +1,42 @@
 """PPTX (PowerPoint presentation) create/read/edit tool.
 
-Requires python-pptx: ``pip install anteroom[office]``
+Backends:
+- COM (Windows + Office + pywin32): full Office object model
+- Library (python-pptx): cross-platform XML manipulation
+
+Install: ``pip install anteroom[office]`` or ``pip install anteroom[office-com]``
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
 from .security import validate_path
 
-try:
-    from pptx import Presentation
+_BACKEND: str | None = None
+_com_mod: Any = None
 
-    AVAILABLE = True
-except ImportError:
-    AVAILABLE = False
+if sys.platform == "win32":
+    try:
+        from . import office_com as _com_mod_import
+
+        if _com_mod_import.COM_AVAILABLE:
+            _com_mod = _com_mod_import
+            _BACKEND = "com"
+    except ImportError:
+        pass
+
+if _BACKEND is None:
+    try:
+        from pptx import Presentation  # noqa: F401
+
+        _BACKEND = "lib"
+    except ImportError:
+        pass
+
+AVAILABLE = _BACKEND is not None
 
 _MAX_OUTPUT = 100_000
 _MAX_CONTENT_BLOCKS = 200
@@ -70,24 +91,216 @@ def set_working_dir(d: str) -> None:
 
 async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
     if not AVAILABLE:
-        return {"error": "python-pptx is not installed. Install with: pip install anteroom[office]"}
+        return {"error": "No pptx backend available. Install with: pip install anteroom[office]"}
 
     resolved, error = validate_path(path, _working_dir)
     if error:
         return {"error": error}
 
+    if _BACKEND == "com":
+        return await _dispatch_com(action, resolved, path, **kwargs)
+
     if action == "create":
-        return _create(resolved, path, **kwargs)
+        return _create_lib(resolved, path, **kwargs)
     elif action == "read":
-        return _read(resolved, path, **kwargs)
+        return _read_lib(resolved, path, **kwargs)
     elif action == "edit":
-        return _edit(resolved, path, **kwargs)
+        return _edit_lib(resolved, path, **kwargs)
     else:
         return {"error": f"Unknown action: {action}. Use 'create', 'read', or 'edit'."}
 
 
-def _add_slide(prs: Any, slide_def: dict[str, Any]) -> None:
-    """Add a single slide to a presentation."""
+# ---------------------------------------------------------------------------
+# COM backend
+# ---------------------------------------------------------------------------
+
+
+async def _dispatch_com(action: str, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    manager = _com_mod.get_manager()
+    if action == "create":
+        return await manager.run_com(_create_com, manager, resolved, display_path, **kwargs)
+    elif action == "read":
+        return await manager.run_com(_read_com, manager, resolved, display_path, **kwargs)
+    elif action == "edit":
+        return await manager.run_com(_edit_com, manager, resolved, display_path, **kwargs)
+    else:
+        return {"error": f"Unknown action: {action}. Use 'create', 'read', or 'edit'."}
+
+
+def _add_slide_com(prs: Any, slide_def: dict[str, Any]) -> None:
+    """Add a single slide to a COM presentation."""
+    layout_idx = slide_def.get("layout", 2)  # ppLayoutText = 2 in COM
+    # COM layout indices: 1=Title, 2=Title+Content, 7=Blank
+    try:
+        layout = prs.SlideMaster.CustomLayouts(layout_idx)
+    except Exception:
+        layout = prs.SlideMaster.CustomLayouts(2)
+
+    slide = prs.Slides.AddSlide(prs.Slides.Count + 1, layout)
+
+    title_text = slide_def.get("title")
+    if title_text and slide.Shapes.HasTitle:
+        slide.Shapes.Title.TextFrame.TextRange.Text = str(title_text)
+
+    content = slide_def.get("content")
+    bullets = slide_def.get("bullets")
+
+    if content or bullets:
+        # Find the body placeholder (index 2 in COM)
+        body = None
+        for i in range(1, slide.Shapes.Count + 1):
+            shape = slide.Shapes(i)
+            if shape.HasTextFrame and shape.PlaceholderFormat.Type == 2:  # ppPlaceholderBody
+                body = shape
+                break
+
+        if body is not None:
+            tf = body.TextFrame.TextRange
+            if content:
+                tf.Text = str(content)
+            elif bullets:
+                tf.Text = str(bullets[0])
+                for bullet in bullets[1:]:
+                    tf.InsertAfter("\r" + str(bullet))
+
+    notes_text = slide_def.get("notes")
+    if notes_text:
+        slide.NotesPage.Shapes(2).TextFrame.TextRange.Text = str(notes_text)
+
+
+def _create_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    slides: list[dict[str, Any]] = kwargs.get("slides") or []
+    if not slides:
+        return {"error": "slides is required for create action"}
+    if len(slides) > _MAX_SLIDES:
+        return {"error": f"Too many slides (max {_MAX_SLIDES})"}
+
+    ppt = manager.get_app("PowerPoint.Application")
+    prs = ppt.Presentations.Add(WithWindow=False)
+
+    try:
+        for slide_def in slides:
+            _add_slide_com(prs, slide_def)
+
+        os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
+        # 24 = ppSaveAsOpenXMLPresentation (.pptx)
+        prs.SaveAs(os.path.abspath(resolved), FileFormat=24)
+    finally:
+        prs.Close()
+
+    return {"result": f"Created {display_path}", "path": display_path, "slides_created": len(slides)}
+
+
+def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    if not os.path.isfile(resolved):
+        return {"error": f"File not found: {display_path}"}
+
+    ppt = manager.get_app("PowerPoint.Application")
+    try:
+        prs = ppt.Presentations.Open(os.path.abspath(resolved), ReadOnly=True, WithWindow=False)
+    except Exception:
+        return {"error": f"Unable to read PPTX file: {display_path}"}
+
+    try:
+        output_parts: list[str] = []
+        slide_count = prs.Slides.Count
+
+        for i in range(1, slide_count + 1):
+            slide = prs.Slides(i)
+            output_parts.append(f"--- Slide {i} ---")
+            for j in range(1, slide.Shapes.Count + 1):
+                shape = slide.Shapes(j)
+                if shape.HasTextFrame:
+                    text = shape.TextFrame.TextRange.Text.strip()
+                    if text:
+                        output_parts.append(text)
+            if slide.HasNotesPage:
+                try:
+                    notes = slide.NotesPage.Shapes(2).TextFrame.TextRange.Text.strip()
+                    if notes:
+                        output_parts.append(f"[Notes] {notes}")
+                except Exception:
+                    pass
+
+        content = "\n".join(output_parts)
+        if len(content) > _MAX_OUTPUT:
+            content = content[:_MAX_OUTPUT] + "\n... (truncated)"
+    finally:
+        prs.Close()
+
+    return {
+        "content": content,
+        "slides": slide_count,
+    }
+
+
+def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    if not os.path.isfile(resolved):
+        return {"error": f"File not found: {display_path}"}
+
+    ppt = manager.get_app("PowerPoint.Application")
+    try:
+        prs = ppt.Presentations.Open(os.path.abspath(resolved), WithWindow=False)
+    except Exception:
+        return {"error": f"Unable to read PPTX file: {display_path}"}
+
+    replacements: list[dict[str, str]] = kwargs.get("replacements") or []
+    slides: list[dict[str, Any]] = kwargs.get("slides") or []
+
+    if not replacements and not slides:
+        prs.Close()
+        return {"error": "Provide 'replacements' and/or 'slides' for edit action"}
+
+    if slides and len(slides) > _MAX_SLIDES:
+        prs.Close()
+        return {"error": f"Too many slides to append (max {_MAX_SLIDES})"}
+
+    current_count = prs.Slides.Count
+    if slides and current_count + len(slides) > _MAX_SLIDES:
+        prs.Close()
+        return {"error": f"Total slides would exceed limit (max {_MAX_SLIDES})"}
+
+    try:
+        replacements_made = 0
+        for rep in replacements:
+            old = rep.get("old", "")
+            new = rep.get("new", "")
+            if not old:
+                continue
+            for i in range(1, prs.Slides.Count + 1):
+                slide = prs.Slides(i)
+                for j in range(1, slide.Shapes.Count + 1):
+                    shape = slide.Shapes(j)
+                    if shape.HasTextFrame:
+                        tr = shape.TextFrame.TextRange
+                        find = tr.Find(old)
+                        while find is not None:
+                            find.Text = new
+                            replacements_made += 1
+                            find = tr.Find(old)
+
+        for slide_def in slides:
+            _add_slide_com(prs, slide_def)
+
+        prs.Save()
+    finally:
+        prs.Close()
+
+    return {
+        "result": f"Edited {display_path}",
+        "path": display_path,
+        "replacements_made": replacements_made,
+        "slides_appended": len(slides),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Library backend (python-pptx)
+# ---------------------------------------------------------------------------
+
+
+def _add_slide_lib(prs: Any, slide_def: dict[str, Any]) -> None:
+    """Add a single slide to a python-pptx presentation."""
     layout_idx = slide_def.get("layout", 1)
     try:
         layout = prs.slide_layouts[layout_idx]
@@ -128,29 +341,33 @@ def _add_slide(prs: Any, slide_def: dict[str, Any]) -> None:
         notes_slide.notes_text_frame.text = str(notes_text)
 
 
-def _create(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+def _create_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    from pptx import Presentation as _Presentation
+
     slides: list[dict[str, Any]] = kwargs.get("slides") or []
     if not slides:
         return {"error": "slides is required for create action"}
     if len(slides) > _MAX_SLIDES:
         return {"error": f"Too many slides (max {_MAX_SLIDES})"}
 
-    prs = Presentation()
+    prs = _Presentation()
 
     for slide_def in slides:
-        _add_slide(prs, slide_def)
+        _add_slide_lib(prs, slide_def)
 
     os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
     prs.save(resolved)
     return {"result": f"Created {display_path}", "path": display_path, "slides_created": len(slides)}
 
 
-def _read(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+def _read_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    from pptx import Presentation as _Presentation
+
     if not os.path.isfile(resolved):
         return {"error": f"File not found: {display_path}"}
 
     try:
-        prs = Presentation(resolved)
+        prs = _Presentation(resolved)
     except Exception:
         return {"error": f"Unable to read PPTX file: {display_path}"}
 
@@ -179,12 +396,14 @@ def _read(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
     }
 
 
-def _edit(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    from pptx import Presentation as _Presentation
+
     if not os.path.isfile(resolved):
         return {"error": f"File not found: {display_path}"}
 
     try:
-        prs = Presentation(resolved)
+        prs = _Presentation(resolved)
     except Exception:
         return {"error": f"Unable to read PPTX file: {display_path}"}
 
@@ -217,7 +436,7 @@ def _edit(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
                                 replacements_made += 1
 
     for slide_def in slides:
-        _add_slide(prs, slide_def)
+        _add_slide_lib(prs, slide_def)
 
     prs.save(resolved)
     return {
