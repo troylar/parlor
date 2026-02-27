@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.82.2
+
+**Fixed:**
+
+- Stop existing tool ticker when `ask_user` starts, preventing repeated output during input (#581)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.82.2)
+
 ### v1.82.1
 
 **Fixed:**
