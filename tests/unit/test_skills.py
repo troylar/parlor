@@ -690,9 +690,17 @@ class TestDefaultPackSkills:
             reg.load(tmpdir)
             names = [s.name for s in reg.list_skills()]
             expected = {
-                "commit", "review", "explain", "create-eval",
-                "new-pack", "new-skill", "artifact-check",
-                "pack-lint", "pack-publish", "pack-doctor", "pack-update",
+                "commit",
+                "review",
+                "explain",
+                "create-eval",
+                "new-pack",
+                "new-skill",
+                "artifact-check",
+                "pack-lint",
+                "pack-publish",
+                "pack-doctor",
+                "pack-update",
                 "a-help",
             }
             for skill_name in expected:
