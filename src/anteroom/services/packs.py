@@ -13,6 +13,7 @@ import logging
 import re
 import shutil
 import sqlite3
+import stat
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -129,6 +130,14 @@ def parse_manifest(manifest_path: Path) -> PackManifest:
     )
 
 
+def _is_symlink(path: Path) -> bool:
+    """Check if *path* is a symlink using lstat (never follows the link)."""
+    try:
+        return stat.S_ISLNK(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
 def validate_manifest(manifest: PackManifest, pack_dir: Path) -> list[str]:
     """Validate that all artifacts referenced in the manifest exist as files.
 
@@ -139,6 +148,9 @@ def validate_manifest(manifest: PackManifest, pack_dir: Path) -> list[str]:
     for art in manifest.artifacts:
         if art.file:
             art_path = pack_dir / art.file
+            if _is_symlink(art_path):
+                errors.append(f"Symlink not allowed for artifact {art.type}/{art.name}: {art.file}")
+                continue
             if not art_path.resolve().is_relative_to(resolved_pack):
                 errors.append(f"Path traversal in artifact {art.type}/{art.name}: {art.file}")
                 continue
@@ -147,6 +159,9 @@ def validate_manifest(manifest: PackManifest, pack_dir: Path) -> list[str]:
             art_path = pack_dir / type_dir / f"{art.name}.yaml"
             if not art_path.is_file():
                 art_path = pack_dir / type_dir / f"{art.name}.md"
+            if _is_symlink(art_path):
+                errors.append(f"Symlink not allowed for artifact {art.type}/{art.name}: {art_path.name}")
+                continue
 
         if not art_path.is_file():
             errors.append(f"Missing artifact file for {art.type}/{art.name}: {art_path}")
@@ -159,6 +174,9 @@ def _resolve_artifact_file(art: ManifestArtifact, pack_dir: Path) -> Path | None
     resolved_pack = pack_dir.resolve()
     if art.file:
         candidate = pack_dir / art.file
+        if _is_symlink(candidate):
+            logger.warning("Symlink rejected: %s", art.file)
+            return None
         if not candidate.resolve().is_relative_to(resolved_pack):
             logger.warning("Path traversal blocked: %s", art.file)
             return None
@@ -168,6 +186,9 @@ def _resolve_artifact_file(art: ManifestArtifact, pack_dir: Path) -> Path | None
     for ext in (".yaml", ".md", ".txt", ".json"):
         candidate = pack_dir / type_dir / f"{art.name}{ext}"
         if candidate.is_file():
+            if _is_symlink(candidate):
+                logger.warning("Symlink rejected: %s", candidate)
+                return None
             return candidate
     return None
 
@@ -223,8 +244,8 @@ def install_pack(
         )
         raise ValueError(msg)
 
-    # Install artifacts
-    artifact_ids: list[str] = []
+    # Read all artifact content first (I/O outside the transaction)
+    artifact_data: list[tuple[str, str, str, str, dict[str, Any]]] = []
     skipped: list[str] = []
     for art in manifest.artifacts:
         art_path = _resolve_artifact_file(art, pack_dir)
@@ -235,37 +256,41 @@ def install_pack(
 
         content, metadata = _read_artifact_content(art_path)
         fqn = build_fqn(manifest.namespace, art.type, art.name)
+        artifact_data.append((fqn, art.type, art.name, content, metadata))
 
-        row = upsert_artifact(
-            db,
-            fqn=fqn,
-            artifact_type=art.type,
-            namespace=manifest.namespace,
-            name=art.name,
-            content=content,
-            source=ArtifactSource.PROJECT,
-            metadata=metadata,
-        )
-        if row:
-            artifact_ids.append(row["id"])
+    # Install inside a single transaction
+    artifact_ids: list[str] = []
+    with db.transaction():
+        for fqn, art_type, art_name, content, metadata in artifact_data:
+            row = upsert_artifact(
+                db,
+                fqn=fqn,
+                artifact_type=art_type,
+                namespace=manifest.namespace,
+                name=art_name,
+                content=content,
+                source=ArtifactSource.PROJECT,
+                metadata=metadata,
+                commit=False,
+            )
+            if row:
+                artifact_ids.append(row["id"])
 
-    # Insert pack row
-    source_path = str(pack_dir.resolve())
-    db.execute(
-        """INSERT INTO packs (id, name, namespace, version, description,
-           source_path, installed_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (pack_id, manifest.name, manifest.namespace, manifest.version, manifest.description, source_path, now, now),
-    )
-
-    # Link artifacts to pack
-    for art_id in artifact_ids:
+        # Insert pack row
+        source_path = str(pack_dir.resolve())
         db.execute(
-            "INSERT INTO pack_artifacts (pack_id, artifact_id) VALUES (?, ?)",
-            (pack_id, art_id),
+            """INSERT INTO packs (id, name, namespace, version, description,
+               source_path, installed_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pack_id, manifest.name, manifest.namespace, manifest.version, manifest.description, source_path, now, now),
         )
 
-    db.commit()
+        # Link artifacts to pack
+        for art_id in artifact_ids:
+            db.execute(
+                "INSERT INTO pack_artifacts (pack_id, artifact_id) VALUES (?, ?)",
+                (pack_id, art_id),
+            )
 
     # Copy to project if requested
     if project_dir is not None:
@@ -312,14 +337,11 @@ def remove_pack(db: sqlite3.Connection, namespace: str, name: str) -> bool:
 
     orphan_ids = [r[0] if isinstance(r, (tuple, list)) else r["artifact_id"] for r in orphan_rows]
 
-    # Delete the pack (cascades to pack_artifacts)
-    db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
-
-    # Delete orphaned artifacts
-    for art_id in orphan_ids:
-        delete_artifact(db, art_id)
-
-    db.commit()
+    # Remove inside a single transaction
+    with db.transaction():
+        db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
+        for art_id in orphan_ids:
+            delete_artifact(db, art_id, commit=False)
 
     logger.info(
         "Removed pack %s/%s (%d orphaned artifacts deleted)",
@@ -428,8 +450,8 @@ def load_project_packs(db: sqlite3.Connection, project_dir: Path) -> list[dict[s
 def _copy_to_project(pack_dir: Path, manifest: PackManifest, project_dir: Path) -> None:
     """Copy pack directory into the project's ``.anteroom/packs/`` tree."""
     dest = project_dir / _ANTEROOM_DIR / _PACKS_DIR / manifest.namespace / manifest.name
-    if dest.exists():
-        if dest.is_symlink():
+    if dest.exists() or _is_symlink(dest):
+        if _is_symlink(dest):
             dest.unlink()
         else:
             shutil.rmtree(dest)

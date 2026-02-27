@@ -33,6 +33,8 @@ def create_artifact(
     metadata: dict[str, Any] | None = None,
     user_id: str | None = None,
     user_display_name: str | None = None,
+    *,
+    commit: bool = True,
 ) -> dict[str, Any]:
     """Insert a new artifact and its initial version record."""
     if not validate_fqn(fqn):
@@ -72,7 +74,8 @@ def create_artifact(
         " VALUES (?, ?, ?, ?, ?, ?)",
         (vid, aid, 1, content, chash, now),
     )
-    db.commit()
+    if commit:
+        db.commit()
 
     return {
         "id": aid,
@@ -140,6 +143,8 @@ def update_artifact(
     artifact_id: str,
     content: str | None = None,
     metadata: dict[str, Any] | None = None,
+    *,
+    commit: bool = True,
 ) -> dict[str, Any] | None:
     """Update an artifact's content and/or metadata.
 
@@ -176,19 +181,20 @@ def update_artifact(
             (json.dumps(metadata), now, artifact_id),
         )
 
-    if content is not None or metadata is not None:
+    if commit and (content is not None or metadata is not None):
         db.commit()
 
     return get_artifact(db, artifact_id)
 
 
-def delete_artifact(db: sqlite3.Connection, artifact_id: str) -> bool:
+def delete_artifact(db: sqlite3.Connection, artifact_id: str, *, commit: bool = True) -> bool:
     """Delete an artifact and its version history (CASCADE)."""
     existing = get_artifact(db, artifact_id)
     if not existing:
         return False
     db.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
-    db.commit()
+    if commit:
+        db.commit()
     return True
 
 
@@ -212,6 +218,8 @@ def upsert_artifact(
     metadata: dict[str, Any] | None = None,
     user_id: str | None = None,
     user_display_name: str | None = None,
+    *,
+    commit: bool = True,
 ) -> dict[str, Any] | None:
     """Create or update an artifact by FQN.
 
@@ -225,6 +233,7 @@ def upsert_artifact(
             existing["id"],
             content=content,
             metadata=metadata if metadata is not None else existing["metadata"],
+            commit=commit,
         )
     try:
         return create_artifact(
@@ -238,6 +247,7 @@ def upsert_artifact(
             metadata,
             user_id,
             user_display_name,
+            commit=commit,
         )
     except sqlite3.IntegrityError:
         # Another thread/process inserted the same FQN between our check and
@@ -250,6 +260,7 @@ def upsert_artifact(
                 existing["id"],
                 content=content,
                 metadata=metadata if metadata is not None else existing["metadata"],
+                commit=commit,
             )
         return None
 

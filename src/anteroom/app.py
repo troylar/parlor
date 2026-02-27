@@ -221,6 +221,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.pack_refresh_worker = pack_refresh_worker
         logger.info("Pack refresh worker started (%d sources)", len(config.pack_sources))
 
+    # Initialize artifact registry
+    from .services.artifact_registry import ArtifactRegistry
+
+    artifact_registry = ArtifactRegistry()
+    artifact_registry.load_from_db(app.state.db)
+    app.state.artifact_registry = artifact_registry
+    if artifact_registry.count:
+        logger.info("Artifact registry loaded: %d artifacts", artifact_registry.count)
+
     # Create shared AIService for proxy if enabled
     app.state.proxy_ai_service = None
     if config.proxy.enabled:

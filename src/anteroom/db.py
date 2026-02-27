@@ -400,7 +400,7 @@ END;
 """
 
 
-_db_lock = threading.Lock()
+_db_lock = threading.RLock()
 
 
 class ThreadSafeConnection:
@@ -439,7 +439,7 @@ class ThreadSafeConnection:
         """Hold the lock for the entire transaction, auto-commit or rollback."""
         with self._lock:
             try:
-                yield self._conn
+                yield self
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()

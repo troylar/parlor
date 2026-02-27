@@ -35,14 +35,14 @@ _ALLOWED_SCHEMES = ("https://", "git://", "ssh://", "http://")
 _GIT_AT_PATTERN = re.compile(r"^[\w.-]+@[\w.-]+:")  # git@host:path SSH shorthand
 
 # Regex to strip embedded credentials from URLs in error messages
-_CREDENTIAL_PATTERN = re.compile(r"(https?://)([^@]+)@", re.IGNORECASE)
+_CREDENTIAL_PATTERN = re.compile(r"((?:https?|ssh|git)://)[^@/\s:]+(?::[^@/\s]+)?@", re.IGNORECASE)
 
 
 def _validate_url_scheme(url: str) -> str | None:
     """Validate that a URL uses an allowed scheme. Returns error message or None."""
     if any(url.startswith(scheme) for scheme in _ALLOWED_SCHEMES):
         if url.startswith("http://"):
-            logger.warning("Pack source URL uses plaintext HTTP (MITM risk): %s", url)
+            logger.warning("Pack source URL uses plaintext HTTP (MITM risk): %s", _sanitize_url(url))
         return None
     if _GIT_AT_PATTERN.match(url):
         return None
@@ -51,7 +51,14 @@ def _validate_url_scheme(url: str) -> str | None:
 
 def _sanitize_git_stderr(stderr: str) -> str:
     """Strip embedded credentials from git stderr before surfacing in errors."""
-    return _CREDENTIAL_PATTERN.sub(r"\1***@", stderr)
+    sanitized = _CREDENTIAL_PATTERN.sub(r"\1***@", stderr)
+    sanitized = re.sub(r"Username for '[^']*'", "Username for '***'", sanitized)
+    return sanitized
+
+
+def _sanitize_url(url: str) -> str:
+    """Strip embedded credentials from a URL for safe logging."""
+    return _CREDENTIAL_PATTERN.sub(r"\1***@", url)
 
 
 _CACHE_DIR_NAME = "cache"
@@ -161,7 +168,7 @@ def clone_source(
     (cache_path / _SOURCE_URL_FILE).write_text(url, encoding="utf-8")
     (cache_path / _SOURCE_BRANCH_FILE).write_text(branch, encoding="utf-8")
 
-    logger.info("Cloned pack source %s (branch: %s) into %s", url, branch, cache_path)
+    logger.info("Cloned pack source %s (branch: %s) into %s", _sanitize_url(url), branch, cache_path)
     return PackSourceResult(success=True, path=cache_path)
 
 
@@ -270,7 +277,7 @@ def remove_cached_source(url: str, data_dir: Path) -> bool:
         return False
 
     shutil.rmtree(cache_path, ignore_errors=True)
-    logger.info("Removed cached pack source for %s at %s", url, cache_path)
+    logger.info("Removed cached pack source for %s at %s", _sanitize_url(url), cache_path)
     return True
 
 

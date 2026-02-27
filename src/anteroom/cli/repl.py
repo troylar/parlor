@@ -1217,6 +1217,15 @@ async def run_cli(
     _artifact_registry.load_from_db(db)
 
     mcp_statuses = mcp_manager.get_server_statuses() if mcp_manager else None
+    # Initialize artifact registry
+    _artifact_registry = None
+    try:
+        from ..services.artifact_registry import ArtifactRegistry
+        _artifact_registry = ArtifactRegistry()
+        _artifact_registry.load_from_db(db)
+    except Exception:
+        pass
+
     extra_system_prompt = _build_system_prompt(
         config,
         working_dir,

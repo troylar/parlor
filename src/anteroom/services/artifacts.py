@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-_FQN_RE = re.compile(r"^@[a-z0-9_-]+/[a-z_]+/[a-z0-9_][a-z0-9_.-]*$")
+_FQN_RE = re.compile(r"^@[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9_]+/[a-z0-9_][a-z0-9_.-]{0,62}$")
 
 
 class ArtifactType(str, enum.Enum):

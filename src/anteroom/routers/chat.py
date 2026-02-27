@@ -365,6 +365,7 @@ async def _build_chat_system_prompt(
     vec_enabled: bool = False,
     embedding_service: Any = None,
     injection_detector: Any = None,
+    artifact_registry: Any = None,
 ) -> str:
     """Assemble the extra system prompt from all context sources."""
     # Runtime context for self-awareness
@@ -381,6 +382,16 @@ async def _build_chat_system_prompt(
     file_instructions = load_instructions()
     if file_instructions:
         extra += "\n\n" + file_instructions
+
+    # Inject artifacts (instructions, rules, context) from registry
+    if artifact_registry is not None:
+        _artifact_parts: list[str] = []
+        for _atype in ("instruction", "rule", "context"):
+            for _art in artifact_registry.list(artifact_type=_atype):
+                if _art.content:
+                    _artifact_parts.append(f"<artifact type=\"{_atype}\" fqn=\"{_art.fqn}\">\n{_art.content}\n</artifact>")
+        if _artifact_parts:
+            extra += "\n\n" + "\n".join(_artifact_parts)
 
     # Plan mode prompt
     if plan_prompt:
@@ -1694,6 +1705,7 @@ async def chat(conversation_id: str, request: Request):
         vec_enabled=getattr(request.app.state, "vec_enabled", False),
         embedding_service=getattr(request.app.state, "embedding_service", None),
         injection_detector=getattr(request.app.state, "injection_detector", None),
+        artifact_registry=getattr(request.app.state, "artifact_registry", None),
     )
 
     # Build per-request safety approval context
