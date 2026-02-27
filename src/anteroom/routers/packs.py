@@ -14,6 +14,7 @@ from ..services.pack_sources import list_cached_sources
 router = APIRouter(tags=["packs"])
 
 _SAFE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_SAFE_ID_RE = re.compile(r"^[a-f0-9-]{32,36}$")
 
 
 def _validate_pack_path_params(namespace: str, name: str) -> None:
@@ -22,6 +23,22 @@ def _validate_pack_path_params(namespace: str, name: str) -> None:
         raise HTTPException(status_code=400, detail=f"Invalid namespace: {namespace!r}")
     if not _SAFE_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail=f"Invalid pack name: {name!r}")
+
+
+def _resolve_or_409(db: Any, namespace: str, name: str) -> dict[str, Any]:
+    """Resolve a pack by namespace/name, raising 409 on ambiguity or 404 if not found."""
+    match, candidates = packs.resolve_pack(db, namespace, name)
+    if match:
+        return match
+    if candidates:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Multiple packs match {namespace}/{name}",
+                "candidates": [{"id": c["id"], "version": c.get("version", "")} for c in candidates],
+            },
+        )
+    raise HTTPException(status_code=404, detail="Pack not found")
 
 
 @router.get("/packs")
@@ -96,15 +113,12 @@ async def attach_pack(request: Request, namespace: str, name: str, body: AttachR
     """Attach a pack to global or project scope."""
     _validate_pack_path_params(namespace, name)
     from ..services.pack_attachments import attach_pack as do_attach
-    from ..services.pack_attachments import resolve_pack_id
 
     db = request.app.state.db
-    pack_id = resolve_pack_id(db, namespace, name)
-    if not pack_id:
-        raise HTTPException(status_code=404, detail="Pack not found")
+    pack = _resolve_or_409(db, namespace, name)
 
     try:
-        result = do_attach(db, pack_id, project_path=body.project_path)
+        result = do_attach(db, pack["id"], project_path=body.project_path)
     except ValueError:
         raise HTTPException(status_code=409, detail="Pack is already attached at this scope")
     return result
@@ -120,14 +134,11 @@ async def detach_pack(
     """Detach a pack from global or project scope."""
     _validate_pack_path_params(namespace, name)
     from ..services.pack_attachments import detach_pack as do_detach
-    from ..services.pack_attachments import resolve_pack_id
 
     db = request.app.state.db
-    pack_id = resolve_pack_id(db, namespace, name)
-    if not pack_id:
-        raise HTTPException(status_code=404, detail="Pack not found")
+    pack = _resolve_or_409(db, namespace, name)
 
-    removed = do_detach(db, pack_id, project_path=project_path)
+    removed = do_detach(db, pack["id"], project_path=project_path)
     if not removed:
         raise HTTPException(status_code=404, detail="Attachment not found")
     return {"status": "detached"}
@@ -137,17 +148,12 @@ async def detach_pack(
 async def list_pack_attachments(request: Request, namespace: str, name: str) -> list[dict[str, Any]]:
     """List attachments for a specific pack."""
     _validate_pack_path_params(namespace, name)
-    from ..services.pack_attachments import (
-        list_attachments_for_pack,
-        resolve_pack_id,
-    )
+    from ..services.pack_attachments import list_attachments_for_pack
 
     db = request.app.state.db
-    pack_id = resolve_pack_id(db, namespace, name)
-    if not pack_id:
-        raise HTTPException(status_code=404, detail="Pack not found")
+    pack = _resolve_or_409(db, namespace, name)
 
-    return list_attachments_for_pack(db, pack_id)
+    return list_attachments_for_pack(db, pack["id"])
 
 
 @router.delete("/packs/{namespace}/{name}")
@@ -155,7 +161,8 @@ async def remove_pack(request: Request, namespace: str, name: str) -> dict[str, 
     """Remove an installed pack."""
     _validate_pack_path_params(namespace, name)
     db = request.app.state.db
-    removed = packs.remove_pack(db, namespace, name)
+    pack = _resolve_or_409(db, namespace, name)
+    removed = packs.remove_pack_by_id(db, pack["id"])
     if not removed:
         raise HTTPException(status_code=404, detail="Pack not found")
     return {"status": "removed"}
@@ -166,10 +173,38 @@ async def get_pack(request: Request, namespace: str, name: str) -> dict[str, Any
     """Get a pack with its full artifact list."""
     _validate_pack_path_params(namespace, name)
     db = request.app.state.db
-    result = packs.get_pack(db, namespace, name)
+    resolved = _resolve_or_409(db, namespace, name)
+    pack = packs.get_pack_by_id(db, resolved["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="Pack not found")
+    pack.pop("source_path", None)
+    for art in pack.get("artifacts", []):
+        art.pop("content", None)
+    return pack
+
+
+@router.get("/packs/by-id/{pack_id}")
+async def get_pack_by_id(request: Request, pack_id: str) -> dict[str, Any]:
+    """Get a pack by its unique ID."""
+    if not _SAFE_ID_RE.match(pack_id):
+        raise HTTPException(status_code=400, detail="Invalid pack ID format")
+    db = request.app.state.db
+    result = packs.get_pack_by_id(db, pack_id)
     if not result:
         raise HTTPException(status_code=404, detail="Pack not found")
     result.pop("source_path", None)
     for art in result.get("artifacts", []):
         art.pop("content", None)
     return result
+
+
+@router.delete("/packs/by-id/{pack_id}")
+async def remove_pack_by_id(request: Request, pack_id: str) -> dict[str, str]:
+    """Remove a pack by its unique ID."""
+    if not _SAFE_ID_RE.match(pack_id):
+        raise HTTPException(status_code=400, detail="Invalid pack ID format")
+    db = request.app.state.db
+    removed = packs.remove_pack_by_id(db, pack_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Pack not found")
+    return {"status": "removed"}

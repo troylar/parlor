@@ -14,11 +14,14 @@ from anteroom.services.packs import (
     _read_artifact_content,
     _resolve_artifact_file,
     get_pack,
+    get_pack_by_id,
     install_pack,
     list_packs,
     load_project_packs,
     parse_manifest,
     remove_pack,
+    remove_pack_by_id,
+    resolve_pack,
     update_pack,
     validate_manifest,
 )
@@ -316,13 +319,12 @@ class TestInstallPack:
         pa = db.execute("SELECT * FROM pack_artifacts").fetchone()
         assert pa is not None
 
-    def test_install_duplicate_raises(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+    def test_install_duplicate_allowed(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         pack_dir = _create_pack_dir(tmp_path)
         manifest = parse_manifest(pack_dir / "pack.yaml")
-        install_pack(db, manifest, pack_dir)
-
-        with pytest.raises(ValueError, match="already installed"):
-            install_pack(db, manifest, pack_dir)
+        r1 = install_pack(db, manifest, pack_dir)
+        r2 = install_pack(db, manifest, pack_dir)
+        assert r1["id"] != r2["id"]
 
     def test_install_with_project_dir(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         pack_dir = _create_pack_dir(tmp_path)
@@ -610,3 +612,54 @@ class TestInstallPackSkippedArtifacts:
         manifest = parse_manifest(pack_dir / "pack.yaml")
         result = install_pack(db, manifest, pack_dir)
         assert result["skipped_artifacts"] == []
+
+
+class TestResolvePack:
+    def test_resolve_unique(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        match, candidates = resolve_pack(db, "test-ns", "test-pack")
+        assert match is not None
+        assert match["id"] == result["id"]
+        assert candidates == []
+
+    def test_resolve_ambiguous(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+        install_pack(db, manifest, pack_dir)
+        match, candidates = resolve_pack(db, "test-ns", "test-pack")
+        assert match is None
+        assert len(candidates) == 2
+
+    def test_resolve_not_found(self, db: ThreadSafeConnection) -> None:
+        match, candidates = resolve_pack(db, "no", "pack")
+        assert match is None
+        assert candidates == []
+
+
+class TestGetPackById:
+    def test_get_by_id(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        got = get_pack_by_id(db, result["id"])
+        assert got is not None
+        assert got["id"] == result["id"]
+        assert got["name"] == "test-pack"
+
+    def test_get_by_id_missing(self, db: ThreadSafeConnection) -> None:
+        assert get_pack_by_id(db, "nonexistent") is None
+
+
+class TestRemovePackById:
+    def test_remove_by_id(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        assert remove_pack_by_id(db, result["id"]) is True
+        assert get_pack_by_id(db, result["id"]) is None
+
+    def test_remove_by_id_missing(self, db: ThreadSafeConnection) -> None:
+        assert remove_pack_by_id(db, "nonexistent") is False

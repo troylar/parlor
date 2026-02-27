@@ -615,15 +615,21 @@ def _resolve_project_id(config: object, project_name: str) -> str:
 def _resolve_space_id(config: object, space_name: str) -> str:
     """Resolve a space name to its ID, or exit with an error."""
     from .db import get_db
-    from .services.space_storage import get_space_by_name
+    from .services.space_storage import resolve_space
 
     db = get_db(config.app.data_dir / "anteroom.db")
-    space = get_space_by_name(db, space_name)
-    if not space:
-        print(f"Error: Space '{space_name}' not found.", file=sys.stderr)
-        print("Run `aroom space list` to list available spaces.", file=sys.stderr)
+    match, candidates = resolve_space(db, space_name)
+    if match:
+        return match["id"]
+    if candidates:
+        print(f"Error: Multiple spaces match '{space_name}':", file=sys.stderr)
+        for c in candidates:
+            print(f"  {c['id'][:8]}  {c['name']}", file=sys.stderr)
+        print("Use a GUID prefix to disambiguate.", file=sys.stderr)
         sys.exit(1)
-    return space["id"]
+    print(f"Error: Space '{space_name}' not found.", file=sys.stderr)
+    print("Run `aroom space list` to list available spaces.", file=sys.stderr)
+    sys.exit(1)
 
 
 def _run_projects(config: object) -> None:
@@ -881,6 +887,36 @@ def _validate_pack_ref(ref: str) -> tuple[str, str]:
     return namespace, name
 
 
+def _pick_from_candidates(
+    candidates: list[dict],
+    entity_type: str,
+    display_fn: object,
+) -> dict | None:
+    """Interactive picker for ambiguous name resolution.
+
+    Shows a numbered list when on a TTY, or prints IDs for non-interactive use.
+    """
+    if not sys.stdin.isatty():
+        print(f"Error: Multiple {entity_type}s match. Use a GUID to disambiguate:", file=sys.stderr)
+        for c in candidates:
+            print(f"  {c.get('id', '?')}", file=sys.stderr)
+        return None
+
+    print(f"Multiple {entity_type}s match:")
+    for i, c in enumerate(candidates, 1):
+        label = display_fn(c) if callable(display_fn) else str(c)
+        print(f"  {i}. {label}")
+    try:
+        choice = input(f"Select (1-{len(candidates)}): ").strip()
+        idx = int(choice) - 1
+        if 0 <= idx < len(candidates):
+            return candidates[idx]
+    except (ValueError, EOFError, KeyboardInterrupt):
+        pass
+    print("Cancelled.", file=sys.stderr)
+    return None
+
+
 def _run_pack(config: object, args: object) -> None:
     """Handle `aroom pack` subcommands."""
     from pathlib import Path
@@ -967,7 +1003,14 @@ def _run_pack(config: object, args: object) -> None:
 
     elif action == "show":
         namespace, name = _validate_pack_ref(args.ref)
-        pack_info = packs.get_pack(db, namespace, name)
+        match, candidates = packs.resolve_pack(db, namespace, name)
+        if not match and candidates:
+            match = _pick_from_candidates(
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
+            )
+        pack_info = match
         if not pack_info:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
             sys.exit(1)
@@ -992,7 +1035,17 @@ def _run_pack(config: object, args: object) -> None:
 
     elif action == "remove":
         namespace, name = _validate_pack_ref(args.ref)
-        removed = packs.remove_pack(db, namespace, name)
+        match, candidates = packs.resolve_pack(db, namespace, name)
+        if not match and candidates:
+            match = _pick_from_candidates(
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
+            )
+        if not match:
+            console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
+            sys.exit(1)
+        removed = packs.remove_pack_by_id(db, match["id"])
         if removed:
             console.print(f"[green]Removed[/green] {escape(args.ref)}")
         else:
@@ -1082,17 +1135,23 @@ def _run_pack(config: object, args: object) -> None:
                 console.print(f"[red]FAIL[/red] {escape(r.url)} — {escape(r.error)}")
 
     elif action == "attach":
-        from .services.pack_attachments import attach_pack, resolve_pack_id
+        from .services.pack_attachments import attach_pack
 
         namespace, name = _validate_pack_ref(args.ref)
-        pack_id = resolve_pack_id(db, namespace, name)
-        if not pack_id:
+        match, candidates = packs.resolve_pack(db, namespace, name)
+        if not match and candidates:
+            match = _pick_from_candidates(
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
+            )
+        if not match:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
             sys.exit(1)
 
         project_path = str(Path.cwd()) if getattr(args, "project", False) else None
         try:
-            attach_pack(db, pack_id, project_path=project_path)
+            attach_pack(db, match["id"], project_path=project_path)
         except ValueError as e:
             console.print(f"[red]Attach failed:[/red] {e}")
             sys.exit(1)
@@ -1101,16 +1160,22 @@ def _run_pack(config: object, args: object) -> None:
         console.print(f"[green]Attached[/green] {escape(args.ref)} ({scope})")
 
     elif action == "detach":
-        from .services.pack_attachments import detach_pack, resolve_pack_id
+        from .services.pack_attachments import detach_pack
 
         namespace, name = _validate_pack_ref(args.ref)
-        pack_id = resolve_pack_id(db, namespace, name)
-        if not pack_id:
+        match, candidates = packs.resolve_pack(db, namespace, name)
+        if not match and candidates:
+            match = _pick_from_candidates(
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
+            )
+        if not match:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
             sys.exit(1)
 
         project_path = str(Path.cwd()) if getattr(args, "project", False) else None
-        removed = detach_pack(db, pack_id, project_path=project_path)
+        removed = detach_pack(db, match["id"], project_path=project_path)
         if removed:
             scope = "project" if project_path else "global"
             console.print(f"[green]Detached[/green] {escape(args.ref)} ({scope})")
@@ -1130,8 +1195,8 @@ def _run_space(config: object, args: object) -> None:
     from .services.space_storage import (
         create_space,
         delete_space,
-        get_space_by_name,
         list_spaces,
+        resolve_space,
         update_space,
     )
     from .services.spaces import (
@@ -1150,6 +1215,19 @@ def _run_space(config: object, args: object) -> None:
         return
 
     db = get_db(config.app.data_dir / "anteroom.db")
+
+    def _resolve(name_or_id: str) -> dict | None:
+        match, candidates = resolve_space(db, name_or_id)
+        if match:
+            return match
+        if candidates:
+            return _pick_from_candidates(
+                candidates,
+                "space",
+                lambda c: f"{c['id'][:8]}  {c['name']}  ({c['file_path']})",
+            )
+        console.print(f"[red]Error:[/red] Space {escape(name_or_id)!r} not found")
+        return None
 
     if action == "list":
         spaces = list_spaces(db)
@@ -1178,10 +1256,6 @@ def _run_space(config: object, args: object) -> None:
         if target.exists():
             console.print(f"[red]Error:[/red] Space file already exists: {target}")
             return
-        existing = get_space_by_name(db, name)
-        if existing:
-            console.print(f"[red]Error:[/red] Space {escape(name)!r} already exists in DB")
-            return
         template_cfg = SpaceConfig(name=name)
         write_space_file(target, template_cfg)
         s = create_space(db, name, str(target), file_hash(target))
@@ -1201,17 +1275,12 @@ def _run_space(config: object, args: object) -> None:
             for e in errors:
                 console.print(f"  - {e}")
             return
-        existing = get_space_by_name(db, space_cfg.name)
-        if existing:
-            console.print(f"[red]Error:[/red] Space {escape(space_cfg.name)!r} already exists")
-            return
         s = create_space(db, space_cfg.name, str(path), file_hash(path))
         console.print(f"[green]Loaded space:[/green] {escape(s['name'])} (id: {s['id'][:8]}...)")
 
     elif action == "show":
-        space = get_space_by_name(db, args.name)
+        space = _resolve(args.name)
         if not space:
-            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
             return
         console.print(f"[bold]{escape(space['name'])}[/bold]")
         console.print(f"  ID:          {space['id']}")
@@ -1221,17 +1290,15 @@ def _run_space(config: object, args: object) -> None:
         console.print(f"  Created:     {space['created_at']}")
 
     elif action == "delete":
-        space = get_space_by_name(db, args.name)
+        space = _resolve(args.name)
         if not space:
-            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
             return
         delete_space(db, space["id"])
         console.print(f"[green]Deleted space:[/green] {escape(args.name)}")
 
     elif action == "refresh":
-        space = get_space_by_name(db, args.name)
+        space = _resolve(args.name)
         if not space:
-            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
             return
         path = Path(space["file_path"])
         if not path.is_file():
@@ -1245,9 +1312,8 @@ def _run_space(config: object, args: object) -> None:
         console.print(f"[green]Refreshed:[/green] {escape(args.name)} (hash updated)")
 
     elif action == "clone":
-        space = get_space_by_name(db, args.name)
+        space = _resolve(args.name)
         if not space:
-            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
             return
         path = Path(space["file_path"])
         if not path.is_file():
@@ -1300,9 +1366,8 @@ def _run_space(config: object, args: object) -> None:
             sync_space_paths(db, space["id"], new_paths)
 
     elif action == "map":
-        space = get_space_by_name(db, args.name)
+        space = _resolve(args.name)
         if not space:
-            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
             return
         dir_path = Path(args.dir_path).expanduser().resolve()
         if not dir_path.is_dir():
@@ -1322,9 +1387,8 @@ def _run_space(config: object, args: object) -> None:
         console.print(f"[green]Mapped:[/green] {dir_path} -> {escape(args.name)}")
 
     elif action == "move-root":
-        space = get_space_by_name(db, args.name)
+        space = _resolve(args.name)
         if not space:
-            console.print(f"[red]Error:[/red] Space {escape(args.name)!r} not found")
             return
         new_root = Path(args.new_root).expanduser().resolve()
         if not new_root.is_dir():

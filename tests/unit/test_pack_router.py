@@ -69,7 +69,12 @@ class TestGetPackEndpoint:
     def test_get_existing(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
-            mock_packs.get_pack.return_value = {
+            mock_packs.resolve_pack.return_value = (
+                {"id": "pack-1", "namespace": "test-ns", "name": "test-pack", "version": "1.0.0"},
+                [],
+            )
+            mock_packs.get_pack_by_id.return_value = {
+                "id": "pack-1",
                 "namespace": "test-ns",
                 "name": "test-pack",
                 "version": "1.0.0",
@@ -95,7 +100,7 @@ class TestGetPackEndpoint:
     def test_get_not_found(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
-            mock_packs.get_pack.return_value = None
+            mock_packs.resolve_pack.return_value = (None, [])
             client = TestClient(app)
             resp = client.get("/api/packs/no/such-pack")
             assert resp.status_code == 404
@@ -103,20 +108,36 @@ class TestGetPackEndpoint:
     def test_get_calls_service_with_correct_args(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
-            mock_packs.get_pack.return_value = {"name": "p", "namespace": "n", "artifacts": []}
+            mock_packs.resolve_pack.return_value = (
+                {"id": "p1", "name": "p", "namespace": "n"},
+                [],
+            )
+            mock_packs.get_pack_by_id.return_value = {"id": "p1", "name": "p", "namespace": "n", "artifacts": []}
             client = TestClient(app)
             client.get("/api/packs/my-ns/my-pack")
-            mock_packs.get_pack.assert_called_once_with(app.state.db, "my-ns", "my-pack")
+            mock_packs.resolve_pack.assert_called_once_with(app.state.db, "my-ns", "my-pack")
+            mock_packs.get_pack_by_id.assert_called_once_with(app.state.db, "p1")
 
     def test_get_not_found_does_not_reflect_input(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
-            mock_packs.get_pack.return_value = None
+            mock_packs.resolve_pack.return_value = (None, [])
             client = TestClient(app)
             resp = client.get("/api/packs/evil-ns/evil-name")
             assert resp.status_code == 404
             assert "evil-ns" not in resp.json()["detail"]
             assert "evil-name" not in resp.json()["detail"]
+
+    def test_get_ambiguous_returns_409(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = (
+                None,
+                [{"id": "p1", "version": "1.0"}, {"id": "p2", "version": "2.0"}],
+            )
+            client = TestClient(app)
+            resp = client.get("/api/packs/test-ns/test-pack")
+            assert resp.status_code == 409
 
 
 class TestListSourcesEndpoint:
@@ -166,9 +187,10 @@ class TestAttachPackEndpoint:
     def test_attach_success(self) -> None:
         app = _make_app()
         with (
-            patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"),
+            patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.attach_pack", return_value={"id": "att-1", "scope": "global"}),
         ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={})
             assert resp.status_code == 200
@@ -176,7 +198,8 @@ class TestAttachPackEndpoint:
 
     def test_attach_not_found(self) -> None:
         app = _make_app()
-        with patch("anteroom.services.pack_attachments.resolve_pack_id", return_value=None):
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = (None, [])
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={})
             assert resp.status_code == 404
@@ -184,9 +207,10 @@ class TestAttachPackEndpoint:
     def test_attach_duplicate_returns_409(self) -> None:
         app = _make_app()
         with (
-            patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"),
+            patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.attach_pack", side_effect=ValueError("already attached")),
         ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={})
             assert resp.status_code == 409
@@ -194,12 +218,13 @@ class TestAttachPackEndpoint:
     def test_attach_with_project_path(self) -> None:
         app = _make_app()
         with (
-            patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"),
+            patch("anteroom.routers.packs.packs") as mock_packs,
             patch(
                 "anteroom.services.pack_attachments.attach_pack",
                 return_value={"id": "att-1", "scope": "project"},
             ) as mock_attach,
         ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={"project_path": "/my/proj"})
             assert resp.status_code == 200
@@ -210,9 +235,10 @@ class TestDetachPackEndpoint:
     def test_detach_success(self) -> None:
         app = _make_app()
         with (
-            patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"),
+            patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.detach_pack", return_value=True),
         ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
             resp = client.delete("/api/packs/test-ns/test-pack/attach")
             assert resp.status_code == 200
@@ -220,7 +246,8 @@ class TestDetachPackEndpoint:
 
     def test_detach_not_found(self) -> None:
         app = _make_app()
-        with patch("anteroom.services.pack_attachments.resolve_pack_id", return_value=None):
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = (None, [])
             client = TestClient(app)
             resp = client.delete("/api/packs/test-ns/test-pack/attach")
             assert resp.status_code == 404
@@ -228,9 +255,10 @@ class TestDetachPackEndpoint:
     def test_detach_not_attached(self) -> None:
         app = _make_app()
         with (
-            patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"),
+            patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.detach_pack", return_value=False),
         ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
             resp = client.delete("/api/packs/test-ns/test-pack/attach")
             assert resp.status_code == 404
@@ -240,7 +268,8 @@ class TestRemovePackEndpoint:
     def test_remove_success(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
-            mock_packs.remove_pack.return_value = True
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            mock_packs.remove_pack_by_id.return_value = True
             client = TestClient(app)
             resp = client.delete("/api/packs/test-ns/test-pack")
             assert resp.status_code == 200
@@ -249,7 +278,7 @@ class TestRemovePackEndpoint:
     def test_remove_not_found(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
-            mock_packs.remove_pack.return_value = False
+            mock_packs.resolve_pack.return_value = (None, [])
             client = TestClient(app)
             resp = client.delete("/api/packs/test-ns/test-pack")
             assert resp.status_code == 404
@@ -259,9 +288,10 @@ class TestListPackAttachmentsEndpoint:
     def test_list_attachments(self) -> None:
         app = _make_app()
         with (
-            patch("anteroom.services.pack_attachments.resolve_pack_id", return_value="pack-1"),
+            patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.list_attachments_for_pack", return_value=[]),
         ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
             resp = client.get("/api/packs/test-ns/test-pack/attachments")
             assert resp.status_code == 200
@@ -269,7 +299,8 @@ class TestListPackAttachmentsEndpoint:
 
     def test_list_attachments_not_found(self) -> None:
         app = _make_app()
-        with patch("anteroom.services.pack_attachments.resolve_pack_id", return_value=None):
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = (None, [])
             client = TestClient(app)
             resp = client.get("/api/packs/test-ns/test-pack/attachments")
             assert resp.status_code == 404

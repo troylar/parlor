@@ -14,7 +14,9 @@ from anteroom.services.space_storage import (
     get_space,
     get_space_by_name,
     get_space_paths,
+    get_spaces_by_name,
     list_spaces,
+    resolve_space,
     resolve_space_by_cwd,
     sync_space_paths,
     update_space,
@@ -44,13 +46,12 @@ class TestCreateSpace:
         assert s["file_hash"] == "abc123"
         assert "id" in s
 
-    def test_create_unique_name(self) -> None:
-        import pytest
-
+    def test_create_duplicate_name_allowed(self) -> None:
         db = _make_db()
-        create_space(db, "dup", "/path.yaml")
-        with pytest.raises(Exception):
-            create_space(db, "dup", "/other.yaml")
+        s1 = create_space(db, "dup", "/path.yaml")
+        s2 = create_space(db, "dup", "/other.yaml")
+        assert s1["id"] != s2["id"]
+        assert s1["name"] == s2["name"]
 
 
 class TestGetSpace:
@@ -232,3 +233,59 @@ class TestDiscoverSpaceFile:
         cd.mkdir()
         (cd / "space.yaml").write_text("name: claude\n")
         assert discover_space_file(str(tmp_path)) == af
+
+
+class TestGetSpacesByName:
+    def test_returns_all_matches(self) -> None:
+        db = _make_db()
+        s1 = create_space(db, "dup", "/a.yaml")
+        s2 = create_space(db, "dup", "/b.yaml")
+        matches = get_spaces_by_name(db, "dup")
+        assert len(matches) == 2
+        ids = {m["id"] for m in matches}
+        assert s1["id"] in ids
+        assert s2["id"] in ids
+
+    def test_returns_empty_on_no_match(self) -> None:
+        db = _make_db()
+        assert get_spaces_by_name(db, "nonexistent") == []
+
+
+class TestResolveSpace:
+    def test_resolve_by_exact_id(self) -> None:
+        db = _make_db()
+        s = create_space(db, "myspace", "/path.yaml")
+        match, candidates = resolve_space(db, s["id"])
+        assert match is not None
+        assert match["id"] == s["id"]
+        assert candidates == []
+
+    def test_resolve_by_name_unique(self) -> None:
+        db = _make_db()
+        s = create_space(db, "unique", "/path.yaml")
+        match, candidates = resolve_space(db, "unique")
+        assert match is not None
+        assert match["id"] == s["id"]
+        assert candidates == []
+
+    def test_resolve_by_name_ambiguous(self) -> None:
+        db = _make_db()
+        create_space(db, "dup", "/a.yaml")
+        create_space(db, "dup", "/b.yaml")
+        match, candidates = resolve_space(db, "dup")
+        assert match is None
+        assert len(candidates) == 2
+
+    def test_resolve_by_id_prefix(self) -> None:
+        db = _make_db()
+        s = create_space(db, "myspace", "/path.yaml")
+        prefix = s["id"][:8]
+        match, candidates = resolve_space(db, prefix)
+        assert match is not None
+        assert match["id"] == s["id"]
+
+    def test_resolve_not_found(self) -> None:
+        db = _make_db()
+        match, candidates = resolve_space(db, "nonexistent")
+        assert match is None
+        assert candidates == []

@@ -930,9 +930,9 @@ async def run_cli(
                 _disc_cfg = parse_space_file(_discovered_path)
                 _disc_errors = validate_space(_disc_cfg)
                 if not _disc_errors:
-                    from ..services.space_storage import get_space_by_name
+                    from ..services.space_storage import get_space_by_name as _gsbn_disc
 
-                    if not get_space_by_name(db, _disc_cfg.name):
+                    if not _gsbn_disc(db, _disc_cfg.name):
                         from ..services.space_storage import create_space as _cs_disc
 
                         _space = _cs_disc(db, _disc_cfg.name, str(_discovered_path), file_hash(_discovered_path))
@@ -2457,20 +2457,23 @@ async def _run_repl(
         _active_space: list[dict[str, Any] | None] = [space]
 
         def _resolve_space(name_or_id: str) -> dict[str, Any] | None:
-            """Look up a space by name or UUID prefix."""
-            from ..services.space_storage import get_space, get_space_by_name
-            from ..services.space_storage import list_spaces as _ls
+            """Look up a space by name, UUID, or UUID prefix. Shows picker on ambiguity."""
+            from ..services.space_storage import resolve_space
 
-            sp = get_space_by_name(db, name_or_id)
-            if sp:
-                return sp
-            sp = get_space(db, name_or_id)
-            if sp:
-                return sp
-            all_spaces = _ls(db)
-            matches = [s for s in all_spaces if s["id"].startswith(name_or_id)]
-            if len(matches) == 1:
-                return matches[0]
+            match, candidates = resolve_space(db, name_or_id)
+            if match:
+                return match
+            if candidates:
+                renderer.console.print(f"\nMultiple spaces match '{name_or_id}':")
+                for i, c in enumerate(candidates, 1):
+                    renderer.console.print(f"  {i}. {c['name']} [{c['id'][:8]}...]")
+                try:
+                    choice = input(f"Select (1-{len(candidates)}): ").strip()
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(candidates):
+                        return candidates[idx]
+                except (ValueError, EOFError, KeyboardInterrupt):
+                    pass
             return None
 
         def _inject_space_instructions(sp: dict[str, Any], instr: str | None = None) -> None:
@@ -3109,9 +3112,6 @@ async def _run_repl(
                         count_space_conversations,
                     )
                     from ..services.space_storage import (
-                        get_space_by_name as _get_space_by_name,
-                    )
-                    from ..services.space_storage import (
                         list_spaces as _list_spaces,
                     )
                     from ..services.space_storage import (
@@ -3239,10 +3239,6 @@ async def _run_repl(
                         if spath.exists():
                             renderer.render_error(f"Space file already exists: {spath}")
                             continue
-                        existing = _get_space_by_name(db, name)
-                        if existing:
-                            renderer.render_error(f"Space '{name}' already exists in DB")
-                            continue
                         _wsf(spath, _SpaceConfig(name=name))
                         sp = _cs(db, name, str(spath), _fh2(spath))
                         renderer.console.print(
@@ -3276,10 +3272,6 @@ async def _run_repl(
                         if errors:
                             for e in errors:
                                 renderer.render_error(e)
-                            continue
-                        existing = _get_space_by_name(db, scfg.name)
-                        if existing:
-                            renderer.render_error(f"Space '{scfg.name}' already exists")
                             continue
                         sp = _cs(db, scfg.name, str(spath), _fh2(spath))
                         renderer.console.print(
@@ -3325,7 +3317,22 @@ async def _run_repl(
                         ns, _, name = ref.rpartition("/")
                         if not ns:
                             ns = "default"
-                        pack_info = packs_service.get_pack(db, ns, name)
+                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
+                        if not _pm and _pc:
+                            renderer.console.print(f"\nMultiple packs match @{ns}/{name}:")
+                            for _pi, _c in enumerate(_pc, 1):
+                                renderer.console.print(
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
+                                )
+                            try:
+                                _ch = input(f"Select (1-{len(_pc)}): ").strip()
+                                _idx = int(_ch) - 1
+                                if 0 <= _idx < len(_pc):
+                                    _pm = _pc[_idx]
+                            except (ValueError, EOFError, KeyboardInterrupt):
+                                continue
+                        pack_info = _pm
                         if not pack_info:
                             renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
                             continue
@@ -3373,7 +3380,25 @@ async def _run_repl(
                         ns, _, name = ref.rpartition("/")
                         if not ns:
                             ns = "default"
-                        removed = packs_service.remove_pack(db, ns, name)
+                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
+                        if not _pm and _pc:
+                            renderer.console.print(f"\nMultiple packs match @{ns}/{name}:")
+                            for _pi, _c in enumerate(_pc, 1):
+                                renderer.console.print(
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
+                                )
+                            try:
+                                _ch = input(f"Select (1-{len(_pc)}): ").strip()
+                                _idx = int(_ch) - 1
+                                if 0 <= _idx < len(_pc):
+                                    _pm = _pc[_idx]
+                            except (ValueError, EOFError, KeyboardInterrupt):
+                                continue
+                        if not _pm:
+                            renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
+                            continue
+                        removed = packs_service.remove_pack_by_id(db, _pm["id"])
                         if removed:
                             renderer.console.print(f"[green]Removed[/green] @{ns}/{name}\n")
                         else:
@@ -3463,17 +3488,31 @@ async def _run_repl(
 
                         from rich.markup import escape as rich_escape
 
-                        from ..services.pack_attachments import attach_pack, resolve_pack_id
+                        from ..services.pack_attachments import attach_pack
 
-                        pack_id = resolve_pack_id(db, ns, name)
-                        if not pack_id:
+                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
+                        if not _pm and _pc:
+                            renderer.console.print(f"\nMultiple packs match @{rich_escape(ns)}/{rich_escape(name)}:")
+                            for _pi, _c in enumerate(_pc, 1):
+                                renderer.console.print(
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
+                                )
+                            try:
+                                _ch = input(f"Select (1-{len(_pc)}): ").strip()
+                                _idx = int(_ch) - 1
+                                if 0 <= _idx < len(_pc):
+                                    _pm = _pc[_idx]
+                            except (ValueError, EOFError, KeyboardInterrupt):
+                                continue
+                        if not _pm:
                             renderer.console.print(
                                 f"[{CHROME}]Pack @{rich_escape(ns)}/{rich_escape(name)} not found.[/{CHROME}]\n"
                             )
                             continue
                         project_path = str(Path(working_dir)) if "--project" in user_input else None
                         try:
-                            attach_pack(db, pack_id, project_path=project_path)
+                            attach_pack(db, _pm["id"], project_path=project_path)
                         except ValueError as exc:
                             renderer.console.print(f"[red]{rich_escape(str(exc))}[/red]\n")
                             continue
@@ -3495,16 +3534,30 @@ async def _run_repl(
 
                         from rich.markup import escape as rich_escape
 
-                        from ..services.pack_attachments import detach_pack, resolve_pack_id
+                        from ..services.pack_attachments import detach_pack
 
-                        pack_id = resolve_pack_id(db, ns, name)
-                        if not pack_id:
+                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
+                        if not _pm and _pc:
+                            renderer.console.print(f"\nMultiple packs match @{rich_escape(ns)}/{rich_escape(name)}:")
+                            for _pi, _c in enumerate(_pc, 1):
+                                renderer.console.print(
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
+                                )
+                            try:
+                                _ch = input(f"Select (1-{len(_pc)}): ").strip()
+                                _idx = int(_ch) - 1
+                                if 0 <= _idx < len(_pc):
+                                    _pm = _pc[_idx]
+                            except (ValueError, EOFError, KeyboardInterrupt):
+                                continue
+                        if not _pm:
                             renderer.console.print(
                                 f"[{CHROME}]Pack @{rich_escape(ns)}/{rich_escape(name)} not found.[/{CHROME}]\n"
                             )
                             continue
                         project_path = str(Path(working_dir)) if "--project" in user_input else None
-                        removed = detach_pack(db, pack_id, project_path=project_path)
+                        removed = detach_pack(db, _pm["id"], project_path=project_path)
                         if removed:
                             scope = "project" if project_path else "global"
                             renderer.console.print(

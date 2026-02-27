@@ -217,7 +217,7 @@ def install_from_source(db: sqlite3.Connection, source_dir: Path) -> tuple[int, 
             logger.warning("Manifest validation errors in %s: %s", manifest_path, errors)
             continue
 
-        existing = packs.get_pack(db, manifest.namespace, manifest.name)
+        existing = packs.get_pack_by_source_path(db, str(pack_dir))
         if existing:
             if existing.get("version") == manifest.version:
                 logger.debug(

@@ -153,13 +153,14 @@ def list_attachments_for_pack(
 
 
 def resolve_pack_id(db: sqlite3.Connection, namespace: str, name: str) -> str | None:
-    """Look up pack_id from namespace/name. Returns None if not found."""
-    row = db.execute(
+    """Look up pack_id from namespace/name. Returns None if not found or ambiguous."""
+    rows = db.execute(
         "SELECT id FROM packs WHERE namespace = ? AND name = ?",
         (namespace, name),
-    ).fetchone()
-    if not row:
+    ).fetchall()
+    if len(rows) != 1:
         return None
+    row = rows[0]
     return row[0] if isinstance(row, (tuple, list)) else row["id"]
 
 

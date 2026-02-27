@@ -115,11 +115,11 @@ class TestPackInstall:
         assert result["name"] == "test-pack"
         assert result["artifact_count"] == 1
 
-    def test_install_duplicate_raises(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
+    def test_install_duplicate_allowed(self, db: ThreadSafeConnection, pack_dir: Path) -> None:
         manifest = parse_manifest(pack_dir / "pack.yaml")
-        install_pack(db, manifest, pack_dir)
-        with pytest.raises(ValueError, match="already installed"):
-            install_pack(db, manifest, pack_dir)
+        r1 = install_pack(db, manifest, pack_dir)
+        r2 = install_pack(db, manifest, pack_dir)
+        assert r1["id"] != r2["id"]
 
     def test_parse_manifest_missing_file(self, tmp_path: Path) -> None:
         with pytest.raises((ValueError, FileNotFoundError)):

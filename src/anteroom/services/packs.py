@@ -235,15 +235,6 @@ def install_pack(
     now = datetime.now(timezone.utc).isoformat()
     pack_id = uuid.uuid4().hex
 
-    # Check for existing pack
-    existing = _get_pack_row(db, manifest.namespace, manifest.name)
-    if existing:
-        msg = (
-            f"Pack {manifest.namespace}/{manifest.name} is already installed "
-            f"(version {existing['version']}). Use update to replace it."
-        )
-        raise ValueError(msg)
-
     # Read all artifact content first (I/O outside the transaction)
     artifact_data: list[tuple[str, str, str, str, dict[str, Any]]] = []
     skipped: list[str] = []
@@ -580,6 +571,93 @@ def _get_pack_row(db: sqlite3.Connection, namespace: str, name: str) -> Any:
         " FROM packs WHERE namespace = ? AND name = ?",
         (namespace, name),
     ).fetchone()
+
+
+def _get_pack_rows(db: sqlite3.Connection, namespace: str, name: str) -> list[Any]:
+    """Fetch all pack rows matching namespace and name."""
+    return db.execute(
+        "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
+        " FROM packs WHERE namespace = ? AND name = ?",
+        (namespace, name),
+    ).fetchall()
+
+
+def get_pack_by_source_path(db: sqlite3.Connection, source_path: str) -> dict[str, Any] | None:
+    """Get a pack by its source_path. Returns None if not found."""
+    row = db.execute(
+        "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
+        " FROM packs WHERE source_path = ?",
+        (source_path,),
+    ).fetchone()
+    if not row:
+        return None
+    return _pack_row_to_dict(row)
+
+
+def get_pack_by_id(db: sqlite3.Connection, pack_id: str) -> dict[str, Any] | None:
+    """Get a pack by its unique ID, including artifacts."""
+    row = db.execute(
+        "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
+        " FROM packs WHERE id = ?",
+        (pack_id,),
+    ).fetchone()
+    if not row:
+        return None
+    result = _pack_row_to_dict(row)
+    art_rows = db.execute(
+        """SELECT a.id, a.fqn, a.type, a.namespace, a.name, a.content, a.content_hash
+           FROM artifacts a
+           JOIN pack_artifacts pa ON a.id = pa.artifact_id
+           WHERE pa.pack_id = ?
+           ORDER BY a.type, a.name""",
+        (pack_id,),
+    ).fetchall()
+    result["artifacts"] = [_art_row_to_dict(r) for r in art_rows]
+    result["artifact_count"] = len(result["artifacts"])
+    return result
+
+
+def resolve_pack(
+    db: sqlite3.Connection, namespace: str, name: str
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Resolve a pack by namespace/name.
+
+    Returns ``(match, [])`` on unique match, or ``(None, candidates)`` when
+    ambiguous. An empty candidates list with ``None`` match means not found.
+    """
+    rows = _get_pack_rows(db, namespace, name)
+    if len(rows) == 1:
+        return _pack_row_to_dict(rows[0]), []
+    if len(rows) > 1:
+        return None, [_pack_row_to_dict(r) for r in rows]
+    return None, []
+
+
+def remove_pack_by_id(db: sqlite3.Connection, pack_id: str) -> bool:
+    """Remove a pack by its unique ID."""
+    row = db.execute("SELECT id FROM packs WHERE id = ?", (pack_id,)).fetchone()
+    if not row:
+        return False
+
+    art_rows = db.execute(
+        "SELECT artifact_id FROM pack_artifacts WHERE pack_id = ?",
+        (pack_id,),
+    ).fetchall()
+    artifact_ids = [r[0] if isinstance(r, (tuple, list)) else r["artifact_id"] for r in art_rows]
+
+    db.execute("DELETE FROM pack_artifacts WHERE pack_id = ?", (pack_id,))
+    db.execute("DELETE FROM pack_attachments WHERE pack_id = ?", (pack_id,))
+    db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
+
+    for aid in artifact_ids:
+        ref = db.execute("SELECT COUNT(*) FROM pack_artifacts WHERE artifact_id = ?", (aid,)).fetchone()
+        count = ref[0] if isinstance(ref, (tuple, list)) else ref["COUNT(*)"]
+        if count == 0:
+            db.execute("DELETE FROM artifact_versions WHERE artifact_id = ?", (aid,))
+            db.execute("DELETE FROM artifacts WHERE id = ?", (aid,))
+
+    db.commit()
+    return True
 
 
 def _pack_row_to_dict(row: Any) -> dict[str, Any]:
