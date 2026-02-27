@@ -387,7 +387,7 @@ async def _build_chat_system_prompt(
     if artifact_registry is not None:
         _artifact_parts: list[str] = []
         for _atype in ("instruction", "rule", "context"):
-            for _art in artifact_registry.list(artifact_type=_atype):
+            for _art in artifact_registry.list_all(artifact_type=_atype):
                 if _art.content:
                     tag = f'<artifact type="{_atype}" fqn="{_art.fqn}">'
                     _artifact_parts.append(f"{tag}\n{_art.content}\n</artifact>")
