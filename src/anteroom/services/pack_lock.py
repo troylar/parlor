@@ -168,11 +168,11 @@ def validate_lock(db: sqlite3.Connection, project_dir: Path) -> list[str]:
         lock_pack_keys.add((ns, name))
 
         # Check pack exists in DB
-        pack_row = db.execute(
+        pack_rows = db.execute(
             "SELECT id FROM packs WHERE namespace = ? AND name = ?",
             (ns, name),
-        ).fetchone()
-        if not pack_row:
+        ).fetchall()
+        if not pack_rows:
             warnings.append(f"Pack {ns}/{name} in lock file but not installed")
             continue
 

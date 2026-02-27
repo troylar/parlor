@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,6 @@ from ..services.space_storage import (
 )
 from ..services.space_storage import (
     get_space,
-    get_space_by_name,
     get_space_paths,
     list_spaces,
 )
@@ -69,15 +67,7 @@ async def api_list_spaces(request: Request) -> list[dict[str, Any]]:
 @router.post("/spaces", status_code=201)
 async def api_create_space(request: Request, body: SpaceCreateRequest) -> dict[str, Any]:
     db = _get_db(request)
-
-    existing = get_space_by_name(db, body.name)
-    if existing:
-        raise HTTPException(status_code=409, detail=f"Space {body.name!r} already exists")
-
-    try:
-        return db_create_space(db, name=body.name, file_path=body.file_path, file_hash=body.file_hash)
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=409, detail=f"Space {body.name!r} already exists")
+    return db_create_space(db, name=body.name, file_path=body.file_path, file_hash=body.file_hash)
 
 
 @router.get("/spaces/{space_id}")

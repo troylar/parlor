@@ -279,8 +279,7 @@ CREATE TABLE IF NOT EXISTS packs (
     description TEXT NOT NULL DEFAULT '',
     source_path TEXT NOT NULL DEFAULT '',
     installed_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(namespace, name)
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pack_artifacts (
@@ -530,7 +529,7 @@ def _create_indexes(conn: sqlite3.Connection) -> None:
     safe to run unconditionally on both fresh and migrated databases.
     """
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_space_paths_space ON space_paths(space_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, position)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_change_log_id ON change_log(id)")
@@ -926,8 +925,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             description TEXT NOT NULL DEFAULT '',
             source_path TEXT NOT NULL DEFAULT '',
             installed_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(namespace, name)
+            updated_at TEXT NOT NULL
         )"""
     )
     conn.execute(
@@ -1008,6 +1006,44 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         conn.execute("ALTER TABLE conversations ADD COLUMN space_id TEXT DEFAULT NULL")
     if "space_id" not in folder_cols:
         conn.execute("ALTER TABLE folders ADD COLUMN space_id TEXT DEFAULT NULL")
+
+
+    # Drop UNIQUE constraint on space names (v1.79.0)
+    try:
+        conn.execute("DROP INDEX IF EXISTS idx_spaces_name")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name)")
+    except sqlite3.OperationalError:
+        pass
+
+    # Drop UNIQUE(namespace, name) on packs (v1.79.0)
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'"
+        ).fetchone()
+        if row:
+            ddl = row[0] if isinstance(row, (tuple, list)) else row["sql"]
+            if ddl and "UNIQUE" in ddl:
+                conn.execute(
+                    """CREATE TABLE IF NOT EXISTS packs_new (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        namespace TEXT NOT NULL,
+                        version TEXT NOT NULL DEFAULT '0.0.0',
+                        description TEXT NOT NULL DEFAULT '',
+                        source_path TEXT NOT NULL DEFAULT '',
+                        installed_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )"""
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO packs_new SELECT id, name, namespace, version, "
+                    "description, source_path, installed_at, updated_at FROM packs"
+                )
+                conn.execute("DROP TABLE packs")
+                conn.execute("ALTER TABLE packs_new RENAME TO packs")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
+    except sqlite3.OperationalError:
+        pass
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:
