@@ -629,6 +629,7 @@ def _build_system_prompt(
     builtin_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
     project_instructions: str | None = None,
+    artifact_registry: Any = None,
 ) -> str:
     runtime_ctx = build_runtime_context(
         model=config.ai.model,
@@ -650,6 +651,17 @@ def _build_system_prompt(
         parts.append(f"\n{project_instructions}")
     if instructions:
         parts.append(f"\n{instructions}")
+
+    # Inject artifacts (instructions, rules, context) from the registry
+    if artifact_registry is not None:
+        from ..services.artifacts import ArtifactType
+
+        for art_type in (ArtifactType.INSTRUCTION, ArtifactType.RULE, ArtifactType.CONTEXT):
+            artifacts = artifact_registry.list_all(artifact_type=art_type)
+            for art in artifacts:
+                if art.content.strip():
+                    parts.append(f"\n<!-- artifact:{art.fqn} -->\n{art.content}")
+
     return "\n".join(parts)
 
 
@@ -1198,6 +1210,12 @@ async def run_cli(
     # Build introspect instructions info for the introspect tool
     _introspect_instructions_info = _build_introspect_instructions_info(working_dir)
 
+    # Initialize ArtifactRegistry with 6-layer precedence
+    from ..services.artifact_registry import ArtifactRegistry
+
+    _artifact_registry = ArtifactRegistry()
+    _artifact_registry.load_from_db(db)
+
     mcp_statuses = mcp_manager.get_server_statuses() if mcp_manager else None
     extra_system_prompt = _build_system_prompt(
         config,
@@ -1206,6 +1224,7 @@ async def run_cli(
         builtin_tools=tool_registry.list_tools(),
         mcp_servers=mcp_statuses,
         project_instructions=_project_instructions,
+        artifact_registry=_artifact_registry,
     )
 
     # Inject canary token into trusted section (before untrusted marker)
@@ -1375,6 +1394,7 @@ async def run_cli(
                 project_id=project_id,
                 instructions=instructions,
                 project_instructions=_project_instructions,
+                artifact_registry=_artifact_registry,
             )
     finally:
         if retention_worker:
@@ -1675,6 +1695,7 @@ async def _run_repl(
     project_id: str | None = None,
     instructions: str | None = None,
     project_instructions: str | None = None,
+    artifact_registry: Any = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -1777,6 +1798,8 @@ async def _run_repl(
         "tools",
         "skills",
         "reload-skills",
+        "pack",
+        "packs",
         "project",
         "projects",
         "mcp",
@@ -1934,6 +1957,7 @@ async def _run_repl(
                         builtin_tools=tool_registry.list_tools(),
                         mcp_servers=mcp_manager.get_server_statuses() if mcp_manager else None,
                         project_instructions=project_instructions,
+                        artifact_registry=artifact_registry,
                     )
         else:
             renderer.render_error(f"Conversation {resume_conversation_id} not found, starting new")
@@ -2945,6 +2969,189 @@ async def _run_repl(
                             renderer.console.print(f"[{CHROME}]Active project: {_active_project[0]['name']}[/{CHROME}]")
                         renderer.console.print(
                             f"[{CHROME}]Usage: /project [list|create|select|edit|delete|clear|sources][/{CHROME}]\n"
+                        )
+                    continue
+                elif cmd in ("/packs", "/pack"):
+                    parts = user_input.split(maxsplit=2)
+                    sub = parts[1].lower() if len(parts) >= 2 else ""
+                    if cmd == "/packs":
+                        sub = "list"
+
+                    if sub == "list" or (cmd == "/pack" and not sub):
+                        installed = packs_service.list_packs(db)
+                        if not installed:
+                            renderer.console.print(
+                                f"\n[{CHROME}]No packs installed."
+                                f" Install from a directory: /pack install <path>[/{CHROME}]\n"
+                            )
+                            continue
+                        renderer.console.print("\n[bold]Installed Packs:[/bold]")
+                        for p in installed:
+                            ns = p.get("namespace", "default")
+                            desc = f" — {p['description']}" if p.get("description") else ""
+                            renderer.console.print(
+                                f"  @{ns}/{p['name']} v{p.get('version', '?')}"
+                                f" ({p.get('artifact_count', 0)} artifacts){desc}"
+                            )
+                        renderer.console.print()
+
+                    elif sub == "show":
+                        ref = parts[2].strip() if len(parts) >= 3 else ""
+                        if not ref:
+                            renderer.console.print(f"[{CHROME}]Usage: /pack show <namespace/name>[/{CHROME}]\n")
+                            continue
+                        ns, _, name = ref.rpartition("/")
+                        if not ns:
+                            ns = "default"
+                        pack_info = packs_service.get_pack(db, ns, name)
+                        if not pack_info:
+                            renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
+                            continue
+                        renderer.console.print(f"\n[bold]@{ns}/{name}[/bold] v{pack_info.get('version', '?')}")
+                        if pack_info.get("description"):
+                            renderer.console.print(f"  {pack_info['description']}")
+                        artifacts = pack_info.get("artifacts", [])
+                        if artifacts:
+                            renderer.console.print(f"\n  [bold]Artifacts ({len(artifacts)}):[/bold]")
+                            for a in artifacts:
+                                renderer.console.print(f"    {a.get('type', '?')}: {a.get('name', '?')}")
+                        renderer.console.print()
+
+                    elif sub == "install":
+                        target = parts[2].strip() if len(parts) >= 3 else ""
+                        if not target:
+                            renderer.console.print(f"[{CHROME}]Usage: /pack install <path>[/{CHROME}]\n")
+                            continue
+                        pack_path = Path(target).expanduser().resolve()
+                        manifest_path = pack_path / "pack.yaml"
+                        if not manifest_path.exists():
+                            renderer.console.print(
+                                f"[{CHROME}]No pack.yaml found in {pack_path}[/{CHROME}]\n"
+                            )
+                            continue
+                        try:
+                            manifest = packs_service.parse_manifest(manifest_path)
+                            errors = packs_service.validate_manifest(manifest, pack_path)
+                            if errors:
+                                for e in errors:
+                                    renderer.console.print(f"[red]  {e}[/red]")
+                                continue
+                            result = packs_service.install_pack(db, manifest, pack_path)
+                            renderer.console.print(
+                                f"[green]Installed[/green] @{manifest.namespace}/{manifest.name}"
+                                f" v{manifest.version} ({result.get('artifact_count', 0)} artifacts)"
+                            )
+                        except ValueError as exc:
+                            renderer.console.print(f"[red]{exc}[/red]")
+                        renderer.console.print()
+
+                    elif sub == "remove":
+                        ref = parts[2].strip() if len(parts) >= 3 else ""
+                        if not ref:
+                            renderer.console.print(f"[{CHROME}]Usage: /pack remove <namespace/name>[/{CHROME}]\n")
+                            continue
+                        ns, _, name = ref.rpartition("/")
+                        if not ns:
+                            ns = "default"
+                        removed = packs_service.remove_pack(db, ns, name)
+                        if removed:
+                            renderer.console.print(f"[green]Removed[/green] @{ns}/{name}\n")
+                        else:
+                            renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
+
+                    elif sub == "sources":
+                        from ..services.pack_sources import list_cached_sources
+
+                        sources_cfg = getattr(config, "pack_sources", []) or []
+                        if not sources_cfg:
+                            renderer.console.print(
+                                f"\n[{CHROME}]No pack sources configured."
+                                f" Add one: /pack add-source <url>[/{CHROME}]\n"
+                            )
+                            continue
+                        data_dir = config.app.data_dir
+                        cached = list_cached_sources(data_dir)
+                        cached_map = {c.url: c for c in cached}
+                        renderer.console.print("\n[bold]Pack Sources:[/bold]")
+                        for src in sources_cfg:
+                            url = src.url if hasattr(src, "url") else src.get("url", "?")
+                            branch = src.branch if hasattr(src, "branch") else src.get("branch", "main")
+                            c = cached_map.get(url)
+                            status = f"[green]cached[/green] ({c.ref[:8]})" if c else "[yellow]not cloned[/yellow]"
+                            renderer.console.print(f"  {url} ({branch}) — {status}")
+                        renderer.console.print()
+
+                    elif sub == "refresh":
+                        from ..services import pack_sources as ps_mod
+
+                        sources_cfg = getattr(config, "pack_sources", []) or []
+                        if not sources_cfg:
+                            renderer.console.print(
+                                f"[{CHROME}]No pack sources configured."
+                                f" Add one: /pack add-source <url>[/{CHROME}]\n"
+                            )
+                            continue
+                        data_dir = config.app.data_dir
+                        total_installed = 0
+                        total_updated = 0
+                        for src in sources_cfg:
+                            url = src.url if hasattr(src, "url") else src.get("url", "?")
+                            branch = src.branch if hasattr(src, "branch") else src.get("branch", "main")
+                            renderer.console.print(f"  Refreshing {url}...")
+                            result = ps_mod.ensure_source(url, branch, data_dir)
+                            if not result.success:
+                                renderer.console.print(f"  [red]Failed: {result.error}[/red]")
+                                continue
+                            if result.path:
+                                from ..services.pack_refresh import install_from_source
+
+                                i, u = install_from_source(db, result.path)
+                                total_installed += i
+                                total_updated += u
+                        renderer.console.print(
+                            f"[green]Done:[/green] {total_installed} installed, {total_updated} updated\n"
+                        )
+
+                    elif sub == "add-source":
+                        url = parts[2].strip() if len(parts) >= 3 else ""
+                        if not url:
+                            renderer.console.print(
+                                f"[{CHROME}]Usage: /pack add-source <git-url>[/{CHROME}]\n"
+                            )
+                            continue
+                        import stat
+
+                        import yaml
+
+                        from ..config import _get_config_path
+
+                        config_path = _get_config_path()
+                        config_path.parent.mkdir(parents=True, exist_ok=True)
+                        raw: dict[str, object] = {}
+                        if config_path.exists():
+                            with open(config_path) as f:
+                                raw = yaml.safe_load(f) or {}
+                        sources_list: list[dict[str, object]] = raw.setdefault("pack_sources", [])  # type: ignore[assignment]
+                        existing_urls = [s.get("url") for s in sources_list if isinstance(s, dict)]
+                        if url in existing_urls:
+                            renderer.console.print(f"[{CHROME}]Source already configured: {url}[/{CHROME}]\n")
+                            continue
+                        sources_list.append({"url": url, "branch": "main", "refresh_interval": 30})
+                        with open(config_path, "w", encoding="utf-8") as f:
+                            yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+                        try:
+                            config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                        except OSError:
+                            pass
+                        renderer.console.print(f"[green]Added pack source:[/green] {url}")
+                        renderer.console.print(
+                            f"[{MUTED}]Run /pack refresh to clone and install packs.[/{MUTED}]\n"
+                        )
+
+                    else:
+                        renderer.console.print(
+                            f"[{CHROME}]Usage: /pack"
+                            f" [list|show|install|remove|sources|refresh|add-source][/{CHROME}]\n"
                         )
                     continue
                 elif cmd == "/artifact-check":

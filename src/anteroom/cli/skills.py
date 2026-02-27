@@ -58,6 +58,8 @@ _BUILTIN_COMMANDS = frozenset(
         "project",
         "mcp",
         "model",
+        "pack",
+        "packs",
         "plan",
         "verbose",
         "detail",
