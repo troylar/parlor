@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.73.0
+
+**New:**
+
+- `/pack` REPL commands: list, show, install, remove, sources, refresh, add-source — manage packs without leaving the REPL (#525)
+- `/pack-create` skill: guided AI-driven pack authoring with manifest scaffolding and validation (#527)
+- Welcome banner now shows skill/pack counts and first-run hint (#526)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.73.0)
+
 ### v1.72.1
 
 **Fixed:**
