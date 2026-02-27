@@ -7,6 +7,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.74.0
+
+**New:**
+
+- Spaces: named YAML workspaces bundling repos, packs, sources, instructions, and config overrides (#532)
+- CLI `aroom space` subcommands and `/space` REPL commands for full space lifecycle (#551, #552)
+- Space config overlay merges between personal and project layers with team enforcement (#553)
+- Hot-reload file watcher detects space YAML changes automatically (#553)
+- Web UI REST API for spaces with chat integration (#554)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.74.0)
+
 ### v1.73.2
 
 **Fixed:**
