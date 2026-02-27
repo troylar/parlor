@@ -1,0 +1,11 @@
+name: security-baseline
+namespace: anteroom
+version: 1.0.0
+description: Security baseline rules — no eval, parameterized queries, no hardcoded secrets
+artifacts:
+  - type: rule
+    name: no-eval
+  - type: rule
+    name: parameterized-queries
+  - type: rule
+    name: no-hardcoded-secrets

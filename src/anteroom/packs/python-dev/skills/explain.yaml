@@ -1,0 +1,11 @@
+name: explain
+description: Explain how a piece of code works in plain language
+content: |
+  Explain the following code in plain language. Break down:
+  1. What it does at a high level
+  2. Key data structures and their purpose
+  3. Control flow and important branches
+  4. Any patterns or idioms used
+  5. Potential edge cases or gotchas
+
+  Be concise but thorough. Use bullet points for clarity.

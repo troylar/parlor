@@ -1,0 +1,11 @@
+name: python-dev
+namespace: anteroom
+version: 1.0.0
+description: Python development best practices — type hints, testing, and code explanation
+artifacts:
+  - type: rule
+    name: type-hints
+  - type: rule
+    name: testing-required
+  - type: skill
+    name: explain
