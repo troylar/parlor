@@ -163,6 +163,91 @@ def resolve_pack_id(db: sqlite3.Connection, namespace: str, name: str) -> str | 
     return row[0] if isinstance(row, (tuple, list)) else row["id"]
 
 
+def attach_pack_to_space(
+    db: sqlite3.Connection,
+    pack_id: str,
+    space_id: str,
+) -> dict[str, Any]:
+    """Attach a pack to a space scope.
+
+    Raises ``ValueError`` if the pack or space doesn't exist, or is already
+    attached to this space.
+    """
+    pack = db.execute("SELECT id, namespace, name FROM packs WHERE id = ?", (pack_id,)).fetchone()
+    if not pack:
+        msg = f"Pack not found: {pack_id}"
+        raise ValueError(msg)
+
+    space = db.execute("SELECT id FROM spaces WHERE id = ?", (space_id,)).fetchone()
+    if not space:
+        msg = f"Space not found: {space_id}"
+        raise ValueError(msg)
+
+    existing = db.execute(
+        "SELECT id FROM pack_attachments WHERE pack_id = ? AND space_id = ?",
+        (pack_id, space_id),
+    ).fetchone()
+    if existing:
+        ns = pack["namespace"] if isinstance(pack, dict) else pack[1]
+        nm = pack["name"] if isinstance(pack, dict) else pack[2]
+        msg = f"Pack {ns}/{nm} is already attached to space {space_id}"
+        raise ValueError(msg)
+
+    att_id = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "INSERT INTO pack_attachments (id, pack_id, space_id, scope, created_at) VALUES (?, ?, ?, 'space', ?)",
+        (att_id, pack_id, space_id, now),
+    )
+    db.commit()
+
+    return {"id": att_id, "pack_id": pack_id, "space_id": space_id, "scope": "space", "created_at": now}
+
+
+def detach_pack_from_space(
+    db: sqlite3.Connection,
+    pack_id: str,
+    space_id: str,
+) -> bool:
+    """Detach a pack from a space. Returns True if found and removed."""
+    cursor = db.execute(
+        "DELETE FROM pack_attachments WHERE pack_id = ? AND space_id = ?",
+        (pack_id, space_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def get_active_pack_ids_for_space(
+    db: sqlite3.Connection,
+    space_id: str,
+    *,
+    project_path: str | None = None,
+) -> list[str]:
+    """Return pack IDs active for a space context.
+
+    Includes global + space-specific attachments, plus project-specific
+    if *project_path* is provided (three-scope union).
+    """
+    if project_path is not None:
+        rows = db.execute(
+            "SELECT DISTINCT pack_id FROM pack_attachments "
+            "WHERE (project_path IS NULL AND space_id IS NULL) "
+            "   OR (space_id = ?) "
+            "   OR (space_id IS NULL AND project_path = ?)",
+            (space_id, project_path),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT DISTINCT pack_id FROM pack_attachments "
+            "WHERE (project_path IS NULL AND space_id IS NULL) "
+            "   OR space_id = ?",
+            (space_id,),
+        ).fetchall()
+
+    return [r[0] if isinstance(r, (tuple, list)) else r["pack_id"] for r in rows]
+
+
 def _row_to_dict(row: Any) -> dict[str, Any]:
     """Convert a DB row to a dict."""
     if isinstance(row, sqlite3.Row):
