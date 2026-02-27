@@ -7,6 +7,20 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.72.0
+
+**New:**
+
+- Pack ecosystem: starter packs, pack attachments (global/project scope), local artifacts, and artifact import/migration (#507)
+- Built-in `python-dev` and `security-baseline` starter packs auto-install at startup (#507)
+- CLI commands: `pack attach`, `pack detach`, `artifact import`, `artifact create` (#507)
+
+**Improved:**
+
+- Path traversal prevention on artifact names and project paths (#507)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.72.0)
+
 ### v1.71.1
 
 **New:**
