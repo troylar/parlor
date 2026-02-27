@@ -159,10 +159,11 @@ def _read(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
     cell_range: str | None = kwargs.get("cell_range")
 
     try:
+        available = list(wb.sheetnames)
         if sheet_name:
-            if sheet_name not in wb.sheetnames:
+            if sheet_name not in available:
                 wb.close()
-                return {"error": f"Sheet '{sheet_name}' not found. Available: {wb.sheetnames}"}
+                return {"error": f"Sheet '{sheet_name}' not found. Available: {available}"}
             ws = wb[sheet_name]
         else:
             ws = wb.active
@@ -189,6 +190,8 @@ def _read(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
         wb.close()
         return {"error": f"Unable to read range from: {display_path}"}
 
+    sheet_title = ws.title
+    sheets_available = list(wb.sheetnames)
     wb.close()
 
     content = json.dumps(output_rows, ensure_ascii=False, default=str)
@@ -197,8 +200,8 @@ def _read(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
 
     return {
         "content": content,
-        "sheet": ws.title,
-        "sheets_available": wb.sheetnames,
+        "sheet": sheet_title,
+        "sheets_available": sheets_available,
         "rows_read": len(output_rows),
     }
 

@@ -178,6 +178,15 @@ class TestEdit:
 
 class TestPathValidation:
     @pytest.mark.asyncio
+    async def test_blocked_system_path_rejected(self):
+        result = await handle(
+            action="create",
+            path="/etc/shadow",
+            slides=[{"title": "x"}],
+        )
+        assert "error" in result
+
+    @pytest.mark.asyncio
     async def test_null_bytes_rejected(self):
         result = await handle(action="read", path="test\x00.pptx")
         assert "error" in result

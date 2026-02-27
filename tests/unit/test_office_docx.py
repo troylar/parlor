@@ -184,14 +184,13 @@ class TestEdit:
 
 class TestPathValidation:
     @pytest.mark.asyncio
-    async def test_path_traversal_rejected(self):
+    async def test_blocked_system_path_rejected(self):
         result = await handle(
             action="create",
-            path="../../etc/passwd.docx",
+            path="/etc/shadow",
             content_blocks=[{"type": "paragraph", "text": "x"}],
         )
-        # validate_path should reject traversal
-        assert "error" in result or (result.get("path", "").startswith("../../"))
+        assert "error" in result
 
     @pytest.mark.asyncio
     async def test_null_bytes_rejected(self):

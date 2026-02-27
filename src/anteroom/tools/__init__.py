@@ -354,7 +354,7 @@ def _register_optional_office_tools(registry: ToolRegistry, working_dir: str | N
     for mod_name in ("office_docx", "office_xlsx", "office_pptx"):
         try:
             module = importlib.import_module(f".{mod_name}", package=__package__)
-        except Exception:
+        except ImportError:
             continue
         if not getattr(module, "AVAILABLE", False):
             continue
