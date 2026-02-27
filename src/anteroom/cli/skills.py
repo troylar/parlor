@@ -61,6 +61,8 @@ _BUILTIN_COMMANDS = frozenset(
         "pack",
         "packs",
         "plan",
+        "space",
+        "spaces",
         "verbose",
         "detail",
         "resume",

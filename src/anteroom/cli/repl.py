@@ -3194,9 +3194,46 @@ async def _run_repl(
                         renderer.console.print(f"[{CHROME}]Cleared space: {old_name}[/{CHROME}]\n")
 
                     elif sub == "create":
+                        name = parts[2].strip() if len(parts) >= 3 else ""
+                        if not name:
+                            renderer.console.print(f"[{CHROME}]Usage: /space create <name>[/{CHROME}]\n")
+                            continue
+                        import re as _re_mod
+
+                        if not _re_mod.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$", name):
+                            renderer.render_error(
+                                f"Invalid space name: {name!r} (must be alphanumeric, hyphens, underscores)"
+                            )
+                            continue
+                        from ..services.space_storage import create_space as _cs
+                        from ..services.spaces import SpaceConfig as _SpaceConfig
+                        from ..services.spaces import file_hash as _fh2
+                        from ..services.spaces import get_spaces_dir as _gsd
+                        from ..services.spaces import write_space_file as _wsf
+
+                        sdir = _gsd()
+                        spath = sdir / f"{name}.yaml"
+                        if spath.exists():
+                            renderer.render_error(f"Space file already exists: {spath}")
+                            continue
+                        existing = _get_space_by_name(db, name)
+                        if existing:
+                            renderer.render_error(f"Space '{name}' already exists in DB")
+                            continue
+                        _wsf(spath, _SpaceConfig(name=name))
+                        sp = _cs(db, name, str(spath), _fh2(spath))
+                        renderer.console.print(
+                            f"[green]Created space: {sp['name']}[/green] [{MUTED}]{sp['id'][:8]}...[/{MUTED}]\n"
+                        )
+                        renderer.console.print(f"  File: {spath}\n")
+                        renderer.console.print(
+                            "  Edit this file to add repos, pack sources, packs, and config overrides.\n"
+                        )
+
+                    elif sub == "load":
                         target = parts[2].strip() if len(parts) >= 3 else ""
                         if not target:
-                            renderer.console.print(f"[{CHROME}]Usage: /space create <path-to-yaml>[/{CHROME}]\n")
+                            renderer.console.print(f"[{CHROME}]Usage: /space load <path-to-yaml>[/{CHROME}]\n")
                             continue
                         from ..services.space_storage import create_space as _cs
                         from ..services.spaces import file_hash as _fh2
@@ -3223,14 +3260,14 @@ async def _run_repl(
                             continue
                         sp = _cs(db, scfg.name, str(spath), _fh2(spath))
                         renderer.console.print(
-                            f"[green]Created space: {sp['name']}[/green] [{MUTED}]{sp['id'][:8]}...[/{MUTED}]\n"
+                            f"[green]Loaded space: {sp['name']}[/green] [{MUTED}]{sp['id'][:8]}...[/{MUTED}]\n"
                         )
 
                     else:
                         if _active_space[0]:
                             renderer.console.print(f"[{CHROME}]Active space: {_active_space[0]['name']}[/{CHROME}]")
                         renderer.console.print(
-                            f"[{CHROME}]Usage: /space [list|show|switch|create|refresh|clear][/{CHROME}]\n"
+                            f"[{CHROME}]Usage: /space [list|show|switch|create|load|refresh|clear][/{CHROME}]\n"
                         )
                     continue
                 elif cmd in ("/packs", "/pack"):

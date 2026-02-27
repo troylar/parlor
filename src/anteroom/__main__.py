@@ -1135,15 +1135,18 @@ def _run_space(config: object, args: object) -> None:
         update_space,
     )
     from .services.spaces import (
+        SpaceConfig,
         file_hash,
+        get_spaces_dir,
         parse_space_file,
         validate_space,
+        write_space_file,
     )
 
     console = Console()
     action = getattr(args, "space_action", None)
     if not action:
-        console.print("Usage: aroom space {list,create,show,delete,refresh,clone,map,move-root}")
+        console.print("Usage: aroom space {list,create,load,show,delete,refresh,clone,map,move-root}")
         return
 
     db = get_db(config.app.data_dir / "anteroom.db")
@@ -1162,6 +1165,32 @@ def _run_space(config: object, args: object) -> None:
         console.print(table)
 
     elif action == "create":
+        import re as _re
+
+        name = args.name
+        if not _re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$", name):
+            console.print(
+                f"[red]Error:[/red] Invalid space name: {escape(name)!r}"
+                " (must be alphanumeric, hyphens, underscores)"
+            )
+            return
+        spaces_dir = get_spaces_dir()
+        target = spaces_dir / f"{name}.yaml"
+        if target.exists():
+            console.print(f"[red]Error:[/red] Space file already exists: {target}")
+            return
+        existing = get_space_by_name(db, name)
+        if existing:
+            console.print(f"[red]Error:[/red] Space {escape(name)!r} already exists in DB")
+            return
+        template_cfg = SpaceConfig(name=name)
+        write_space_file(target, template_cfg)
+        s = create_space(db, name, str(target), file_hash(target))
+        console.print(f"[green]Created space:[/green] {escape(s['name'])} (id: {s['id'][:8]}...)")
+        console.print(f"  File: {target}")
+        console.print("  Edit this file to add repos, pack sources, packs, and config overrides.")
+
+    elif action == "load":
         path = Path(args.path).expanduser().resolve()
         if not path.is_file():
             console.print(f"[red]Error:[/red] File not found: {path}")
@@ -1178,7 +1207,7 @@ def _run_space(config: object, args: object) -> None:
             console.print(f"[red]Error:[/red] Space {escape(space_cfg.name)!r} already exists")
             return
         s = create_space(db, space_cfg.name, str(path), file_hash(path))
-        console.print(f"[green]Created space:[/green] {escape(s['name'])} (id: {s['id'][:8]}...)")
+        console.print(f"[green]Loaded space:[/green] {escape(s['name'])} (id: {s['id'][:8]}...)")
 
     elif action == "show":
         space = get_space_by_name(db, args.name)
@@ -1721,8 +1750,10 @@ def main() -> None:
     space_parser = subparsers.add_parser("space", help="Manage spaces")
     space_subparsers = space_parser.add_subparsers(dest="space_action")
     space_subparsers.add_parser("list", help="List all spaces")
-    space_create_parser = space_subparsers.add_parser("create", help="Create a space from a YAML file")
-    space_create_parser.add_argument("path", help="Path to space YAML file")
+    space_create_parser = space_subparsers.add_parser("create", help="Create a new space with a starter template")
+    space_create_parser.add_argument("name", help="Space name")
+    space_load_parser = space_subparsers.add_parser("load", help="Load an existing space YAML file")
+    space_load_parser.add_argument("path", help="Path to space YAML file")
     space_show_parser = space_subparsers.add_parser("show", help="Show space details")
     space_show_parser.add_argument("name", help="Space name")
     space_delete_parser = space_subparsers.add_parser("delete", help="Delete a space")
