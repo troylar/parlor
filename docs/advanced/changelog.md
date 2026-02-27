@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.71.0
+
+**New:**
+
+- Artifact health check: analyze all loaded artifacts for conflicts, shadows, duplicates, bloat, and quality issues (#508)
+- Three interfaces: CLI (`aroom artifact check`), REPL (`/artifact-check`), and API (`GET /api/artifacts/check`) (#508)
+- Auto-fix mode removes exact duplicate artifacts; JSON output for CI/CD integration (#508)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.71.0)
+
 ### v1.70.0
 
 **New:**
