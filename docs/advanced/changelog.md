@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.71.1
+
+**New:**
+
+- Comprehensive packs & artifacts documentation: 20 new pages covering concepts, quickstart, all 7 artifact types, manifest format, CLI/API reference, pack sources, lock files, health checks, and troubleshooting (#519)
+- 8 end-to-end tutorials: install packs, create from scratch, share via git, team standardization, auto-updates, conflict management, health check diagnosis, CI/CD integration (#519)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.71.1)
+
 ### v1.71.0
 
 **New:**
