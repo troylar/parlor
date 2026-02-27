@@ -400,6 +400,8 @@ prompt: |
   | aroom db       | purge                   | Delete old conversations                       |
   | aroom db       | encrypt                 | Migrate to encrypted database                  |
   | aroom config   | validate                | Check compliance rules                         |
+  | aroom artifact | list                    | List artifacts with type/namespace/source filters |
+  | aroom artifact | show FQN                | Show artifact details with version history    |
   | aroom projects |                         | List named projects with metadata              |
 
   ### Built-in Tools

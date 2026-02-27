@@ -228,6 +228,40 @@ CREATE TABLE IF NOT EXISTS source_attachments (
     FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
     FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    id TEXT PRIMARY KEY,
+    fqn TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL CHECK(type IN (
+        'skill','rule','instruction','context','memory','mcp_server','config_overlay')),
+    namespace TEXT NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('built_in', 'global', 'team', 'project', 'local', 'inline')),
+    metadata TEXT NOT NULL DEFAULT '{}',
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_fqn ON artifacts(fqn);
+CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(type);
+CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace);
+
+CREATE TABLE IF NOT EXISTS artifact_versions (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(artifact_id, version),
+    FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_id ON artifact_versions(artifact_id);
 """
 
 _FTS_SCHEMA = """
@@ -763,6 +797,42 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
 
     # Add unique index on projects.name for name-based lookup (--project <name>)
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name ON projects(name)")
+
+    # Artifacts tables (v1.67.0)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS artifacts (
+            id TEXT PRIMARY KEY,
+            fqn TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL CHECK(type IN (
+        'skill','rule','instruction','context','memory','mcp_server','config_overlay')),
+            namespace TEXT NOT NULL,
+            name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            source TEXT NOT NULL CHECK(source IN ('built_in', 'global', 'team', 'project', 'local', 'inline')),
+            metadata TEXT NOT NULL DEFAULT '{}',
+            user_id TEXT DEFAULT NULL,
+            user_display_name TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_fqn ON artifacts(fqn)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_namespace ON artifacts(namespace)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS artifact_versions (
+            id TEXT PRIMARY KEY,
+            artifact_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(artifact_id, version),
+            FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact_id ON artifact_versions(artifact_id)")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:

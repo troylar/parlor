@@ -622,6 +622,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
 
     from .routers import (
         approvals,
+        artifacts,
         chat,
         config_api,
         conversations,
@@ -645,6 +646,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
     app.include_router(sources.router, prefix="/api")
     app.include_router(usage.router, prefix="/api")
     app.include_router(plan.router, prefix="/api")
+    app.include_router(artifacts.router, prefix="/api")
 
     if config.proxy.enabled:
         from .routers import proxy
