@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.80.0
+
+**New:**
+
+- GUID identity for spaces and packs — duplicate human-friendly names are now allowed, with interactive disambiguation picker in CLI and 409 responses in API (#579)
+- New `by-id` pack API endpoints for unambiguous programmatic access (#579)
+- ID prefix matching — type the first few characters of a GUID to resolve directly (#579)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.80.0)
+
 ### v1.79.1
 
 **Improved:**
