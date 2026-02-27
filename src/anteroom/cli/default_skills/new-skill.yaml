@@ -74,3 +74,6 @@ prompt: |
   6. Write the YAML file to disk. IMPORTANT: use `.yaml` extension (not `.yml`)
   7. After writing, read the file back and parse it as YAML to confirm it is valid
   8. Tell the user to run `/skills` to see it in the list (shows searched directories)
+  9. Mention: "Skills are one of 7 artifact types in Anteroom (alongside rules,
+     instructions, context, memory, MCP servers, and config overlays). To share
+     this skill with your team, bundle it into a pack with `/pack-create`."

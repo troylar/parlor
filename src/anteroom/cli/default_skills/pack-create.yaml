@@ -1,0 +1,115 @@
+name: pack-create
+description: Scaffold a new pack with manifest and artifact files
+prompt: |
+  Help the user create a new Anteroom pack — a shareable bundle of skills, rules,
+  instructions, and other artifacts.
+
+  ## Pack Manifest Schema (pack.yaml)
+
+  ```yaml
+  namespace: my-team          # lowercase alphanumeric, hyphens, underscores, dots (1-64 chars)
+  name: my-pack               # same format as namespace
+  version: "1.0.0"            # semver string (quoted to avoid YAML float parsing)
+  description: "What this pack does"
+  artifacts:
+    - type: skill             # one of the 7 artifact types below
+      name: my-skill          # lowercase alphanumeric, hyphens, underscores
+      file: skills/my-skill.yaml  # relative path from pack.yaml (optional — convention used if omitted)
+  ```
+
+  ### Artifact Types
+
+  | Type | Directory Convention | Extension | Purpose |
+  |------|---------------------|-----------|---------|
+  | skill | skills/ | .yaml | Reusable prompt template invoked as /skill-name |
+  | rule | rules/ | .md | Always-on instruction injected every turn |
+  | instruction | instructions/ | .md | Static system prompt context |
+  | context | context/ | .md | Dynamic per-turn reference material |
+  | memory | memories/ | .md | Persistent cross-session knowledge |
+  | mcp_server | mcp_servers/ | .yaml | MCP server connection config |
+  | config_overlay | config_overlays/ | .yaml | YAML config fragment merged at runtime |
+
+  ### Name/Namespace Rules
+
+  - Pattern: `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`
+  - Keep lowercase for FQN compatibility (FQNs are `@namespace/type/name`)
+  - Hyphens preferred over underscores for readability
+
+  ### Skill Artifact File Format
+
+  ```yaml
+  name: skill-name
+  description: One-line description
+  prompt: |
+    Multi-line prompt template.
+    Use {args} for user argument substitution.
+  ```
+
+  ### Rule / Instruction / Context / Memory File Format
+
+  Plain markdown files. The entire file content becomes the artifact content.
+
+  ## Workflow
+
+  The user's request: {args}
+
+  1. **Understand intent.** If no request was provided above, ask the user:
+     - What do you want to package? (skills? rules? both?)
+     - What do they do? (brief description of each artifact)
+     - Who is this for? (team name becomes the namespace)
+
+     If a request was provided, extract these answers from it — do NOT re-ask
+     questions that are already answered.
+
+  2. **Choose namespace and name.**
+     - Namespace: team or org identifier (e.g., `platform-team`, `data-eng`)
+     - Name: descriptive pack name (e.g., `code-review-tools`, `onboarding-rules`)
+     - Both must be lowercase, alphanumeric with hyphens
+
+  3. **Design artifacts.** For each artifact the user described:
+     - Pick the correct type from the 7 types above
+     - Choose a clear, kebab-case name
+     - Determine the file path (use convention: `<type_dir>/<name>.<ext>`)
+
+  4. **Create the pack directory structure.** Use `write_file` to create:
+     - The pack directory (named after the pack)
+     - Each artifact file with appropriate content
+     - `pack.yaml` manifest listing all artifacts
+
+     Write artifact files FIRST, then `pack.yaml` last. This way the manifest
+     references files that already exist.
+
+  5. **Validate the pack.** Run this command with `bash`:
+
+     ```
+     python3 -c "
+     from pathlib import Path
+     from anteroom.services.packs import parse_manifest, validate_manifest
+     m = parse_manifest(Path('<pack-dir>/pack.yaml'))
+     errors = validate_manifest(m, Path('<pack-dir>'))
+     if errors:
+         for e in errors:
+             print(f'ERROR: {e}')
+     else:
+         print(f'Valid pack: {m.namespace}/{m.name} v{m.version} with {len(m.artifacts)} artifact(s)')
+     "
+     ```
+
+     Replace `<pack-dir>` with the actual directory path.
+
+     If validation reports errors, fix them and re-validate. Do not declare
+     success until validation passes.
+
+  6. **Report what was created.** Show:
+     - Pack location and structure (tree view)
+     - How to install: `/pack install <path-to-pack-dir>`
+     - How to share: suggest initializing a git repo if not already in one
+
+  ## Constraints
+
+  - Do NOT guess the manifest format — use the schema above exactly
+  - Do NOT create empty artifacts — every artifact file must have meaningful content
+  - Do NOT skip validation — always run the validation step
+  - Keep skill prompts focused: one skill = one workflow
+  - Use YAML block scalar `prompt: |` for multi-line skill prompts
+  - Use `.yaml` extension for skill and config files, `.md` for rules/instructions/context/memory
