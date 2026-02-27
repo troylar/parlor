@@ -19,8 +19,16 @@ ConfirmCallback = Callable[[SafetyVerdict], Coroutine[Any, Any, bool]]
 
 # Tools whose output contains external/filesystem content — tagged untrusted for prompt injection defense.
 _UNTRUSTED_TOOLS = {
-    "read_file", "grep", "glob_files", "bash", "write_file", "edit_file", "run_agent",
-    "docx", "xlsx", "pptx",
+    "read_file",
+    "grep",
+    "glob_files",
+    "bash",
+    "write_file",
+    "edit_file",
+    "run_agent",
+    "docx",
+    "xlsx",
+    "pptx",
 }
 
 

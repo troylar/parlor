@@ -47,8 +47,7 @@ DEFINITION: dict[str, Any] = {
             "sheets": {
                 "type": "array",
                 "description": (
-                    "Sheets for create action. "
-                    "Each: {name: str, rows: [[value, ...], ...], headers?: [str, ...]}."
+                    "Sheets for create action. Each: {name: str, rows: [[value, ...], ...], headers?: [str, ...]}."
                 ),
                 "items": {"type": "object"},
             },
