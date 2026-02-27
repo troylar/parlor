@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.68.0
+
+**New:**
+
+- Universal artifact system: skills, rules, instructions, context, memories, MCP servers, and config overlays as first-class versioned entities (#504)
+- 6-layer precedence resolution for artifact loading (`built_in` through `inline`) (#504)
+- CLI `aroom artifact list/show` commands and read-only API endpoints (#504)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.68.0)
+
 ### v1.67.0
 
 **New:**
