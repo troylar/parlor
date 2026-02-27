@@ -94,6 +94,7 @@ class TestInitDb:
             "folder_id",
             "user_id",
             "user_display_name",
+            "space_id",
             "created_at",
             "updated_at",
         }
