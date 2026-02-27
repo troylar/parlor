@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.78.2
+
+**Fixed:**
+
+- Bash tool subprocesses no longer hang when commands read from stdin — stdin is now closed immediately (#573)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.78.2)
+
 ### v1.78.1
 
 *Maintenance release — see GitHub Release for details.*
