@@ -573,7 +573,6 @@ def _get_pack_row(db: sqlite3.Connection, namespace: str, name: str) -> Any:
     ).fetchone()
 
 
-
 def _get_pack_rows(db: sqlite3.Connection, namespace: str, name: str) -> list[Any]:
     """Fetch all pack rows matching namespace and name."""
     return db.execute(
@@ -636,9 +635,7 @@ def resolve_pack(
 
 def remove_pack_by_id(db: sqlite3.Connection, pack_id: str) -> bool:
     """Remove a pack by its unique ID."""
-    row = db.execute(
-        "SELECT id FROM packs WHERE id = ?", (pack_id,)
-    ).fetchone()
+    row = db.execute("SELECT id FROM packs WHERE id = ?", (pack_id,)).fetchone()
     if not row:
         return False
 
@@ -653,9 +650,7 @@ def remove_pack_by_id(db: sqlite3.Connection, pack_id: str) -> bool:
     db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
 
     for aid in artifact_ids:
-        ref = db.execute(
-            "SELECT COUNT(*) FROM pack_artifacts WHERE artifact_id = ?", (aid,)
-        ).fetchone()
+        ref = db.execute("SELECT COUNT(*) FROM pack_artifacts WHERE artifact_id = ?", (aid,)).fetchone()
         count = ref[0] if isinstance(ref, (tuple, list)) else ref["COUNT(*)"]
         if count == 0:
             db.execute("DELETE FROM artifact_versions WHERE artifact_id = ?", (aid,))

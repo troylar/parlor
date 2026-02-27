@@ -65,7 +65,6 @@ def get_space_by_name(db: sqlite3.Connection, name: str) -> dict[str, Any] | Non
     return dict(row)
 
 
-
 def get_spaces_by_name(db: sqlite3.Connection, name: str) -> list[dict[str, Any]]:
     """Return all spaces matching *name* (there may be duplicates)."""
     rows = db.execute(
@@ -75,9 +74,7 @@ def get_spaces_by_name(db: sqlite3.Connection, name: str) -> list[dict[str, Any]
     return [dict(r) for r in rows]
 
 
-def resolve_space(
-    db: sqlite3.Connection, name_or_id: str
-) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def resolve_space(db: sqlite3.Connection, name_or_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Resolve a space by exact ID, ID prefix, or name.
 
     Returns ``(match, [])`` on unique match, or ``(None, candidates)`` when

@@ -1006,8 +1006,9 @@ def _run_pack(config: object, args: object) -> None:
         match, candidates = packs.resolve_pack(db, namespace, name)
         if not match and candidates:
             match = _pick_from_candidates(
-                candidates, "pack",
-                lambda c: f"{c['id'][:8]}  {c.get('namespace','')}/{c.get('name','')} v{c.get('version','')}",
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
             )
         pack_info = match
         if not pack_info:
@@ -1037,8 +1038,9 @@ def _run_pack(config: object, args: object) -> None:
         match, candidates = packs.resolve_pack(db, namespace, name)
         if not match and candidates:
             match = _pick_from_candidates(
-                candidates, "pack",
-                lambda c: f"{c['id'][:8]}  {c.get('namespace','')}/{c.get('name','')} v{c.get('version','')}",
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
             )
         if not match:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
@@ -1139,8 +1141,9 @@ def _run_pack(config: object, args: object) -> None:
         match, candidates = packs.resolve_pack(db, namespace, name)
         if not match and candidates:
             match = _pick_from_candidates(
-                candidates, "pack",
-                lambda c: f"{c['id'][:8]}  {c.get('namespace','')}/{c.get('name','')} v{c.get('version','')}",
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
             )
         if not match:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
@@ -1163,8 +1166,9 @@ def _run_pack(config: object, args: object) -> None:
         match, candidates = packs.resolve_pack(db, namespace, name)
         if not match and candidates:
             match = _pick_from_candidates(
-                candidates, "pack",
-                lambda c: f"{c['id'][:8]}  {c.get('namespace','')}/{c.get('name','')} v{c.get('version','')}",
+                candidates,
+                "pack",
+                lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
             )
         if not match:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")

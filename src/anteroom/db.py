@@ -1007,7 +1007,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
     if "space_id" not in folder_cols:
         conn.execute("ALTER TABLE folders ADD COLUMN space_id TEXT DEFAULT NULL")
 
-
     # Drop UNIQUE constraint on space names (v1.79.0)
     try:
         conn.execute("DROP INDEX IF EXISTS idx_spaces_name")
@@ -1017,9 +1016,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
 
     # Drop UNIQUE(namespace, name) on packs (v1.79.0)
     try:
-        row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'"
-        ).fetchone()
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'").fetchone()
         if row:
             ddl = row[0] if isinstance(row, (tuple, list)) else row["sql"]
             if ddl and "UNIQUE" in ddl:

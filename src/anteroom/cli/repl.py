@@ -3322,8 +3322,8 @@ async def _run_repl(
                             renderer.console.print(f"\nMultiple packs match @{ns}/{name}:")
                             for _pi, _c in enumerate(_pc, 1):
                                 renderer.console.print(
-                                    f"  {_pi}. {_c.get('namespace','')}/{_c.get('name','')} "
-                                    f"v{_c.get('version','')} [{_c['id'][:8]}...]"
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
                                 )
                             try:
                                 _ch = input(f"Select (1-{len(_pc)}): ").strip()
@@ -3385,8 +3385,8 @@ async def _run_repl(
                             renderer.console.print(f"\nMultiple packs match @{ns}/{name}:")
                             for _pi, _c in enumerate(_pc, 1):
                                 renderer.console.print(
-                                    f"  {_pi}. {_c.get('namespace','')}/{_c.get('name','')} "
-                                    f"v{_c.get('version','')} [{_c['id'][:8]}...]"
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
                                 )
                             try:
                                 _ch = input(f"Select (1-{len(_pc)}): ").strip()
@@ -3495,8 +3495,8 @@ async def _run_repl(
                             renderer.console.print(f"\nMultiple packs match @{rich_escape(ns)}/{rich_escape(name)}:")
                             for _pi, _c in enumerate(_pc, 1):
                                 renderer.console.print(
-                                    f"  {_pi}. {_c.get('namespace','')}/{_c.get('name','')} "
-                                    f"v{_c.get('version','')} [{_c['id'][:8]}...]"
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
                                 )
                             try:
                                 _ch = input(f"Select (1-{len(_pc)}): ").strip()
@@ -3541,8 +3541,8 @@ async def _run_repl(
                             renderer.console.print(f"\nMultiple packs match @{rich_escape(ns)}/{rich_escape(name)}:")
                             for _pi, _c in enumerate(_pc, 1):
                                 renderer.console.print(
-                                    f"  {_pi}. {_c.get('namespace','')}/{_c.get('name','')} "
-                                    f"v{_c.get('version','')} [{_c['id'][:8]}...]"
+                                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
                                 )
                             try:
                                 _ch = input(f"Select (1-{len(_pc)}): ").strip()
