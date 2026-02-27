@@ -403,6 +403,17 @@ prompt: |
   | aroom artifact | list                    | List artifacts with type/namespace/source filters |
   | aroom artifact | show FQN                | Show artifact details with version history    |
   | aroom artifact | check                   | Run artifact health check (--fix, --json)      |
+  | aroom artifact | import                  | Import skills/ANTEROOM.md as artifacts (--instructions) |
+  | aroom artifact | create                  | Create a new local artifact from template      |
+  | aroom pack     | list                    | List installed packs with artifact counts      |
+  | aroom pack     | install PATH            | Install a pack from local directory            |
+  | aroom pack     | show NAMESPACE/NAME     | Show pack details with artifact listing        |
+  | aroom pack     | remove NAMESPACE/NAME   | Remove an installed pack                       |
+  | aroom pack     | update PATH             | Update a pack from local directory             |
+  | aroom pack     | sources                 | List configured pack sources and cache status  |
+  | aroom pack     | refresh                 | Pull all configured pack sources and update    |
+  | aroom pack     | attach NAMESPACE/NAME   | Attach a pack to global/project scope (--project) |
+  | aroom pack     | detach NAMESPACE/NAME   | Detach a pack from global/project scope (--project) |
   | aroom projects |                         | List named projects with metadata              |
 
   ### Built-in Tools
