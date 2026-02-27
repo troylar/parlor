@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 26, 2026
 
+### v1.69.0
+
+**New:**
+
+- Pack management system: install, remove, update, and list artifact packs via CLI and REST API (#505)
+- YAML manifests with namespaced naming, reference counting, and lock file generation for reproducible installs (#505)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.69.0)
+
 ### v1.68.0
 
 **New:**
