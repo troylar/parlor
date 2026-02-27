@@ -323,12 +323,11 @@ CREATE TABLE IF NOT EXISTS pack_attachments (
     FOREIGN KEY(space_id) REFERENCES spaces(id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_attachments_unique
-    ON pack_attachments(pack_id, COALESCE(project_path, ''), COALESCE(space_id, ''));
-
 CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id);
 CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path);
-CREATE INDEX IF NOT EXISTS idx_pack_attachments_space ON pack_attachments(space_id);
+-- NOTE: idx_pack_attachments_unique and idx_pack_attachments_space are created in
+-- _run_migrations() because they reference space_id, which may not exist on databases
+-- created before v1.74.0.  The migration adds the column first, then the indexes.
 
 CREATE TABLE IF NOT EXISTS space_sources (
     space_id TEXT NOT NULL,
@@ -349,8 +348,9 @@ CREATE TABLE IF NOT EXISTS space_sources (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_space_sources_unique
     ON space_sources(space_id, COALESCE(source_id, ''), COALESCE(group_id, ''), COALESCE(tag_filter, ''));
 
-CREATE INDEX IF NOT EXISTS idx_conversations_space ON conversations(space_id);
-CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id);
+-- NOTE: idx_conversations_space and idx_folders_space are created in
+-- _run_migrations() because they reference space_id, which may not exist on
+-- databases created before v1.74.0.
 """
 
 _FTS_SCHEMA = """
@@ -961,10 +961,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             FOREIGN KEY(pack_id) REFERENCES packs(id) ON DELETE CASCADE
         )"""
     )
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_attachments_unique "
-        "ON pack_attachments(pack_id, COALESCE(project_path, ''), COALESCE(space_id, ''))"
-    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_pack ON pack_attachments(pack_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_project ON pack_attachments(project_path)")
 
@@ -977,7 +973,13 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         pa_cols = {row[1] for row in conn.execute("PRAGMA table_info(pack_attachments)").fetchall()}
         if "space_id" not in pa_cols:
             conn.execute("ALTER TABLE pack_attachments ADD COLUMN space_id TEXT DEFAULT NULL")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_space ON pack_attachments(space_id)")
+    # Indexes referencing space_id — created here (not _SCHEMA) so they run after the
+    # column is guaranteed to exist on databases migrated from pre-v1.74.0.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_attachments_space ON pack_attachments(space_id)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_attachments_unique "
+        "ON pack_attachments(pack_id, COALESCE(project_path, ''), COALESCE(space_id, ''))"
+    )
 
     # Spaces tables (v1.74.0)
     conn.execute(
@@ -1027,11 +1029,15 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         "ON space_sources(space_id, COALESCE(source_id, ''), COALESCE(group_id, ''), COALESCE(tag_filter, ''))"
     )
 
-    # Add space_id to conversations and folders
+    # Add space_id to conversations and folders (v1.74.0)
+    # Note: SQLite ALTER TABLE cannot add FK constraints. Fresh installs get the FK in
+    # CREATE TABLE. Migrated DBs rely on application-level cascade in space_storage.py.
     if "space_id" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN space_id TEXT DEFAULT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_space ON conversations(space_id)")
     if "space_id" not in folder_cols:
         conn.execute("ALTER TABLE folders ADD COLUMN space_id TEXT DEFAULT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id)")
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:

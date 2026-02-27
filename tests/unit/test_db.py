@@ -318,6 +318,135 @@ class TestMigrations:
         assert "created_at" in col_names
 
 
+class TestSpaceIdMigration:
+    """Regression tests for #562: space_id column migration on pre-v1.74.0 databases."""
+
+    def _init_pre_spaces_db(self) -> sqlite3.Connection:
+        """Create a DB with the pre-v1.74.0 schema — tables exist but without space_id."""
+        conn = sqlite3.connect(":memory:", check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                instructions TEXT NOT NULL DEFAULT '',
+                model TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS folders (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                parent_id TEXT DEFAULT NULL,
+                project_id TEXT DEFAULT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                collapsed INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS tags (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT NOT NULL DEFAULT '#3b82f6',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                model TEXT DEFAULT NULL,
+                project_id TEXT DEFAULT NULL,
+                folder_id TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                position INTEGER NOT NULL
+            );
+            -- pack_attachments existed since v1.70.0, but without space_id
+            CREATE TABLE IF NOT EXISTS pack_attachments (
+                id TEXT PRIMARY KEY,
+                pack_id TEXT NOT NULL,
+                project_path TEXT,
+                scope TEXT NOT NULL CHECK(scope IN ('global', 'project')),
+                created_at TEXT NOT NULL
+            );
+        """)
+        conn.commit()
+        return conn
+
+    def test_migration_succeeds_on_pre_spaces_db(self) -> None:
+        """init_db must not crash on a database created before spaces feature."""
+        from anteroom.db import _run_migrations
+
+        conn = self._init_pre_spaces_db()
+        _run_migrations(conn)
+
+    def test_space_id_added_to_conversations(self) -> None:
+        from anteroom.db import _run_migrations
+
+        conn = self._init_pre_spaces_db()
+        _run_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+        assert "space_id" in cols
+
+    def test_space_id_added_to_folders(self) -> None:
+        from anteroom.db import _run_migrations
+
+        conn = self._init_pre_spaces_db()
+        _run_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(folders)").fetchall()}
+        assert "space_id" in cols
+
+    def test_space_id_added_to_pack_attachments(self) -> None:
+        from anteroom.db import _run_migrations
+
+        conn = self._init_pre_spaces_db()
+        _run_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(pack_attachments)").fetchall()}
+        assert "space_id" in cols
+
+    def test_indexes_created_after_migration(self) -> None:
+        from anteroom.db import _run_migrations
+
+        conn = self._init_pre_spaces_db()
+        _run_migrations(conn)
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list(conversations)").fetchall()}
+        assert "idx_conversations_space" in indexes
+
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list(folders)").fetchall()}
+        assert "idx_folders_space" in indexes
+
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list(pack_attachments)").fetchall()}
+        assert "idx_pack_attachments_space" in indexes
+        assert "idx_pack_attachments_unique" in indexes
+
+    def test_migration_idempotent_with_space_id(self) -> None:
+        from anteroom.db import _run_migrations
+
+        conn = self._init_pre_spaces_db()
+        _run_migrations(conn)
+        _run_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+        assert "space_id" in cols
+
+    def test_fresh_db_also_gets_indexes(self) -> None:
+        """On a brand-new database, space_id indexes should also exist."""
+        conn = _init_in_memory()
+        from anteroom.db import _run_migrations
+
+        _run_migrations(conn)
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list(conversations)").fetchall()}
+        assert "idx_conversations_space" in indexes
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list(pack_attachments)").fetchall()}
+        assert "idx_pack_attachments_unique" in indexes
+
+
 class TestVecSupport:
     def test_message_embeddings_table_created(self) -> None:
         conn = _init_in_memory()
