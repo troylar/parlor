@@ -3,13 +3,13 @@
 Skills are YAML files in ~/.anteroom/skills/ or .anteroom/skills/ (project-level).
 Each skill defines a prompt template that gets injected when invoked via /skill_name.
 
-Example skill file (~/.anteroom/skills/commit.yaml):
-    name: commit
-    description: Create a git commit with a conventional message
+Example skill file (~/.anteroom/skills/deploy-check.yaml):
+    name: deploy-check
+    description: Verify the app is ready to deploy
     prompt: |
-      Look at the current git diff and staged changes.
-      Create a commit with a conventional commit message.
-      Format: type(scope): description
+      Check that all tests pass and lint is clean.
+      Run: pytest tests/unit/ -v && ruff check src/
+      Report any issues found.
 """
 
 from __future__ import annotations

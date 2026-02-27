@@ -82,12 +82,6 @@ prompt: |
        ...
      ```
 
-  ## Difference from /artifact-check
-
-  `/artifact-check` runs the health check and shows raw output. `/pack-doctor` is
-  a comprehensive diagnostic that also checks sources, lock files, attachment state,
-  and provides guided remediation for every issue found.
-
   ## Constraints
 
   - Do NOT modify any files or database state — this is diagnostic only

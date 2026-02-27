@@ -230,9 +230,10 @@ class TestSkillRegistry:
             reg.load(tmpdir)
             skills = reg.list_skills()
             names = [s.name for s in skills]
-            assert "commit" in names
-            assert "review" in names
-            assert "explain" in names
+            assert "commit" not in names
+            assert "review" not in names
+            assert "explain" not in names
+            assert "artifact-check" not in names
             assert "a-help" in names
             assert "new-skill" in names
 
@@ -275,12 +276,13 @@ class TestSkillRegistry:
         with tempfile.TemporaryDirectory() as tmpdir:
             skills_dir = Path(tmpdir) / ".anteroom" / "skills"
             skills_dir.mkdir(parents=True)
-            (skills_dir / "commit.yaml").write_text("name: commit\ndescription: My commit\nprompt: Custom commit\n")
+            content = "name: create-eval\ndescription: My eval\nprompt: Custom eval\n"
+            (skills_dir / "create-eval.yaml").write_text(content)
             reg = SkillRegistry()
             reg.load(tmpdir)
             collision_warnings = [w for w in reg.load_warnings if "overrides" in w]
             assert len(collision_warnings) == 1
-            assert "commit" in collision_warnings[0]
+            assert "create-eval" in collision_warnings[0]
 
     def test_empty_skill_name_defaults_to_stem(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -387,8 +389,8 @@ class TestSkillRegistry:
             reg = self._make_registry(tmpdir)
             descs = reg.get_skill_descriptions()
             names = [name for name, _ in descs]
-            assert "commit" in names
-            assert "review" in names
+            assert "commit" in names  # from user-level fixture, not default
+            assert "review" in names  # from user-level fixture, not default
             for name, desc in descs:
                 assert isinstance(name, str)
                 assert isinstance(desc, str)
@@ -690,13 +692,9 @@ class TestDefaultPackSkills:
             reg.load(tmpdir)
             names = [s.name for s in reg.list_skills()]
             expected = {
-                "commit",
-                "review",
-                "explain",
                 "create-eval",
                 "new-pack",
                 "new-skill",
-                "artifact-check",
                 "pack-lint",
                 "pack-publish",
                 "pack-doctor",
