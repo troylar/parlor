@@ -14,6 +14,7 @@ from ..services.pack_sources import list_cached_sources
 router = APIRouter(tags=["packs"])
 
 _SAFE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_SAFE_ID_RE = re.compile(r"^[a-f0-9-]{32,36}$")
 
 
 def _validate_pack_path_params(namespace: str, name: str) -> None:
@@ -172,7 +173,10 @@ async def get_pack(request: Request, namespace: str, name: str) -> dict[str, Any
     """Get a pack with its full artifact list."""
     _validate_pack_path_params(namespace, name)
     db = request.app.state.db
-    pack = _resolve_or_409(db, namespace, name)
+    resolved = _resolve_or_409(db, namespace, name)
+    pack = packs.get_pack_by_id(db, resolved["id"])
+    if not pack:
+        raise HTTPException(status_code=404, detail="Pack not found")
     pack.pop("source_path", None)
     for art in pack.get("artifacts", []):
         art.pop("content", None)
@@ -182,6 +186,8 @@ async def get_pack(request: Request, namespace: str, name: str) -> dict[str, Any
 @router.get("/packs/by-id/{pack_id}")
 async def get_pack_by_id(request: Request, pack_id: str) -> dict[str, Any]:
     """Get a pack by its unique ID."""
+    if not _SAFE_ID_RE.match(pack_id):
+        raise HTTPException(status_code=400, detail="Invalid pack ID format")
     db = request.app.state.db
     result = packs.get_pack_by_id(db, pack_id)
     if not result:
@@ -195,6 +201,8 @@ async def get_pack_by_id(request: Request, pack_id: str) -> dict[str, Any]:
 @router.delete("/packs/by-id/{pack_id}")
 async def remove_pack_by_id(request: Request, pack_id: str) -> dict[str, str]:
     """Remove a pack by its unique ID."""
+    if not _SAFE_ID_RE.match(pack_id):
+        raise HTTPException(status_code=400, detail="Invalid pack ID format")
     db = request.app.state.db
     removed = packs.remove_pack_by_id(db, pack_id)
     if not removed:

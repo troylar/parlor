@@ -1012,7 +1012,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         conn.execute("DROP INDEX IF EXISTS idx_spaces_name")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_spaces_name ON spaces(name)")
     except sqlite3.OperationalError:
-        pass
+        logger.warning("Failed to migrate spaces index to non-unique", exc_info=True)
 
     # Drop UNIQUE(namespace, name) on packs (v1.79.0)
     try:
@@ -1040,7 +1040,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                 conn.execute("ALTER TABLE packs_new RENAME TO packs")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
     except sqlite3.OperationalError:
-        pass
+        logger.warning("Failed to migrate packs table to drop UNIQUE constraint", exc_info=True)
 
 
 def has_vec_support(conn: sqlite3.Connection) -> bool:

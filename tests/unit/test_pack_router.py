@@ -70,23 +70,24 @@ class TestGetPackEndpoint:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
             mock_packs.resolve_pack.return_value = (
-                {
-                    "id": "pack-1",
-                    "namespace": "test-ns",
-                    "name": "test-pack",
-                    "version": "1.0.0",
-                    "source_path": "/secret/internal/path",
-                    "artifacts": [
-                        {
-                            "fqn": "@test-ns/skill/greet",
-                            "type": "skill",
-                            "content_hash": "abc123",
-                            "content": "sensitive system instructions",
-                        },
-                    ],
-                },
+                {"id": "pack-1", "namespace": "test-ns", "name": "test-pack", "version": "1.0.0"},
                 [],
             )
+            mock_packs.get_pack_by_id.return_value = {
+                "id": "pack-1",
+                "namespace": "test-ns",
+                "name": "test-pack",
+                "version": "1.0.0",
+                "source_path": "/secret/internal/path",
+                "artifacts": [
+                    {
+                        "fqn": "@test-ns/skill/greet",
+                        "type": "skill",
+                        "content_hash": "abc123",
+                        "content": "sensitive system instructions",
+                    },
+                ],
+            }
             client = TestClient(app)
             resp = client.get("/api/packs/test-ns/test-pack")
             assert resp.status_code == 200
@@ -108,12 +109,14 @@ class TestGetPackEndpoint:
         app = _make_app()
         with patch("anteroom.routers.packs.packs") as mock_packs:
             mock_packs.resolve_pack.return_value = (
-                {"id": "p1", "name": "p", "namespace": "n", "artifacts": []},
+                {"id": "p1", "name": "p", "namespace": "n"},
                 [],
             )
+            mock_packs.get_pack_by_id.return_value = {"id": "p1", "name": "p", "namespace": "n", "artifacts": []}
             client = TestClient(app)
             client.get("/api/packs/my-ns/my-pack")
             mock_packs.resolve_pack.assert_called_once_with(app.state.db, "my-ns", "my-pack")
+            mock_packs.get_pack_by_id.assert_called_once_with(app.state.db, "p1")
 
     def test_get_not_found_does_not_reflect_input(self) -> None:
         app = _make_app()
