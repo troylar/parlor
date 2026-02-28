@@ -7,6 +7,23 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 27, 2026
 
+### v1.83.0
+
+**New:**
+
+- 47 new Office tool actions: Word (track changes, comments, headers/footers, styles, find-regex, and more), Excel (formatting, charts, named ranges, data validation, conditional formatting, and more), PowerPoint (shapes, images, tables, hyperlinks, slide management, and more) (#589)
+- COM backend for Windows with native Office automation — PDF export, pivot tables, transitions, animations, and other COM-only features (#588)
+- New `anteroom[office-com]` install option for full Windows COM backend support (#588)
+
+**Fixed:**
+
+- DDE formula injection protection on COM cell writes (#589)
+- ReDoS mitigation via regex pattern length cap in find_regex (#589)
+- URL scheme validation on all hyperlink actions (#589)
+- Resource leak fixes across all Office COM handlers (#589)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.83.0)
+
 ### v1.82.2
 
 **Fixed:**
