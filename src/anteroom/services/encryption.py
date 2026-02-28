@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def open_encrypted_db(db_path: Path, key: bytes) -> sqlite3.Connection:
     """
     import sqlcipher3
 
-    conn = sqlcipher3.connect(str(db_path))  # type: ignore[attr-defined]
+    conn = cast(sqlite3.Connection, sqlcipher3.connect(str(db_path)))
     # SECURITY-REVIEW: PRAGMA key does not support parameterized binding in SQLCipher.
     # _key_hex() returns hex-only output (0-9a-f) from bytes.hex(), so SQL injection
     # is not possible. The f-string is the required interface for SQLCipher PRAGMAs.
@@ -143,7 +144,7 @@ def migrate_plaintext_to_encrypted(
 
     try:
         # Open the plaintext DB with sqlcipher (no key = plaintext mode)
-        src_conn = sqlcipher3.connect(str(db_path))  # type: ignore[attr-defined]
+        src_conn = cast(sqlite3.Connection, sqlcipher3.connect(str(db_path)))
         src_conn.execute("PRAGMA key = ''")  # Plaintext mode
 
         # Attach the encrypted target

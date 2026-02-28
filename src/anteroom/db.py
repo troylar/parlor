@@ -7,8 +7,10 @@ import re
 import sqlite3
 import stat
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +436,7 @@ class ThreadSafeConnection:
 
     def execute_fetchone(self, sql: str, parameters: tuple = ()) -> sqlite3.Row | None:
         with self._lock:
-            return self._conn.execute(sql, parameters).fetchone()
+            return cast(sqlite3.Row | None, self._conn.execute(sql, parameters).fetchone())
 
     def execute_fetchall(self, sql: str, parameters: tuple = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -453,7 +455,7 @@ class ThreadSafeConnection:
             self._conn.close()
 
     @contextmanager
-    def transaction(self):
+    def transaction(self) -> Generator[ThreadSafeConnection, None, None]:
         """Hold the lock for the entire transaction, auto-commit or rollback."""
         with self._lock:
             try:
@@ -464,12 +466,12 @@ class ThreadSafeConnection:
                 raise
 
     @property
-    def row_factory(self):
+    def row_factory(self) -> Any:
         with self._lock:
             return self._conn.row_factory
 
     @row_factory.setter
-    def row_factory(self, value):
+    def row_factory(self, value: Any) -> None:
         with self._lock:
             self._conn.row_factory = value
 
