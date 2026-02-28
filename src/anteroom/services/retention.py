@@ -12,6 +12,10 @@ import re
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +29,7 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 
 def purge_conversations_before(
-    db: object,
+    db: ThreadSafeConnection,
     cutoff: datetime,
     data_dir: Path,
     *,
@@ -39,12 +43,9 @@ def purge_conversations_before(
 
     Returns the count of conversations purged.
     """
-    import sqlite3
-
     cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
 
-    conn: sqlite3.Connection = db  # type: ignore[assignment]
-    rows = conn.execute(
+    rows = db.execute(
         "SELECT id FROM conversations WHERE updated_at < ?",
         (cutoff_str,),
     ).fetchall()
@@ -64,34 +65,31 @@ def purge_conversations_before(
             if attachments_dir.exists():
                 shutil.rmtree(attachments_dir)
 
-        conn.execute("DELETE FROM conversations WHERE id = ?", (cid,))
+        db.execute("DELETE FROM conversations WHERE id = ?", (cid,))
         count += 1
 
     if not dry_run and count:
-        conn.commit()
+        db.commit()
 
     return count
 
 
-def purge_orphaned_attachments(data_dir: Path, db: object, *, dry_run: bool = False) -> int:
+def purge_orphaned_attachments(data_dir: Path, db: ThreadSafeConnection, *, dry_run: bool = False) -> int:
     """Delete attachment directories with no corresponding conversation.
 
     Returns the count of orphaned directories removed.
     """
-    import sqlite3
-
     attachments_root = data_dir / "attachments"
     if not attachments_root.exists():
         return 0
 
-    conn: sqlite3.Connection = db  # type: ignore[assignment]
     count = 0
     for entry in attachments_root.iterdir():
         if not entry.is_dir():
             continue
         if not _UUID_RE.match(entry.name):
             continue
-        row = conn.execute("SELECT 1 FROM conversations WHERE id = ?", (entry.name,)).fetchone()
+        row = db.execute("SELECT 1 FROM conversations WHERE id = ?", (entry.name,)).fetchone()
         if row is None:
             if not dry_run:
                 shutil.rmtree(entry)

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 
 def _uuid() -> str:
@@ -21,7 +23,7 @@ _UPDATABLE_COLUMNS = frozenset({"file_path", "file_hash", "last_loaded_at", "upd
 
 
 def create_space(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     name: str,
     file_path: str,
     file_hash: str = "",
@@ -45,7 +47,7 @@ def create_space(
     }
 
 
-def get_space(db: sqlite3.Connection, space_id: str) -> dict[str, Any] | None:
+def get_space(db: ThreadSafeConnection, space_id: str) -> dict[str, Any] | None:
     row = db.execute(
         "SELECT id, name, file_path, file_hash, last_loaded_at, created_at, updated_at FROM spaces WHERE id = ?",
         (space_id,),
@@ -55,7 +57,7 @@ def get_space(db: sqlite3.Connection, space_id: str) -> dict[str, Any] | None:
     return dict(row)
 
 
-def get_space_by_name(db: sqlite3.Connection, name: str) -> dict[str, Any] | None:
+def get_space_by_name(db: ThreadSafeConnection, name: str) -> dict[str, Any] | None:
     row = db.execute(
         "SELECT id, name, file_path, file_hash, last_loaded_at, created_at, updated_at FROM spaces WHERE name = ?",
         (name,),
@@ -65,7 +67,7 @@ def get_space_by_name(db: sqlite3.Connection, name: str) -> dict[str, Any] | Non
     return dict(row)
 
 
-def get_spaces_by_name(db: sqlite3.Connection, name: str) -> list[dict[str, Any]]:
+def get_spaces_by_name(db: ThreadSafeConnection, name: str) -> list[dict[str, Any]]:
     """Return all spaces matching *name* (there may be duplicates)."""
     rows = db.execute(
         "SELECT id, name, file_path, file_hash, last_loaded_at, created_at, updated_at FROM spaces WHERE name = ?",
@@ -74,7 +76,7 @@ def get_spaces_by_name(db: sqlite3.Connection, name: str) -> list[dict[str, Any]
     return [dict(r) for r in rows]
 
 
-def resolve_space(db: sqlite3.Connection, name_or_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def resolve_space(db: ThreadSafeConnection, name_or_id: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Resolve a space by exact ID, ID prefix, or name.
 
     Returns ``(match, [])`` on unique match, or ``(None, candidates)`` when
@@ -101,14 +103,14 @@ def resolve_space(db: sqlite3.Connection, name_or_id: str) -> tuple[dict[str, An
     return None, []
 
 
-def list_spaces(db: sqlite3.Connection) -> list[dict[str, Any]]:
+def list_spaces(db: ThreadSafeConnection) -> list[dict[str, Any]]:
     rows = db.execute(
         "SELECT id, name, file_path, file_hash, last_loaded_at, created_at, updated_at FROM spaces ORDER BY name"
     ).fetchall()
     return [dict(r) for r in rows]
 
 
-def update_space(db: sqlite3.Connection, space_id: str, **kwargs: Any) -> dict[str, Any] | None:
+def update_space(db: ThreadSafeConnection, space_id: str, **kwargs: Any) -> dict[str, Any] | None:
     if not kwargs:
         return get_space(db, space_id)
 
@@ -125,7 +127,7 @@ def update_space(db: sqlite3.Connection, space_id: str, **kwargs: Any) -> dict[s
     return get_space(db, space_id)
 
 
-def delete_space(db: sqlite3.Connection, space_id: str) -> bool:
+def delete_space(db: ThreadSafeConnection, space_id: str) -> bool:
     space = get_space(db, space_id)
     if not space:
         return False
@@ -138,7 +140,7 @@ def delete_space(db: sqlite3.Connection, space_id: str) -> bool:
 
 
 def sync_space_paths(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     space_id: str,
     paths: list[dict[str, Any]],
 ) -> None:
@@ -156,7 +158,7 @@ def sync_space_paths(
     db.commit()
 
 
-def get_space_paths(db: sqlite3.Connection, space_id: str) -> list[dict[str, Any]]:
+def get_space_paths(db: ThreadSafeConnection, space_id: str) -> list[dict[str, Any]]:
     rows = db.execute(
         "SELECT id, space_id, repo_url, local_path FROM space_paths WHERE space_id = ?",
         (space_id,),
@@ -165,7 +167,7 @@ def get_space_paths(db: sqlite3.Connection, space_id: str) -> list[dict[str, Any
 
 
 def update_conversation_space(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     space_id: str | None,
 ) -> None:
@@ -176,7 +178,7 @@ def update_conversation_space(
     db.commit()
 
 
-def count_space_conversations(db: sqlite3.Connection, space_id: str) -> int:
+def count_space_conversations(db: ThreadSafeConnection, space_id: str) -> int:
     row = db.execute(
         "SELECT COUNT(*) FROM conversations WHERE space_id = ?",
         (space_id,),
@@ -184,7 +186,7 @@ def count_space_conversations(db: sqlite3.Connection, space_id: str) -> int:
     return row[0] if row else 0
 
 
-def get_space_local_dirs(db: sqlite3.Connection, space_id: str) -> list[str]:
+def get_space_local_dirs(db: ThreadSafeConnection, space_id: str) -> list[str]:
     """Return local_path values for a space that have non-empty local_path."""
     rows = db.execute(
         "SELECT local_path FROM space_paths WHERE space_id = ? AND local_path != ''",
@@ -225,7 +227,7 @@ def discover_space_file(cwd: str) -> Path | None:
     return None
 
 
-def resolve_space_by_cwd(db: sqlite3.Connection, cwd: str) -> dict[str, Any] | None:
+def resolve_space_by_cwd(db: ThreadSafeConnection, cwd: str) -> dict[str, Any] | None:
     """Resolve a space by working directory (exact match or subdirectory).
 
     Checks exact path first, then walks up parent directories to find a

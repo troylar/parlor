@@ -13,11 +13,12 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 
 from . import __version__
-from .config import _get_config_path, load_config
+from .config import AppConfig, _get_config_path, load_config
 
 
 def _run_init(force: bool = False, team_config: str | None = None) -> None:
@@ -31,7 +32,7 @@ def _load_config_or_exit(
     team_config_path: Path | None = None,
     *,
     interactive: bool = False,
-) -> tuple[Path, object, list[str]]:
+) -> tuple[Path, AppConfig, list[str]]:
     config_path = _get_config_path()
     if not config_path.exists():
         print(f"No configuration file found at {config_path}", file=sys.stderr)
@@ -86,7 +87,7 @@ def _run_config_validate(team_config_path: Path | None = None) -> None:
         sys.exit(1)
 
 
-async def _validate_ai_connection(config) -> None:
+async def _validate_ai_connection(config: AppConfig) -> None:
     from .services.ai_service import create_ai_service
 
     ai_service = create_ai_service(config.ai)
@@ -100,7 +101,7 @@ async def _validate_ai_connection(config) -> None:
         print("  The app will start, but chat may not work until the AI service is reachable.", file=sys.stderr)
 
 
-async def _test_connection(config) -> None:
+async def _test_connection(config: AppConfig) -> None:
     from .services.ai_service import create_ai_service
 
     ai_service = create_ai_service(config.ai)
@@ -140,7 +141,7 @@ async def _test_connection(config) -> None:
     print("\nAll checks passed.")
 
 
-def _run_db(args) -> None:
+def _run_db(args: argparse.Namespace) -> None:
     """Handle `aroom db` subcommands."""
     import getpass
     import stat
@@ -359,7 +360,7 @@ def _run_db_encrypt(args: object) -> None:
 
 
 def _run_usage(
-    config, period: str | None = None, conversation_id: str | None = None, output_json: bool = False
+    config: AppConfig, period: str | None = None, conversation_id: str | None = None, output_json: bool = False
 ) -> None:
     """Show token usage and cost statistics."""
     import json
@@ -388,7 +389,7 @@ def _run_usage(
             ("All time", None),
         ]
 
-    all_results = {}
+    all_results: dict[str, dict[str, Any]] = {}
     for label, since in selected:
         stats = storage.get_usage_stats(db, since=since, conversation_id=conversation_id)
         total_prompt = sum(s.get("prompt_tokens", 0) or 0 for s in stats)
@@ -447,7 +448,7 @@ def _run_usage(
     print()
 
 
-def _run_audit(args) -> None:
+def _run_audit(args: argparse.Namespace) -> None:
     """Handle `aroom audit` subcommands."""
     action = getattr(args, "audit_action", None)
     if not action:
@@ -511,7 +512,9 @@ def _run_audit(args) -> None:
         print(f"Purged {deleted} audit log file(s) older than {config.audit.retention_days} days.")
 
 
-def _run_web(config, config_path: Path, *, debug: bool = False, enforced_fields: list[str] | None = None) -> None:
+def _run_web(
+    config: AppConfig, config_path: Path, *, debug: bool = False, enforced_fields: list[str] | None = None
+) -> None:
     """Launch the web UI server."""
     print(f"Config loaded from {config_path}")
     print(f"  AI endpoint: {config.ai.base_url}")
@@ -538,7 +541,7 @@ def _run_web(config, config_path: Path, *, debug: bool = False, enforced_fields:
 
     app = create_app(config, enforced_fields=enforced_fields)
 
-    ssl_kwargs: dict[str, str] = {}
+    ssl_kwargs: dict[str, Any] = {}
     scheme = "http"
     if config.app.tls:
         from .tls import ensure_certificates
@@ -598,7 +601,7 @@ def _run_web(config, config_path: Path, *, debug: bool = False, enforced_fields:
         raise
 
 
-def _resolve_project_id(config: object, project_name: str) -> str:
+def _resolve_project_id(config: AppConfig, project_name: str) -> str:
     """Resolve a project name to its ID, or exit with an error."""
     from .db import get_db
     from .services import storage
@@ -609,10 +612,10 @@ def _resolve_project_id(config: object, project_name: str) -> str:
         print(f"Error: Project '{project_name}' not found.", file=sys.stderr)
         print("Run `aroom projects` to list available projects.", file=sys.stderr)
         sys.exit(1)
-    return project["id"]
+    return str(project["id"])
 
 
-def _resolve_space_id(config: object, space_name: str) -> str:
+def _resolve_space_id(config: AppConfig, space_name: str) -> str:
     """Resolve a space name to its ID, or exit with an error."""
     from .db import get_db
     from .services.space_storage import resolve_space
@@ -620,7 +623,7 @@ def _resolve_space_id(config: object, space_name: str) -> str:
     db = get_db(config.app.data_dir / "anteroom.db")
     match, candidates = resolve_space(db, space_name)
     if match:
-        return match["id"]
+        return str(match["id"])
     if candidates:
         print(f"Error: Multiple spaces match '{space_name}':", file=sys.stderr)
         for c in candidates:
@@ -632,7 +635,7 @@ def _resolve_space_id(config: object, space_name: str) -> str:
     sys.exit(1)
 
 
-def _run_projects(config: object) -> None:
+def _run_projects(config: AppConfig) -> None:
     """List all named projects."""
     from rich.console import Console
     from rich.table import Table
@@ -666,7 +669,7 @@ def _run_projects(config: object) -> None:
     console.print(table)
 
 
-def _run_artifact(config: object, args: object) -> None:
+def _run_artifact(config: AppConfig, args: argparse.Namespace) -> None:
     """Handle `aroom artifact` subcommands."""
     from rich.console import Console
     from rich.markup import escape
@@ -793,7 +796,7 @@ def _run_artifact(config: object, args: object) -> None:
             sys.exit(1)
 
 
-def _run_artifact_check(config: object, args: object, db: object, console: object) -> None:
+def _run_artifact_check(config: AppConfig, args: argparse.Namespace, db: Any, console: Any) -> None:
     """Handle `aroom artifact check` subcommand."""
     import json as json_mod
     from pathlib import Path
@@ -917,7 +920,7 @@ def _pick_from_candidates(
     return None
 
 
-def _run_pack(config: object, args: object) -> None:
+def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
     """Handle `aroom pack` subcommands."""
     from pathlib import Path
 
@@ -991,14 +994,14 @@ def _run_pack(config: object, args: object) -> None:
 
         project_dir = Path.cwd() if getattr(args, "project", False) else None
         try:
-            result = packs.install_pack(db, manifest, pack_path, project_dir=project_dir)
+            install_result: dict[str, Any] = packs.install_pack(db, manifest, pack_path, project_dir=project_dir)
         except ValueError as e:
             console.print(f"[red]Install failed:[/red] {e}")
             sys.exit(1)
 
         console.print(
-            f"[green]Installed[/green] {escape(result['namespace'])}/{escape(result['name'])} "
-            f"v{escape(result['version'])} ({result['artifact_count']} artifacts)"
+            f"[green]Installed[/green] {escape(install_result['namespace'])}/{escape(install_result['name'])} "
+            f"v{escape(install_result['version'])} ({install_result['artifact_count']} artifacts)"
         )
 
     elif action == "show":
@@ -1070,14 +1073,14 @@ def _run_pack(config: object, args: object) -> None:
 
         project_dir = Path.cwd() if getattr(args, "project", False) else None
         try:
-            result = packs.update_pack(db, manifest, pack_path, project_dir=project_dir)
+            update_result: dict[str, Any] = packs.update_pack(db, manifest, pack_path, project_dir=project_dir)
         except ValueError as e:
             console.print(f"[red]Update failed:[/red] {e}")
             sys.exit(1)
 
         console.print(
-            f"[green]Updated[/green] {escape(result['namespace'])}/{escape(result['name'])} "
-            f"v{escape(result['version'])} ({result['artifact_count']} artifacts)"
+            f"[green]Updated[/green] {escape(update_result['namespace'])}/{escape(update_result['name'])} "
+            f"v{escape(update_result['version'])} ({update_result['artifact_count']} artifacts)"
         )
 
     elif action == "sources":
@@ -1183,7 +1186,7 @@ def _run_pack(config: object, args: object) -> None:
             console.print(f"[yellow]Not attached:[/yellow] {escape(args.ref)}")
 
 
-def _run_space(config: object, args: object) -> None:
+def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
     """Handle `aroom space` subcommands."""
     from pathlib import Path
 
@@ -1406,7 +1409,7 @@ def _run_space(config: object, args: object) -> None:
 
 
 def _run_chat(
-    config,
+    config: AppConfig,
     prompt: str | None = None,
     no_tools: bool = False,
     continue_last: bool = False,
@@ -1480,7 +1483,7 @@ def _run_chat(
 
 
 def _run_exec(
-    config,
+    config: AppConfig,
     prompt: str,
     output_json: bool = False,
     no_conversation: bool = False,

@@ -11,7 +11,10 @@ import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ def _validate_project_path(project_path: str | None) -> None:
 
 
 def attach_pack(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     pack_id: str,
     *,
     project_path: str | None = None,
@@ -69,7 +72,7 @@ def attach_pack(
 
 
 def detach_pack(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     pack_id: str,
     *,
     project_path: str | None = None,
@@ -84,7 +87,7 @@ def detach_pack(
 
 
 def list_attachments(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     *,
     project_path: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -117,7 +120,7 @@ def list_attachments(
 
 
 def get_active_pack_ids(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     *,
     project_path: str | None = None,
 ) -> list[str]:
@@ -138,7 +141,7 @@ def get_active_pack_ids(
 
 
 def list_attachments_for_pack(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     pack_id: str,
 ) -> list[dict[str, Any]]:
     """List all attachments for a specific pack."""
@@ -152,7 +155,7 @@ def list_attachments_for_pack(
     return [dict(r) if isinstance(r, sqlite3.Row) else {k: v for k, v in zip(keys, r)} for r in rows]
 
 
-def resolve_pack_id(db: sqlite3.Connection, namespace: str, name: str) -> str | None:
+def resolve_pack_id(db: ThreadSafeConnection, namespace: str, name: str) -> str | None:
     """Look up pack_id from namespace/name. Returns None if not found or ambiguous."""
     rows = db.execute(
         "SELECT id FROM packs WHERE namespace = ? AND name = ?",
@@ -165,7 +168,7 @@ def resolve_pack_id(db: sqlite3.Connection, namespace: str, name: str) -> str | 
 
 
 def attach_pack_to_space(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     pack_id: str,
     space_id: str,
 ) -> dict[str, Any]:
@@ -206,7 +209,7 @@ def attach_pack_to_space(
 
 
 def detach_pack_from_space(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     pack_id: str,
     space_id: str,
 ) -> bool:
@@ -220,7 +223,7 @@ def detach_pack_from_space(
 
 
 def get_active_pack_ids_for_space(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     space_id: str,
     *,
     project_path: str | None = None,
