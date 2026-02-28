@@ -56,7 +56,7 @@ def _sanitize_for_terminal(text: str) -> str:
     return re.sub(r"[\x00-\x08\x0b-\x0d\x0e-\x1f\x7f]", "", text)
 
 
-def _identity_kwargs(config: AppConfig) -> dict[str, str | None]:
+def _identity_kwargs(config: AppConfig) -> dict[str, Any]:
     if config.identity:
         return {"user_id": config.identity.user_id, "user_display_name": config.identity.display_name}
     return {"user_id": None, "user_display_name": None}
@@ -249,9 +249,12 @@ async def run_exec_mode(
             return ""
 
     # Rate limiting
+    from typing import cast as _cast
+
+    from ..services.tool_rate_limit import ToolRateLimitConfig as _SvcRateLimitConfig
     from ..services.tool_rate_limit import ToolRateLimiter
 
-    _rate_limiter = ToolRateLimiter(config.safety.tool_rate_limit)
+    _rate_limiter = ToolRateLimiter(_cast(_SvcRateLimitConfig, config.safety.tool_rate_limit))
     tool_registry.set_rate_limiter(_rate_limiter)
 
     # Sub-agent support
@@ -305,7 +308,7 @@ async def run_exec_mode(
                 rl_v = _rate_limiter.check(tool_name)
                 if rl_v and rl_v.exceeded and _rate_limiter.config.action == "block":
                     return {"error": rl_v.reason, "safety_blocked": True, "rate_limited": True}
-            result = await mcp_manager.call_tool(tool_name, arguments)
+            result: dict[str, Any] = await mcp_manager.call_tool(tool_name, arguments)
             if _rate_limiter:
                 _rate_limiter.record_call(success="error" not in result)
             return result

@@ -120,8 +120,7 @@ def update_space(db: ThreadSafeConnection, space_id: str, **kwargs: Any) -> dict
 
     kwargs["updated_at"] = _now()
     set_clause = ", ".join(f"{col} = ?" for col in kwargs)
-    values = list(kwargs.values())
-    values.append(space_id)
+    values = tuple(kwargs.values()) + (space_id,)
     db.execute(f"UPDATE spaces SET {set_clause} WHERE id = ?", values)  # noqa: S608
     db.commit()
     return get_space(db, space_id)

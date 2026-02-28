@@ -1109,13 +1109,13 @@ def _patch_heading_left() -> None:
         return
     from rich.markdown import Heading
 
-    def _left_aligned(self, console, options):
+    def _left_aligned(self: Any, console: Any, options: Any) -> Any:
         self.text.justify = "left"
         if self.tag == "h2":
             yield Text("")
         yield self.text
 
-    Heading.__rich_console__ = _left_aligned
+    Heading.__rich_console__ = _left_aligned  # type: ignore[method-assign]
     _heading_patched = True
 
 
@@ -1682,7 +1682,7 @@ def _get_build_date() -> str:
     try:
         from datetime import datetime
 
-        from .._build_info import BUILD_TIMESTAMP  # type: ignore[import-not-found]
+        from .._build_info import BUILD_TIMESTAMP
 
         dt = datetime.fromisoformat(BUILD_TIMESTAMP)
         return dt.astimezone().strftime("%b %d, %Y %I:%M %p")

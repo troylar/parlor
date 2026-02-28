@@ -84,17 +84,17 @@ async def _watch_for_escape(cancel_event: asyncio.Event) -> None:
 
         def _poll() -> None:
             while not cancel_event.is_set():
-                if msvcrt.kbhit():
-                    ch = msvcrt.getch()
+                if msvcrt.kbhit():  # type: ignore[attr-defined]
+                    ch = msvcrt.getch()  # type: ignore[attr-defined]
                     if ch == b"\x1b":
                         # Distinguish bare Escape from escape sequences (arrow keys, etc.)
                         time.sleep(0.05)
-                        if not msvcrt.kbhit():
+                        if not msvcrt.kbhit():  # type: ignore[attr-defined]
                             cancel_event.set()
                             return
                         # Consume the rest of the escape sequence
-                        while msvcrt.kbhit():
-                            msvcrt.getch()
+                        while msvcrt.kbhit():  # type: ignore[attr-defined]
+                            msvcrt.getch()  # type: ignore[attr-defined]
                 time.sleep(0.05)
     else:
         import select
@@ -245,10 +245,10 @@ _CONTEXT_WARN_TOKENS = 80_000
 _CONTEXT_AUTO_COMPACT_TOKENS = 100_000
 
 
-_tiktoken_encoding = None
+_tiktoken_encoding: Any = None
 
 
-def _get_tiktoken_encoding():
+def _get_tiktoken_encoding() -> Any:
     global _tiktoken_encoding
     if _tiktoken_encoding is None:
         try:
@@ -396,7 +396,7 @@ def _restore_working_dir(
 
     Returns the effective working directory (stored or current fallback).
     """
-    stored_dir = conv.get("working_dir")
+    stored_dir: str | None = conv.get("working_dir")
     if not stored_dir:
         return current_working_dir
     # Resolve symlinks for consistent validation
@@ -495,7 +495,7 @@ async def _drain_input_to_msg_queue(
     cancel_event: asyncio.Event,
     exit_flag: asyncio.Event,
     warn_callback: Any | None = None,
-    identity_kwargs: dict[str, str | None] | None = None,
+    identity_kwargs: dict[str, Any] | None = None,
     file_max_chars: int = 100_000,
     skill_registry: Any | None = None,
 ) -> None:
@@ -681,7 +681,7 @@ def _build_system_prompt(
     return "\n".join(parts)
 
 
-def _identity_kwargs(config: AppConfig) -> dict[str, str | None]:
+def _identity_kwargs(config: AppConfig) -> dict[str, Any]:
     """Extract user_id/user_display_name from config identity, or empty dict."""
     if config.identity:
         return {"user_id": config.identity.user_id, "user_display_name": config.identity.display_name}
@@ -778,7 +778,7 @@ async def _check_project_trust(
     try:
         from prompt_toolkit import PromptSession as _TrustSession
 
-        _trust_session = _TrustSession()
+        _trust_session: Any = _TrustSession()
 
         while True:
             answer = await _trust_session.prompt_async(
@@ -1115,7 +1115,7 @@ async def run_cli(
             try:
                 from prompt_toolkit import PromptSession as _ConfirmSession
 
-                _confirm_session = _ConfirmSession()
+                _confirm_session: Any = _ConfirmSession()
                 answer = await _confirm_session.prompt_async(
                     "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
                 )
@@ -1167,7 +1167,7 @@ async def run_cli(
         try:
             from prompt_toolkit import PromptSession as _AskSession
 
-            _ask_session = _AskSession()
+            _ask_session: Any = _AskSession()
 
             if options:
                 for i, opt in enumerate(options, 1):
@@ -1183,7 +1183,7 @@ async def run_cli(
 
             renderer.console.print()
             renderer.start_thinking()
-            return answer
+            return str(answer)
         except (EOFError, KeyboardInterrupt):
             renderer.console.print(f"  [{MUTED}](cancelled)[/{MUTED}]\n")
             renderer.start_thinking()
@@ -1193,6 +1193,9 @@ async def run_cli(
     _subagent_counter = 0
     _active_cancel_event: list[asyncio.Event | None] = [None]
 
+    from typing import cast as _cast
+
+    from ..services.tool_rate_limit import ToolRateLimitConfig as _SvcRateLimitConfig
     from ..services.tool_rate_limit import ToolRateLimiter
     from ..tools.subagent import SubagentLimiter
 
@@ -1202,7 +1205,7 @@ async def run_cli(
         max_total=_sa_config.max_total,
     )
 
-    _rate_limiter = ToolRateLimiter(config.safety.tool_rate_limit)
+    _rate_limiter = ToolRateLimiter(_cast(_SvcRateLimitConfig, config.safety.tool_rate_limit))
     tool_registry.set_rate_limiter(_rate_limiter)
 
     # Construct DLP scanner if configured
@@ -1844,7 +1847,7 @@ def _patch_completion_menu_position() -> None:
         except Exception:
             return _orig(self, fl, screen, mouse_handlers, write_position, style, erase_bg, z_index)
 
-    FloatContainer._draw_float = _draw_float_patched  # type: ignore[assignment]
+    FloatContainer._draw_float = _draw_float_patched  # type: ignore[method-assign]
 
 
 async def _run_repl(
@@ -2077,7 +2080,7 @@ async def _run_repl(
     try:
         from prompt_toolkit.input import vt100_parser
 
-        vt100_parser.ANSI_SEQUENCES["\x1b[13;2u"] = "c-j"
+        vt100_parser.ANSI_SEQUENCES["\x1b[13;2u"] = "c-j"  # type: ignore[assignment]
     except Exception:
         pass
 
@@ -2359,6 +2362,7 @@ async def _run_repl(
 
     current_model = config.ai.model
     _pending_resume_info = False
+    ai_messages: list[dict[str, Any]] = []
 
     if resume_conversation_id:
         conv_data = storage.get_conversation(db, resume_conversation_id)
@@ -2371,7 +2375,7 @@ async def _run_repl(
             _pending_resume_info = True
             # Load project from resumed conversation if not already set via --project
             if not project_id and conv.get("project_id"):
-                project_id = conv["project_id"]
+                project_id = str(conv["project_id"])
                 _proj = storage.get_project(db, project_id)
                 if _proj:
                     if _proj.get("instructions"):
@@ -2404,7 +2408,7 @@ async def _run_repl(
             is_first_message = True
     else:
         conv = storage.create_conversation(db, working_dir=working_dir, project_id=project_id, **id_kw)
-        ai_messages: list[dict[str, Any]] = []
+        ai_messages = []
         is_first_message = True
 
     async def _show_help_dialog() -> None:
@@ -3302,7 +3306,7 @@ async def _run_repl(
                         except Exception:
                             pass
 
-                    if use_semantic:
+                    if use_semantic and _emb_svc is not None:
                         try:
                             query_emb = await _emb_svc.embed(query)
                             if query_emb:
@@ -3448,7 +3452,7 @@ async def _run_repl(
                         if not target:
                             renderer.console.print(f"[{CHROME}]Usage: /project select <name|id>[/{CHROME}]\n")
                             continue
-                        proj = _resolve_project(target)
+                        proj = _resolve_project(target)  # type: ignore[assignment]
                         if not proj:
                             renderer.render_error(
                                 f"Project '{target}' not found. Run /projects to list available projects."
@@ -3474,7 +3478,7 @@ async def _run_repl(
                             else:
                                 renderer.console.print(f"[{CHROME}]Usage: /project edit <name|id>[/{CHROME}]\n")
                                 continue
-                        proj = _resolve_project(target)
+                        proj = _resolve_project(target)  # type: ignore[assignment]
                         if not proj:
                             renderer.render_error(f"Project '{target}' not found.")
                             continue
@@ -3527,7 +3531,7 @@ async def _run_repl(
                         if not target:
                             renderer.console.print(f"[{CHROME}]Usage: /project delete <name|id>[/{CHROME}]\n")
                             continue
-                        proj = _resolve_project(target)
+                        proj = _resolve_project(target)  # type: ignore[assignment]
                         if not proj:
                             renderer.render_error(f"Project '{target}' not found.")
                             continue
@@ -3557,7 +3561,7 @@ async def _run_repl(
                         renderer.console.print(f"[{CHROME}]Cleared project: {old_name}[/{CHROME}]\n")
 
                     elif sub == "sources":
-                        proj = _active_project[0]
+                        proj = _active_project[0]  # type: ignore[assignment]
                         if not proj:
                             renderer.console.print(
                                 f"[{CHROME}]No active project. Use /project select <name> first.[/{CHROME}]\n"
@@ -3568,9 +3572,9 @@ async def _run_repl(
                             renderer.console.print(f"[{CHROME}]No sources linked to '{proj['name']}'[/{CHROME}]\n")
                             continue
                         renderer.console.print(f"\n[bold]Sources for {proj['name']}:[/bold]")
-                        for s in sources:
-                            title = s.get("title") or s.get("url") or s["id"][:8]
-                            renderer.console.print(f"  {title} [{MUTED}]{s['id'][:8]}...[/{MUTED}]")
+                        for psrc in sources:
+                            title = psrc.get("title") or psrc.get("url") or psrc["id"][:8]
+                            renderer.console.print(f"  {title} [{MUTED}]{psrc['id'][:8]}...[/{MUTED}]")
                         renderer.console.print()
 
                     else:
@@ -3604,15 +3608,15 @@ async def _run_repl(
                             )
                             continue
                         renderer.console.print("\n[bold]Spaces:[/bold]")
-                        for s in spaces:
-                            cnt = count_space_conversations(db, s["id"])
+                        for sp in spaces:
+                            cnt = count_space_conversations(db, sp["id"])
                             active = (
                                 " [green](active)[/green]"
-                                if (_active_space[0] and _active_space[0]["id"] == s["id"])
+                                if (_active_space[0] and _active_space[0]["id"] == sp["id"])
                                 else ""
                             )
                             renderer.console.print(
-                                f"  {s['name']} — {cnt} conversations{active} [{MUTED}]{s['id'][:8]}...[/{MUTED}]"
+                                f"  {sp['name']} — {cnt} conversations{active} [{MUTED}]{sp['id'][:8]}...[/{MUTED}]"
                             )
                         renderer.console.print()
 
@@ -3656,7 +3660,7 @@ async def _run_repl(
                         renderer.console.print()
 
                     elif sub == "refresh":
-                        sp = _active_space[0]
+                        sp = _active_space[0]  # type: ignore[assignment]
                         if not sp:
                             renderer.console.print(f"[{CHROME}]No active space[/{CHROME}]\n")
                             continue
@@ -3743,8 +3747,8 @@ async def _run_repl(
                             continue
                         errors = _vs(scfg)
                         if errors:
-                            for e in errors:
-                                renderer.render_error(e)
+                            for err in errors:
+                                renderer.render_error(err)
                             continue
                         sp = _cs(db, scfg.name, str(spath), _fh2(spath))
                         renderer.console.print(
@@ -3857,8 +3861,8 @@ async def _run_repl(
                             manifest = packs_service.parse_manifest(manifest_path)
                             errors = packs_service.validate_manifest(manifest, pack_path)
                             if errors:
-                                for e in errors:
-                                    renderer.console.print(f"[red]  {e}[/red]")
+                                for err in errors:
+                                    renderer.console.print(f"[red]  {err}[/red]")
                                 continue
                             result = packs_service.install_pack(db, manifest, pack_path)
                             renderer.console.print(
@@ -3938,11 +3942,15 @@ async def _run_repl(
                         cached = list_cached_sources(data_dir)
                         cached_map = {c.url: c for c in cached}
                         renderer.console.print("\n[bold]Pack Sources:[/bold]")
-                        for src in sources_cfg:
-                            url = src.url if hasattr(src, "url") else src.get("url", "?")
-                            branch = src.branch if hasattr(src, "branch") else src.get("branch", "main")
-                            c = cached_map.get(url)
-                            status = f"[green]cached[/green] ({c.ref[:8]})" if c else "[yellow]not cloned[/yellow]"
+                        for psc in sources_cfg:
+                            url = getattr(psc, "url", None) or "?"
+                            branch = getattr(psc, "branch", "main") or "main"
+                            cached_entry = cached_map.get(url)
+                            status = (
+                                f"[green]cached[/green] ({cached_entry.ref[:8]})"
+                                if cached_entry
+                                else "[yellow]not cloned[/yellow]"
+                            )
                             renderer.console.print(f"  {url} ({branch}) — {status}")
                         renderer.console.print()
 
@@ -3958,18 +3966,18 @@ async def _run_repl(
                         data_dir = config.app.data_dir
                         total_installed = 0
                         total_updated = 0
-                        for src in sources_cfg:
-                            url = src.url if hasattr(src, "url") else src.get("url", "?")
-                            branch = src.branch if hasattr(src, "branch") else src.get("branch", "main")
+                        for psc in sources_cfg:
+                            url = getattr(psc, "url", None) or "?"
+                            branch = getattr(psc, "branch", "main") or "main"
                             renderer.console.print(f"  Refreshing {url}...")
-                            result = ps_mod.ensure_source(url, branch, data_dir)
-                            if not result.success:
-                                renderer.console.print(f"  [red]Failed: {result.error}[/red]")
+                            src_result = ps_mod.ensure_source(url, branch, data_dir)
+                            if not src_result.success:
+                                renderer.console.print(f"  [red]Failed: {src_result.error}[/red]")
                                 continue
-                            if result.path:
+                            if src_result.path:
                                 from ..services.pack_refresh import install_from_source
 
-                                i, u = install_from_source(db, result.path)
+                                i, u = install_from_source(db, src_result.path)
                                 total_installed += i
                                 total_updated += u
                         renderer.console.print(
@@ -3986,12 +3994,12 @@ async def _run_repl(
 
                         from ..services.pack_sources import add_pack_source
 
-                        result = add_pack_source(url)
-                        if not result.ok:
-                            renderer.console.print(f"[red]{rich_escape(result.message)}[/red]\n")
+                        add_result = add_pack_source(url)
+                        if not add_result.ok:
+                            renderer.console.print(f"[red]{rich_escape(add_result.message)}[/red]\n")
                             continue
-                        if result.message:
-                            renderer.console.print(f"[{CHROME}]{rich_escape(result.message)}[/{CHROME}]\n")
+                        if add_result.message:
+                            renderer.console.print(f"[{CHROME}]{rich_escape(add_result.message)}[/{CHROME}]\n")
                             continue
                         renderer.console.print(f"[green]Added pack source:[/green] {rich_escape(url)}")
                         renderer.console.print(f"[{MUTED}]Run /pack refresh to clone and install packs.[/{MUTED}]\n")
@@ -4155,8 +4163,8 @@ async def _run_repl(
                             manifest = packs_service.parse_manifest(manifest_path)
                             errors = packs_service.validate_manifest(manifest, pack_path)
                             if errors:
-                                for e in errors:
-                                    renderer.console.print(f"[red]  {e}[/red]")
+                                for err in errors:
+                                    renderer.console.print(f"[red]  {err}[/red]")
                                 continue
                             result = packs_service.update_pack(db, manifest, pack_path)
                             renderer.console.print(
@@ -4230,22 +4238,22 @@ async def _run_repl(
                         try:
                             if action == "connect":
                                 await mcp_manager.connect_server(server_name)
-                                status = mcp_manager.get_server_statuses().get(server_name, {})
-                                if status.get("status") == "connected":
+                                srv_status = mcp_manager.get_server_statuses().get(server_name, {})
+                                if srv_status.get("status") == "connected":
                                     renderer.console.print(f"[green]Connected: {server_name}[/green]\n")
                                 else:
-                                    err = status.get("error_message", "unknown error")
+                                    err = srv_status.get("error_message", "unknown error")
                                     renderer.render_error(f"Failed to connect '{server_name}': {err}")
                             elif action == "disconnect":
                                 await mcp_manager.disconnect_server(server_name)
                                 renderer.console.print(f"[{CHROME}]Disconnected: {server_name}[/{CHROME}]\n")
                             elif action == "reconnect":
                                 await mcp_manager.reconnect_server(server_name)
-                                status = mcp_manager.get_server_statuses().get(server_name, {})
-                                if status.get("status") == "connected":
+                                srv_status = mcp_manager.get_server_statuses().get(server_name, {})
+                                if srv_status.get("status") == "connected":
                                     renderer.console.print(f"[green]Reconnected: {server_name}[/green]\n")
                                 else:
-                                    err = status.get("error_message", "unknown error")
+                                    err = srv_status.get("error_message", "unknown error")
                                     renderer.render_error(f"Failed to reconnect '{server_name}': {err}")
                             else:
                                 renderer.render_error(
@@ -4274,7 +4282,7 @@ async def _run_repl(
                     renderer.console.print(f"[{CHROME}]Switched to model: {new_model}[/{CHROME}]\n")
                     continue
                 elif cmd == "/plan":
-                    sub, inline_prompt = parse_plan_command(user_input)
+                    sub, inline_prompt = parse_plan_command(user_input)  # type: ignore[assignment]
                     if sub in ("on", "start"):
                         if _plan_active[0]:
                             renderer.console.print(f"[{CHROME}]Already in planning mode[/{CHROME}]\n")
@@ -4457,12 +4465,12 @@ async def _run_repl(
                         continue
 
                     renderer.console.print("\n[bold]Messages:[/bold]")
-                    for msg in stored:
-                        role_label = "You" if msg["role"] == "user" else "AI"
-                        preview = msg["content"][:80].replace("\n", " ")
-                        if len(msg["content"]) > 80:
-                            preview += "..."
-                        renderer.console.print(f"  {msg['position']}. [{role_label}] {preview}")
+                    for smsg in stored:
+                        role_label = "You" if smsg["role"] == "user" else "AI"
+                        msg_preview = smsg["content"][:80].replace("\n", " ")
+                        if len(smsg["content"]) > 80:
+                            msg_preview += "..."
+                        renderer.console.print(f"  {smsg['position']}. [{role_label}] {msg_preview}")
 
                     if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
                         _rw_body: list[tuple[str, str]] = [
@@ -4535,7 +4543,7 @@ async def _run_repl(
                                 renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                                 continue
 
-                    result = await rewind_service(
+                    rewind_result = await rewind_service(
                         db=db,
                         conversation_id=conv["id"],
                         to_position=target_pos,
@@ -4545,15 +4553,15 @@ async def _run_repl(
 
                     ai_messages = _load_conversation_messages(db, conv["id"])
 
-                    summary = f"Rewound {result.deleted_messages} message(s)"
-                    if result.reverted_files:
-                        summary += f", reverted {len(result.reverted_files)} file(s)"
-                    if result.skipped_files:
-                        summary += f", {len(result.skipped_files)} skipped"
+                    summary = f"Rewound {rewind_result.deleted_messages} message(s)"
+                    if rewind_result.reverted_files:
+                        summary += f", reverted {len(rewind_result.reverted_files)} file(s)"
+                    if rewind_result.skipped_files:
+                        summary += f", {len(rewind_result.skipped_files)} skipped"
                     renderer.console.print(f"[{CHROME}]{summary}[/{CHROME}]\n")
 
-                    if result.skipped_files:
-                        for sf in result.skipped_files:
+                    if rewind_result.skipped_files:
+                        for sf in rewind_result.skipped_files:
                             renderer.console.print(f"  [yellow]Skipped: {sf}[/yellow]")
                         renderer.console.print()
                     continue
@@ -4798,13 +4806,13 @@ async def _run_repl(
                             _pending_usage = event.data
                         elif event.kind == "assistant_message":
                             if event.data["content"]:
-                                msg = storage.create_message(
+                                new_msg = storage.create_message(
                                     db, conv["id"], "assistant", event.data["content"], **id_kw
                                 )
                                 if _pending_usage:
                                     storage.update_message_usage(
                                         db,
-                                        msg["id"],
+                                        new_msg["id"],
                                         _pending_usage.get("prompt_tokens", 0),
                                         _pending_usage.get("completion_tokens", 0),
                                         _pending_usage.get("total_tokens", 0),
