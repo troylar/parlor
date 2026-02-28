@@ -161,7 +161,7 @@ def resolve_pack_id(db: sqlite3.Connection, namespace: str, name: str) -> str | 
     if len(rows) != 1:
         return None
     row = rows[0]
-    return row[0] if isinstance(row, (tuple, list)) else row["id"]
+    return str(row[0] if isinstance(row, (tuple, list)) else row["id"])
 
 
 def attach_pack_to_space(

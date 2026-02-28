@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,7 +56,7 @@ class PackRefreshWorker:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: ThreadSafeConnection,
         data_dir: Path,
         sources: list[PackSourceConfig],
     ) -> None:
@@ -191,7 +194,7 @@ class PackRefreshWorker:
             self._task.cancel()
 
 
-def install_from_source(db: sqlite3.Connection, source_dir: Path) -> tuple[int, int]:
+def install_from_source(db: ThreadSafeConnection, source_dir: Path) -> tuple[int, int]:
     """Scan a source directory for pack manifests and install/update.
 
     Walks *source_dir* looking for ``pack.yaml`` files.  For each manifest

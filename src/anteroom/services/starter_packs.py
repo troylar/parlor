@@ -7,10 +7,12 @@ Starter packs live under ``src/anteroom/packs/`` and are installed at
 from __future__ import annotations
 
 import logging
-import sqlite3
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 from .artifacts import ArtifactSource
 from .packs import PackManifest, parse_manifest, validate_manifest
@@ -48,7 +50,7 @@ def list_starter_packs() -> list[dict[str, str]]:
 
 
 def install_starter_packs(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     *,
     names: list[str] | None = None,
 ) -> list[dict[str, str]]:
@@ -109,7 +111,7 @@ def install_starter_packs(
 
 
 def _install_starter(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     manifest: PackManifest,
     pack_dir: Path,
     upsert_artifact: UpsertFn,

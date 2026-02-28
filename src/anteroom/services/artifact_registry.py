@@ -11,8 +11,10 @@ issues in the artifact epic.
 from __future__ import annotations
 
 import logging
-import sqlite3
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 from .artifact_storage import list_artifacts
 from .artifacts import Artifact, ArtifactSource, ArtifactType
@@ -42,7 +44,7 @@ class ArtifactRegistry:
     # Loading
     # ------------------------------------------------------------------
 
-    def load_from_db(self, db: sqlite3.Connection) -> None:
+    def load_from_db(self, db: ThreadSafeConnection) -> None:
         """Load all artifacts from the database, applying layer precedence.
 
         Artifacts are sorted by source layer so that higher-precedence

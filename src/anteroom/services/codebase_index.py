@@ -330,7 +330,7 @@ class CodebaseIndexService:
 
         if not self.is_available():
             # Fallback: filename-only listing
-            files = []
+            files: list[FileSymbols] = []
             for fpath, lang in source_files:
                 rel = str(fpath.relative_to(root))
                 files.append(FileSymbols(path=rel, language=lang, mtime=fpath.stat().st_mtime))
@@ -339,7 +339,7 @@ class CodebaseIndexService:
             )
 
         parser = self._ensure_parser()
-        files: list[FileSymbols] = []
+        files = []  # list[FileSymbols]
 
         for fpath, lang in source_files:
             rel = str(fpath.relative_to(root))

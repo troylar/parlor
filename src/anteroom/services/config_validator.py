@@ -440,7 +440,7 @@ def validate_config(raw: dict[str, Any]) -> ValidationResult:
             )
 
     # Validate float fields
-    for section_path, key, lo, hi, default in _FLOAT_FIELDS:
+    for section_path, key, lo, hi, default in _FLOAT_FIELDS:  # type: ignore[assignment]
         section = _get_section(raw, section_path)
         if section is None or key not in section:
             continue

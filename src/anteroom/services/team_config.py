@@ -330,7 +330,7 @@ def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
         if isinstance(base_val, dict) and isinstance(overlay_val, dict):
             result[key] = deep_merge(base_val, overlay_val)
         elif _is_named_list(base_val) and _is_named_list(overlay_val):
-            result[key] = _merge_named_lists(base_val, overlay_val)
+            result[key] = _merge_named_lists(base_val, overlay_val)  # type: ignore[arg-type]
         else:
             result[key] = overlay_val
     return result

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import enum
 import logging
-import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 import yaml
 
@@ -87,7 +89,7 @@ class HealthReport:
         }
 
 
-def check_config_overlay_conflicts(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_config_overlay_conflicts(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Detect config overlays from different sources that set the same field to different values."""
     overlays = artifact_storage.list_artifacts(db, artifact_type=ArtifactType.CONFIG_OVERLAY)
     if len(overlays) < 2:
@@ -135,7 +137,7 @@ def check_config_overlay_conflicts(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def check_skill_name_collisions(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_skill_name_collisions(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Detect skills with the same name from different sources."""
     skills = artifact_storage.list_artifacts(db, artifact_type=ArtifactType.SKILL)
     if len(skills) < 2:
@@ -169,7 +171,7 @@ def check_skill_name_collisions(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def check_shadow_warnings(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_shadow_warnings(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Detect when a higher-precedence artifact shadows a lower one of the same type+name."""
     all_artifacts = artifact_storage.list_artifacts(db)
     if len(all_artifacts) < 2:
@@ -204,7 +206,7 @@ def check_shadow_warnings(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def check_empty_artifacts(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_empty_artifacts(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Flag artifacts with trivially small content."""
     all_artifacts = artifact_storage.list_artifacts(db)
     issues: list[HealthIssue] = []
@@ -225,7 +227,7 @@ def check_empty_artifacts(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def check_malformed_artifacts(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_malformed_artifacts(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Validate FQN format and YAML syntax for all artifacts."""
     all_artifacts = artifact_storage.list_artifacts(db)
     issues: list[HealthIssue] = []
@@ -294,7 +296,7 @@ def check_malformed_artifacts(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def check_lock_drift(db: sqlite3.Connection, project_dir: Path | None = None) -> list[HealthIssue]:
+def check_lock_drift(db: ThreadSafeConnection, project_dir: Path | None = None) -> list[HealthIssue]:
     """Check lock file matches current DB state."""
     if project_dir is None:
         return []
@@ -316,7 +318,7 @@ def check_lock_drift(db: sqlite3.Connection, project_dir: Path | None = None) ->
     return issues
 
 
-def check_bloat(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_bloat(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Report total artifact count, content size, and estimated token impact."""
     all_artifacts = artifact_storage.list_artifacts(db)
     if not all_artifacts:
@@ -352,10 +354,10 @@ def check_bloat(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def check_orphaned_artifacts(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_orphaned_artifacts(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Find artifacts not linked to any pack and not from built_in/local/inline sources."""
     pack_count = db.execute_fetchone("SELECT COUNT(*) AS cnt FROM packs")
-    pack_count_val = pack_count[0] if isinstance(pack_count, (tuple, list)) else pack_count["cnt"]
+    pack_count_val = int(pack_count["cnt"]) if pack_count else 0
     if pack_count_val == 0:
         return []
 
@@ -383,7 +385,7 @@ def check_orphaned_artifacts(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def check_duplicate_content(db: sqlite3.Connection) -> list[HealthIssue]:
+def check_duplicate_content(db: ThreadSafeConnection) -> list[HealthIssue]:
     """Detect artifacts with identical content (exact duplicates by hash)."""
     all_artifacts = artifact_storage.list_artifacts(db)
     if len(all_artifacts) < 2:
@@ -416,7 +418,7 @@ def check_duplicate_content(db: sqlite3.Connection) -> list[HealthIssue]:
     return issues
 
 
-def fix_duplicate_content(db: sqlite3.Connection) -> int:
+def fix_duplicate_content(db: ThreadSafeConnection) -> int:
     """Remove exact duplicate artifacts, keeping the highest-precedence copy.
 
     Skips artifacts referenced by packs (via pack_artifacts junction table).
@@ -455,7 +457,7 @@ def fix_duplicate_content(db: sqlite3.Connection) -> int:
 
 
 def run_health_check(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     *,
     project_dir: Path | None = None,
     fix: bool = False,
@@ -469,7 +471,7 @@ def run_health_check(
     report.estimated_tokens = report.total_size_bytes // 4
 
     pack_count = db.execute_fetchone("SELECT COUNT(*) AS cnt FROM packs")
-    report.pack_count = pack_count[0] if isinstance(pack_count, (tuple, list)) else pack_count["cnt"]
+    report.pack_count = int(pack_count["cnt"]) if pack_count else 0
 
     # Run all diagnostic checks first
     report.issues.extend(check_config_overlay_conflicts(db))
