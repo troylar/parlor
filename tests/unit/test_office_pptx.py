@@ -1260,3 +1260,53 @@ class TestSmartartComOnly:
         )
         assert "error" in result
         assert "COM backend" in result["error"]
+
+
+class TestComDispatchErrorHandling:
+    @pytest.mark.asyncio
+    async def test_dispatch_com_returns_error_dict_on_exception(self):
+        """When a COM handler raises, _dispatch_com catches and returns error dict with details."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_manager = MagicMock()
+        mock_manager.run_com = AsyncMock(side_effect=RuntimeError("Access denied by security policy"))
+        mock_com_mod = MagicMock()
+        mock_com_mod.get_manager.return_value = mock_manager
+        mock_com_mod.COM_AVAILABLE = True
+
+        with (
+            patch("anteroom.tools.office_pptx._BACKEND", "com"),
+            patch("anteroom.tools.office_pptx._com_mod", mock_com_mod),
+        ):
+            result = await handle(action="edit", path="test.pptx", replacements=[{"old": "a", "new": "b"}])
+
+        assert "error" in result
+        assert "Access denied by security policy" in result["error"]
+        assert "RuntimeError" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_open_pres_com_includes_exception_message(self):
+        """_open_pres_com error includes exc type and message, not just type name."""
+        from unittest.mock import MagicMock
+
+        from anteroom.tools.office_pptx import _open_pres_com
+
+        mock_manager = MagicMock()
+        mock_ppt = MagicMock()
+        mock_ppt.Presentations.Open.side_effect = Exception("File is locked by another process")
+        mock_manager.get_app.return_value = mock_ppt
+
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as f:
+            f.write(b"dummy")
+            path = f.name
+        try:
+            _, _, err = _open_pres_com(mock_manager, path, "test.pptx")
+            assert err is not None
+            assert "File is locked by another process" in err
+            assert "Exception" in err
+        finally:
+            import os
+
+            os.unlink(path)

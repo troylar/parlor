@@ -411,7 +411,10 @@ async def _dispatch_com(
     handler = _com_dispatch.get(action)
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
-    return await manager.run_com(handler, manager, resolved, display_path, **kwargs)
+    try:
+        return await manager.run_com(handler, manager, resolved, display_path, **kwargs)
+    except Exception as exc:
+        return {"error": f"COM {action} failed on {display_path}: {type(exc).__name__}: {exc}"}
 
 
 def _open_workbook_com(

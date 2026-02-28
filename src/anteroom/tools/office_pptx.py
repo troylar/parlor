@@ -362,7 +362,10 @@ async def _dispatch_com(
     handler = _com_dispatch.get(action)
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
-    return await manager.run_com(handler, manager, resolved, display_path, **kwargs)
+    try:
+        return await manager.run_com(handler, manager, resolved, display_path, **kwargs)
+    except Exception as exc:
+        return {"error": f"COM {action} failed on {display_path}: {type(exc).__name__}: {exc}"}
 
 
 def _open_pres_com(
@@ -387,7 +390,7 @@ def _open_pres_com(
         )
         return ppt, prs, None
     except Exception as exc:
-        return None, None, f"Unable to read PPTX file: {display_path} ({type(exc).__name__})"
+        return None, None, f"Unable to open PPTX file: {display_path} ({type(exc).__name__}: {exc})"
 
 
 def _get_slide_com(prs: Any, slide_index: Optional[int]) -> tuple[Any, Optional[str]]:
@@ -788,8 +791,8 @@ def _insert_image_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[s
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     if slide_index is None:
         return {"error": "slide_index is required for insert_image"}
@@ -899,8 +902,8 @@ def _insert_shape_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[s
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     if slide_index is None:
         return {"error": "slide_index is required for insert_shape"}
@@ -1019,8 +1022,8 @@ def _format_shape_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[s
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     if slide_index is None:
         return {"error": "slide_index is required for format_shape"}
@@ -1162,8 +1165,8 @@ def _master_layout_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     if operation == "list":
         layouts: list[dict[str, Any]] = []
@@ -1256,8 +1259,8 @@ def _reorder_slides_lib(resolved: str, display_path: str, **kwargs: Any) -> dict
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     slides_list = list(prs.slides)
     if slide_index < 1 or slide_index > len(slides_list):
@@ -1484,8 +1487,8 @@ def _embed_table_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[st
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     if slide_index is None:
         return {"error": "slide_index is required for embed_table"}
@@ -1661,8 +1664,8 @@ def _hyperlinks_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     if slide_index is None:
         return {"error": "slide_index is required for hyperlinks"}
@@ -1804,8 +1807,8 @@ def _headers_footers_lib(resolved: str, display_path: str, **kwargs: Any) -> dic
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     if operation == "list":
         # Read placeholder content from slides
@@ -2219,8 +2222,8 @@ def _read_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     output_parts: list[str] = []
 
@@ -2255,8 +2258,8 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
 
     try:
         prs = _Presentation(resolved)
-    except Exception:
-        return {"error": f"Unable to read PPTX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read PPTX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     replacements: list[dict[str, str]] = kwargs.get("replacements") or []
     slides: list[dict[str, Any]] = kwargs.get("slides") or []

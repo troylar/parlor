@@ -290,7 +290,10 @@ async def _dispatch_com(
     handler = _com_dispatch.get(action)
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
-    return await manager.run_com(handler, manager, resolved, display_path, working_dir=working_dir, **kwargs)
+    try:
+        return await manager.run_com(handler, manager, resolved, display_path, working_dir=working_dir, **kwargs)
+    except Exception as exc:
+        return {"error": f"COM {action} failed on {display_path}: {type(exc).__name__}: {exc}"}
 
 
 # --- create ---
@@ -396,8 +399,8 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
     word = manager.get_app("Word.Application")
     try:
         doc = word.Documents.Open(os.path.abspath(resolved), ReadOnly=True)
-    except Exception:
-        return {"error": f"Unable to read DOCX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read DOCX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     try:
         output_parts: list[str] = []
@@ -450,8 +453,8 @@ def _read_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
 
     try:
         document = _docx.Document(resolved)
-    except Exception:
-        return {"error": f"Unable to read DOCX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read DOCX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     output_parts: list[str] = []
 
@@ -495,8 +498,8 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
     word = manager.get_app("Word.Application")
     try:
         doc = word.Documents.Open(os.path.abspath(resolved))
-    except Exception:
-        return {"error": f"Unable to read DOCX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read DOCX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     replacements: list[dict[str, str]] = kwargs.get("replacements") or []
     content_blocks: list[dict[str, Any]] = kwargs.get("content_blocks") or []
@@ -578,8 +581,8 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
 
     try:
         document = _docx.Document(resolved)
-    except Exception:
-        return {"error": f"Unable to read DOCX file: {display_path}"}
+    except Exception as exc:
+        return {"error": f"Unable to read DOCX file: {display_path} ({type(exc).__name__}: {exc})"}
 
     replacements: list[dict[str, str]] = kwargs.get("replacements") or []
     content_blocks: list[dict[str, Any]] = kwargs.get("content_blocks") or []

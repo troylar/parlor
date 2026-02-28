@@ -1276,3 +1276,25 @@ class TestSlicersComOnly:
         result = await handle(action="slicers", path="slicer.xlsx", range_name="PivotTable1")
         assert "error" in result
         assert "COM backend" in result["error"]
+
+
+class TestComDispatchErrorHandling:
+    @pytest.mark.asyncio
+    async def test_dispatch_com_returns_error_dict_on_exception(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_manager = MagicMock()
+        mock_manager.run_com = AsyncMock(side_effect=RuntimeError("Access denied by security policy"))
+        mock_com_mod = MagicMock()
+        mock_com_mod.get_manager.return_value = mock_manager
+        mock_com_mod.COM_AVAILABLE = True
+
+        with (
+            patch("anteroom.tools.office_xlsx._BACKEND", "com"),
+            patch("anteroom.tools.office_xlsx._com_mod", mock_com_mod),
+        ):
+            result = await handle(action="edit", path="test.xlsx", cells=[{"cell": "A1", "value": "x"}])
+
+        assert "error" in result
+        assert "Access denied by security policy" in result["error"]
+        assert "RuntimeError" in result["error"]
