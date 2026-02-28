@@ -125,7 +125,7 @@ DEFINITION: dict[str, Any] = {
             "append_rows": {
                 "type": "array",
                 "description": "Rows to append: [[value, ...]].",
-                "items": {"type": "array"},
+                "items": {"type": "array", "items": {}},
             },
             "add_sheets": {
                 "type": "array",
