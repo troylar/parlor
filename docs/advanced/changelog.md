@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 28, 2026
 
+### v1.83.5
+
+**Fixed:**
+
+- COM objects no longer disconnect between read and edit operations — fixes "object is not connected to server" error (#595)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.83.5)
+
 ### v1.83.4
 
 **Fixed:**
