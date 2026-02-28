@@ -672,10 +672,16 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
         ("paragraph_edits", paragraph_edits),
         ("placeholder_edits", placeholder_edits),
         ("image_replacements", image_replacements),
+        ("delete_slides", delete_slides),
+        ("duplicate_slides", duplicate_slides),
     ]:
         if len(_arr) > _MAX_EDIT_OPS:
             prs.Close()
             return {"error": f"Too many {_arr_name} entries (max {_MAX_EDIT_OPS})"}
+
+    if len(template_fill) > _MAX_EDIT_OPS:
+        prs.Close()
+        return {"error": f"Too many template_fill keys (max {_MAX_EDIT_OPS})"}
 
     current_count = prs.Slides.Count
     if slides and current_count + len(slides) > _MAX_SLIDES:
@@ -2793,9 +2799,14 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
         ("paragraph_edits", paragraph_edits),
         ("placeholder_edits", placeholder_edits),
         ("image_replacements", image_replacements),
+        ("delete_slides", delete_slides),
+        ("duplicate_slides", duplicate_slides),
     ]:
         if len(_arr) > _MAX_EDIT_OPS:
             return {"error": f"Too many {_arr_name} entries (max {_MAX_EDIT_OPS})"}
+
+    if len(template_fill) > _MAX_EDIT_OPS:
+        return {"error": f"Too many template_fill keys (max {_MAX_EDIT_OPS})"}
 
     current_count = len(prs.slides)
     if slides_to_add and current_count + len(slides_to_add) > _MAX_SLIDES:
