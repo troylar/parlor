@@ -92,6 +92,39 @@ class TestRead:
         assert "My notes" in result["content"]
 
     @pytest.mark.asyncio
+    async def test_read_shows_paragraph_structure(self, tmp_path):
+        """Multi-paragraph shapes should show per-paragraph detail in read output."""
+        from pptx import Presentation
+        from pptx.util import Pt
+
+        prs = Presentation()
+        layout = prs.slide_layouts[5]  # blank
+        slide = prs.slides.add_slide(layout)
+        from pptx.util import Emu
+
+        tx_box = slide.shapes.add_textbox(Emu(0), Emu(0), Emu(5000000), Emu(5000000))
+        tf = tx_box.text_frame
+        # First paragraph (heading)
+        tf.paragraphs[0].text = "Requirements"
+        tf.paragraphs[0].runs[0].font.bold = True
+        tf.paragraphs[0].runs[0].font.size = Pt(18)
+        # Second paragraph (body)
+        p2 = tf.add_paragraph()
+        p2.text = "Must support offline mode"
+        p2.level = 1
+
+        prs.save(str(tmp_path / "structured.pptx"))
+
+        result = await handle(action="read", path="structured.pptx")
+        assert "error" not in result
+        content = result["content"]
+        assert "paragraphs)" in content
+        assert "P0" in content
+        assert "P1" in content
+        assert "Requirements" in content
+        assert "bold" in content
+
+    @pytest.mark.asyncio
     async def test_read_not_found(self):
         result = await handle(action="read", path="missing.pptx")
         assert "error" in result

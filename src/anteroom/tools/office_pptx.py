@@ -140,7 +140,9 @@ DEFINITION: dict[str, Any] = {
             "shape_edits": {
                 "type": "array",
                 "description": (
-                    "Edit text/formatting on specific shapes. Each entry: "
+                    "Edit text/formatting on specific shapes. CAUTION: setting 'text' replaces ALL "
+                    "paragraphs with a single plain paragraph — use 'paragraph_edits' instead for "
+                    "multi-paragraph content with headings, bullets, or mixed formatting. Each entry: "
                     "{slide_index: int (1-based), shape_index: int (1-based), "
                     "text?: str, font_size?: number, font_bold?: bool, "
                     "font_color?: str (hex), font_name?: str}."
@@ -588,15 +590,73 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
                     tbl = shape.Table
                     output_parts.append(f"[Table {table_idx}: {tbl.Rows.Count} rows x {tbl.Columns.Count} cols]")
                     for r in range(1, min(tbl.Rows.Count + 1, 51)):
-                        row_vals: list[str] = []
+                        row_vals_com: list[str] = []
+                        has_rich_cell_com = False
                         for c in range(1, tbl.Columns.Count + 1):
-                            cell_text = tbl.Cell(r, c).Shape.TextFrame.TextRange.Text.strip()
-                            row_vals.append(cell_text)
-                        output_parts.append(f"  Row {r - 1}: {row_vals}")
+                            cell_tf = tbl.Cell(r, c).Shape.TextFrame
+                            cell_text_com = cell_tf.TextRange.Text.strip()
+                            row_vals_com.append(cell_text_com)
+                            try:
+                                if cell_tf.TextRange.Paragraphs().Count > 1:
+                                    has_rich_cell_com = True
+                            except Exception:
+                                pass
+                        if has_rich_cell_com:
+                            output_parts.append(f"  Row {r - 1}:")
+                            for c in range(1, tbl.Columns.Count + 1):
+                                cell_tf = tbl.Cell(r, c).Shape.TextFrame
+                                try:
+                                    pc = cell_tf.TextRange.Paragraphs().Count
+                                except Exception:
+                                    pc = 1
+                                if pc > 1:
+                                    output_parts.append(f"    Col {c - 1}: ({pc} paragraphs)")
+                                    for pi in range(1, min(pc + 1, 51)):
+                                        try:
+                                            p = cell_tf.TextRange.Paragraphs(pi)
+                                            ptxt_com = p.Text.strip()
+                                            fmt_p: list[str] = []
+                                            if p.IndentLevel > 1:
+                                                fmt_p.append(f"level={p.IndentLevel - 1}")
+                                            if p.Font.Bold:
+                                                fmt_p.append("bold")
+                                            fmt_s = f" ({', '.join(fmt_p)})" if fmt_p else ""
+                                            output_parts.append(f"      P{pi - 1}{fmt_s}: {ptxt_com}")
+                                        except Exception:
+                                            break
+                                else:
+                                    output_parts.append(f"    Col {c - 1}: {cell_tf.TextRange.Text.strip()}")
+                        else:
+                            output_parts.append(f"  Row {r - 1}: {row_vals_com}")
                 elif shape.HasTextFrame:
-                    text = shape.TextFrame.TextRange.Text.strip()
-                    if text:
-                        output_parts.append(f"[Shape {j}] {text}")
+                    tf = shape.TextFrame
+                    try:
+                        para_count = tf.TextRange.Paragraphs().Count
+                    except Exception:
+                        para_count = 1
+                    if para_count > 1:
+                        output_parts.append(f"[Shape {j}] ({para_count} paragraphs)")
+                        for pi in range(1, min(para_count + 1, 51)):
+                            try:
+                                p = tf.TextRange.Paragraphs(pi)
+                                ptxt = p.Text.strip()
+                                fmt_parts: list[str] = []
+                                level = p.IndentLevel
+                                if level > 1:
+                                    fmt_parts.append(f"level={level - 1}")
+                                if p.Font.Bold:
+                                    fmt_parts.append("bold")
+                                if p.Font.Size:
+                                    fmt_parts.append(f"size={int(p.Font.Size)}")
+                                fmt_str = f" ({', '.join(fmt_parts)})" if fmt_parts else ""
+                                indent = "  " * max(level, 1)
+                                output_parts.append(f"{indent}P{pi - 1}{fmt_str}: {ptxt}")
+                            except Exception:
+                                break
+                    else:
+                        text = tf.TextRange.Text.strip()
+                        if text:
+                            output_parts.append(f"[Shape {j}] {text}")
             if slide.HasNotesPage:
                 try:
                     notes = slide.NotesPage.Shapes(2).TextFrame.TextRange.Text.strip()
@@ -2743,16 +2803,68 @@ def _read_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
                 table_idx += 1
                 tbl = shape.table
                 output_parts.append(f"[Table {table_idx}: {len(tbl.rows)} rows x {len(tbl.columns)} cols]")
-                for r, row in enumerate(tbl.rows):
+                for r, row_obj in enumerate(tbl.rows):
                     if r >= 50:
                         output_parts.append("  ... (rows truncated)")
                         break
-                    row_vals = [tbl.cell(r, c).text.strip() for c in range(len(tbl.columns))]
-                    output_parts.append(f"  Row {r}: {row_vals}")
+                    row_vals: list[str] = []
+                    has_rich_cell = False
+                    for c in range(len(tbl.columns)):
+                        cell = tbl.cell(r, c)
+                        cell_paras = cell.text_frame.paragraphs if cell.text_frame else []
+                        if len(cell_paras) > 1:
+                            has_rich_cell = True
+                        row_vals.append(cell.text.strip())
+                    if has_rich_cell:
+                        output_parts.append(f"  Row {r}:")
+                        for c in range(len(tbl.columns)):
+                            cell = tbl.cell(r, c)
+                            cell_paras = cell.text_frame.paragraphs if cell.text_frame else []
+                            if len(cell_paras) > 1:
+                                output_parts.append(f"    Col {c}: ({len(cell_paras)} paragraphs)")
+                                for pi, para in enumerate(cell_paras):
+                                    ptxt = para.text.strip()
+                                    fmt_parts_c: list[str] = []
+                                    if para.level and para.level > 0:
+                                        fmt_parts_c.append(f"level={para.level}")
+                                    if para.runs and para.runs[0].font.bold:
+                                        fmt_parts_c.append("bold")
+                                    fmt_c = f" ({', '.join(fmt_parts_c)})" if fmt_parts_c else ""
+                                    output_parts.append(f"      P{pi}{fmt_c}: {ptxt}")
+                            else:
+                                output_parts.append(f"    Col {c}: {cell.text.strip()}")
+                    else:
+                        output_parts.append(f"  Row {r}: {row_vals}")
             elif shape.has_text_frame:
-                text = shape.text_frame.text.strip()
-                if text:
-                    output_parts.append(f"[Shape {j}] {text}")
+                tf = shape.text_frame
+                paras = tf.paragraphs
+                if len(paras) > 1 or (paras and paras[0].level > 0):
+                    # Multi-paragraph or indented: show structure so the AI
+                    # can reconstruct it with paragraph_edits.
+                    output_parts.append(f"[Shape {j}] ({len(paras)} paragraphs)")
+                    for pi, para in enumerate(paras):
+                        if pi >= 50:
+                            output_parts.append("  ... (paragraphs truncated)")
+                            break
+                        ptxt = para.text.strip()
+                        level = para.level or 0
+                        fmt_parts: list[str] = []
+                        if level > 0:
+                            fmt_parts.append(f"level={level}")
+                        runs = para.runs
+                        if runs:
+                            r0_font = runs[0].font
+                            if r0_font.bold:
+                                fmt_parts.append("bold")
+                            if r0_font.size is not None:
+                                fmt_parts.append(f"size={int(r0_font.size.pt)}")
+                        fmt_str = f" ({', '.join(fmt_parts)})" if fmt_parts else ""
+                        indent = "  " * (level + 1)
+                        output_parts.append(f"{indent}P{pi}{fmt_str}: {ptxt}")
+                else:
+                    text = tf.text.strip()
+                    if text:
+                        output_parts.append(f"[Shape {j}] {text}")
         if slide.has_notes_slide:
             notes = slide.notes_slide.notes_text_frame.text.strip()
             if notes:
