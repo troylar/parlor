@@ -765,7 +765,10 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
             col = te.get("col")
             value = te.get("value", "")
             if row is None or col is None:
-                table_edit_skips.append(f"entry {idx}: row or col is None")
+                keys = list(te.keys())
+                table_edit_skips.append(
+                    f"entry {idx}: row={row!r}, col={col!r} (expected: slide_index, row, col, value; got: {keys})"
+                )
                 continue
             table_count = 0
             found_table = False
@@ -2906,7 +2909,10 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
         col = te.get("col")
         value = te.get("value", "")
         if row is None or col is None:
-            table_edit_skips.append(f"entry {idx}: row or col is None")
+            keys = list(te.keys())
+            table_edit_skips.append(
+                f"entry {idx}: row={row!r}, col={col!r} (expected: slide_index, row, col, value; got: {keys})"
+            )
             continue
         table_count = 0
         for shape in slide.shapes:
