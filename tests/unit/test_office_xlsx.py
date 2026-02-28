@@ -807,7 +807,7 @@ class TestImages:
 
         sig = b"\x89PNG\r\n\x1a\n"
         ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-        scanline = b"\x00\xFF\x00\x00"
+        scanline = b"\x00\xff\x00\x00"
         idat = zlib.compress(scanline)
         png_bytes = sig + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", idat) + _chunk(b"IEND", b"")
         png_path = tmp_path / "test_image.png"
@@ -1075,10 +1075,13 @@ class TestCharts:
         await handle(
             action="create",
             path="chart.xlsx",
-            sheets=[{
-                "name": "Data", "headers": ["Month", "Sales"],
-                "rows": [["Jan", 100], ["Feb", 200], ["Mar", 150]],
-            }],
+            sheets=[
+                {
+                    "name": "Data",
+                    "headers": ["Month", "Sales"],
+                    "rows": [["Jan", 100], ["Feb", 200], ["Mar", 150]],
+                }
+            ],
         )
         result = await handle(
             action="charts",

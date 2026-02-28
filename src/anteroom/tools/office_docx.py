@@ -44,10 +44,20 @@ _MAX_OUTPUT = 100_000
 _MAX_CONTENT_BLOCKS = 200
 
 _ALL_ACTIONS = [
-    "create", "read", "edit",
-    "track_changes", "comments", "headers_footers", "insert_image",
-    "styles", "export_pdf", "page_setup", "sections",
-    "bookmarks", "toc", "find_regex",
+    "create",
+    "read",
+    "edit",
+    "track_changes",
+    "comments",
+    "headers_footers",
+    "insert_image",
+    "styles",
+    "export_pdf",
+    "page_setup",
+    "sections",
+    "bookmarks",
+    "toc",
+    "find_regex",
 ]
 
 DEFINITION: dict[str, Any] = {
@@ -86,8 +96,15 @@ DEFINITION: dict[str, Any] = {
             "operation": {
                 "type": "string",
                 "enum": [
-                    "accept", "reject", "list", "add", "read", "delete",
-                    "set", "enable", "disable",
+                    "accept",
+                    "reject",
+                    "list",
+                    "add",
+                    "read",
+                    "delete",
+                    "set",
+                    "enable",
+                    "disable",
                 ],
                 "description": "Sub-operation for actions that support multiple modes.",
             },
@@ -143,8 +160,7 @@ DEFINITION: dict[str, Any] = {
             "margins": {
                 "type": "object",
                 "description": (
-                    "Page margins in inches for page_setup: "
-                    "{top?: float, bottom?: float, left?: float, right?: float}."
+                    "Page margins in inches for page_setup: {top?: float, bottom?: float, left?: float, right?: float}."
                 ),
             },
             "paper_size": {
@@ -172,7 +188,8 @@ DEFINITION: dict[str, Any] = {
 
 
 def _open_document_lib(
-    resolved: str, display_path: str,
+    resolved: str,
+    display_path: str,
 ) -> tuple[Any, str | None]:
     """Open a document with python-docx, returning (doc, error)."""
     import docx as _docx
@@ -187,7 +204,10 @@ def _open_document_lib(
 
 
 def _open_document_com(
-    manager: Any, resolved: str, display_path: str, read_only: bool = False,
+    manager: Any,
+    resolved: str,
+    display_path: str,
+    read_only: bool = False,
 ) -> tuple[Any, Any, str | None]:
     """Open document via COM. Returns (word, doc, error)."""
     if not os.path.isfile(resolved):
@@ -241,7 +261,12 @@ async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
 
 
 async def _dispatch_com(
-    action: str, resolved: str, display_path: str, *, working_dir: str, **kwargs: Any,
+    action: str,
+    resolved: str,
+    display_path: str,
+    *,
+    working_dir: str,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     manager = _com_mod.get_manager()
 
@@ -624,13 +649,15 @@ def _track_changes_com(manager: Any, resolved: str, display_path: str, **kwargs:
             revisions: list[dict[str, str]] = []
             for i in range(1, doc.Revisions.Count + 1):
                 rev = doc.Revisions(i)
-                revisions.append({
-                    "index": i,
-                    "type": str(rev.Type),
-                    "author": rev.Author or "",
-                    "date": str(rev.Date),
-                    "text": rev.Range.Text[:200] if rev.Range else "",
-                })
+                revisions.append(
+                    {
+                        "index": i,
+                        "type": str(rev.Type),
+                        "author": rev.Author or "",
+                        "date": str(rev.Date),
+                        "text": rev.Range.Text[:200] if rev.Range else "",
+                    }
+                )
             return {"result": "Listed tracked changes", "revisions": revisions, "count": len(revisions)}
 
         if op == "accept":
@@ -672,13 +699,15 @@ def _comments_com(manager: Any, resolved: str, display_path: str, **kwargs: Any)
             comments: list[dict[str, str]] = []
             for i in range(1, doc.Comments.Count + 1):
                 c = doc.Comments(i)
-                comments.append({
-                    "index": i,
-                    "author": c.Author or "",
-                    "date": str(c.Date),
-                    "text": c.Range.Text if c.Range else "",
-                    "scope": c.Scope.Text[:200] if c.Scope else "",
-                })
+                comments.append(
+                    {
+                        "index": i,
+                        "author": c.Author or "",
+                        "date": str(c.Date),
+                        "text": c.Range.Text if c.Range else "",
+                        "scope": c.Scope.Text[:200] if c.Scope else "",
+                    }
+                )
             return {"result": "Read comments", "comments": comments, "count": len(comments)}
 
         if op == "add":
@@ -909,11 +938,13 @@ def _styles_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -
                     s = doc.Styles(i)
                     # Type: 1=paragraph, 2=character, 3=table, 4=list
                     type_map = {1: "paragraph", 2: "character", 3: "table", 4: "list"}
-                    styles.append({
-                        "name": s.NameLocal,
-                        "type": type_map.get(s.Type, "unknown"),
-                        "builtin": str(s.BuiltIn),
-                    })
+                    styles.append(
+                        {
+                            "name": s.NameLocal,
+                            "type": type_map.get(s.Type, "unknown"),
+                            "builtin": str(s.BuiltIn),
+                        }
+                    )
                 except Exception:
                     continue
             return {"result": "Listed styles", "styles": styles, "count": len(styles)}
@@ -943,9 +974,7 @@ def _styles_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -
                 return {"error": "style_name and paragraph_index required for set operation"}
             para_idx = int(paragraph_index)
             if para_idx < 0 or para_idx >= doc.Paragraphs.Count:
-                return {
-                    "error": f"paragraph_index {para_idx} out of range (0-{doc.Paragraphs.Count - 1})"
-                }
+                return {"error": f"paragraph_index {para_idx} out of range (0-{doc.Paragraphs.Count - 1})"}
             doc.Paragraphs(para_idx + 1).Style = style_name
             doc.Save()
             return {
@@ -972,13 +1001,18 @@ def _styles_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, An
         styles: list[dict[str, str]] = []
         for s in doc.styles:
             type_map = {
-                1: "paragraph", 2: "character", 3: "table", 4: "list",
+                1: "paragraph",
+                2: "character",
+                3: "table",
+                4: "list",
             }
-            styles.append({
-                "name": s.name,
-                "type": type_map.get(s.type, "unknown"),
-                "builtin": str(s.builtin),
-            })
+            styles.append(
+                {
+                    "name": s.name,
+                    "type": type_map.get(s.type, "unknown"),
+                    "builtin": str(s.builtin),
+                }
+            )
         return {"result": "Listed styles", "styles": styles, "count": len(styles)}
 
     if op == "read":
@@ -1013,9 +1047,7 @@ def _styles_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, An
             return {"error": f"Style '{style_name}' not found in document"}
         para_idx = int(paragraph_index)
         if para_idx < 0 or para_idx >= len(doc.paragraphs):
-            return {
-                "error": f"paragraph_index {para_idx} out of range (0-{len(doc.paragraphs) - 1})"
-            }
+            return {"error": f"paragraph_index {para_idx} out of range (0-{len(doc.paragraphs) - 1})"}
         doc.paragraphs[para_idx].style = style_name
         doc.save(resolved)
         return {
@@ -1176,9 +1208,7 @@ def _page_setup_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str
         if dims:
             w, h = dims
             current_orient = kwargs.get("orientation", "")
-            if current_orient == "landscape" or (
-                not current_orient and section.page_width > section.page_height
-            ):
+            if current_orient == "landscape" or (not current_orient and section.page_width > section.page_height):
                 section.page_width = h
                 section.page_height = w
             else:
@@ -1217,23 +1247,31 @@ def _sections_com(manager: Any, resolved: str, display_path: str, **kwargs: Any)
                 s = doc.Sections(i)
                 # Start types: 0=continuous, 1=new_column, 2=new_page, 3=even_page, 4=odd_page
                 type_map = {
-                    0: "continuous", 1: "new_column", 2: "new_page",
-                    3: "even_page", 4: "odd_page",
+                    0: "continuous",
+                    1: "new_column",
+                    2: "new_page",
+                    3: "even_page",
+                    4: "odd_page",
                 }
-                sections.append({
-                    "index": i,
-                    "start_type": type_map.get(s.PageSetup.SectionStart, "unknown"),
-                    "page_width": s.PageSetup.PageWidth,
-                    "page_height": s.PageSetup.PageHeight,
-                })
+                sections.append(
+                    {
+                        "index": i,
+                        "start_type": type_map.get(s.PageSetup.SectionStart, "unknown"),
+                        "page_width": s.PageSetup.PageWidth,
+                        "page_height": s.PageSetup.PageHeight,
+                    }
+                )
             return {"result": "Listed sections", "sections": sections, "count": len(sections)}
 
         if op == "add":
             start_type = kwargs.get("start_type", "new_page")
             # Map to COM constants
             type_map = {
-                "continuous": 0, "new_column": 1, "new_page": 2,
-                "even_page": 3, "odd_page": 4,
+                "continuous": 0,
+                "new_column": 1,
+                "new_page": 2,
+                "even_page": 3,
+                "odd_page": 4,
             }
             xl_type = type_map.get(start_type, 2)
             rng = doc.Content
@@ -1267,15 +1305,22 @@ def _sections_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, 
             start_type_raw = s.start_type if hasattr(s, "start_type") else None
             start_type_val = int(start_type_raw) if start_type_raw is not None else None
             type_map = {
-                0: "continuous", 1: "new_column", 2: "new_page",
-                3: "even_page", 4: "odd_page",
+                0: "continuous",
+                1: "new_column",
+                2: "new_page",
+                3: "even_page",
+                4: "odd_page",
             }
-            sections.append({
-                "index": i + 1,
-                "start_type": type_map.get(start_type_val, "new_page") if start_type_val is not None else "new_page",
-                "page_width": str(s.page_width),
-                "page_height": str(s.page_height),
-            })
+            sections.append(
+                {
+                    "index": i + 1,
+                    "start_type": type_map.get(start_type_val, "new_page")
+                    if start_type_val is not None
+                    else "new_page",
+                    "page_width": str(s.page_width),
+                    "page_height": str(s.page_height),
+                }
+            )
         return {"result": "Listed sections", "sections": sections, "count": len(sections)}
 
     if op == "add":
@@ -1316,11 +1361,13 @@ def _bookmarks_com(manager: Any, resolved: str, display_path: str, **kwargs: Any
             bookmarks: list[dict[str, str]] = []
             for i in range(1, doc.Bookmarks.Count + 1):
                 bm = doc.Bookmarks(i)
-                bookmarks.append({
-                    "name": bm.Name,
-                    "start": str(bm.Start),
-                    "end": str(bm.End),
-                })
+                bookmarks.append(
+                    {
+                        "name": bm.Name,
+                        "start": str(bm.Start),
+                        "end": str(bm.End),
+                    }
+                )
             return {"result": "Listed bookmarks", "bookmarks": bookmarks, "count": len(bookmarks)}
 
         if op == "add":
@@ -1401,10 +1448,12 @@ def _toc_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> d
             for i in range(1, toc_count + 1):
                 toc = doc.TablesOfContents(i)
                 text = toc.Range.Text[:1000] if toc.Range else ""
-                toc_info.append({
-                    "index": i,
-                    "text": text,
-                })
+                toc_info.append(
+                    {
+                        "index": i,
+                        "text": text,
+                    }
+                )
             return {"result": "Read table of contents", "tables_of_contents": toc_info, "count": toc_count}
 
         if op == "delete":
@@ -1471,11 +1520,13 @@ def _find_regex_com(manager: Any, resolved: str, display_path: str, **kwargs: An
         rng.Find.ClearFormatting()
         found_count = 0
         while rng.Find.Execute(FindText=pattern, MatchWildcards=True):
-            matches.append({
-                "text": rng.Text[:200],
-                "start": rng.Start,
-                "end": rng.End,
-            })
+            matches.append(
+                {
+                    "text": rng.Text[:200],
+                    "start": rng.Start,
+                    "end": rng.End,
+                }
+            )
             found_count += 1
             if found_count >= 100:
                 break
@@ -1530,12 +1581,14 @@ def _find_regex_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str
     found_count = 0
     for para_idx, para in enumerate(doc.paragraphs):
         for m in compiled.finditer(para.text):
-            matches.append({
-                "text": m.group()[:200],
-                "paragraph": para_idx,
-                "start": m.start(),
-                "end": m.end(),
-            })
+            matches.append(
+                {
+                    "text": m.group()[:200],
+                    "paragraph": para_idx,
+                    "start": m.start(),
+                    "end": m.end(),
+                }
+            )
             found_count += 1
             if found_count >= 100:
                 break

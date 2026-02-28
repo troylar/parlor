@@ -47,16 +47,39 @@ _MAX_EXCEL_ROWS = 1_048_576  # Excel row limit
 
 _VALID_CHART_TYPES = ("column", "bar", "line", "pie", "scatter", "area")
 _VALID_CF_OPERATORS = (
-    "greaterThan", "lessThan", "equal", "notEqual",
-    "between", "greaterThanOrEqual", "lessThanOrEqual",
+    "greaterThan",
+    "lessThan",
+    "equal",
+    "notEqual",
+    "between",
+    "greaterThanOrEqual",
+    "lessThanOrEqual",
 )
 
 _ALL_ACTIONS = [
-    "create", "read", "edit",
-    "format_cells", "merge_cells", "freeze_panes", "auto_filter", "print_area",
-    "named_ranges", "data_validation", "conditional_format", "comments",
-    "hyperlinks", "images", "protect", "group_rows_cols", "print_settings",
-    "charts", "export_pdf", "sort", "pivot_tables", "sparklines", "slicers",
+    "create",
+    "read",
+    "edit",
+    "format_cells",
+    "merge_cells",
+    "freeze_panes",
+    "auto_filter",
+    "print_area",
+    "named_ranges",
+    "data_validation",
+    "conditional_format",
+    "comments",
+    "hyperlinks",
+    "images",
+    "protect",
+    "group_rows_cols",
+    "print_settings",
+    "charts",
+    "export_pdf",
+    "sort",
+    "pivot_tables",
+    "sparklines",
+    "slicers",
 ]
 
 _working_dir_override: str | None = None
@@ -183,8 +206,7 @@ DEFINITION: dict[str, Any] = {
             "protect_options": {
                 "type": "object",
                 "description": (
-                    "Protection options: {sheet?, format_cells?, "
-                    "insert_rows?, delete_rows?, sort?, auto_filter?}."
+                    "Protection options: {sheet?, format_cells?, insert_rows?, delete_rows?, sort?, auto_filter?}."
                 ),
             },
             "start": {
@@ -322,16 +344,39 @@ async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _COM_ACTIONS = [
-    "create", "read", "edit", "format_cells", "merge_cells", "freeze_panes",
-    "auto_filter", "print_area", "named_ranges", "data_validation",
-    "conditional_format", "comments", "hyperlinks", "images", "protect",
-    "group_rows_cols", "print_settings", "charts", "export_pdf", "sort",
-    "pivot_tables", "sparklines", "slicers",
+    "create",
+    "read",
+    "edit",
+    "format_cells",
+    "merge_cells",
+    "freeze_panes",
+    "auto_filter",
+    "print_area",
+    "named_ranges",
+    "data_validation",
+    "conditional_format",
+    "comments",
+    "hyperlinks",
+    "images",
+    "protect",
+    "group_rows_cols",
+    "print_settings",
+    "charts",
+    "export_pdf",
+    "sort",
+    "pivot_tables",
+    "sparklines",
+    "slicers",
 ]
 
 
 async def _dispatch_com(
-    action: str, resolved: str, display_path: str, *, working_dir: str, **kwargs: Any,
+    action: str,
+    resolved: str,
+    display_path: str,
+    *,
+    working_dir: str,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     manager = _com_mod.get_manager()
     kwargs["working_dir"] = working_dir
@@ -369,7 +414,10 @@ async def _dispatch_com(
 
 
 def _open_workbook_com(
-    manager: Any, resolved: str, display_path: str, read_only: bool = False,
+    manager: Any,
+    resolved: str,
+    display_path: str,
+    read_only: bool = False,
 ) -> tuple[Any, Any, str | None]:
     """Open workbook via COM. Returns (excel, wb, error)."""
     if not os.path.isfile(resolved):
@@ -1088,8 +1136,13 @@ def _conditional_format_com(manager: Any, resolved: str, display_path: str, **kw
         formula = rule.get("formula", "0")
 
         op_map = {
-            "greaterThan": 5, "lessThan": 6, "equal": 3,
-            "notEqual": 4, "between": 1, "greaterThanOrEqual": 7, "lessThanOrEqual": 8,
+            "greaterThan": 5,
+            "lessThan": 6,
+            "equal": 3,
+            "notEqual": 4,
+            "between": 1,
+            "greaterThanOrEqual": 7,
+            "lessThanOrEqual": 8,
         }
         xl_op = op_map.get(operator, 5)
 
@@ -1143,7 +1196,8 @@ def _conditional_format_lib(resolved: str, display_path: str, **kwargs: Any) -> 
         font = Font(color=_normalize_hex_color(fmt["font_color"])) if fmt.get("font_color") else None
         fill = (
             PatternFill(start_color=_normalize_hex_color(fmt["fill_color"]), fill_type="solid")
-            if fmt.get("fill_color") else None
+            if fmt.get("fill_color")
+            else None
         )
 
         cf_rule = CellIsRule(operator=operator, formula=[formula], font=font, fill=fill)
@@ -1188,11 +1242,13 @@ def _comments_com(manager: Any, resolved: str, display_path: str, **kwargs: Any)
                     for c in range(1, used.Columns.Count + 1):
                         cell = used.Cells(r, c)
                         if cell.Comment is not None:
-                            comments.append({
-                                "cell": cell.Address.replace("$", ""),
-                                "text": cell.Comment.Text(),
-                                "author": cell.Comment.Author or "",
-                            })
+                            comments.append(
+                                {
+                                    "cell": cell.Address.replace("$", ""),
+                                    "text": cell.Comment.Text(),
+                                    "author": cell.Comment.Author or "",
+                                }
+                            )
             return {"result": "Read comments", "comments": comments}
 
         if op == "delete":
@@ -1242,11 +1298,13 @@ def _comments_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, 
         for row in ws.iter_rows():
             for cell in row:
                 if cell.comment:
-                    comments.append({
-                        "cell": cell.coordinate,
-                        "text": cell.comment.text,
-                        "author": cell.comment.author or "",
-                    })
+                    comments.append(
+                        {
+                            "cell": cell.coordinate,
+                            "text": cell.comment.text,
+                            "author": cell.comment.author or "",
+                        }
+                    )
         wb.close()
         return {"result": "Read comments", "comments": comments}
 
@@ -1295,11 +1353,13 @@ def _hyperlinks_com(manager: Any, resolved: str, display_path: str, **kwargs: An
             links: list[dict[str, str]] = []
             for i in range(1, ws.Hyperlinks.Count + 1):
                 hl = ws.Hyperlinks(i)
-                links.append({
-                    "cell": hl.Range.Address.replace("$", ""),
-                    "url": hl.Address or "",
-                    "display": hl.TextToDisplay or "",
-                })
+                links.append(
+                    {
+                        "cell": hl.Range.Address.replace("$", ""),
+                        "url": hl.Address or "",
+                        "display": hl.TextToDisplay or "",
+                    }
+                )
             return {"result": "Read hyperlinks", "hyperlinks": links}
     finally:
         try:
@@ -1344,11 +1404,13 @@ def _hyperlinks_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str
         for row in ws.iter_rows():
             for cell in row:
                 if cell.hyperlink:
-                    links.append({
-                        "cell": cell.coordinate,
-                        "url": cell.hyperlink.target or "",
-                        "display": str(cell.value or ""),
-                    })
+                    links.append(
+                        {
+                            "cell": cell.coordinate,
+                            "url": cell.hyperlink.target or "",
+                            "display": str(cell.value or ""),
+                        }
+                    )
         wb.close()
         return {"result": "Read hyperlinks", "hyperlinks": links}
 
@@ -1705,8 +1767,12 @@ def _charts_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -
         anchor_cell = kwargs.get("anchor_cell", "E2")
 
         type_map = {
-            "column": 51, "bar": 57, "line": 4, "pie": 5,
-            "scatter": -4169, "area": 1,
+            "column": 51,
+            "bar": 57,
+            "line": 4,
+            "pie": 5,
+            "scatter": -4169,
+            "area": 1,
         }
         if chart_type not in type_map:
             return {"error": f"Unknown chart_type: '{chart_type}'. Supported: {', '.join(_VALID_CHART_TYPES)}"}
@@ -1750,8 +1816,12 @@ def _charts_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, An
     anchor_cell = kwargs.get("anchor_cell", "E2")
 
     type_map: dict[str, Any] = {
-        "column": BarChart, "bar": BarChart, "line": LineChart,
-        "pie": PieChart, "scatter": ScatterChart, "area": AreaChart,
+        "column": BarChart,
+        "bar": BarChart,
+        "line": LineChart,
+        "pie": PieChart,
+        "scatter": ScatterChart,
+        "area": AreaChart,
     }
     if chart_type not in type_map:
         wb.close()

@@ -386,8 +386,14 @@ class TestInsertShape:
     @pytest.mark.asyncio
     async def test_insert_all_shape_types(self, tmp_path):
         shape_types = [
-            "rectangle", "oval", "triangle", "right_arrow",
-            "left_arrow", "diamond", "rounded_rectangle", "star",
+            "rectangle",
+            "oval",
+            "triangle",
+            "right_arrow",
+            "left_arrow",
+            "diamond",
+            "rounded_rectangle",
+            "star",
         ]
         for shape_type in shape_types:
             await self._create_pptx(f"shape_{shape_type}.pptx")

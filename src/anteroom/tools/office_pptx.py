@@ -404,6 +404,7 @@ def _get_slide_com(prs: Any, slide_index: Optional[int]) -> tuple[Any, Optional[
 
 _PP_LAYOUT_TEXT = 2  # ppLayoutText constant for COM
 
+
 def _add_slide_com(prs: Any, slide_def: dict[str, Any]) -> None:
     """Add a single slide to a COM presentation."""
     layout_idx = slide_def.get("layout", _PP_LAYOUT_TEXT)
