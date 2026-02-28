@@ -51,7 +51,8 @@ class TestComAppManager:
 
         assert word is not excel
 
-    def test_quit_all_calls_quit_on_each(self):
+    def test_quit_all_calls_quit_on_each_without_executor(self):
+        """quit_all without an executor (no run_com called) quits apps directly."""
         manager = ComAppManager()
         mock_word = MagicMock()
         mock_excel = MagicMock()
@@ -80,7 +81,8 @@ class TestComAppManager:
         assert len(manager._apps) == 0
 
     @pytest.mark.asyncio
-    async def test_run_com_calls_coinitialize(self):
+    async def test_run_com_initializes_com_on_worker_thread(self):
+        """CoInitialize is called once via the executor initializer, not per-call."""
         manager = ComAppManager()
         mock_pythoncom = MagicMock()
         result_value = {"test": True}
@@ -90,13 +92,20 @@ class TestComAppManager:
 
         with patch("anteroom.tools.office_com._pythoncom", mock_pythoncom):
             result = await manager.run_com(work)
+            # Second call reuses the same thread — no additional CoInitialize
+            result2 = await manager.run_com(work)
 
         assert result is result_value
+        assert result2 is result_value
+        # CoInitialize called once by the thread initializer
         mock_pythoncom.CoInitialize.assert_called_once()
-        mock_pythoncom.CoUninitialize.assert_called_once()
+
+        # Clean up executor
+        if manager._executor:
+            manager._executor.shutdown(wait=False)
 
     @pytest.mark.asyncio
-    async def test_run_com_uninitializes_on_exception(self):
+    async def test_run_com_propagates_exception(self):
         manager = ComAppManager()
         mock_pythoncom = MagicMock()
 
@@ -107,8 +116,12 @@ class TestComAppManager:
             with pytest.raises(ValueError, match="boom"):
                 await manager.run_com(failing_work)
 
+        # CoInitialize called by initializer; no per-call CoUninitialize
         mock_pythoncom.CoInitialize.assert_called_once()
-        mock_pythoncom.CoUninitialize.assert_called_once()
+        mock_pythoncom.CoUninitialize.assert_not_called()
+
+        if manager._executor:
+            manager._executor.shutdown(wait=False)
 
     @pytest.mark.asyncio
     async def test_run_com_passes_args_and_kwargs(self):
@@ -125,6 +138,55 @@ class TestComAppManager:
 
         assert result == "done"
         assert calls == [(1, 2, "val")]
+
+        if manager._executor:
+            manager._executor.shutdown(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_run_com_reuses_same_thread(self):
+        """Verify all run_com calls execute on the same thread (persistent worker)."""
+        import threading
+
+        manager = ComAppManager()
+        mock_pythoncom = MagicMock()
+        thread_ids: list[int] = []
+
+        def record_thread():
+            thread_ids.append(threading.current_thread().ident)
+            return True
+
+        with patch("anteroom.tools.office_com._pythoncom", mock_pythoncom):
+            await manager.run_com(record_thread)
+            await manager.run_com(record_thread)
+            await manager.run_com(record_thread)
+
+        assert len(thread_ids) == 3
+        assert thread_ids[0] == thread_ids[1] == thread_ids[2]
+
+        if manager._executor:
+            manager._executor.shutdown(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_quit_all_with_executor_runs_on_worker_thread(self):
+        """quit_all with an active executor submits quit to the worker thread."""
+        manager = ComAppManager()
+        mock_pythoncom = MagicMock()
+        mock_app = MagicMock()
+
+        with patch("anteroom.tools.office_com._pythoncom", mock_pythoncom):
+            with patch("anteroom.tools.office_com._win32com_client") as mock_client:
+                mock_client.Dispatch = MagicMock(return_value=mock_app)
+
+                # Start the executor by running something
+                await manager.run_com(manager.get_app, "Word.Application")
+
+            # Now quit_all should submit to the executor
+            manager.quit_all()
+
+        mock_app.Quit.assert_called_once()
+        assert len(manager._apps) == 0
+        assert manager._executor is None
+        mock_pythoncom.CoUninitialize.assert_called_once()
 
 
 class TestGetManager:

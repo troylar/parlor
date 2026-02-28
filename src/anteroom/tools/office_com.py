@@ -7,6 +7,7 @@ Only activates on Windows with pywin32 installed.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import sys
 from typing import Any, Callable, TypeVar
@@ -31,23 +32,38 @@ if sys.platform == "win32":
 T = TypeVar("T")
 
 
+def _com_thread_init() -> None:
+    """Initialize COM on the persistent worker thread."""
+    _pythoncom.CoInitialize()
+
+
 class ComAppManager:
     """Manages cached COM Application objects for Office apps.
 
     COM Application objects (Word, Excel, PowerPoint) are expensive to launch.
     This manager caches them for reuse and handles cleanup on shutdown.
 
-    All COM calls must happen on a thread with CoInitialize called. Use
-    ``run_com()`` to execute a callable on a properly initialized thread.
+    All COM calls run on a single persistent thread with CoInitialize called
+    once at startup. This ensures cached COM objects remain connected across
+    multiple ``run_com()`` calls.
     """
 
     def __init__(self) -> None:
         self._apps: dict[str, Any] = {}
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
+
+    def _get_executor(self) -> concurrent.futures.ThreadPoolExecutor:
+        if self._executor is None:
+            self._executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1,
+                initializer=_com_thread_init,
+            )
+        return self._executor
 
     def get_app(self, prog_id: str) -> Any:
         """Get or create a cached COM Application object.
 
-        Must be called from a COM-initialized thread (inside ``run_com``).
+        Must be called from the COM worker thread (inside ``run_com``).
 
         Args:
             prog_id: COM ProgID, e.g. "Word.Application", "Excel.Application",
@@ -67,33 +83,43 @@ class ComAppManager:
         return self._apps[prog_id]
 
     def quit_all(self) -> None:
-        """Quit all cached COM Application objects.
-
-        Must be called from a COM-initialized thread (inside ``run_com``).
-        """
-        for prog_id, app in list(self._apps.items()):
-            try:
-                app.Quit()
-            except Exception:
-                logger.debug("Failed to quit COM app %s", prog_id)
-            del self._apps[prog_id]
-
-    async def run_com(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        """Run a callable on a thread with COM initialized.
-
-        COM is apartment-threaded — each thread must call CoInitialize before
-        using COM objects and CoUninitialize when done. This wraps that lifecycle
-        around the provided callable via asyncio.to_thread.
-        """
-
-        def _wrapper() -> T:
-            _pythoncom.CoInitialize()
-            try:
-                return fn(*args, **kwargs)
-            finally:
+        """Quit all cached COM Application objects and shut down the worker thread."""
+        if self._executor is not None:
+            # Run quit on the COM thread where the objects live
+            def _quit_apps() -> None:
+                for prog_id, app in list(self._apps.items()):
+                    try:
+                        app.Quit()
+                    except Exception:
+                        logger.debug("Failed to quit COM app %s", prog_id)
+                    del self._apps[prog_id]
                 _pythoncom.CoUninitialize()
 
-        return await asyncio.to_thread(_wrapper)
+            try:
+                self._executor.submit(_quit_apps).result(timeout=10)
+            except Exception:
+                logger.debug("Failed to quit COM apps on worker thread")
+                self._apps.clear()
+            self._executor.shutdown(wait=False)
+            self._executor = None
+        else:
+            # No executor — just clear the cache (e.g. in tests)
+            for prog_id, app in list(self._apps.items()):
+                try:
+                    app.Quit()
+                except Exception:
+                    logger.debug("Failed to quit COM app %s", prog_id)
+                del self._apps[prog_id]
+
+    async def run_com(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """Run a callable on the persistent COM worker thread.
+
+        Uses a single-thread executor so COM objects created by ``get_app()``
+        remain in the same apartment and stay connected across calls.
+        """
+        executor = self._get_executor()
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(executor, lambda: fn(*args, **kwargs))
 
 
 _manager: ComAppManager | None = None
