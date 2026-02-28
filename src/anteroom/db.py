@@ -1045,7 +1045,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         logger.warning("Failed to migrate packs table to drop UNIQUE constraint", exc_info=True)
 
 
-def has_vec_support(conn: sqlite3.Connection) -> bool:
+def has_vec_support(conn: sqlite3.Connection | ThreadSafeConnection) -> bool:
     """Check if sqlite-vec extension is loaded and available."""
     try:
         conn.execute("SELECT vec_version()")
