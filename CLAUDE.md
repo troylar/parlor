@@ -128,7 +128,7 @@ CLI (cli/)         ──┘         │
 - **`cli/pickers.py`** — Conversation picker helpers: `picker_relative_time()`, `picker_type_badge()`, `picker_format_preview()`, `resolve_conversation()`, `show_resume_info()`, `show_resume_picker()` (interactive prompt_toolkit picker with preview panel)
 - **`cli/completer.py`** — `AnteroomCompleter`: tab completion for /commands, @file paths, and conversation slugs
 - **`cli/dialogs.py`** — Help dialog rendering
-- **`cli/renderer.py`** — Rich terminal output: verbosity levels, thinking spinner with lifecycle phases, plan checklist rendering, inline diff rendering for file tools, tool call dedup, subagent rendering. Fullscreen mode detection via `is_fullscreen()` to adapt output handling (e.g., suppress cursor manipulation inside OutputPaneWriter)
+- **`cli/renderer.py`** — Rich terminal output: verbosity levels, thinking spinner with lifecycle phases, plan checklist rendering, inline diff rendering for file tools, tool call dedup, subagent rendering. Fullscreen mode support: `use_fullscreen_output(layout, invalidate_fn)` switches renderer to full-screen mode (redirects all console output to layout's output pane, updates status line instead of raw ANSI manipulation), `is_fullscreen()` detects fullscreen mode to adapt output handling (e.g., suppress cursor manipulation inside OutputPaneWriter)
 - **`cli/exec_mode.py`** — Non-interactive mode for scripting/CI. JSON output, timeout, fail-closed approval. Exit codes: 0/1/124
 - **`cli/plan.py`** — Planning mode helpers: `PLAN_MODE_ALLOWED_TOOLS`, plan file I/O, plan command parsing, `enter_plan_mode()`, `leave_plan_mode()`
 - **`cli/instructions.py`** — ANTEROOM.md discovery (`.anteroom.md` > `ANTEROOM.md`, walk-up from cwd), global instructions, token estimation
