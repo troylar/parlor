@@ -39,6 +39,25 @@ class TestComAppManager:
         assert mock_app.WindowState == 2  # ppWindowMinimized
         assert mock_app.DisplayAlerts is False
 
+    def test_get_app_reconnects_on_stale_connection(self):
+        """If the cached COM app is disconnected, get_app evicts and recreates it."""
+        manager = ComAppManager()
+        stale_app = MagicMock()
+        # Simulate RPC disconnect: accessing .Name raises
+        type(stale_app).Name = property(lambda self: (_ for _ in ()).throw(Exception("RPC server is unavailable")))
+        fresh_app = MagicMock()
+
+        with patch("anteroom.tools.office_com._win32com_client") as mock_client:
+            mock_client.Dispatch = MagicMock(side_effect=[stale_app, fresh_app])
+            # First call creates and caches stale_app
+            app1 = manager.get_app("Word.Application")
+            assert app1 is stale_app
+
+            # Second call detects stale connection and reconnects
+            app2 = manager.get_app("Word.Application")
+            assert app2 is fresh_app
+            assert mock_client.Dispatch.call_count == 2
+
     def test_get_app_different_prog_ids(self):
         manager = ComAppManager()
         mock_word = MagicMock()

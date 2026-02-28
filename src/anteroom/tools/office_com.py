@@ -60,26 +60,40 @@ class ComAppManager:
             )
         return self._executor
 
+    def _create_app(self, prog_id: str) -> Any:
+        """Create a new COM Application object for the given ProgID."""
+        app = _win32com_client.Dispatch(prog_id)
+        if prog_id == "PowerPoint.Application":
+            # PowerPoint refuses to automate with Visible=False
+            # (-2147352567). Set visible and minimize instead.
+            app.Visible = True
+            app.WindowState = 2  # ppWindowMinimized
+        else:
+            app.Visible = False
+        app.DisplayAlerts = False
+        return app
+
     def get_app(self, prog_id: str) -> Any:
         """Get or create a cached COM Application object.
 
         Must be called from the COM worker thread (inside ``run_com``).
+        Automatically reconnects if the cached object is stale (e.g.
+        the Office process was closed or the RPC connection dropped).
 
         Args:
             prog_id: COM ProgID, e.g. "Word.Application", "Excel.Application",
                      "PowerPoint.Application".
         """
+        if prog_id in self._apps:
+            try:
+                # Lightweight health check — access a property to verify
+                # the COM connection is still alive.
+                self._apps[prog_id].Name  # noqa: B018
+            except Exception:
+                logger.info("COM app %s disconnected, reconnecting", prog_id)
+                del self._apps[prog_id]
         if prog_id not in self._apps:
-            app = _win32com_client.Dispatch(prog_id)
-            if prog_id == "PowerPoint.Application":
-                # PowerPoint refuses to automate with Visible=False
-                # (-2147352567). Set visible and minimize instead.
-                app.Visible = True
-                app.WindowState = 2  # ppWindowMinimized
-            else:
-                app.Visible = False
-            app.DisplayAlerts = False
-            self._apps[prog_id] = app
+            self._apps[prog_id] = self._create_app(prog_id)
         return self._apps[prog_id]
 
     def quit_all(self) -> None:
