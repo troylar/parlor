@@ -6,6 +6,7 @@ import os
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
 from prompt_toolkit.completion import Completion
 from prompt_toolkit.document import Document
 
@@ -220,8 +221,10 @@ class TestAcceptCompletionBehavior:
         if buf.complete_state and buf.complete_state.current_completion:
             saved_completer = buf.completer
             buf.completer = None
-            buf.apply_completion(buf.complete_state.current_completion)
-            buf.completer = saved_completer
+            try:
+                buf.apply_completion(buf.complete_state.current_completion)
+            finally:
+                buf.completer = saved_completer
             return True
         return False
 
@@ -256,6 +259,18 @@ class TestAcceptCompletionBehavior:
         # During apply_completion, completer should have been None
         assert completer_during_apply == [None]
         # After, completer should be restored
+        assert buf.completer is original_completer
+
+    def test_completer_restored_on_exception(self) -> None:
+        """#617-12: Completer must be restored even if apply_completion raises."""
+        buf = self._make_buf(has_completion=True)
+        original_completer = buf.completer
+        buf.apply_completion.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            self._accept_completion(buf)
+
+        # Completer must still be restored despite the exception
         assert buf.completer is original_completer
 
     def test_enter_with_completion_does_not_submit(self) -> None:

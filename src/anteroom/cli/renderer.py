@@ -224,7 +224,17 @@ def _collapse_plan() -> None:
     completed = sum(1 for s in _plan_steps if s["status"] == "complete")
     total = len(_plan_steps)
 
-    if _repl_mode and _stdout:
+    if _fullscreen_mode and _fullscreen_layout:
+        # In fullscreen, render as styled fragments to the output pane
+        summary = f"  \u2713 Plan: {completed}/{total} steps complete\n"
+        if completed == total:
+            _fullscreen_layout.append_output_fragments([("class:status", summary)])
+        else:
+            summary = f"  \u25cb Plan: {completed}/{total} steps complete\n"
+            _fullscreen_layout.append_output_fragments([("class:status.hint", summary)])
+        if _fullscreen_invalidate:
+            _fullscreen_invalidate()
+    elif _repl_mode and _stdout:
         green = "\033[32m"
         muted = "\033[38;2;139;139;139m"
         rst = "\033[0m"
@@ -752,7 +762,7 @@ async def stop_thinking(
     - ``collapse_plan``: if True, collapse the plan to a one-line summary
     - Neither: clean final line (just "Thinking... Ns")
     """
-    global _spinner, _thinking_ticker_task, _thinking_phase, _plan_written_lines
+    global _spinner, _thinking_ticker_task, _thinking_phase, _plan_written_lines, _thinking_start
     elapsed = 0.0
     # Await ticker termination to prevent race conditions
     if _thinking_ticker_task is not None:
@@ -804,6 +814,7 @@ async def stop_thinking(
                 rst = "\033[0m"
                 _stdout.write(f"\r\033[2K{gold}Thinking...{rst} {timer_c}{elapsed:.0f}s{rst}\n")
                 _stdout.flush()
+    _thinking_start = 0
     return elapsed
 
 
@@ -812,7 +823,7 @@ def stop_thinking_sync() -> float:
 
     Does not await the ticker — use only when an event loop is unavailable.
     """
-    global _spinner, _thinking_ticker_task, _plan_written_lines
+    global _spinner, _thinking_ticker_task, _plan_written_lines, _thinking_start
     elapsed = 0.0
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
@@ -838,6 +849,7 @@ def stop_thinking_sync() -> float:
                 _plan_written_lines = 0
             _stdout.write("\r\033[2K")
             _stdout.flush()
+    _thinking_start = 0
     return elapsed
 
 
@@ -871,8 +883,9 @@ async def thinking_countdown(
             # cancel_event fired — give up
             if _repl_mode and _stdout:
                 _write_thinking_line(elapsed, cancel_msg="cancelled")
-                _stdout.write("\n")
-                _stdout.flush()
+                if not _fullscreen_mode:
+                    _stdout.write("\n")
+                    _stdout.flush()
             return False
         except asyncio.TimeoutError:
             remaining -= 1
@@ -1042,8 +1055,9 @@ def render_response_end() -> None:
 
 
 def render_newline() -> None:
-    _stdout.write("\n")
-    _stdout.flush()
+    if _stdout:
+        _stdout.write("\n")
+        _stdout.flush()
 
 
 # ---------------------------------------------------------------------------

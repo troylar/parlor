@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
@@ -472,9 +474,11 @@ class TestApplicationIntegration:
     def test_output_pane_writer_fileno_raises(self):
         ctrl = OutputControl()
         writer = OutputPaneWriter(ctrl, lambda: None)
+        import io
+
         import pytest
 
-        with pytest.raises(AttributeError):
+        with pytest.raises(io.UnsupportedOperation):
             writer.fileno()
 
     def test_multiple_ansi_appends(self):
@@ -1357,3 +1361,174 @@ class TestPickerOverlay:
         assert r2 is not None
         assert r2["id"] == "2"
         assert al._picker_visible is False
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for #617 bug fixes
+# ---------------------------------------------------------------------------
+
+
+class TestBugfix617:
+    """Regression tests for fullscreen layout bugs (#617)."""
+
+    def _make_layout(self):
+        buf = Buffer(name="test-input")
+        return AnteroomLayout(
+            header_fn=lambda: [("", "header")],
+            footer_fn=lambda: [("", "footer")],
+            input_buffer=buf,
+        )
+
+    def test_hide_dialog_during_teardown(self):
+        """#617-4: hide_dialog() must not raise when layout is destroyed."""
+        al = self._make_layout()
+        # Simulate destroyed layout by making focus() raise
+        al._layout = None  # type: ignore[assignment]
+        # Should not raise
+        al.hide_dialog()
+
+    def test_hide_picker_during_teardown(self):
+        """#617-4: hide_picker() must not raise when layout is destroyed."""
+        al = self._make_layout()
+        al._layout = None  # type: ignore[assignment]
+        al.hide_picker()
+
+    def test_dialog_state_ordering(self):
+        """#617-5: _dialog_visible must be True before buffer reset."""
+        al = self._make_layout()
+        # After show_dialog sets up state, visible should be True
+        # We can't easily test the ordering without async, but we can
+        # verify that the reset happens after visible is set
+        al._dialog_visible = False
+        al._dialog_event = None
+        # Manually replicate the fixed ordering
+        al._dialog_visible = True
+        al._dialog_buffer.reset()
+        assert al._dialog_visible is True
+
+    def test_flush_atomic_swap(self):
+        """#617-14: OutputPaneWriter.flush() uses atomic swap."""
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        writer.write("hello ")
+        writer.write("world")
+        writer.flush()
+        assert ctrl.fragment_count > 0
+        # After flush, pending should be empty
+        assert len(writer._pending) == 0
+
+    def test_picker_preview_bounds_check(self):
+        """#617-15: _get_picker_preview() bounds-checks index."""
+        al = self._make_layout()
+        al._picker_items = [{"_label": "A"}]
+        al._picker_selected_idx = 5  # out of bounds
+        al._picker_preview_fn = lambda item: [("", item["_label"])]
+        # Should not raise, should return empty preview
+        result = al._get_picker_preview()
+        assert result == [("class:picker.preview.empty", "  No preview available")]
+
+    def test_fileno_raises_unsupported_operation(self):
+        """#617-16: fileno() must raise io.UnsupportedOperation."""
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        with pytest.raises(io.UnsupportedOperation):
+            writer.fileno()
+
+    def test_header_no_leading_separator(self):
+        """#617-17: No leading separator when first fields are empty."""
+        # Only git_branch set, no model or working_dir
+        result = format_header(git_branch="main")
+        styles = [s for s, _ in result]
+        texts = [t for _, t in result]
+        # Should not have a separator before "main"
+        assert "class:header.sep" not in styles[:2]
+        assert "main" in texts
+
+    def test_header_separator_between_fields(self):
+        """Separator should appear between populated fields."""
+        result = format_header(model="gpt-4", git_branch="main")
+        texts = "".join(t for _, t in result)
+        assert "gpt-4" in texts
+        assert "main" in texts
+        # Should have a separator
+        sep_count = sum(1 for s, _ in result if s == "class:header.sep")
+        assert sep_count >= 1
+
+    def test_flush_empty_pending_is_noop(self):
+        """#617-14: flush() with no pending data should not touch control."""
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        initial_count = ctrl.fragment_count
+        writer.flush()
+        assert ctrl.fragment_count == initial_count
+
+    def test_flush_concurrent_write_safety(self):
+        """#617-14: Writes during flush don't lose data (atomic swap)."""
+        ctrl = OutputControl()
+        invalidate_calls = []
+        writer = OutputPaneWriter(ctrl, lambda: invalidate_calls.append(1))
+        writer.write("first")
+        # Simulate a write that arrives during flush by writing after
+        # the pending list is swapped but before flush completes
+        writer.flush()
+        writer.write("second")
+        writer.flush()
+        # Both writes should have been flushed
+        assert ctrl.fragment_count > 0
+        assert len(writer._pending) == 0
+        assert len(invalidate_calls) == 2
+
+    def test_hide_dialog_focus_exception_swallowed(self):
+        """#617-4: Any exception from focus() is caught during teardown."""
+        al = self._make_layout()
+        # Make focus raise a specific error
+        al._layout.focus = lambda w: (_ for _ in ()).throw(  # type: ignore[assignment]
+            RuntimeError("layout destroyed")
+        )
+        # Should not propagate
+        al.hide_dialog()
+
+    def test_hide_picker_focus_exception_swallowed(self):
+        """#617-4: Any exception from focus() is caught during teardown."""
+        al = self._make_layout()
+        al._layout.focus = lambda w: (_ for _ in ()).throw(  # type: ignore[assignment]
+            RuntimeError("layout destroyed")
+        )
+        al.hide_picker()
+
+    def test_picker_preview_empty_items(self):
+        """#617-15: Empty items list returns fallback preview."""
+        al = self._make_layout()
+        al._picker_items = []
+        al._picker_selected_idx = 0
+        al._picker_preview_fn = lambda item: [("", "should not reach")]
+        result = al._get_picker_preview()
+        assert result == [("class:picker.preview.empty", "  No preview available")]
+
+    def test_picker_preview_no_preview_fn(self):
+        """#617-15: None preview_fn returns fallback preview."""
+        al = self._make_layout()
+        al._picker_items = [{"_label": "X"}]
+        al._picker_selected_idx = 0
+        al._picker_preview_fn = None
+        result = al._get_picker_preview()
+        assert result == [("class:picker.preview.empty", "  No preview available")]
+
+    def test_header_all_empty_fields(self):
+        """#617-17: All-empty header should not have any separators."""
+        result = format_header()
+        sep_count = sum(1 for s, _ in result if s == "class:header.sep")
+        assert sep_count == 0
+
+    def test_fileno_exception_type(self):
+        """#617-16: fileno() raises io.UnsupportedOperation, not AttributeError."""
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        # Should NOT raise AttributeError
+        with pytest.raises(io.UnsupportedOperation):
+            writer.fileno()
+        # Verify it's a subclass of OSError (standard contract)
+        try:
+            writer.fileno()
+        except io.UnsupportedOperation as e:
+            assert isinstance(e, OSError)

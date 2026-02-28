@@ -3265,3 +3265,136 @@ class TestFullscreenBridge:
         self._mod.console.print("hello world")
         assert layout.output.fragment_count > 0
         assert len(calls) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for #617 bug fixes
+# ---------------------------------------------------------------------------
+
+
+class TestBugfix617Renderer:
+    """Regression tests for renderer bugs (#617)."""
+
+    def setup_method(self):
+        import importlib
+
+        import anteroom.cli.renderer as mod
+
+        importlib.reload(mod)
+        self._mod = mod
+
+    def test_stop_thinking_resets_thinking_start(self):
+        """#617-18: _thinking_start must be reset to 0 after stop_thinking."""
+        self._mod._thinking_start = time.monotonic()
+        self._mod._repl_mode = False
+        self._mod._fullscreen_mode = False
+        self._mod._spinner = None
+        self._mod._thinking_ticker_task = None
+        asyncio.run(self._mod.stop_thinking())
+        assert self._mod._thinking_start == 0
+
+    def test_stop_thinking_sync_resets_thinking_start(self):
+        """#617-18: stop_thinking_sync must also reset _thinking_start."""
+        self._mod._thinking_start = time.monotonic()
+        self._mod._repl_mode = False
+        self._mod._fullscreen_mode = False
+        self._mod._spinner = None
+        self._mod._thinking_ticker_task = None
+        self._mod.stop_thinking_sync()
+        assert self._mod._thinking_start == 0
+
+    def test_render_newline_when_stdout_is_none(self):
+        """#617: render_newline must not raise when _stdout is None."""
+        self._mod._stdout = None
+        # Should not raise
+        self._mod.render_newline()
+
+    def test_collapse_plan_fullscreen_uses_layout(self):
+        """#617-19: _collapse_plan in fullscreen writes to layout, not raw ANSI."""
+        from prompt_toolkit.buffer import Buffer
+
+        from anteroom.cli.layout import AnteroomLayout
+
+        buf = Buffer(name="test")
+        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
+        invalidated = []
+        self._mod._fullscreen_mode = True
+        self._mod._fullscreen_layout = layout
+        self._mod._fullscreen_invalidate = lambda: invalidated.append(1)
+        self._mod._plan_steps = [
+            {"text": "Step 1", "status": "complete"},
+            {"text": "Step 2", "status": "complete"},
+        ]
+        self._mod._plan_visible = True
+        self._mod._repl_mode = True
+        self._mod._collapse_plan()
+        assert not self._mod._plan_visible
+        assert layout.output.fragment_count > 0
+        assert len(invalidated) >= 1
+
+    def test_stop_thinking_returns_elapsed(self):
+        """#617-18: stop_thinking returns elapsed time even after reset."""
+        self._mod._thinking_start = time.monotonic() - 2.5
+        self._mod._repl_mode = False
+        self._mod._fullscreen_mode = False
+        self._mod._spinner = None
+        self._mod._thinking_ticker_task = None
+        elapsed = asyncio.run(self._mod.stop_thinking())
+        assert elapsed >= 2.0
+        assert self._mod._thinking_start == 0
+
+    def test_stop_thinking_sync_returns_elapsed(self):
+        """#617-18: stop_thinking_sync returns elapsed time even after reset."""
+        self._mod._thinking_start = time.monotonic() - 1.0
+        self._mod._repl_mode = False
+        self._mod._fullscreen_mode = False
+        self._mod._spinner = None
+        self._mod._thinking_ticker_task = None
+        elapsed = self._mod.stop_thinking_sync()
+        assert elapsed >= 0.5
+        assert self._mod._thinking_start == 0
+
+    def test_stop_thinking_idempotent(self):
+        """#617-18: Calling stop_thinking twice doesn't accumulate state."""
+        self._mod._thinking_start = time.monotonic() - 1.0
+        self._mod._repl_mode = False
+        self._mod._fullscreen_mode = False
+        self._mod._spinner = None
+        self._mod._thinking_ticker_task = None
+        asyncio.run(self._mod.stop_thinking())
+        assert self._mod._thinking_start == 0
+        # Second call should still work without error
+        asyncio.run(self._mod.stop_thinking())
+        assert self._mod._thinking_start == 0
+
+    def test_collapse_plan_partial_completion(self):
+        """#617-19: _collapse_plan with partial steps shows correct status."""
+        from prompt_toolkit.buffer import Buffer
+
+        from anteroom.cli.layout import AnteroomLayout
+
+        buf = Buffer(name="test")
+        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
+        invalidated = []
+        self._mod._fullscreen_mode = True
+        self._mod._fullscreen_layout = layout
+        self._mod._fullscreen_invalidate = lambda: invalidated.append(1)
+        self._mod._plan_steps = [
+            {"text": "Step 1", "status": "complete"},
+            {"text": "Step 2", "status": "pending"},
+            {"text": "Step 3", "status": "pending"},
+        ]
+        self._mod._plan_visible = True
+        self._mod._repl_mode = True
+        self._mod._collapse_plan()
+        assert not self._mod._plan_visible
+        assert layout.output.fragment_count > 0
+
+    def test_render_newline_with_stdout(self):
+        """render_newline writes newline when _stdout is set."""
+        import io as io_mod
+
+        fake_stdout = io_mod.StringIO()
+        self._mod._stdout = fake_stdout
+        self._mod.render_newline()
+        assert fake_stdout.getvalue() == "\n"

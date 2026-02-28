@@ -2094,8 +2094,10 @@ async def _run_repl(
         if buf.complete_state and buf.complete_state.current_completion:
             saved_completer = buf.completer
             buf.completer = None
-            buf.apply_completion(buf.complete_state.current_completion)
-            buf.completer = saved_completer
+            try:
+                buf.apply_completion(buf.complete_state.current_completion)
+            finally:
+                buf.completer = saved_completer
             return True
         return False
 
@@ -2129,11 +2131,13 @@ async def _run_repl(
             buf.reset()
             _last_ctrl_c[0] = now
         elif now - _last_ctrl_c[0] < 2.0:
+            # Second Ctrl+C within 2 seconds — exit
             _exit_flag[0] = True
             buf.validate_and_handle()
         else:
-            _exit_flag[0] = True
-            buf.validate_and_handle()
+            # First Ctrl+C with empty buffer — show hint, don't exit
+            _last_ctrl_c[0] = now
+            renderer.console.print(f"[{CHROME}]Press Ctrl+C again to exit[/{CHROME}]")
 
     # Styled prompt — dim while agent is working to signal "you can type to queue"
     _prompt_text = HTML("<style fg='#C5A059'>❯</style> ")
@@ -2269,6 +2273,7 @@ async def _run_repl(
     _cached_project_name: list[str] = [""]
     _cached_project_id: list[str | None] = [None]
     _cached_project_time: list[float] = [0.0]
+    _header_plan_mode: list[bool] = [plan_mode]
 
     def _fetch_git_branch_sync() -> str:
         """Run git rev-parse in a thread-safe way (called via asyncio.to_thread)."""
@@ -2310,12 +2315,14 @@ async def _run_repl(
             except RuntimeError:
                 pass  # no event loop yet
 
+        # Use conv["project_id"] which is updated by /project select
+        _pid = conv.get("project_id") or project_id
         _pname = ""
-        if project_id:
-            if now - _cached_project_time[0] > 5.0 or _cached_project_id[0] != project_id:
-                _pdata = storage.get_project(db, project_id)
+        if _pid:
+            if now - _cached_project_time[0] > 30.0 or _cached_project_id[0] != _pid:
+                _pdata = storage.get_project(db, _pid)
                 _cached_project_name[0] = _pdata.get("name", "") if _pdata else ""
-                _cached_project_id[0] = project_id
+                _cached_project_id[0] = _pid
                 _cached_project_time[0] = now
             _pname = _cached_project_name[0]
 
@@ -2326,7 +2333,7 @@ async def _run_repl(
             project_name=_pname,
             space_name=space["name"] if space else "",
             conv_title=conv.get("title", "") or "",
-            plan_mode=plan_mode,
+            plan_mode=_header_plan_mode[0],
         )
 
     _anteroom_layout = AnteroomLayout(
@@ -2711,7 +2718,6 @@ async def _run_repl(
         """Continuously collect user input via the fullscreen buffer accept handler."""
         while not exit_flag.is_set():
             _exit_flag[0] = False
-            _input_ready.clear()
 
             # Wait for the buffer accept handler to fire
             try:
@@ -2720,6 +2726,8 @@ async def _run_repl(
                 return
 
             user_input_raw = _accepted_text[0]
+            # Clear after reading — prevents losing input set between iterations
+            _input_ready.clear()
             # Clear the input buffer for the next prompt
             _fs_input_buffer.reset()
             _fs_app.invalidate()
@@ -2802,6 +2810,7 @@ async def _run_repl(
             plan_path = get_plan_file_path(config.app.data_dir, conv_id)
             _plan_file[0] = plan_path
             _plan_active[0] = True
+            _header_plan_mode[0] = True
             # Back up full tools before filtering
             _full_tools_backup[0] = tools_openai
 
@@ -2816,6 +2825,7 @@ async def _run_repl(
         def _exit_plan_mode(plan_content: str | None = None) -> None:
             nonlocal tools_openai, extra_system_prompt
             _plan_active[0] = False
+            _header_plan_mode[0] = False
 
             # Restore full tools
             if _full_tools_backup[0] is not None:
@@ -4945,25 +4955,29 @@ async def _run_repl(
 
     async def _run_fullscreen() -> None:
         """Run input collector and agent runner inside the fullscreen app."""
-        # Render deferred resume info now that console writes to the output pane
-        if _pending_resume_info:
-            _show_resume_info(db, conv, ai_messages)
+        try:
+            # Render deferred resume info now that console writes to the output pane
+            if _pending_resume_info:
+                _show_resume_info(db, conv, ai_messages)
 
-        input_task = asyncio.create_task(_collect_input())
-        runner_task = asyncio.create_task(_agent_runner())
+            input_task = asyncio.create_task(_collect_input())
+            runner_task = asyncio.create_task(_agent_runner())
 
-        # Wait for either task to signal exit
-        done_tasks, pending_tasks = await asyncio.wait({input_task, runner_task}, return_when=asyncio.FIRST_COMPLETED)
-        exit_flag.set()
-        _input_ready.set()  # unblock _collect_input if waiting
-        for t in pending_tasks:
-            t.cancel()
-            try:
-                await t
-            except BaseException:
-                pass
-        # Exit the fullscreen application
-        _fs_app.exit()
+            # Wait for either task to signal exit
+            done_tasks, pending_tasks = await asyncio.wait(
+                {input_task, runner_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            exit_flag.set()
+            _input_ready.set()  # unblock _collect_input if waiting
+            for t in pending_tasks:
+                t.cancel()
+                try:
+                    await t
+                except BaseException:
+                    pass
+        finally:
+            # Always exit the fullscreen application, even on unhandled exceptions
+            _fs_app.exit()
 
     _fs_app.after_render += lambda _app: None  # ensure event loop ticks
     asyncio.get_running_loop().call_soon(lambda: asyncio.create_task(_run_fullscreen()))

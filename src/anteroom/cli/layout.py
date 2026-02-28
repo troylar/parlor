@@ -152,25 +152,26 @@ def format_header(
             parts.append(("class:header.sep", _HEADER_SEP))
         parts.append(("class:header.dir", short))
 
+    def _sep_append(style: str, text: str) -> None:
+        # Only add separator if there's already content beyond the leading space
+        if len(parts) > 1:
+            parts.append(("class:header.sep", _HEADER_SEP))
+        parts.append((style, text))
+
     if git_branch:
-        parts.append(("class:header.sep", _HEADER_SEP))
-        parts.append(("class:header.branch", git_branch))
+        _sep_append("class:header.branch", git_branch)
 
     if project_name:
-        parts.append(("class:header.sep", _HEADER_SEP))
-        parts.append(("class:header.project", project_name))
+        _sep_append("class:header.project", project_name)
 
     if space_name:
-        parts.append(("class:header.sep", _HEADER_SEP))
-        parts.append(("class:header.space", space_name))
+        _sep_append("class:header.space", space_name)
 
     if conv_title:
-        parts.append(("class:header.sep", _HEADER_SEP))
-        parts.append(("class:header.title", conv_title))
+        _sep_append("class:header.title", conv_title)
 
     if plan_mode:
-        parts.append(("class:header.sep", _HEADER_SEP))
-        parts.append(("class:header.plan", "PLAN"))
+        _sep_append("class:header.plan", "PLAN")
 
     parts.append(("class:header", " "))
     return parts
@@ -523,8 +524,8 @@ class AnteroomLayout:
         self._dialog_body_fragments = body_fragments
         self._dialog_result = None
         self._dialog_event = asyncio.Event()
-        self._dialog_buffer.reset()
         self._dialog_visible = True
+        self._dialog_buffer.reset()
         self._layout.focus(self._dialog_input_window)
         try:
             await self._dialog_event.wait()
@@ -537,7 +538,10 @@ class AnteroomLayout:
         self._dialog_visible = False
         self._dialog_buffer.reset()
         self._dialog_event = None
-        self._layout.focus(self._input_window)
+        try:
+            self._layout.focus(self._input_window)
+        except Exception:
+            pass  # layout may be destroyed during app teardown
 
     def cancel_dialog(self) -> None:
         """Cancel the dialog (Escape pressed). Sets result to None and signals."""
@@ -575,9 +579,13 @@ class AnteroomLayout:
         return fragments
 
     def _get_picker_preview(self) -> list[tuple[str, str]]:
-        if not self._picker_items or self._picker_preview_fn is None:
+        items = self._picker_items
+        idx = self._picker_selected_idx
+        if not items or self._picker_preview_fn is None:
             return [("class:picker.preview.empty", "  No preview available")]
-        return self._picker_preview_fn(self._picker_items[self._picker_selected_idx])
+        if idx >= len(items):
+            return [("class:picker.preview.empty", "  No preview available")]
+        return self._picker_preview_fn(items[idx])
 
     # -- Picker overlay API ------------------------------------------------
 
@@ -635,7 +643,10 @@ class AnteroomLayout:
         self._picker_selected_idx = 0
         self._picker_preview_fn = None
         self._picker_event = None
-        self._layout.focus(self._input_window)
+        try:
+            self._layout.focus(self._input_window)
+        except Exception:
+            pass  # layout may be destroyed during app teardown
 
     def set_status(self, fragments: list[tuple[str, str]]) -> None:
         """Set the ephemeral status line (thinking indicator, tool ticker)."""
@@ -735,8 +746,9 @@ class OutputPaneWriter:
     def flush(self) -> None:
         if not self._pending:
             return
-        text = "".join(self._pending)
-        self._pending.clear()
+        # Atomic swap prevents race between write() and flush()
+        pending, self._pending = self._pending, []
+        text = "".join(pending)
         if not text:
             return
         from prompt_toolkit.formatted_text import ANSI, to_formatted_text
@@ -753,7 +765,9 @@ class OutputPaneWriter:
         return True
 
     def fileno(self) -> int:
-        raise AttributeError("OutputPaneWriter has no file descriptor")
+        import io
+
+        raise io.UnsupportedOperation("OutputPaneWriter has no file descriptor")
 
 
 # ---------------------------------------------------------------------------
