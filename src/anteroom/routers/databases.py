@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from collections import OrderedDict
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -56,7 +57,7 @@ class DatabaseAuthRequest(BaseModel):
 
 
 @router.get("/databases")
-async def list_databases(request: Request):
+async def list_databases(request: Request) -> Any:
     if not hasattr(request.app.state, "db_manager"):
         return []
     dbs = request.app.state.db_manager.list_databases()
@@ -64,7 +65,7 @@ async def list_databases(request: Request):
 
 
 @router.post("/databases/{name}/auth")
-async def authenticate_database(name: str, body: DatabaseAuthRequest, request: Request):
+async def authenticate_database(name: str, body: DatabaseAuthRequest, request: Request) -> Any:
     """Verify passphrase for a shared database. Sets a session flag on success."""
     _validate_db_name(name)
 

@@ -7,6 +7,7 @@ import re
 import sqlite3 as _sqlite3
 import unicodedata
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response
@@ -48,7 +49,7 @@ def _require_json(request: Request) -> None:
         raise HTTPException(status_code=415, detail="Content-Type must be application/json")
 
 
-def _get_db(request: Request):
+def _get_db(request: Request) -> Any:
     """Resolve database connection from optional ?db= query parameter."""
     db_name = request.query_params.get("db")
     if hasattr(request.app.state, "db_manager"):
@@ -73,7 +74,7 @@ def _get_identity(request: Request) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _get_event_bus(request: Request):
+def _get_event_bus(request: Request) -> Any:
     return getattr(request.app.state, "event_bus", None)
 
 
@@ -95,7 +96,7 @@ async def list_conversations(
     search: str | None = None,
     project_id: str | None = None,
     type: str | None = Query(default=None, pattern=r"^(chat|note|document)$"),
-):
+) -> Any:
     if project_id:
         _validate_uuid(project_id)
     db = _get_db(request)
@@ -103,7 +104,7 @@ async def list_conversations(
 
 
 @router.post("/conversations", status_code=201)
-async def create_conversation(request: Request):
+async def create_conversation(request: Request) -> Any:
     _require_json(request)
     db = _get_db(request)
     body = {}
@@ -172,7 +173,7 @@ def _validate_uuid_or_slug(value: str) -> None:
 
 
 @router.get("/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str, request: Request):
+async def get_conversation(conversation_id: str, request: Request) -> Any:
     _validate_uuid_or_slug(conversation_id)
     db = _get_db(request)
     # Try UUID first, then slug fallback (get_conversation handles both)
@@ -184,7 +185,7 @@ async def get_conversation(conversation_id: str, request: Request):
 
 
 @router.patch("/conversations/{conversation_id}")
-async def update_conversation(conversation_id: str, body: ConversationUpdate, request: Request):
+async def update_conversation(conversation_id: str, body: ConversationUpdate, request: Request) -> Any:
     _validate_uuid_or_slug(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -226,7 +227,7 @@ async def update_conversation(conversation_id: str, body: ConversationUpdate, re
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(conversation_id: str, request: Request):
+async def delete_conversation(conversation_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     data_dir = request.app.state.config.app.data_dir
@@ -260,7 +261,7 @@ async def delete_conversation(conversation_id: str, request: Request):
 
 
 @router.post("/conversations/{conversation_id}/entries", status_code=201)
-async def create_entry(conversation_id: str, body: EntryCreate, request: Request):
+async def create_entry(conversation_id: str, body: EntryCreate, request: Request) -> Any:
     _require_json(request)
     _validate_uuid(conversation_id)
     db = _get_db(request)
@@ -299,7 +300,7 @@ async def create_entry(conversation_id: str, body: EntryCreate, request: Request
 
 
 @router.post("/conversations/{conversation_id}/fork", status_code=201)
-async def fork_conversation(conversation_id: str, body: ForkRequest, request: Request):
+async def fork_conversation(conversation_id: str, body: ForkRequest, request: Request) -> Any:
     _require_json(request)
     _validate_uuid(conversation_id)
     db = _get_db(request)
@@ -315,7 +316,7 @@ async def fork_conversation(conversation_id: str, body: ForkRequest, request: Re
 
 
 @router.patch("/conversations/{conversation_id}/messages/{message_id}")
-async def update_message(conversation_id: str, message_id: str, body: MessageEdit, request: Request):
+async def update_message(conversation_id: str, message_id: str, body: MessageEdit, request: Request) -> Any:
     _validate_uuid(conversation_id)
     _validate_uuid(message_id)
     db = _get_db(request)
@@ -329,7 +330,7 @@ async def update_message(conversation_id: str, message_id: str, body: MessageEdi
 
 
 @router.delete("/conversations/{conversation_id}/messages/{message_id}", status_code=204)
-async def delete_message(conversation_id: str, message_id: str, request: Request):
+async def delete_message(conversation_id: str, message_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     _validate_uuid(message_id)
     db = _get_db(request)
@@ -347,7 +348,7 @@ async def delete_message(conversation_id: str, message_id: str, request: Request
 
 
 @router.put("/conversations/{conversation_id}/document")
-async def replace_document(conversation_id: str, body: DocumentContent, request: Request):
+async def replace_document(conversation_id: str, body: DocumentContent, request: Request) -> Any:
     _require_json(request)
     _validate_uuid(conversation_id)
     db = _get_db(request)
@@ -362,7 +363,7 @@ async def replace_document(conversation_id: str, body: DocumentContent, request:
 
 
 @router.delete("/conversations/{conversation_id}/messages", status_code=204)
-async def delete_messages_after(conversation_id: str, request: Request, after_position: int = Query(ge=0)):
+async def delete_messages_after(conversation_id: str, request: Request, after_position: int = Query(ge=0)) -> Any:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -409,7 +410,7 @@ async def rewind_conversation(conversation_id: str, body: RewindRequest, request
 
 
 @router.post("/conversations/{conversation_id}/canvas", status_code=201)
-async def create_canvas(conversation_id: str, body: CanvasCreate, request: Request):
+async def create_canvas(conversation_id: str, body: CanvasCreate, request: Request) -> Any:
     _require_json(request)
     _validate_uuid(conversation_id)
     db = _get_db(request)
@@ -433,7 +434,7 @@ async def create_canvas(conversation_id: str, body: CanvasCreate, request: Reque
 
 
 @router.get("/conversations/{conversation_id}/canvas")
-async def get_canvas(conversation_id: str, request: Request):
+async def get_canvas(conversation_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -446,7 +447,7 @@ async def get_canvas(conversation_id: str, request: Request):
 
 
 @router.patch("/conversations/{conversation_id}/canvas")
-async def update_canvas(conversation_id: str, body: CanvasUpdate, request: Request):
+async def update_canvas(conversation_id: str, body: CanvasUpdate, request: Request) -> Any:
     _require_json(request)
     _validate_uuid(conversation_id)
     db = _get_db(request)
@@ -465,7 +466,7 @@ async def update_canvas(conversation_id: str, body: CanvasUpdate, request: Reque
 
 
 @router.delete("/conversations/{conversation_id}/canvas", status_code=204)
-async def delete_canvas(conversation_id: str, request: Request):
+async def delete_canvas(conversation_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -482,7 +483,7 @@ async def delete_canvas(conversation_id: str, request: Request):
 
 
 @router.get("/folders")
-async def list_folders(request: Request, project_id: str | None = None):
+async def list_folders(request: Request, project_id: str | None = None) -> Any:
     if project_id:
         _validate_uuid(project_id)
     db = _get_db(request)
@@ -490,7 +491,7 @@ async def list_folders(request: Request, project_id: str | None = None):
 
 
 @router.post("/folders", status_code=201)
-async def create_folder(body: FolderCreate, request: Request):
+async def create_folder(body: FolderCreate, request: Request) -> Any:
     if body.parent_id:
         _validate_uuid(body.parent_id)
     if body.project_id:
@@ -508,12 +509,14 @@ async def create_folder(body: FolderCreate, request: Request):
 
 
 @router.patch("/folders/{folder_id}")
-async def update_folder(folder_id: str, body: FolderUpdate, request: Request):
+async def update_folder(folder_id: str, body: FolderUpdate, request: Request) -> Any:
     _validate_uuid(folder_id)
     if body.parent_id is not None and body.parent_id != "":
         _validate_uuid(body.parent_id)
     db = _get_db(request)
-    parent_id = ... if body.parent_id is None else (body.parent_id or None)
+    from ..services.storage import _UNSET
+
+    parent_id = _UNSET if body.parent_id is None else (body.parent_id or None)
     updated = storage.update_folder(
         db,
         folder_id,
@@ -528,7 +531,7 @@ async def update_folder(folder_id: str, body: FolderUpdate, request: Request):
 
 
 @router.delete("/folders/{folder_id}", status_code=204)
-async def delete_folder(folder_id: str, request: Request):
+async def delete_folder(folder_id: str, request: Request) -> Any:
     _validate_uuid(folder_id)
     db = _get_db(request)
     # SECURITY-REVIEW: folder_id is UUID-validated above; parameterized queries in storage
@@ -542,20 +545,20 @@ async def delete_folder(folder_id: str, request: Request):
 
 
 @router.get("/tags")
-async def list_tags(request: Request):
+async def list_tags(request: Request) -> Any:
     db = _get_db(request)
     return storage.list_tags(db)
 
 
 @router.post("/tags", status_code=201)
-async def create_tag(body: TagCreate, request: Request):
+async def create_tag(body: TagCreate, request: Request) -> Any:
     db = _get_db(request)
     uid, uname = _get_identity(request)
     return storage.create_tag(db, name=body.name, color=body.color, user_id=uid, user_display_name=uname)
 
 
 @router.patch("/tags/{tag_id}")
-async def update_tag(tag_id: str, body: TagUpdate, request: Request):
+async def update_tag(tag_id: str, body: TagUpdate, request: Request) -> Any:
     _validate_uuid(tag_id)
     db = _get_db(request)
     updated = storage.update_tag(db, tag_id, name=body.name, color=body.color)
@@ -565,7 +568,7 @@ async def update_tag(tag_id: str, body: TagUpdate, request: Request):
 
 
 @router.delete("/tags/{tag_id}", status_code=204)
-async def delete_tag(tag_id: str, request: Request):
+async def delete_tag(tag_id: str, request: Request) -> Any:
     _validate_uuid(tag_id)
     db = _get_db(request)
     deleted = storage.delete_tag(db, tag_id)
@@ -575,7 +578,7 @@ async def delete_tag(tag_id: str, request: Request):
 
 
 @router.post("/conversations/{conversation_id}/tags/{tag_id}", status_code=201)
-async def add_tag(conversation_id: str, tag_id: str, request: Request):
+async def add_tag(conversation_id: str, tag_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     _validate_uuid(tag_id)
     db = _get_db(request)
@@ -587,7 +590,7 @@ async def add_tag(conversation_id: str, tag_id: str, request: Request):
 
 
 @router.delete("/conversations/{conversation_id}/tags/{tag_id}", status_code=204)
-async def remove_tag(conversation_id: str, tag_id: str, request: Request):
+async def remove_tag(conversation_id: str, tag_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     _validate_uuid(tag_id)
     db = _get_db(request)
@@ -596,7 +599,7 @@ async def remove_tag(conversation_id: str, tag_id: str, request: Request):
 
 
 @router.post("/conversations/{conversation_id}/copy", status_code=201)
-async def copy_conversation(conversation_id: str, request: Request, target_db: str = Query(...)):
+async def copy_conversation(conversation_id: str, request: Request, target_db: str = Query(...)) -> Any:
     _validate_uuid(conversation_id)
     source = _get_db(request)
     conv = storage.get_conversation(source, conversation_id)
@@ -615,7 +618,7 @@ async def copy_conversation(conversation_id: str, request: Request, target_db: s
 
 
 @router.get("/conversations/{conversation_id}/export")
-async def export_conversation(conversation_id: str, request: Request):
+async def export_conversation(conversation_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)

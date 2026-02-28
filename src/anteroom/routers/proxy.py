@@ -13,6 +13,7 @@ import json
 import logging
 import time
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["proxy"])
 
 
-def _get_ai_service(request: Request):
+def _get_ai_service(request: Request) -> Any:
     """Get the shared proxy AIService from app state."""
     return request.app.state.proxy_ai_service
 
@@ -106,17 +107,17 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
         )
 
 
-async def _handle_non_streaming(ai_service, kwargs: dict) -> JSONResponse:
+async def _handle_non_streaming(ai_service: Any, kwargs: dict) -> JSONResponse:
     """Forward a non-streaming request and return the response."""
     response = await ai_service.client.chat.completions.create(**kwargs)
     return JSONResponse(content=response.model_dump())
 
 
-async def _handle_streaming(ai_service, kwargs: dict) -> StreamingResponse:
+async def _handle_streaming(ai_service: Any, kwargs: dict) -> StreamingResponse:
     """Forward a streaming request and relay SSE chunks."""
     stream = await ai_service.client.chat.completions.create(**kwargs)
 
-    async def event_generator():
+    async def event_generator() -> Any:
         try:
             async for chunk in stream:
                 data = chunk.model_dump()

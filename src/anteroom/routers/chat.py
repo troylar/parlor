@@ -196,7 +196,7 @@ def _validate_uuid(value: str) -> str:
     return value
 
 
-def _get_db(request: Request):
+def _get_db(request: Request) -> Any:
     """Resolve database connection from optional ?db= query parameter."""
     db_name = request.query_params.get("db")
     if hasattr(request.app.state, "db_manager"):
@@ -220,7 +220,7 @@ def _is_safe_name(name: str) -> bool:
     return bool(re.match(r"^[a-zA-Z0-9_-]{1,64}$", name))
 
 
-def _get_event_bus(request: Request):
+def _get_event_bus(request: Request) -> Any:
     return getattr(request.app.state, "event_bus", None)
 
 
@@ -572,9 +572,9 @@ async def _web_confirm_tool(ctx: WebConfirmContext, verdict: Any) -> bool:
     finally:
         ctx.pending_approvals.pop(approval_id, None)
 
-    approved = entry.get("approved", False)
+    approved = bool(entry.get("approved", False))
     if approved:
-        scope = entry.get("scope", "once")
+        scope = str(entry.get("scope", "once"))
         task = asyncio.current_task()
         if task is not None:
             ctx.last_resolved_scope[id(task)] = scope
@@ -657,7 +657,7 @@ async def _web_ask_user_callback(ctx: WebConfirmContext, question: str, options:
     finally:
         ctx.pending_approvals.pop(ask_id, None)
 
-    return entry.get("answer", "")
+    return str(entry.get("answer", ""))
 
 
 @dataclass
@@ -751,7 +751,7 @@ async def _execute_web_tool(ctx: ToolExecutorContext, tool_name: str, arguments:
         result = await ctx.tool_registry.call_tool(tool_name, arguments, confirm_callback=_confirm)
         if result.get("_approval_decision") == "allowed_once":
             result["_approval_decision"] = _scope_to_decision(ctx.confirm_ctx)
-        return result
+        return dict(result)
     if ctx.mcp_manager:
         verdict = ctx.tool_registry.check_safety(tool_name, arguments)
         if verdict and verdict.needs_approval:
@@ -779,7 +779,7 @@ async def _execute_web_tool(ctx: ToolExecutorContext, tool_name: str, arguments:
             ctx.rate_limiter.record_call(success="error" not in result)
         decision = _scope_to_decision(ctx.confirm_ctx) if (verdict and verdict.needs_approval) else "auto"
         result["_approval_decision"] = decision
-        return result
+        return dict(result)
     raise ValueError(f"Unknown tool: {tool_name}")
 
 
@@ -789,12 +789,12 @@ def _canvas_needs_approval(safety_config: Any, tool_registry: Any) -> bool:
     Canvas tools are READ tier by default, so this returns False unless the
     user has explicitly overridden the tier via config or denied them.
     """
-    from ..tools.tiers import get_tool_tier, parse_approval_mode, should_require_approval
+    from ..tools.tiers import ApprovalMode, get_tool_tier, parse_approval_mode, should_require_approval
 
     if safety_config is None:
         return True
     raw_mode = safety_config.approval_mode
-    mode = parse_approval_mode(str(raw_mode)) if not isinstance(raw_mode, int) else raw_mode
+    mode: ApprovalMode = parse_approval_mode(str(raw_mode)) if not isinstance(raw_mode, int) else ApprovalMode(raw_mode)
     tier = get_tool_tier("create_canvas", getattr(safety_config, "tool_tiers", None))
     allowed = getattr(tool_registry, "_session_allowed", None) or set()
     config_allowed = set(safety_config.allowed_tools) if safety_config.allowed_tools else None
@@ -839,7 +839,9 @@ class StreamContext:
 _DISCONNECT_POLL_INTERVAL = 3  # seconds
 
 
-async def _poll_disconnect(request: Any, cancel_event: asyncio.Event, interval: float = _DISCONNECT_POLL_INTERVAL):
+async def _poll_disconnect(
+    request: Any, cancel_event: asyncio.Event, interval: float = _DISCONNECT_POLL_INTERVAL
+) -> None:
     """Background task that polls for client disconnect and cancels the stream."""
     try:
         while not cancel_event.is_set():
@@ -860,7 +862,7 @@ async def _poll_disconnect(request: Any, cancel_event: asyncio.Event, interval: 
 _KEEPALIVE_INTERVAL = 15  # seconds between SSE keepalive pings
 
 
-async def _with_keepalive(gen, interval: float = _KEEPALIVE_INTERVAL):
+async def _with_keepalive(gen: Any, interval: float = _KEEPALIVE_INTERVAL) -> Any:
     """Wrap an async generator to yield keepalive comments during long pauses.
 
     Prevents browsers and proxies from closing the SSE connection when the
@@ -893,7 +895,7 @@ async def _with_keepalive(gen, interval: float = _KEEPALIVE_INTERVAL):
                 pass
 
 
-async def _stream_chat_events(ctx: StreamContext):
+async def _stream_chat_events(ctx: StreamContext) -> Any:
     """Async generator that yields SSE events for the chat stream."""
     from ..services.agent_loop import run_agent_loop
 
@@ -1374,11 +1376,15 @@ async def _parse_chat_request(request: Request) -> ChatRequestContext:
             raise HTTPException(status_code=400, detail=f"Maximum {MAX_FILES_PER_REQUEST} files per request")
         plan_mode = str(form.get("plan_mode", "")).lower() == "true"
         source_ids = [s for s in form.getlist("source_ids") if isinstance(s, str) and s]
-        source_tag = form.get("source_tag") or None
-        if isinstance(source_tag, str) and not source_tag.strip():
+        _source_tag_raw = form.get("source_tag")
+        source_tag = str(_source_tag_raw) if isinstance(_source_tag_raw, str) and _source_tag_raw else None
+        if source_tag and not source_tag.strip():
             source_tag = None
-        source_group_id = form.get("source_group_id") or None
-        if isinstance(source_group_id, str) and not source_group_id.strip():
+        _source_group_id_raw = form.get("source_group_id")
+        source_group_id = (
+            str(_source_group_id_raw) if isinstance(_source_group_id_raw, str) and _source_group_id_raw else None
+        )
+        if source_group_id and not source_group_id.strip():
             source_group_id = None
     else:
         body = ChatRequest(**(await request.json()))
@@ -1419,7 +1425,7 @@ async def _parse_chat_request(request: Request) -> ChatRequestContext:
 
 
 @router.post("/conversations/{conversation_id}/chat")
-async def chat(conversation_id: str, request: Request):
+async def chat(conversation_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -1843,7 +1849,7 @@ async def chat(conversation_id: str, request: Request):
 
 
 @router.post("/conversations/{conversation_id}/stop")
-async def stop_generation(conversation_id: str, request: Request):
+async def stop_generation(conversation_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -1857,7 +1863,7 @@ async def stop_generation(conversation_id: str, request: Request):
 
 
 @router.get("/conversations/{conversation_id}/stream-status")
-async def stream_status(conversation_id: str, request: Request):
+async def stream_status(conversation_id: str, request: Request) -> Any:
     _validate_uuid(conversation_id)
     stream_info = _active_streams.get(conversation_id)
     if not stream_info:
@@ -1867,7 +1873,7 @@ async def stream_status(conversation_id: str, request: Request):
 
 
 @router.get("/attachments/{attachment_id}")
-async def get_attachment(attachment_id: str, request: Request):
+async def get_attachment(attachment_id: str, request: Request) -> Any:
     _validate_uuid(attachment_id)
     db = _get_db(request)
     att = storage.get_attachment(db, attachment_id)

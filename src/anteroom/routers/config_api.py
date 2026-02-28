@@ -81,7 +81,7 @@ async def get_conventions() -> ConventionsResponse:
 
 
 @router.patch("/config")
-async def update_config(body: ConfigUpdate, request: Request):
+async def update_config(body: ConfigUpdate, request: Request) -> Any:
     from ..config import _DEFAULT_SYSTEM_PROMPT
 
     config = request.app.state.config
@@ -116,7 +116,7 @@ async def update_config(body: ConfigUpdate, request: Request):
     }
 
 
-def _persist_config(config) -> None:
+def _persist_config(config: Any) -> None:
     from ..config import _get_config_path
 
     config_path = _get_config_path()
@@ -196,7 +196,7 @@ async def list_mcp_tools(request: Request) -> list[McpTool]:
 
 
 @router.post("/mcp/servers/{name}/connect")
-async def connect_mcp_server(name: str, request: Request):
+async def connect_mcp_server(name: str, request: Request) -> Any:
     mcp_manager = request.app.state.mcp_manager
     if not mcp_manager:
         raise HTTPException(status_code=400, detail="No MCP servers configured")
@@ -209,7 +209,7 @@ async def connect_mcp_server(name: str, request: Request):
 
 
 @router.post("/mcp/servers/{name}/disconnect")
-async def disconnect_mcp_server(name: str, request: Request):
+async def disconnect_mcp_server(name: str, request: Request) -> Any:
     mcp_manager = request.app.state.mcp_manager
     if not mcp_manager:
         raise HTTPException(status_code=400, detail="No MCP servers configured")
@@ -222,7 +222,7 @@ async def disconnect_mcp_server(name: str, request: Request):
 
 
 @router.post("/mcp/servers/{name}/reconnect")
-async def reconnect_mcp_server(name: str, request: Request):
+async def reconnect_mcp_server(name: str, request: Request) -> Any:
     mcp_manager = request.app.state.mcp_manager
     if not mcp_manager:
         raise HTTPException(status_code=400, detail="No MCP servers configured")
@@ -238,14 +238,14 @@ async def reconnect_mcp_server(name: str, request: Request):
 
 
 @router.get("/databases")
-async def list_databases(request: Request):
+async def list_databases(request: Request) -> Any:
     if not hasattr(request.app.state, "db_manager"):
         return [{"name": "personal", "path": ""}]
     return request.app.state.db_manager.list_databases()
 
 
 @router.post("/databases", status_code=201)
-async def add_database(body: DatabaseAdd, request: Request):
+async def add_database(body: DatabaseAdd, request: Request) -> Any:
     if body.name == "personal":
         raise HTTPException(status_code=400, detail="Cannot use reserved name 'personal'")
     if not hasattr(request.app.state, "db_manager"):
@@ -287,7 +287,7 @@ async def add_database(body: DatabaseAdd, request: Request):
 
 
 @router.delete("/databases/{name}", status_code=204)
-async def remove_database(name: str, request: Request):
+async def remove_database(name: str, request: Request) -> Any:
     if name == "personal":
         raise HTTPException(status_code=400, detail="Cannot remove personal database")
     if not hasattr(request.app.state, "db_manager"):
@@ -325,7 +325,7 @@ def _persist_database(name: str, path: str) -> None:
 
 
 @router.get("/browse")
-async def browse_directory(path: str = "~"):
+async def browse_directory(path: str = "~") -> Any:
     """List directories and .db files at the given path for file browsing."""
     try:
         resolved = safe_resolve_pathlib(Path(os.path.expanduser(path)))

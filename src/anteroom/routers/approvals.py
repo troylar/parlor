@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -24,7 +24,7 @@ class ApprovalRequest(BaseModel):
 
 
 @router.post("/approvals/{approval_id}/respond")
-async def respond_approval(approval_id: str, body: ApprovalRequest, request: Request):
+async def respond_approval(approval_id: str, body: ApprovalRequest, request: Request) -> Any:
     ct = request.headers.get("content-type", "")
     if not ct.startswith("application/json"):
         raise HTTPException(status_code=415, detail="Content-Type must be application/json")
