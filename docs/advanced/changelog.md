@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## February 28, 2026
 
+### v1.84.2
+
+**Fixed:**
+
+- PPTX table edit skip diagnostics now show the actual keys the AI sent, exposing key name mismatches (#599)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.84.2)
+
 ### v1.84.1
 
 **Fixed:**
