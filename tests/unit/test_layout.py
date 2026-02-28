@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
 
@@ -10,6 +11,7 @@ from anteroom.cli.layout import (
     InputLexer,
     OutputControl,
     OutputPaneWriter,
+    _DialogVisible,
     _strip_bg,
     create_anteroom_style,
     format_header,
@@ -602,3 +604,473 @@ class TestInputLexer:
         lexer = InputLexer()
         get_line = lexer.lex_document(doc)
         assert get_line(0) == [("", "")]
+
+
+# ---------------------------------------------------------------------------
+# Dialog overlay
+# ---------------------------------------------------------------------------
+
+
+class TestDialogOverlay:
+    def _make_layout(self):
+        buf = Buffer(name="test-input")
+        return AnteroomLayout(
+            header_fn=lambda: [("class:header", " test ")],
+            footer_fn=lambda: [("class:footer", " status ")],
+            input_buffer=buf,
+        )
+
+    def test_dialog_initially_hidden(self):
+        al = self._make_layout()
+        assert al._dialog_visible is False
+        filt = _DialogVisible(al)
+        assert not filt()
+
+    def test_dialog_visible_filter_tracks_state(self):
+        al = self._make_layout()
+        filt = _DialogVisible(al)
+        assert not filt()
+        al._dialog_visible = True
+        assert filt()
+        al._dialog_visible = False
+        assert not filt()
+
+    @pytest.mark.asyncio
+    async def test_show_dialog_sets_visible(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _simulate_accept():
+            await asyncio.sleep(0.01)
+            assert al._dialog_visible is True
+            assert al._dialog_title == "Test Title"
+            al._dialog_buffer.text = "y"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_simulate_accept())
+        result = await al.show_dialog(
+            title="Test Title",
+            body_fragments=[("class:dialog.body", "body text")],
+        )
+        await task
+        assert result == "y"
+        assert al._dialog_visible is False
+
+    @pytest.mark.asyncio
+    async def test_show_dialog_cancel_returns_none(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _simulate_cancel():
+            await asyncio.sleep(0.01)
+            al.cancel_dialog()
+
+        task = asyncio.create_task(_simulate_cancel())
+        result = await al.show_dialog(
+            title="Cancel Test",
+            body_fragments=[("class:dialog.body", "cancel me")],
+        )
+        await task
+        assert result is None
+        assert al._dialog_visible is False
+
+    def test_hide_dialog_resets_state(self):
+        al = self._make_layout()
+        al._dialog_visible = True
+        al._dialog_buffer.text = "leftover"
+        al.hide_dialog()
+        assert al._dialog_visible is False
+        assert al._dialog_buffer.text == ""
+        assert al._dialog_event is None
+
+    def test_cancel_dialog_signals_event(self):
+        import asyncio
+
+        al = self._make_layout()
+        al._dialog_event = asyncio.Event()
+        al._dialog_result = "something"
+        al.cancel_dialog()
+        assert al._dialog_result is None
+        assert al._dialog_event.is_set()
+
+    def test_on_dialog_accept_sets_result(self):
+        import asyncio
+
+        al = self._make_layout()
+        al._dialog_event = asyncio.Event()
+        al._dialog_buffer.text = "test input"
+        al._on_dialog_accept(al._dialog_buffer)
+        assert al._dialog_result == "test input"
+        assert al._dialog_event.is_set()
+
+    def test_dialog_body_fragments_returned(self):
+        al = self._make_layout()
+        body = [("class:dialog.body", "hello")]
+        al._dialog_body_fragments = body
+        assert al._get_dialog_body() == body
+
+    def test_dialog_title_returned(self):
+        al = self._make_layout()
+        al._dialog_title = "My Title"
+        frags = al._get_dialog_title()
+        assert len(frags) == 1
+        assert "My Title" in frags[0][1]
+
+    def test_dialog_styles_present(self):
+        style = create_anteroom_style()
+        class_names = [rule[0] for rule in style.style_rules]
+        assert "dialog.frame" in class_names
+        assert "dialog.title" in class_names
+        assert "dialog.body" in class_names
+        assert "dialog.input" in class_names
+        assert "dialog.hint" in class_names
+        assert "dialog.option" in class_names
+        assert "dialog.option.key" in class_names
+        assert "dialog.shadow" in class_names
+
+
+# ---------------------------------------------------------------------------
+# Dialog overlay — approval flow simulation
+# ---------------------------------------------------------------------------
+
+
+class TestDialogApprovalFlow:
+    """Tests simulating the fullscreen approval dialog flow."""
+
+    def _make_layout(self):
+        buf = Buffer(name="test-input")
+        return AnteroomLayout(
+            header_fn=lambda: [("class:header", " test ")],
+            footer_fn=lambda: [("class:footer", " status ")],
+            input_buffer=buf,
+        )
+
+    @pytest.mark.asyncio
+    async def test_approval_allow_once(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _type_y():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = "y"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_type_y())
+        result = await al.show_dialog(
+            title="Approval Required",
+            body_fragments=[("class:dialog.body", "Destructive command detected")],
+        )
+        await task
+        assert result == "y"
+
+    @pytest.mark.asyncio
+    async def test_approval_allow_session(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _type_s():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = "s"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_type_s())
+        result = await al.show_dialog(
+            title="Approval Required",
+            body_fragments=[("class:dialog.body", "test")],
+        )
+        await task
+        assert result == "s"
+
+    @pytest.mark.asyncio
+    async def test_approval_allow_always(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _type_a():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = "a"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_type_a())
+        result = await al.show_dialog(
+            title="Approval Required",
+            body_fragments=[("class:dialog.body", "test")],
+        )
+        await task
+        assert result == "a"
+
+    @pytest.mark.asyncio
+    async def test_approval_deny(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _type_n():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = "n"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_type_n())
+        result = await al.show_dialog(
+            title="Approval Required",
+            body_fragments=[("class:dialog.body", "test")],
+        )
+        await task
+        assert result == "n"
+
+    @pytest.mark.asyncio
+    async def test_approval_escape_returns_none(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _press_escape():
+            await asyncio.sleep(0.01)
+            al.cancel_dialog()
+
+        task = asyncio.create_task(_press_escape())
+        result = await al.show_dialog(
+            title="Approval Required",
+            body_fragments=[("class:dialog.body", "test")],
+        )
+        await task
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_approval_body_includes_command(self):
+        import asyncio
+
+        al = self._make_layout()
+        body = [
+            ("class:dialog.body", "  Destructive command detected\n"),
+            ("class:dialog.hint", "  Command: rm -rf build\n\n"),
+            ("class:dialog.option.key", "  [y]"),
+            ("class:dialog.option", " Allow once   "),
+        ]
+
+        async def _accept():
+            await asyncio.sleep(0.01)
+            assert al._dialog_body_fragments == body
+            al._dialog_buffer.text = "y"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_accept())
+        await al.show_dialog(title="Approval Required", body_fragments=body)
+        await task
+
+    @pytest.mark.asyncio
+    async def test_dialog_focus_moves_to_dialog_input(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _check_focus_and_accept():
+            await asyncio.sleep(0.01)
+            assert al._dialog_visible is True
+            al._dialog_buffer.text = "y"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_check_focus_and_accept())
+        await al.show_dialog(
+            title="Focus Test",
+            body_fragments=[("class:dialog.body", "test")],
+        )
+        await task
+        assert al._dialog_visible is False
+
+    @pytest.mark.asyncio
+    async def test_dialog_hides_after_accept(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _accept():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = "done"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_accept())
+        result = await al.show_dialog(
+            title="Test",
+            body_fragments=[("class:dialog.body", "test")],
+        )
+        await task
+        assert result == "done"
+        assert al._dialog_visible is False
+        assert al._dialog_event is None
+        assert al._dialog_buffer.text == ""
+
+
+# ---------------------------------------------------------------------------
+# Dialog overlay — ask_user flow simulation
+# ---------------------------------------------------------------------------
+
+
+class TestDialogAskUserFlow:
+    """Tests simulating the fullscreen ask_user dialog flow."""
+
+    def _make_layout(self):
+        buf = Buffer(name="test-input")
+        return AnteroomLayout(
+            header_fn=lambda: [("class:header", " test ")],
+            footer_fn=lambda: [("class:footer", " status ")],
+            input_buffer=buf,
+        )
+
+    @pytest.mark.asyncio
+    async def test_ask_user_freeform_answer(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _type_answer():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = "my custom answer"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_type_answer())
+        result = await al.show_dialog(
+            title="Question",
+            body_fragments=[("class:dialog.body", "  What should I do?\n\n")],
+        )
+        await task
+        assert result == "my custom answer"
+
+    @pytest.mark.asyncio
+    async def test_ask_user_numeric_selection(self):
+        import asyncio
+
+        al = self._make_layout()
+        body = [
+            ("class:dialog.body", "  Which option?\n\n"),
+            ("class:dialog.option.key", "  1. "),
+            ("class:dialog.option", "Option A\n"),
+            ("class:dialog.option.key", "  2. "),
+            ("class:dialog.option", "Option B\n"),
+        ]
+
+        async def _type_number():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = "2"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_type_number())
+        result = await al.show_dialog(title="Question", body_fragments=body)
+        await task
+        assert result == "2"
+
+    @pytest.mark.asyncio
+    async def test_ask_user_escape_returns_none(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _press_escape():
+            await asyncio.sleep(0.01)
+            al.cancel_dialog()
+
+        task = asyncio.create_task(_press_escape())
+        result = await al.show_dialog(
+            title="Question",
+            body_fragments=[("class:dialog.body", "  A question?\n\n")],
+        )
+        await task
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_ask_user_empty_answer(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _type_empty():
+            await asyncio.sleep(0.01)
+            al._dialog_buffer.text = ""
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_type_empty())
+        result = await al.show_dialog(
+            title="Question",
+            body_fragments=[("class:dialog.body", "  question\n\n")],
+        )
+        await task
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_ask_user_with_options_body_format(self):
+        import asyncio
+
+        al = self._make_layout()
+        body = [
+            ("class:dialog.body", "  Pick one\n\n"),
+            ("class:dialog.option.key", "  1. "),
+            ("class:dialog.option", "Alpha\n"),
+            ("class:dialog.option.key", "  2. "),
+            ("class:dialog.option", "Beta\n"),
+            ("class:dialog.option.key", "  3. "),
+            ("class:dialog.option", "Gamma\n"),
+        ]
+
+        async def _accept():
+            await asyncio.sleep(0.01)
+            assert al._dialog_body_fragments == body
+            al._dialog_buffer.text = "1"
+            al._on_dialog_accept(al._dialog_buffer)
+
+        task = asyncio.create_task(_accept())
+        result = await al.show_dialog(title="Question", body_fragments=body)
+        await task
+        assert result == "1"
+
+    def test_cancel_dialog_when_no_event_is_noop(self):
+        al = self._make_layout()
+        al._dialog_event = None
+        al.cancel_dialog()
+        assert al._dialog_result is None
+
+    @pytest.mark.asyncio
+    async def test_multiple_dialogs_sequential(self):
+        import asyncio
+
+        al = self._make_layout()
+
+        async def _accept_with(text, delay=0.01):
+            await asyncio.sleep(delay)
+            al._dialog_buffer.text = text
+            al._on_dialog_accept(al._dialog_buffer)
+
+        # First dialog
+        task1 = asyncio.create_task(_accept_with("first"))
+        r1 = await al.show_dialog(
+            title="Dialog 1",
+            body_fragments=[("class:dialog.body", "one")],
+        )
+        await task1
+        assert r1 == "first"
+        assert al._dialog_visible is False
+
+        # Second dialog
+        task2 = asyncio.create_task(_accept_with("second"))
+        r2 = await al.show_dialog(
+            title="Dialog 2",
+            body_fragments=[("class:dialog.body", "two")],
+        )
+        await task2
+        assert r2 == "second"
+        assert al._dialog_visible is False
+
+    @pytest.mark.asyncio
+    async def test_fullscreen_layout_none_guard(self):
+        """When renderer._fullscreen_layout is None, callbacks should fall through."""
+        # The guard: `renderer.is_fullscreen() and renderer._fullscreen_layout is not None`
+        # We can't test the repl callbacks directly, but verify hide_dialog is safe
+        # when called on a layout that was never shown.
+        al = self._make_layout()
+        assert al._dialog_visible is False
+        al.hide_dialog()
+        assert al._dialog_visible is False

@@ -1010,7 +1010,56 @@ async def run_cli(
     async def _confirm_destructive(verdict: SafetyVerdict) -> bool:
         from rich.markup import escape
 
+        def _apply_choice(choice: str) -> bool:
+            if choice in ("a", "always"):
+                tool_registry.grant_session_permission(verdict.tool_name)
+                _persist_allowed_tool(verdict.tool_name)
+                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (always)[/{MUTED}]\n")
+                return True
+            if choice in ("s", "session"):
+                tool_registry.grant_session_permission(verdict.tool_name)
+                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (session)[/{MUTED}]\n")
+                return True
+            if choice in ("y", "yes"):
+                renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (once)[/{MUTED}]\n")
+                return True
+            renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
+            return False
+
         async with _approval_lock:
+            if renderer.is_fullscreen() and renderer._fullscreen_layout is not None:
+                body: list[tuple[str, str]] = [
+                    ("class:dialog.body", f"  {verdict.reason}\n"),
+                ]
+                cmd = verdict.details.get("command", "")
+                path = verdict.details.get("path", "")
+                if cmd:
+                    body.append(("class:dialog.hint", f"  Command: {cmd}\n\n"))
+                elif path:
+                    body.append(("class:dialog.hint", f"  Path: {path}\n\n"))
+                else:
+                    body.append(("class:dialog.body", "\n"))
+                body.extend(
+                    [
+                        ("class:dialog.option.key", "  [y]"),
+                        ("class:dialog.option", " Allow once   "),
+                        ("class:dialog.option.key", "[s]"),
+                        ("class:dialog.option", " Session\n"),
+                        ("class:dialog.option.key", "  [a]"),
+                        ("class:dialog.option", " Always       "),
+                        ("class:dialog.option.key", "[n]"),
+                        ("class:dialog.option", " Deny"),
+                    ]
+                )
+                answer = await renderer._fullscreen_layout.show_dialog(
+                    title="Approval Required",
+                    body_fragments=body,
+                )
+                if answer is None:
+                    renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
+                    return False
+                return _apply_choice(answer.strip().lower())
+
             renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
             if verdict.details.get("command"):
                 renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
@@ -1023,21 +1072,7 @@ async def run_cli(
                 answer = await _confirm_session.prompt_async(
                     "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
                 )
-                choice = answer.strip().lower()
-                if choice in ("a", "always"):
-                    tool_registry.grant_session_permission(verdict.tool_name)
-                    _persist_allowed_tool(verdict.tool_name)
-                    renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (always)[/{MUTED}]\n")
-                    return True
-                if choice in ("s", "session"):
-                    tool_registry.grant_session_permission(verdict.tool_name)
-                    renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (session)[/{MUTED}]\n")
-                    return True
-                if choice in ("y", "yes"):
-                    renderer.console.print(f"  [{MUTED}]✓ Allowed: {escape(verdict.tool_name)} (once)[/{MUTED}]\n")
-                    return True
-                renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
-                return False
+                return _apply_choice(answer.strip().lower())
             except (EOFError, KeyboardInterrupt):
                 renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
                 return False
@@ -1056,7 +1091,31 @@ async def run_cli(
 
     # Set up ask_user callback for mid-turn questions
     async def _ask_user_callback(question: str, options: list[str] | None = None) -> str:
+        def _resolve_choice(answer: str, opts: list[str] | None) -> str:
+            if opts and answer.isdigit():
+                idx = int(answer)
+                if 1 <= idx <= len(opts):
+                    return opts[idx - 1]
+                renderer.console.print(f"  [{MUTED}]Invalid choice #{idx}, using as freeform answer[/{MUTED}]")
+            return answer
+
         await renderer.stop_thinking()
+
+        if renderer.is_fullscreen() and renderer._fullscreen_layout is not None:
+            body: list[tuple[str, str]] = [("class:dialog.body", f"  {question}\n\n")]
+            if options:
+                for i, opt in enumerate(options, 1):
+                    body.append(("class:dialog.option.key", f"  {i}. "))
+                    body.append(("class:dialog.option", f"{opt}\n"))
+            answer = await renderer._fullscreen_layout.show_dialog(
+                title="Question",
+                body_fragments=body,
+            )
+            renderer.start_thinking()
+            if answer is None:
+                return ""
+            return _resolve_choice(answer.strip(), options)
+
         renderer.console.print(f"\n[yellow bold]Question:[/yellow bold] {question}")
         try:
             from prompt_toolkit import PromptSession as _AskSession
@@ -1069,13 +1128,7 @@ async def run_cli(
                 hint = "(enter number to select, or type a custom answer; esc to cancel)"
                 renderer.console.print(f"  [{MUTED}]{hint}[/{MUTED}]")
                 answer = await _ask_session.prompt_async("  Choice: ")
-                answer = answer.strip()
-                if answer.isdigit():
-                    idx = int(answer)
-                    if 1 <= idx <= len(options):
-                        answer = options[idx - 1]
-                    else:
-                        renderer.console.print(f"  [{MUTED}]Invalid choice #{idx}, using as freeform answer[/{MUTED}]")
+                answer = _resolve_choice(answer.strip(), options)
             else:
                 renderer.console.print(f"  [{MUTED}](esc to cancel)[/{MUTED}]")
                 answer = await _ask_session.prompt_async("  Answer: ")
@@ -2567,7 +2620,11 @@ async def _run_repl(
         if buf.complete_state:
             buf.complete_previous()
 
-    @kb.add("escape", filter=Condition(lambda: agent_busy.is_set()))
+    @kb.add("escape", filter=Condition(lambda: _anteroom_layout._dialog_visible))
+    def _dialog_cancel_on_escape(event: Any) -> None:
+        _anteroom_layout.cancel_dialog()
+
+    @kb.add("escape", filter=Condition(lambda: agent_busy.is_set() and not _anteroom_layout._dialog_visible))
     def _cancel_on_escape(event: Any) -> None:
         ce = _current_cancel_event[0]
         if ce is not None:

@@ -14,13 +14,14 @@ Provides the HSplit structure::
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, Any, Callable
 
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Filter
-from prompt_toolkit.layout.containers import ConditionalContainer, Float, FloatContainer, HSplit, Window
+from prompt_toolkit.layout.containers import ConditionalContainer, Float, FloatContainer, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import (
     BufferControl,
     FormattedTextControl,
@@ -237,6 +238,16 @@ class _HasContent(Filter):
         return bool(self._layout._status_fragments)
 
 
+class _DialogVisible(Filter):
+    """Filter that returns True when the modal dialog overlay is visible."""
+
+    def __init__(self, layout: "AnteroomLayout") -> None:
+        self._layout = layout
+
+    def __call__(self) -> bool:
+        return self._layout._dialog_visible
+
+
 class AnteroomLayout:
     """Manages the full-screen HSplit layout and exposes the output pane."""
 
@@ -252,6 +263,19 @@ class AnteroomLayout:
         self._footer_fn = footer_fn
         self._input_buffer = input_buffer
         self._status_fragments: list[tuple[str, str]] = []
+
+        # Dialog overlay state
+        self._dialog_visible: bool = False
+        self._dialog_title: str = ""
+        self._dialog_body_fragments: list[tuple[str, str]] = []
+        self._dialog_result: str | None = None
+        self._dialog_event: asyncio.Event | None = None
+
+        self._dialog_buffer = Buffer(
+            name="anteroom-dialog",
+            multiline=False,
+            accept_handler=self._on_dialog_accept,
+        )
 
         self._header_window = Window(
             content=FormattedTextControl(self._header_fn),
@@ -289,6 +313,53 @@ class AnteroomLayout:
             get_line_prefix=input_line_prefix,
         )
 
+        # Dialog overlay containers
+        self._dialog_input_window = Window(
+            content=BufferControl(buffer=self._dialog_buffer),
+            height=1,
+            style="class:dialog.input",
+        )
+        dialog_inner = HSplit(
+            [
+                Window(
+                    content=FormattedTextControl(self._get_dialog_title),
+                    height=1,
+                    style="class:dialog.title",
+                ),
+                Window(height=1, char="\u2500", style="class:dialog.border"),
+                Window(
+                    content=FormattedTextControl(self._get_dialog_body),
+                    style="class:dialog.body",
+                    wrap_lines=True,
+                ),
+                Window(height=1, char=" ", style="class:dialog.body"),
+                self._dialog_input_window,
+                Window(height=1, char=" ", style="class:dialog.body"),
+                Window(
+                    content=FormattedTextControl(lambda: [("class:dialog.hint", "  Enter: submit  Escape: cancel")]),
+                    height=1,
+                    style="class:dialog.hint",
+                ),
+            ]
+        )
+        dialog_centered = HSplit(
+            [
+                Window(style="class:dialog.shadow"),  # top spacer
+                VSplit(
+                    [
+                        Window(width=4, style="class:dialog.shadow"),  # left margin
+                        HSplit(
+                            [dialog_inner],
+                            style="class:dialog.frame",
+                            padding=1,
+                        ),
+                        Window(width=4, style="class:dialog.shadow"),  # right margin
+                    ]
+                ),
+                Window(style="class:dialog.shadow"),  # bottom spacer
+            ]
+        )
+
         self._layout = Layout(
             FloatContainer(
                 content=HSplit(
@@ -308,6 +379,13 @@ class AnteroomLayout:
                         ycursor=True,
                         content=CompletionsMenu(max_height=8, scroll_offset=1),
                     ),
+                    Float(
+                        content=ConditionalContainer(
+                            dialog_centered,
+                            filter=_DialogVisible(self),
+                        ),
+                        transparent=False,
+                    ),
                 ],
             ),
             focused_element=self._input_window,
@@ -315,6 +393,18 @@ class AnteroomLayout:
 
     def _get_status(self) -> list[tuple[str, str]]:
         return self._status_fragments
+
+    def _get_dialog_title(self) -> list[tuple[str, str]]:
+        return [("class:dialog.title", f"  {self._dialog_title}")]
+
+    def _get_dialog_body(self) -> list[tuple[str, str]]:
+        return self._dialog_body_fragments
+
+    def _on_dialog_accept(self, buf: Buffer) -> bool:
+        self._dialog_result = buf.text
+        if self._dialog_event is not None:
+            self._dialog_event.set()
+        return False  # do not append to history
 
     # -- Public API --------------------------------------------------------
 
@@ -337,6 +427,45 @@ class AnteroomLayout:
     def focus_input(self) -> None:
         """Ensure the input window has focus."""
         self._layout.focus(self._input_window)
+
+    # -- Dialog overlay API ------------------------------------------------
+
+    async def show_dialog(
+        self,
+        *,
+        title: str,
+        body_fragments: list[tuple[str, str]],
+    ) -> str | None:
+        """Show a modal dialog overlay and wait for user input.
+
+        Returns the text entered by the user, or ``None`` if they pressed
+        Escape to cancel.
+        """
+        self._dialog_title = title
+        self._dialog_body_fragments = body_fragments
+        self._dialog_result = None
+        self._dialog_event = asyncio.Event()
+        self._dialog_buffer.reset()
+        self._dialog_visible = True
+        self._layout.focus(self._dialog_input_window)
+        try:
+            await self._dialog_event.wait()
+        finally:
+            self.hide_dialog()
+        return self._dialog_result
+
+    def hide_dialog(self) -> None:
+        """Dismiss the dialog overlay and return focus to the main input."""
+        self._dialog_visible = False
+        self._dialog_buffer.reset()
+        self._dialog_event = None
+        self._layout.focus(self._input_window)
+
+    def cancel_dialog(self) -> None:
+        """Cancel the dialog (Escape pressed). Sets result to None and signals."""
+        self._dialog_result = None
+        if self._dialog_event is not None:
+            self._dialog_event.set()
 
     def set_status(self, fragments: list[tuple[str, str]]) -> None:
         """Set the ephemeral status line (thinking indicator, tool ticker)."""
@@ -500,5 +629,15 @@ def create_anteroom_style() -> Style:
             "input.command": "#C5A059 bold",
             "prompt": "#C5A059 bold",
             "prompt.continuation": "#505868",
+            # Dialog overlay
+            "dialog.frame": "bg:#1a1a2e #e0e0e0",
+            "dialog.title": "bg:#1a1a2e #C5A059 bold",
+            "dialog.border": "#3a3a4e",
+            "dialog.body": "bg:#1a1a2e #e0e0e0",
+            "dialog.input": "bg:#2a2a3e #e0e0e0",
+            "dialog.hint": "bg:#1a1a2e #6b7280",
+            "dialog.option": "bg:#1a1a2e #94A3B8",
+            "dialog.option.key": "bg:#1a1a2e #C5A059 bold",
+            "dialog.shadow": "bg:#0a0a15",
         }
     )
