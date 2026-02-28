@@ -753,9 +753,11 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
 
         # Table cell edits
         table_cells_edited = 0
-        for te in table_edits:
+        table_edit_skips: list[str] = []
+        for idx, te in enumerate(table_edits):
             si = te.get("slide_index")
             if si is None or si < 1 or si > prs.Slides.Count:
+                table_edit_skips.append(f"entry {idx}: slide_index={si} out of range (valid: 1-{prs.Slides.Count})")
                 continue
             slide = prs.Slides(si)
             ti = te.get("table_index", 1)
@@ -763,8 +765,10 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
             col = te.get("col")
             value = te.get("value", "")
             if row is None or col is None:
+                table_edit_skips.append(f"entry {idx}: row or col is None")
                 continue
             table_count = 0
+            found_table = False
             for j in range(1, slide.Shapes.Count + 1):
                 shape = slide.Shapes(j)
                 if shape.HasTable:
@@ -774,9 +778,24 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
                         if 0 <= row < tbl.Rows.Count and 0 <= col < tbl.Columns.Count:
                             tbl.Cell(row + 1, col + 1).Shape.TextFrame.TextRange.Text = str(value)
                             table_cells_edited += 1
+                        else:
+                            table_edit_skips.append(
+                                f"entry {idx}: row={row},col={col} out of bounds "
+                                f"(table has {tbl.Rows.Count} rows, {tbl.Columns.Count} cols)"
+                            )
+                        found_table = True
                         break
+            if not found_table:
+                if table_count == 0:
+                    table_edit_skips.append(f"entry {idx}: no tables found on slide {si}")
+                else:
+                    table_edit_skips.append(
+                        f"entry {idx}: table_index={ti} not found (slide {si} has {table_count} table(s))"
+                    )
         if table_edits:
             result["table_cells_edited"] = table_cells_edited
+            if table_edit_skips:
+                result["table_edit_skips"] = table_edit_skips
 
         # Table cell formatting
         table_cells_formatted = 0
@@ -972,13 +991,18 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
 
         # Shape text/formatting edits
         shapes_edited = 0
-        for se in shape_edits:
+        shape_edit_skips: list[str] = []
+        for idx, se in enumerate(shape_edits):
             si = se.get("slide_index")
             shi = se.get("shape_index")
             if si is None or shi is None or si < 1 or si > prs.Slides.Count:
+                shape_edit_skips.append(f"entry {idx}: slide_index={si} or shape_index={shi} out of range")
                 continue
             slide = prs.Slides(si)
             if shi < 1 or shi > slide.Shapes.Count:
+                shape_edit_skips.append(
+                    f"entry {idx}: shape_index={shi} out of range (slide {si} has {slide.Shapes.Count} shapes)"
+                )
                 continue
             shape = slide.Shapes(shi)
             text = se.get("text")
@@ -999,6 +1023,8 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
             shapes_edited += 1
         if shape_edits:
             result["shapes_edited"] = shapes_edited
+            if shape_edit_skips:
+                result["shape_edit_skips"] = shape_edit_skips
 
         # Notes edits
         notes_edited = 0
@@ -2868,9 +2894,11 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
 
     # Table cell edits
     table_cells_edited = 0
-    for te in table_edits:
+    table_edit_skips: list[str] = []
+    for idx, te in enumerate(table_edits):
         si = te.get("slide_index")
         if si is None or si < 1 or si > len(slide_list):
+            table_edit_skips.append(f"entry {idx}: slide_index={si} out of range (valid: 1-{len(slide_list)})")
             continue
         slide = slide_list[si - 1]
         ti = te.get("table_index", 1)
@@ -2878,6 +2906,7 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
         col = te.get("col")
         value = te.get("value", "")
         if row is None or col is None:
+            table_edit_skips.append(f"entry {idx}: row or col is None")
             continue
         table_count = 0
         for shape in slide.shapes:
@@ -2888,9 +2917,23 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
                     if 0 <= row < len(tbl.rows) and 0 <= col < len(tbl.columns):
                         tbl.cell(row, col).text = str(value)
                         table_cells_edited += 1
+                    else:
+                        table_edit_skips.append(
+                            f"entry {idx}: row={row},col={col} out of bounds "
+                            f"(table has {len(tbl.rows)} rows, {len(tbl.columns)} cols)"
+                        )
                     break
+        else:
+            if table_count == 0:
+                table_edit_skips.append(f"entry {idx}: no tables found on slide {si}")
+            else:
+                table_edit_skips.append(
+                    f"entry {idx}: table_index={ti} not found (slide {si} has {table_count} table(s))"
+                )
     if table_edits:
         result["table_cells_edited"] = table_cells_edited
+        if table_edit_skips:
+            result["table_edit_skips"] = table_edit_skips
 
     # Table cell formatting
     table_cells_formatted = 0
@@ -3094,14 +3137,19 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
 
     # Shape text/formatting edits
     shapes_edited = 0
-    for se in shape_edits:
+    shape_edit_skips: list[str] = []
+    for idx, se in enumerate(shape_edits):
         si = se.get("slide_index")
         shi = se.get("shape_index")
         if si is None or shi is None or si < 1 or si > len(slide_list):
+            shape_edit_skips.append(f"entry {idx}: slide_index={si} or shape_index={shi} out of range")
             continue
         slide = slide_list[si - 1]
         shape_list = list(slide.shapes)
         if shi < 1 or shi > len(shape_list):
+            shape_edit_skips.append(
+                f"entry {idx}: shape_index={shi} out of range (slide {si} has {len(shape_list)} shapes)"
+            )
             continue
         shape = shape_list[shi - 1]
         text = se.get("text")
@@ -3128,6 +3176,8 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
         shapes_edited += 1
     if shape_edits:
         result["shapes_edited"] = shapes_edited
+        if shape_edit_skips:
+            result["shape_edit_skips"] = shape_edit_skips
 
     # Notes edits
     notes_edited = 0
