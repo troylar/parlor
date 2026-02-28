@@ -42,6 +42,7 @@ AVAILABLE = _BACKEND is not None
 
 _MAX_OUTPUT = 100_000
 _MAX_CONTENT_BLOCKS = 200
+_MAX_EDIT_OPS = 500
 
 _ALL_ACTIONS = [
     "create",
@@ -58,14 +59,19 @@ _ALL_ACTIONS = [
     "bookmarks",
     "toc",
     "find_regex",
+    "template_fill",
 ]
 
 DEFINITION: dict[str, Any] = {
     "name": "docx",
     "description": (
         "Create, read, edit, and manipulate Word documents (.docx). "
+        "Read returns per-paragraph formatting annotations (bold, italic, underline, "
+        "font size/name, style, indentation), table cell multi-paragraph structure, "
+        "headers/footers, section layout, and document properties. "
         "Supports track changes, comments, headers/footers, images, styles, "
-        "PDF export, page setup, sections, bookmarks, table of contents, and regex find."
+        "PDF export, page setup, sections, bookmarks, table of contents, regex find, "
+        "and template fill ({{key}} replacement across all content)."
     ),
     "parameters": {
         "type": "object",
@@ -181,6 +187,14 @@ DEFINITION: dict[str, Any] = {
                 "type": "string",
                 "description": "Replacement text for find_regex action.",
             },
+            "template_data": {
+                "type": "object",
+                "description": (
+                    "Key-value pairs for template_fill action. "
+                    "Each {{key}} in paragraphs, tables, headers, and footers "
+                    "is replaced with the corresponding value."
+                ),
+            },
         },
         "required": ["action", "path"],
     },
@@ -247,6 +261,7 @@ async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
         "bookmarks": _bookmarks_lib,
         "toc": _toc_lib,
         "find_regex": _find_regex_lib,
+        "template_fill": _template_fill_lib,
     }
 
     handler = _lib_dispatch.get(action)
@@ -285,6 +300,7 @@ async def _dispatch_com(
         "bookmarks": _bookmarks_com,
         "toc": _toc_com,
         "find_regex": _find_regex_com,
+        "template_fill": _template_fill_com,
     }
 
     handler = _com_dispatch.get(action)
@@ -405,29 +421,90 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
     try:
         output_parts: list[str] = []
 
+        pi = 0
         for para in doc.Paragraphs:
             style_name = para.Style.NameLocal
             text = para.Range.Text.rstrip("\r\x07")
+
+            # Build formatting annotation
+            fmt_parts: list[str] = []
+            if style_name and style_name != "Normal":
+                fmt_parts.append(f"style={style_name}")
+            try:
+                if para.LeftIndent and para.LeftIndent > 0:
+                    fmt_parts.append(f"indent={round(para.LeftIndent / 72, 2)}in")
+            except Exception:
+                pass
+            try:
+                f = para.Range.Font
+                if f.Bold:
+                    fmt_parts.append("bold")
+                if f.Italic:
+                    fmt_parts.append("italic")
+                if f.Underline and f.Underline != 0:
+                    fmt_parts.append("underline")
+                if f.Size:
+                    fmt_parts.append(f"size={int(f.Size)}")
+                if f.Name:
+                    fmt_parts.append(f"font={f.Name}")
+            except Exception:
+                pass
+            fmt_str = f" ({', '.join(fmt_parts)})" if fmt_parts else ""
+
             if style_name.startswith("Heading"):
                 try:
                     level = int(style_name.split()[-1])
                 except (ValueError, IndexError):
                     level = 1
-                output_parts.append(f"{'#' * level} {text}")
+                output_parts.append(f"{'#' * level}{fmt_str} {text}")
             elif text.strip():
-                output_parts.append(text)
+                output_parts.append(f"P{pi}{fmt_str}: {text}")
+            pi += 1
 
         for i in range(1, doc.Tables.Count + 1):
-            output_parts.append(f"\n[Table {i}]")
             table = doc.Tables(i)
-            table_rows: list[list[str]] = []
+            output_parts.append(f"\n[Table {i}] ({table.Rows.Count} rows x {table.Columns.Count} cols)")
             for r in range(1, table.Rows.Count + 1):
-                row_data: list[str] = []
+                row_parts: list[str] = []
                 for c in range(1, table.Columns.Count + 1):
-                    cell_text = table.Cell(r, c).Range.Text.rstrip("\r\x07")
-                    row_data.append(cell_text)
-                table_rows.append(row_data)
-            output_parts.append(json.dumps(table_rows, ensure_ascii=False))
+                    try:
+                        cell = table.Cell(r, c)
+                        cell_text = cell.Range.Text.rstrip("\r\x07")
+                        para_count_cell = cell.Range.Paragraphs.Count
+                        if para_count_cell > 1:
+                            cell_lines: list[str] = []
+                            for cpi in range(1, min(para_count_cell + 1, 51)):
+                                try:
+                                    p = cell.Range.Paragraphs(cpi)
+                                    ptxt = p.Range.Text.rstrip("\r\x07")
+                                    cp_fmt: list[str] = []
+                                    if p.Range.Font.Bold:
+                                        cp_fmt.append("bold")
+                                    cp_fmt_str = f" ({', '.join(cp_fmt)})" if cp_fmt else ""
+                                    cell_lines.append(f"P{cpi - 1}{cp_fmt_str}: {ptxt}")
+                                except Exception:
+                                    break
+                            row_parts.append(f"R{r - 1}C{c - 1}: " + " | ".join(cell_lines))
+                        else:
+                            row_parts.append(cell_text)
+                    except Exception:
+                        row_parts.append("")
+                output_parts.append(f"  Row {r - 1}: {json.dumps(row_parts, ensure_ascii=False)}")
+
+        # Headers and footers
+        try:
+            for si in range(1, doc.Sections.Count + 1):
+                sec = doc.Sections(si)
+                hdr_text = sec.Headers(1).Range.Text.rstrip("\r\x07").strip()
+                ftr_text = sec.Footers(1).Range.Text.rstrip("\r\x07").strip()
+                if hdr_text or ftr_text:
+                    output_parts.append(f"\n[Section {si}]")
+                    if hdr_text:
+                        output_parts.append(f"  Header: {hdr_text}")
+                    if ftr_text:
+                        output_parts.append(f"  Footer: {ftr_text}")
+        except Exception:
+            pass
 
         content = "\n".join(output_parts)
         if len(content) > _MAX_OUTPUT:
@@ -435,6 +512,7 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
 
         para_count = doc.Paragraphs.Count
         table_count = doc.Tables.Count
+        section_count = doc.Sections.Count
     finally:
         doc.Close(SaveChanges=False)
 
@@ -442,6 +520,7 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
         "content": content,
         "paragraphs": para_count,
         "tables": table_count,
+        "sections": section_count,
     }
 
 
@@ -458,34 +537,158 @@ def _read_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
 
     output_parts: list[str] = []
 
-    for para in document.paragraphs:
+    for pi, para in enumerate(document.paragraphs):
         style_name = para.style.name if para.style else ""
+        text = para.text
+
+        # Build formatting annotation from first run
+        fmt_parts: list[str] = []
+        if style_name and style_name != "Normal":
+            fmt_parts.append(f"style={style_name}")
+        indent = para.paragraph_format.left_indent
+        if indent is not None:
+            try:
+                indent_inches = round(indent.inches, 2)
+                if indent_inches > 0:
+                    fmt_parts.append(f"indent={indent_inches}in")
+            except Exception:
+                pass
+        runs = para.runs
+        if runs:
+            r0 = runs[0]
+            f = r0.font
+            if f.bold:
+                fmt_parts.append("bold")
+            if f.italic:
+                fmt_parts.append("italic")
+            if f.underline:
+                fmt_parts.append("underline")
+            if f.size is not None:
+                try:
+                    fmt_parts.append(f"size={int(f.size.pt)}")
+                except Exception:
+                    pass
+            if f.name:
+                fmt_parts.append(f"font={f.name}")
+            if f.color and f.color.rgb:
+                color_str = str(f.color.rgb)
+                if color_str not in ("000000", "None"):
+                    fmt_parts.append(f"color=#{color_str}")
+
+        fmt_str = f" ({', '.join(fmt_parts)})" if fmt_parts else ""
+
         if style_name.startswith("Heading"):
             try:
                 level = int(style_name.split()[-1])
             except (ValueError, IndexError):
                 level = 1
-            output_parts.append(f"{'#' * level} {para.text}")
+            output_parts.append(f"{'#' * level}{fmt_str} {text}")
         else:
-            if para.text.strip():
-                output_parts.append(para.text)
+            if text.strip():
+                output_parts.append(f"P{pi}{fmt_str}: {text}")
 
     for i, table in enumerate(document.tables):
-        output_parts.append(f"\n[Table {i + 1}]")
-        table_rows: list[list[str]] = []
-        for row in table.rows:
-            table_rows.append([cell.text for cell in row.cells])
-        output_parts.append(json.dumps(table_rows, ensure_ascii=False))
+        output_parts.append(f"\n[Table {i + 1}] ({len(table.rows)} rows x {len(table.columns)} cols)")
+        for ri, row in enumerate(table.rows):
+            row_parts: list[str] = []
+            for ci, cell in enumerate(row.cells):
+                cell_paras = cell.paragraphs
+                if len(cell_paras) > 1:
+                    cell_lines: list[str] = []
+                    for cpi, cpara in enumerate(cell_paras):
+                        cp_fmt: list[str] = []
+                        if cpara.runs and cpara.runs[0].font.bold:
+                            cp_fmt.append("bold")
+                        if cpara.style and cpara.style.name != "Normal":
+                            cp_fmt.append(f"style={cpara.style.name}")
+                        cp_fmt_str = f" ({', '.join(cp_fmt)})" if cp_fmt else ""
+                        cell_lines.append(f"P{cpi}{cp_fmt_str}: {cpara.text}")
+                    row_parts.append(f"R{ri}C{ci}: " + " | ".join(cell_lines))
+                else:
+                    row_parts.append(cell.text)
+            output_parts.append(f"  Row {ri}: {json.dumps(row_parts, ensure_ascii=False)}")
+
+    # Headers and footers
+    try:
+        for si, section in enumerate(document.sections):
+            hdr = section.header
+            ftr = section.footer
+            hdr_text = ""
+            if hdr and not hdr.is_linked_to_previous:
+                hdr_text = "\n".join(p.text for p in hdr.paragraphs).strip()
+            ftr_text = ""
+            if ftr and not ftr.is_linked_to_previous:
+                ftr_text = "\n".join(p.text for p in ftr.paragraphs).strip()
+            if hdr_text or ftr_text:
+                output_parts.append(f"\n[Section {si + 1}]")
+                if hdr_text:
+                    output_parts.append(f"  Header: {hdr_text}")
+                if ftr_text:
+                    output_parts.append(f"  Footer: {ftr_text}")
+    except Exception:
+        pass
+
+    # Section info
+    sections_info: list[dict[str, Any]] = []
+    try:
+        for si, section in enumerate(document.sections):
+            sec_info: dict[str, Any] = {"index": si + 1}
+            try:
+                sec_info["orientation"] = "landscape" if section.orientation == 1 else "portrait"
+            except Exception:
+                pass
+            try:
+                sec_info["page_width"] = round(section.page_width.inches, 2) if section.page_width else None
+                sec_info["page_height"] = round(section.page_height.inches, 2) if section.page_height else None
+            except Exception:
+                pass
+            try:
+                sec_info["top_margin"] = round(section.top_margin.inches, 2) if section.top_margin else None
+                sec_info["bottom_margin"] = round(section.bottom_margin.inches, 2) if section.bottom_margin else None
+                sec_info["left_margin"] = round(section.left_margin.inches, 2) if section.left_margin else None
+                sec_info["right_margin"] = round(section.right_margin.inches, 2) if section.right_margin else None
+            except Exception:
+                pass
+            sections_info.append(sec_info)
+    except Exception:
+        pass
+
+    # Document core properties
+    doc_props: dict[str, Any] = {}
+    try:
+        cp = document.core_properties
+        if cp.title:
+            doc_props["title"] = cp.title
+        if cp.author:
+            doc_props["author"] = cp.author
+        if cp.subject:
+            doc_props["subject"] = cp.subject
+        if cp.created:
+            doc_props["created"] = str(cp.created)
+        if cp.modified:
+            doc_props["modified"] = str(cp.modified)
+        if cp.last_modified_by:
+            doc_props["last_modified_by"] = cp.last_modified_by
+    except Exception:
+        pass
 
     content = "\n".join(output_parts)
     if len(content) > _MAX_OUTPUT:
         content = content[:_MAX_OUTPUT] + "\n... (truncated)"
 
-    return {
+    result: dict[str, Any] = {
         "content": content,
         "paragraphs": len(document.paragraphs),
         "tables": len(document.tables),
+        "sections": len(document.sections),
     }
+
+    if sections_info:
+        result["sections_info"] = sections_info
+    if doc_props:
+        result["properties"] = doc_props
+
+    return result
 
 
 # --- edit ---
@@ -1607,4 +1810,154 @@ def _find_regex_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str
         "matches": matches,
         "count": len(matches),
         "truncated": found_count >= 100,
+    }
+
+
+# ---------------------------------------------------------------------------
+# template_fill — {{key}} replacement across entire document
+# ---------------------------------------------------------------------------
+
+
+def _template_fill_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    template_data: dict[str, Any] = kwargs.get("template_data") or {}
+    if not template_data:
+        return {"error": "template_data is required for template_fill action"}
+    if len(template_data) > _MAX_EDIT_OPS:
+        return {"error": f"Too many template keys (max {_MAX_EDIT_OPS})"}
+
+    if not os.path.isfile(resolved):
+        return {"error": f"File not found: {display_path}"}
+
+    word = manager.get_app("Word.Application")
+    try:
+        doc = word.Documents.Open(os.path.abspath(resolved))
+    except Exception as exc:
+        return {"error": f"Unable to open DOCX file: {display_path} ({type(exc).__name__}: {exc})"}
+
+    try:
+        tokens_replaced = 0
+        for key, value in template_data.items():
+            token = "{{" + str(key) + "}}"
+            val_str = str(value)
+
+            # Replace in main body
+            find = doc.Content.Find
+            find.ClearFormatting()
+            find.Replacement.ClearFormatting()
+            while find.Execute(FindText=token, ReplaceWith=val_str, Replace=1):
+                tokens_replaced += 1
+
+            # Replace in headers and footers
+            for si in range(1, doc.Sections.Count + 1):
+                sec = doc.Sections(si)
+                for hf_type in (1, 2, 3):  # wdHeaderFooterPrimary, FirstPage, EvenPages
+                    try:
+                        hdr = sec.Headers(hf_type)
+                        if hdr.Exists:
+                            hf = hdr.Range.Find
+                            hf.ClearFormatting()
+                            hf.Replacement.ClearFormatting()
+                            while hf.Execute(FindText=token, ReplaceWith=val_str, Replace=1):
+                                tokens_replaced += 1
+                    except Exception:
+                        pass
+                    try:
+                        ftr = sec.Footers(hf_type)
+                        if ftr.Exists:
+                            ff = ftr.Range.Find
+                            ff.ClearFormatting()
+                            ff.Replacement.ClearFormatting()
+                            while ff.Execute(FindText=token, ReplaceWith=val_str, Replace=1):
+                                tokens_replaced += 1
+                    except Exception:
+                        pass
+
+        doc.Save()
+    finally:
+        try:
+            doc.Close(SaveChanges=False)
+        except Exception:
+            pass
+
+    return {
+        "result": f"Template fill completed on {display_path}",
+        "path": display_path,
+        "tokens_replaced": tokens_replaced,
+        "keys_processed": len(template_data),
+    }
+
+
+def _template_fill_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    import docx as _docx
+
+    template_data: dict[str, Any] = kwargs.get("template_data") or {}
+    if not template_data:
+        return {"error": "template_data is required for template_fill action"}
+    if len(template_data) > _MAX_EDIT_OPS:
+        return {"error": f"Too many template keys (max {_MAX_EDIT_OPS})"}
+
+    if not os.path.isfile(resolved):
+        return {"error": f"File not found: {display_path}"}
+
+    try:
+        document = _docx.Document(resolved)
+    except Exception as exc:
+        return {"error": f"Unable to read DOCX file: {display_path} ({type(exc).__name__}: {exc})"}
+
+    tokens_replaced = 0
+
+    for key, value in template_data.items():
+        token = "{{" + str(key) + "}}"
+        val_str = str(value)
+
+        # Replace in paragraphs (preserves formatting by replacing within runs)
+        for para in document.paragraphs:
+            if token in para.text:
+                for run in para.runs:
+                    if token in run.text:
+                        run.text = run.text.replace(token, val_str)
+                        tokens_replaced += 1
+
+        # Replace in tables
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        if token in para.text:
+                            for run in para.runs:
+                                if token in run.text:
+                                    run.text = run.text.replace(token, val_str)
+                                    tokens_replaced += 1
+
+        # Replace in headers and footers
+        for section in document.sections:
+            for hf in (section.header, section.footer, section.first_page_header, section.first_page_footer):
+                try:
+                    if hf is None:
+                        continue
+                    for para in hf.paragraphs:
+                        if token in para.text:
+                            for run in para.runs:
+                                if token in run.text:
+                                    run.text = run.text.replace(token, val_str)
+                                    tokens_replaced += 1
+                    # Also check tables within headers/footers
+                    for table in hf.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for para in cell.paragraphs:
+                                    if token in para.text:
+                                        for run in para.runs:
+                                            if token in run.text:
+                                                run.text = run.text.replace(token, val_str)
+                                                tokens_replaced += 1
+                except Exception:
+                    pass
+
+    document.save(resolved)
+    return {
+        "result": f"Template fill completed on {display_path}",
+        "path": display_path,
+        "tokens_replaced": tokens_replaced,
+        "keys_processed": len(template_data),
     }

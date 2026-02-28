@@ -43,6 +43,7 @@ AVAILABLE = _BACKEND is not None
 _MAX_OUTPUT = 100_000
 _MAX_CONTENT_BLOCKS = 200
 _MAX_ROWS = 10_000
+_MAX_EDIT_OPS = 500
 _MAX_EXCEL_COLUMNS = 16_384  # Excel column limit (XFD)
 _MAX_EXCEL_ROWS = 1_048_576  # Excel row limit
 
@@ -81,6 +82,11 @@ _ALL_ACTIONS = [
     "pivot_tables",
     "sparklines",
     "slicers",
+    "template_fill",
+    "manage_sheets",
+    "resize",
+    "insert_delete",
+    "copy_range",
 ]
 
 _working_dir_override: str | None = None
@@ -89,8 +95,11 @@ DEFINITION: dict[str, Any] = {
     "name": "xlsx",
     "description": (
         "Create, read, edit, and manipulate Excel spreadsheets (.xlsx). "
-        "Supports formatting, charts, pivot tables, data validation, conditional formatting, "
-        "named ranges, comments, hyperlinks, images, sheet protection, and more."
+        "Read returns values, formulas, merged ranges, cell formatting, column widths, "
+        "data validations, conditional formatting rules, named ranges, and freeze pane state. "
+        "Supports formatting, charts, pivot tables, template fill ({{key}} replacement), "
+        "sheet management (rename/delete/copy/reorder/hide), column/row resize, "
+        "bulk insert/delete rows/columns, range copy, and more."
     ),
     "parameters": {
         "type": "object",
@@ -254,6 +263,54 @@ DEFINITION: dict[str, Any] = {
                 "type": "string",
                 "description": "Output file path for export_pdf.",
             },
+            "template_data": {
+                "type": "object",
+                "description": (
+                    "Key-value pairs for template_fill action. "
+                    "Each {{key}} in cells is replaced with the corresponding value."
+                ),
+            },
+            "sheet_operations": {
+                "type": "array",
+                "description": (
+                    "Operations for manage_sheets: [{op: 'rename'|'delete'|'copy'|'reorder'|'hide'|'unhide', "
+                    "sheet: str, new_name?: str, position?: int, target_name?: str}]."
+                ),
+                "items": {"type": "object"},
+            },
+            "resize_ops": {
+                "type": "array",
+                "description": (
+                    "Resize operations: [{target: 'column'|'row', index: str|int, size: float}]. "
+                    "Column index is letter (e.g. 'A'), row index is number. "
+                    "Size is width for columns (character units) or height for rows (points)."
+                ),
+                "items": {"type": "object"},
+            },
+            "insert_delete_ops": {
+                "type": "array",
+                "description": (
+                    "Insert/delete operations: [{op: 'insert_rows'|'delete_rows'|'insert_cols'|'delete_cols', "
+                    "index: int, count?: int}]. index is 1-based."
+                ),
+                "items": {"type": "object"},
+            },
+            "source_range": {
+                "type": "string",
+                "description": "Source cell range for copy_range, e.g. 'A1:C10'.",
+            },
+            "dest_cell": {
+                "type": "string",
+                "description": "Destination top-left cell for copy_range, e.g. 'E1'.",
+            },
+            "copy_values_only": {
+                "type": "boolean",
+                "description": "If true, copy only values (not formulas). Default false.",
+            },
+            "dest_sheet": {
+                "type": "string",
+                "description": "Destination sheet name for copy_range (defaults to source sheet).",
+            },
         },
         "required": ["action", "path"],
     },
@@ -332,6 +389,11 @@ async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
         "pivot_tables": _pivot_tables_lib,
         "sparklines": _sparklines_lib,
         "slicers": _slicers_lib,
+        "template_fill": _template_fill_lib,
+        "manage_sheets": _manage_sheets_lib,
+        "resize": _resize_lib,
+        "insert_delete": _insert_delete_lib,
+        "copy_range": _copy_range_lib,
     }
 
     handler = _lib_dispatch.get(action)
@@ -368,6 +430,11 @@ _COM_ACTIONS = [
     "pivot_tables",
     "sparklines",
     "slicers",
+    "template_fill",
+    "manage_sheets",
+    "resize",
+    "insert_delete",
+    "copy_range",
 ]
 
 
@@ -406,6 +473,11 @@ async def _dispatch_com(
         "pivot_tables": _pivot_tables_com,
         "sparklines": _sparklines_com,
         "slicers": _slicers_com,
+        "template_fill": _template_fill_com,
+        "manage_sheets": _manage_sheets_com,
+        "resize": _resize_com,
+        "insert_delete": _insert_delete_com,
+        "copy_range": _copy_range_com,
     }
 
     handler = _com_dispatch.get(action)
@@ -520,12 +592,23 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
             return {"error": err}
 
         output_rows: list[list[Any]] = []
+        formulas: dict[str, str] = {}
+        formatting: dict[str, dict[str, Any]] = {}
+
         if cell_range:
             rng = ws.Range(cell_range)
             for r in range(1, rng.Rows.Count + 1):
                 row_data = []
                 for c in range(1, rng.Columns.Count + 1):
-                    row_data.append(rng.Cells(r, c).Value)
+                    cell = rng.Cells(r, c)
+                    row_data.append(cell.Value)
+                    # Collect formula
+                    if cell.HasFormula:
+                        formulas[cell.Address.replace("$", "")] = cell.Formula
+                    # Collect formatting
+                    fmt_info = _collect_com_cell_format(cell)
+                    if fmt_info:
+                        formatting[cell.Address.replace("$", "")] = fmt_info
                 output_rows.append(row_data)
                 if len(output_rows) >= _MAX_ROWS:
                     break
@@ -535,10 +618,63 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
                 for r in range(1, used.Rows.Count + 1):
                     row_data = []
                     for c in range(1, used.Columns.Count + 1):
-                        row_data.append(used.Cells(r, c).Value)
+                        cell = used.Cells(r, c)
+                        row_data.append(cell.Value)
+                        if cell.HasFormula:
+                            formulas[cell.Address.replace("$", "")] = cell.Formula
+                        fmt_info = _collect_com_cell_format(cell)
+                        if fmt_info:
+                            formatting[cell.Address.replace("$", "")] = fmt_info
                     output_rows.append(row_data)
                     if len(output_rows) >= _MAX_ROWS:
                         break
+
+        # Collect merged ranges
+        merged_ranges: list[str] = []
+        try:
+            for area in ws.Cells.MergeCells if ws.Cells.MergeCells else []:
+                merged_ranges.append(str(area))
+        except Exception:
+            try:
+                used = ws.UsedRange
+                if used:
+                    for r in range(1, min(used.Rows.Count + 1, _MAX_ROWS)):
+                        for c in range(1, used.Columns.Count + 1):
+                            cell = used.Cells(r, c)
+                            if cell.MergeCells:
+                                ma = cell.MergeArea.Address.replace("$", "")
+                                if ma not in merged_ranges:
+                                    merged_ranges.append(ma)
+            except Exception:
+                pass
+
+        # Collect freeze pane
+        freeze_pane: str | None = None
+        try:
+            win = wb.Application.ActiveWindow
+            if win.FreezePanes:
+                freeze_pane = f"Row {win.SplitRow + 1}, Col {win.SplitColumn + 1}"
+        except Exception:
+            pass
+
+        # Collect named ranges
+        named_ranges: list[dict[str, str]] = []
+        try:
+            for i in range(1, wb.Names.Count + 1):
+                n = wb.Names(i)
+                named_ranges.append({"name": n.Name, "refers_to": n.RefersTo})
+        except Exception:
+            pass
+
+        # Hidden sheets
+        hidden_sheets: list[str] = []
+        try:
+            for i in range(1, wb.Worksheets.Count + 1):
+                s = wb.Worksheets(i)
+                if s.Visible != -1:  # xlSheetVisible = -1
+                    hidden_sheets.append(f"{s.Name} (hidden)")
+        except Exception:
+            pass
 
         sheet_title = ws.Name
     finally:
@@ -548,12 +684,62 @@ def _read_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
     if len(content) > _MAX_OUTPUT:
         content = content[:_MAX_OUTPUT] + "\n... (truncated)"
 
-    return {
+    result: dict[str, Any] = {
         "content": content,
         "sheet": sheet_title,
         "sheets_available": available,
         "rows_read": len(output_rows),
     }
+
+    if formulas:
+        result["formulas"] = formulas
+    if formatting:
+        result["formatting"] = formatting
+    if merged_ranges:
+        result["merged_ranges"] = merged_ranges
+    if freeze_pane:
+        result["freeze_pane"] = freeze_pane
+    if named_ranges:
+        result["named_ranges"] = named_ranges
+    if hidden_sheets:
+        result["hidden_sheets"] = hidden_sheets
+
+    return result
+
+
+def _collect_com_cell_format(cell: Any) -> dict[str, Any]:
+    """Extract non-default formatting from a COM cell object."""
+    fmt: dict[str, Any] = {}
+    try:
+        f = cell.Font
+        if f.Bold:
+            fmt["bold"] = True
+        if f.Italic:
+            fmt["italic"] = True
+        if f.Underline and f.Underline != -4142:  # xlUnderlineStyleNone
+            fmt["underline"] = True
+        if f.Name and f.Name != "Calibri":
+            fmt["font"] = f.Name
+        if f.Size and f.Size != 11:
+            fmt["size"] = f.Size
+    except Exception:
+        pass
+    try:
+        if cell.Interior.ColorIndex not in (None, -4142, 0):  # xlNone
+            color_int = cell.Interior.Color
+            r = color_int & 0xFF
+            g = (color_int >> 8) & 0xFF
+            b = (color_int >> 16) & 0xFF
+            fmt["fill"] = f"#{r:02X}{g:02X}{b:02X}"
+    except Exception:
+        pass
+    try:
+        nf = cell.NumberFormat
+        if nf and nf != "General":
+            fmt["number_format"] = nf
+    except Exception:
+        pass
+    return fmt
 
 
 def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
@@ -2066,48 +2252,245 @@ def _create_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, An
 
 
 def _read_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
-    wb, err = _open_workbook_lib(resolved, display_path, read_only=True)
-    if err:
-        return {"error": err}
+    import openpyxl as _openpyxl
 
     sheet_name: str | None = kwargs.get("sheet_name")
     cell_range: str | None = kwargs.get("cell_range")
 
-    ws, err = _get_sheet_lib(wb, sheet_name)
+    # Open twice: data_only=True for computed values, data_only=False for formulas
+    wb_val, err = _open_workbook_lib(resolved, display_path, read_only=True)
     if err:
-        wb.close()
         return {"error": err}
 
+    try:
+        wb_fmt = _openpyxl.load_workbook(resolved, read_only=False, data_only=False)
+    except Exception:
+        wb_fmt = None
+
+    ws_val, err = _get_sheet_lib(wb_val, sheet_name)
+    if err:
+        wb_val.close()
+        if wb_fmt:
+            wb_fmt.close()
+        return {"error": err}
+
+    ws_fmt = None
+    if wb_fmt:
+        ws_fmt, _ = _get_sheet_lib(wb_fmt, sheet_name)
+
     output_rows: list[list[Any]] = []
+    formulas: dict[str, str] = {}
+    formatting: dict[str, dict[str, Any]] = {}
+
     try:
         if cell_range:
-            for row in ws[cell_range]:
+            for row in ws_val[cell_range]:
                 output_rows.append([cell.value for cell in row])
                 if len(output_rows) >= _MAX_ROWS:
                     break
         else:
-            for row in ws.iter_rows():
+            for row in ws_val.iter_rows():
                 output_rows.append([cell.value for cell in row])
                 if len(output_rows) >= _MAX_ROWS:
                     break
     except Exception as exc:
-        wb.close()
+        wb_val.close()
+        if wb_fmt:
+            wb_fmt.close()
         return {"error": f"Unable to read range from: {display_path} ({type(exc).__name__}: {exc})"}
 
-    sheet_title = ws.title
-    sheets_available = list(wb.sheetnames)
-    wb.close()
+    # Collect formulas from the non-data_only workbook
+    if ws_fmt:
+        try:
+            for row in ws_fmt.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and cell.value.startswith("="):
+                        formulas[cell.coordinate] = cell.value
+        except Exception:
+            pass
+
+    # Collect cell formatting for non-default cells
+    if ws_fmt:
+        try:
+            from openpyxl.styles import DEFAULT_FONT
+
+            for row in ws_fmt.iter_rows():
+                for cell in row:
+                    if cell.value is None and not isinstance(cell.value, (int, float)):
+                        if cell.value is None:
+                            continue
+                    fmt_info: dict[str, Any] = {}
+                    f = cell.font
+                    if f and f != DEFAULT_FONT:
+                        if f.bold:
+                            fmt_info["bold"] = True
+                        if f.italic:
+                            fmt_info["italic"] = True
+                        if f.underline:
+                            fmt_info["underline"] = True
+                        if f.name and f.name != DEFAULT_FONT.name:
+                            fmt_info["font"] = f.name
+                        if f.size and f.size != DEFAULT_FONT.size:
+                            fmt_info["size"] = f.size
+                        if f.color and f.color.rgb and f.color.rgb != "00000000":
+                            color_val = str(f.color.rgb)
+                            if color_val not in ("00000000", "FF000000"):
+                                fmt_info["font_color"] = f"#{color_val[-6:]}"
+                    fill = cell.fill
+                    if fill and fill.fgColor and fill.fgColor.rgb:
+                        fill_rgb = str(fill.fgColor.rgb)
+                        if fill_rgb not in ("00000000", "FFFFFFFF", "00000000"):
+                            fmt_info["fill"] = f"#{fill_rgb[-6:]}"
+                    if cell.number_format and cell.number_format != "General":
+                        fmt_info["number_format"] = cell.number_format
+                    al = cell.alignment
+                    if al:
+                        if al.horizontal and al.horizontal != "general":
+                            fmt_info["align"] = al.horizontal
+                        if al.wrap_text:
+                            fmt_info["wrap"] = True
+                    if fmt_info:
+                        formatting[cell.coordinate] = fmt_info
+        except Exception:
+            pass
+
+    # Collect merged ranges
+    merged_ranges: list[str] = []
+    if ws_fmt:
+        try:
+            for mr in ws_fmt.merged_cells.ranges:
+                merged_ranges.append(str(mr))
+        except Exception:
+            pass
+
+    # Collect column widths and row heights
+    col_widths: dict[str, float] = {}
+    row_heights: dict[int, float] = {}
+    if ws_fmt:
+        try:
+            for col_letter, dim in ws_fmt.column_dimensions.items():
+                if dim.width is not None and dim.width != 8.0:
+                    col_widths[str(col_letter)] = round(dim.width, 2)
+            for row_num, dim in ws_fmt.row_dimensions.items():
+                if dim.height is not None and dim.height != 15.0:
+                    row_heights[int(row_num)] = round(dim.height, 2)
+        except Exception:
+            pass
+
+    # Collect data validations
+    validations: list[dict[str, Any]] = []
+    if ws_fmt:
+        try:
+            for dv in ws_fmt.data_validations.dataValidation:
+                v_info: dict[str, Any] = {"range": str(dv.sqref)}
+                if dv.type:
+                    v_info["type"] = dv.type
+                if dv.formula1:
+                    v_info["formula1"] = str(dv.formula1)
+                if dv.formula2:
+                    v_info["formula2"] = str(dv.formula2)
+                if dv.operator:
+                    v_info["operator"] = dv.operator
+                validations.append(v_info)
+        except Exception:
+            pass
+
+    # Collect conditional formatting rules
+    cf_rules: list[dict[str, Any]] = []
+    if ws_fmt:
+        try:
+            for cf_range, rules in ws_fmt.conditional_formatting:
+                for rule in rules:
+                    cf_info: dict[str, Any] = {"range": str(cf_range)}
+                    if hasattr(rule, "type"):
+                        cf_info["type"] = rule.type
+                    if hasattr(rule, "operator") and rule.operator:
+                        cf_info["operator"] = rule.operator
+                    if hasattr(rule, "formula") and rule.formula:
+                        cf_info["formula"] = [str(f) for f in rule.formula]
+                    cf_rules.append(cf_info)
+        except Exception:
+            pass
+
+    # Collect named ranges
+    named_ranges: list[dict[str, str]] = []
+    if wb_fmt:
+        try:
+            for dn in wb_fmt.defined_names.values():
+                named_ranges.append({"name": dn.name, "refers_to": dn.attr_text})
+        except Exception:
+            pass
+
+    # Collect freeze pane position
+    freeze_pane: str | None = None
+    if ws_fmt:
+        try:
+            if ws_fmt.freeze_panes:
+                freeze_pane = str(ws_fmt.freeze_panes)
+        except Exception:
+            pass
+
+    # Collect auto-filter state
+    auto_filter_ref: str | None = None
+    if ws_fmt:
+        try:
+            if ws_fmt.auto_filter and ws_fmt.auto_filter.ref:
+                auto_filter_ref = str(ws_fmt.auto_filter.ref)
+        except Exception:
+            pass
+
+    # Collect hidden sheets
+    hidden_sheets: list[str] = []
+    if wb_fmt:
+        try:
+            for sn in wb_fmt.sheetnames:
+                s = wb_fmt[sn]
+                if s.sheet_state and s.sheet_state != "visible":
+                    hidden_sheets.append(f"{sn} ({s.sheet_state})")
+        except Exception:
+            pass
+
+    sheet_title = ws_val.title
+    sheets_available = list(wb_val.sheetnames)
+    wb_val.close()
+    if wb_fmt:
+        wb_fmt.close()
 
     content = json.dumps(output_rows, ensure_ascii=False, default=str)
     if len(content) > _MAX_OUTPUT:
         content = content[:_MAX_OUTPUT] + "\n... (truncated)"
 
-    return {
+    result: dict[str, Any] = {
         "content": content,
         "sheet": sheet_title,
         "sheets_available": sheets_available,
         "rows_read": len(output_rows),
     }
+
+    if formulas:
+        result["formulas"] = formulas
+    if formatting:
+        result["formatting"] = formatting
+    if merged_ranges:
+        result["merged_ranges"] = merged_ranges
+    if col_widths:
+        result["column_widths"] = col_widths
+    if row_heights:
+        result["row_heights"] = row_heights
+    if validations:
+        result["data_validations"] = validations
+    if cf_rules:
+        result["conditional_formatting"] = cf_rules
+    if named_ranges:
+        result["named_ranges"] = named_ranges
+    if freeze_pane:
+        result["freeze_pane"] = freeze_pane
+    if auto_filter_ref:
+        result["auto_filter"] = auto_filter_ref
+    if hidden_sheets:
+        result["hidden_sheets"] = hidden_sheets
+
+    return result
 
 
 def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
@@ -2166,6 +2549,546 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
         "cells_updated": cells_updated,
         "rows_appended": rows_appended,
         "sheets_added": sheets_added,
+    }
+
+
+# ---------------------------------------------------------------------------
+# template_fill — {{key}} replacement across all cells
+# ---------------------------------------------------------------------------
+
+
+def _template_fill_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    template_data: dict[str, Any] = kwargs.get("template_data") or {}
+    if not template_data:
+        return {"error": "template_data is required for template_fill action"}
+    if len(template_data) > _MAX_EDIT_OPS:
+        return {"error": f"Too many template keys (max {_MAX_EDIT_OPS})"}
+
+    _, wb, err = _open_workbook_com(manager, resolved, display_path)
+    if err:
+        return {"error": err}
+
+    try:
+        tokens_replaced = 0
+        for key, value in template_data.items():
+            token = "{{" + str(key) + "}}"
+            val_str = str(value)
+            for si in range(1, wb.Worksheets.Count + 1):
+                ws = wb.Worksheets(si)
+                used = ws.UsedRange
+                if used is None:
+                    continue
+                cells = used.Find(What=token, LookIn=-4163, LookAt=2)  # xlValues, xlPart
+                if cells is None:
+                    continue
+                first_addr = cells.Address
+                while True:
+                    cells.Value = str(cells.Value).replace(token, val_str)
+                    tokens_replaced += 1
+                    cells = used.FindNext(cells)
+                    if cells is None or cells.Address == first_addr:
+                        break
+        wb.Save()
+    finally:
+        wb.Close(SaveChanges=False)
+
+    return {
+        "result": f"Template fill completed on {display_path}",
+        "path": display_path,
+        "tokens_replaced": tokens_replaced,
+        "keys_processed": len(template_data),
+    }
+
+
+def _template_fill_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    template_data: dict[str, Any] = kwargs.get("template_data") or {}
+    if not template_data:
+        return {"error": "template_data is required for template_fill action"}
+    if len(template_data) > _MAX_EDIT_OPS:
+        return {"error": f"Too many template keys (max {_MAX_EDIT_OPS})"}
+
+    wb, err = _open_workbook_lib(resolved, display_path)
+    if err:
+        return {"error": err}
+
+    tokens_replaced = 0
+    for key, value in template_data.items():
+        token = "{{" + str(key) + "}}"
+        val_str = str(value)
+        for ws in wb.worksheets:
+            for row in ws.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and token in cell.value:
+                        cell.value = cell.value.replace(token, val_str)
+                        tokens_replaced += 1
+
+    wb.save(resolved)
+    wb.close()
+    return {
+        "result": f"Template fill completed on {display_path}",
+        "path": display_path,
+        "tokens_replaced": tokens_replaced,
+        "keys_processed": len(template_data),
+    }
+
+
+# ---------------------------------------------------------------------------
+# manage_sheets — rename, delete, copy, reorder, hide/unhide
+# ---------------------------------------------------------------------------
+
+_VALID_SHEET_OPS = ("rename", "delete", "copy", "reorder", "hide", "unhide")
+
+
+def _manage_sheets_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    sheet_operations: list[dict[str, Any]] = kwargs.get("sheet_operations") or []
+    if not sheet_operations:
+        return {"error": "sheet_operations is required for manage_sheets action"}
+    if len(sheet_operations) > _MAX_EDIT_OPS:
+        return {"error": f"Too many sheet operations (max {_MAX_EDIT_OPS})"}
+
+    _, wb, err = _open_workbook_com(manager, resolved, display_path)
+    if err:
+        return {"error": err}
+
+    try:
+        ops_done = 0
+        for op_def in sheet_operations:
+            op = op_def.get("op", "")
+            sheet = op_def.get("sheet", "")
+            if op not in _VALID_SHEET_OPS:
+                return {"error": f"Unknown sheet operation: '{op}'. Valid: {', '.join(_VALID_SHEET_OPS)}"}
+            if not sheet:
+                return {"error": "Each sheet operation requires a 'sheet' name"}
+
+            ws, ws_err = _get_sheet_com(wb, sheet)
+            if ws_err and op != "copy":
+                return {"error": ws_err}
+
+            if op == "rename":
+                new_name = op_def.get("new_name")
+                if not new_name:
+                    return {"error": "rename requires 'new_name'"}
+                ws.Name = str(new_name)
+            elif op == "delete":
+                if wb.Worksheets.Count <= 1:
+                    return {"error": "Cannot delete the only sheet in a workbook"}
+                ws.Delete()
+            elif op == "copy":
+                target_name = op_def.get("new_name", f"{sheet} Copy")
+                ws.Copy(After=wb.Worksheets(wb.Worksheets.Count))
+                wb.Worksheets(wb.Worksheets.Count).Name = str(target_name)
+            elif op == "reorder":
+                position = op_def.get("position", 1)
+                position = max(1, min(position, wb.Worksheets.Count))
+                if position == 1:
+                    ws.Move(Before=wb.Worksheets(1))
+                else:
+                    ws.Move(After=wb.Worksheets(position - 1))
+            elif op == "hide":
+                ws.Visible = 0  # xlSheetHidden
+            elif op == "unhide":
+                ws.Visible = -1  # xlSheetVisible
+            ops_done += 1
+
+        wb.Save()
+    finally:
+        wb.Close(SaveChanges=False)
+
+    return {
+        "result": f"Completed {ops_done} sheet operation(s) on {display_path}",
+        "path": display_path,
+        "operations_completed": ops_done,
+    }
+
+
+def _manage_sheets_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    sheet_operations: list[dict[str, Any]] = kwargs.get("sheet_operations") or []
+    if not sheet_operations:
+        return {"error": "sheet_operations is required for manage_sheets action"}
+    if len(sheet_operations) > _MAX_EDIT_OPS:
+        return {"error": f"Too many sheet operations (max {_MAX_EDIT_OPS})"}
+
+    wb, err = _open_workbook_lib(resolved, display_path)
+    if err:
+        return {"error": err}
+
+    ops_done = 0
+    for op_def in sheet_operations:
+        op = op_def.get("op", "")
+        sheet = op_def.get("sheet", "")
+        if op not in _VALID_SHEET_OPS:
+            wb.close()
+            return {"error": f"Unknown sheet operation: '{op}'. Valid: {', '.join(_VALID_SHEET_OPS)}"}
+        if not sheet:
+            wb.close()
+            return {"error": "Each sheet operation requires a 'sheet' name"}
+
+        if sheet not in wb.sheetnames:
+            wb.close()
+            return {"error": f"Sheet '{sheet}' not found. Available: {list(wb.sheetnames)}"}
+
+        ws = wb[sheet]
+
+        if op == "rename":
+            new_name = op_def.get("new_name")
+            if not new_name:
+                wb.close()
+                return {"error": "rename requires 'new_name'"}
+            ws.title = str(new_name)
+        elif op == "delete":
+            if len(wb.sheetnames) <= 1:
+                wb.close()
+                return {"error": "Cannot delete the only sheet in a workbook"}
+            wb.remove(ws)
+        elif op == "copy":
+            target_name = op_def.get("new_name", f"{sheet} Copy")
+            new_ws = wb.copy_worksheet(ws)
+            new_ws.title = str(target_name)
+        elif op == "reorder":
+            position = op_def.get("position", 1)
+            position = max(1, min(position, len(wb.sheetnames))) - 1
+            wb.move_sheet(ws, offset=position - wb.sheetnames.index(sheet))
+        elif op == "hide":
+            ws.sheet_state = "hidden"
+        elif op == "unhide":
+            ws.sheet_state = "visible"
+        ops_done += 1
+
+    wb.save(resolved)
+    wb.close()
+    return {
+        "result": f"Completed {ops_done} sheet operation(s) on {display_path}",
+        "path": display_path,
+        "operations_completed": ops_done,
+    }
+
+
+# ---------------------------------------------------------------------------
+# resize — column width / row height control
+# ---------------------------------------------------------------------------
+
+
+def _resize_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    resize_ops: list[dict[str, Any]] = kwargs.get("resize_ops") or []
+    if not resize_ops:
+        return {"error": "resize_ops is required for resize action"}
+    if len(resize_ops) > _MAX_EDIT_OPS:
+        return {"error": f"Too many resize operations (max {_MAX_EDIT_OPS})"}
+
+    _, wb, err = _open_workbook_com(manager, resolved, display_path)
+    if err:
+        return {"error": err}
+
+    try:
+        ws, ws_err = _get_sheet_com(wb, kwargs.get("sheet_name"))
+        if ws_err:
+            return {"error": ws_err}
+
+        resized = 0
+        for op in resize_ops:
+            target = op.get("target", "")
+            index = op.get("index")
+            size = op.get("size")
+            if target not in ("column", "row"):
+                return {"error": f"Invalid resize target: '{target}'. Use 'column' or 'row'"}
+            if index is None or size is None:
+                return {"error": "Each resize op requires 'index' and 'size'"}
+            size = float(size)
+            if size < 0:
+                return {"error": "Size must be non-negative"}
+
+            if target == "column":
+                ws.Columns(str(index)).ColumnWidth = size
+            else:
+                ws.Rows(int(index)).RowHeight = size
+            resized += 1
+
+        wb.Save()
+    finally:
+        wb.Close(SaveChanges=False)
+
+    return {
+        "result": f"Resized {resized} column(s)/row(s) in {display_path}",
+        "path": display_path,
+        "resized": resized,
+    }
+
+
+def _resize_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    resize_ops: list[dict[str, Any]] = kwargs.get("resize_ops") or []
+    if not resize_ops:
+        return {"error": "resize_ops is required for resize action"}
+    if len(resize_ops) > _MAX_EDIT_OPS:
+        return {"error": f"Too many resize operations (max {_MAX_EDIT_OPS})"}
+
+    wb, err = _open_workbook_lib(resolved, display_path)
+    if err:
+        return {"error": err}
+
+    ws, ws_err = _get_sheet_lib(wb, kwargs.get("sheet_name"))
+    if ws_err:
+        wb.close()
+        return {"error": ws_err}
+
+    resized = 0
+    for op in resize_ops:
+        target = op.get("target", "")
+        index = op.get("index")
+        size = op.get("size")
+        if target not in ("column", "row"):
+            wb.close()
+            return {"error": f"Invalid resize target: '{target}'. Use 'column' or 'row'"}
+        if index is None or size is None:
+            wb.close()
+            return {"error": "Each resize op requires 'index' and 'size'"}
+        size = float(size)
+        if size < 0:
+            wb.close()
+            return {"error": "Size must be non-negative"}
+
+        if target == "column":
+            ws.column_dimensions[str(index).upper()].width = size
+        else:
+            ws.row_dimensions[int(index)].height = size
+        resized += 1
+
+    wb.save(resolved)
+    wb.close()
+    return {
+        "result": f"Resized {resized} column(s)/row(s) in {display_path}",
+        "path": display_path,
+        "resized": resized,
+    }
+
+
+# ---------------------------------------------------------------------------
+# insert_delete — bulk row/column insert/delete
+# ---------------------------------------------------------------------------
+
+_VALID_INSERT_DELETE_OPS = ("insert_rows", "delete_rows", "insert_cols", "delete_cols")
+
+
+def _insert_delete_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    insert_delete_ops: list[dict[str, Any]] = kwargs.get("insert_delete_ops") or []
+    if not insert_delete_ops:
+        return {"error": "insert_delete_ops is required for insert_delete action"}
+    if len(insert_delete_ops) > _MAX_EDIT_OPS:
+        return {"error": f"Too many insert/delete operations (max {_MAX_EDIT_OPS})"}
+
+    _, wb, err = _open_workbook_com(manager, resolved, display_path)
+    if err:
+        return {"error": err}
+
+    try:
+        ws, ws_err = _get_sheet_com(wb, kwargs.get("sheet_name"))
+        if ws_err:
+            return {"error": ws_err}
+
+        ops_done = 0
+        for op_def in insert_delete_ops:
+            op = op_def.get("op", "")
+            index = op_def.get("index")
+            count = op_def.get("count", 1)
+            if op not in _VALID_INSERT_DELETE_OPS:
+                return {"error": f"Unknown op: '{op}'. Valid: {', '.join(_VALID_INSERT_DELETE_OPS)}"}
+            if index is None:
+                return {"error": "Each operation requires 'index' (1-based)"}
+            index = int(index)
+            count = max(1, min(int(count), _MAX_ROWS))
+
+            if op == "insert_rows":
+                for _ in range(count):
+                    ws.Rows(index).Insert()
+            elif op == "delete_rows":
+                rng = ws.Range(ws.Rows(index), ws.Rows(index + count - 1))
+                rng.Delete()
+            elif op == "insert_cols":
+                for _ in range(count):
+                    ws.Columns(index).Insert()
+            elif op == "delete_cols":
+                rng = ws.Range(ws.Columns(index), ws.Columns(index + count - 1))
+                rng.Delete()
+            ops_done += 1
+
+        wb.Save()
+    finally:
+        wb.Close(SaveChanges=False)
+
+    return {
+        "result": f"Completed {ops_done} insert/delete operation(s) on {display_path}",
+        "path": display_path,
+        "operations_completed": ops_done,
+    }
+
+
+def _insert_delete_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    insert_delete_ops: list[dict[str, Any]] = kwargs.get("insert_delete_ops") or []
+    if not insert_delete_ops:
+        return {"error": "insert_delete_ops is required for insert_delete action"}
+    if len(insert_delete_ops) > _MAX_EDIT_OPS:
+        return {"error": f"Too many insert/delete operations (max {_MAX_EDIT_OPS})"}
+
+    wb, err = _open_workbook_lib(resolved, display_path)
+    if err:
+        return {"error": err}
+
+    ws, ws_err = _get_sheet_lib(wb, kwargs.get("sheet_name"))
+    if ws_err:
+        wb.close()
+        return {"error": ws_err}
+
+    ops_done = 0
+    for op_def in insert_delete_ops:
+        op = op_def.get("op", "")
+        index = op_def.get("index")
+        count = op_def.get("count", 1)
+        if op not in _VALID_INSERT_DELETE_OPS:
+            wb.close()
+            return {"error": f"Unknown op: '{op}'. Valid: {', '.join(_VALID_INSERT_DELETE_OPS)}"}
+        if index is None:
+            wb.close()
+            return {"error": "Each operation requires 'index' (1-based)"}
+        index = int(index)
+        count = max(1, min(int(count), _MAX_ROWS))
+
+        if op == "insert_rows":
+            ws.insert_rows(index, count)
+        elif op == "delete_rows":
+            ws.delete_rows(index, count)
+        elif op == "insert_cols":
+            ws.insert_cols(index, count)
+        elif op == "delete_cols":
+            ws.delete_cols(index, count)
+        ops_done += 1
+
+    wb.save(resolved)
+    wb.close()
+    return {
+        "result": f"Completed {ops_done} insert/delete operation(s) on {display_path}",
+        "path": display_path,
+        "operations_completed": ops_done,
+    }
+
+
+# ---------------------------------------------------------------------------
+# copy_range — copy/paste cell ranges
+# ---------------------------------------------------------------------------
+
+
+def _copy_range_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    source_range = kwargs.get("source_range")
+    dest_cell = kwargs.get("dest_cell")
+    if not source_range or not dest_cell:
+        return {"error": "source_range and dest_cell are required for copy_range action"}
+
+    _, wb, err = _open_workbook_com(manager, resolved, display_path)
+    if err:
+        return {"error": err}
+
+    try:
+        ws_src, ws_err = _get_sheet_com(wb, kwargs.get("sheet_name"))
+        if ws_err:
+            return {"error": ws_err}
+
+        dest_sheet = kwargs.get("dest_sheet")
+        if dest_sheet:
+            ws_dst, ws_err = _get_sheet_com(wb, dest_sheet)
+            if ws_err:
+                return {"error": ws_err}
+        else:
+            ws_dst = ws_src
+
+        copy_values_only = kwargs.get("copy_values_only", False)
+        src_rng = ws_src.Range(source_range)
+
+        if copy_values_only:
+            src_rng.Copy()
+            ws_dst.Range(dest_cell).PasteSpecial(Paste=-4163)  # xlPasteValues
+        else:
+            src_rng.Copy(Destination=ws_dst.Range(dest_cell))
+
+        wb.Save()
+    finally:
+        wb.Close(SaveChanges=False)
+
+    return {
+        "result": f"Copied {source_range} to {dest_cell} in {display_path}",
+        "path": display_path,
+        "source_range": source_range,
+        "dest_cell": dest_cell,
+        "values_only": copy_values_only,
+    }
+
+
+def _copy_range_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]:
+    source_range = kwargs.get("source_range")
+    dest_cell = kwargs.get("dest_cell")
+    if not source_range or not dest_cell:
+        return {"error": "source_range and dest_cell are required for copy_range action"}
+
+    wb, err = _open_workbook_lib(resolved, display_path)
+    if err:
+        return {"error": err}
+
+    ws_src, ws_err = _get_sheet_lib(wb, kwargs.get("sheet_name"))
+    if ws_err:
+        wb.close()
+        return {"error": ws_err}
+
+    dest_sheet = kwargs.get("dest_sheet")
+    if dest_sheet:
+        ws_dst, ws_err = _get_sheet_lib(wb, dest_sheet)
+        if ws_err:
+            wb.close()
+            return {"error": ws_err}
+    else:
+        ws_dst = ws_src
+
+    copy_values_only = kwargs.get("copy_values_only", False)
+
+    try:
+        from openpyxl.utils import coordinate_to_tuple
+
+        src_cells = ws_src[source_range]
+        if not isinstance(src_cells, tuple):
+            src_cells = ((src_cells,),)
+
+        dest_row, dest_col = coordinate_to_tuple(dest_cell)
+
+        cells_copied = 0
+        for r_offset, row in enumerate(src_cells):
+            for c_offset, cell in enumerate(row):
+                dst_cell = ws_dst.cell(row=dest_row + r_offset, column=dest_col + c_offset)
+                if copy_values_only:
+                    dst_cell.value = cell.value
+                else:
+                    if isinstance(cell.value, str) and cell.value.startswith("="):
+                        dst_cell.value = cell.value
+                    else:
+                        dst_cell.value = cell.value
+                    if cell.has_style:
+                        from copy import copy as _copy
+
+                        dst_cell.font = _copy(cell.font)
+                        dst_cell.fill = _copy(cell.fill)
+                        dst_cell.border = _copy(cell.border)
+                        dst_cell.alignment = _copy(cell.alignment)
+                        dst_cell.number_format = cell.number_format
+                        dst_cell.protection = _copy(cell.protection)
+                cells_copied += 1
+    except Exception as exc:
+        wb.close()
+        return {"error": f"Copy failed: {type(exc).__name__}: {exc}"}
+
+    wb.save(resolved)
+    wb.close()
+    return {
+        "result": f"Copied {source_range} to {dest_cell} in {display_path}",
+        "path": display_path,
+        "source_range": source_range,
+        "dest_cell": dest_cell,
+        "values_only": copy_values_only,
+        "cells_copied": cells_copied,
     }
 
 
