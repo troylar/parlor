@@ -954,6 +954,7 @@ class TestComDispatchErrorHandling:
         mock_com_mod.COM_AVAILABLE = True
 
         with (
+            patch("anteroom.tools.office_docx.AVAILABLE", True),
             patch("anteroom.tools.office_docx._BACKEND", "com"),
             patch("anteroom.tools.office_docx._com_mod", mock_com_mod),
         ):
