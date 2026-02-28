@@ -18,16 +18,16 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "fastapi>=0.115.0",
-    "starlette>=0.47.2",
+    "fastapi>=0.134.0",
+    "starlette>=0.52.0",
     "python-multipart>=0.0.18",
     "uvicorn[standard]>=0.24.0",
-    "sse-starlette>=1.8.0",
-    "openai>=1.12.0",
-    "mcp>=1.23.0",
+    "sse-starlette>=3.3.2",
+    "openai>=1.76.2",
+    "mcp>=1.23.3",
     "pyyaml>=6.0",
     "filetype>=1.2.0",
-    "rich>=13.0.0",
+    "rich>=13.5.3",
     "prompt-toolkit>=3.0.0",
     "tiktoken>=0.7.0",
     "cryptography>=46.0.5",
@@ -57,7 +57,7 @@ index = [
     "tree-sitter-language-pack>=0.2.0",
 ]
 docs = [
-    "pypdf>=6.7.1",
+    "pypdf>=6.7.4",
     "python-docx>=1.0",
 ]
 office = [
@@ -75,14 +75,14 @@ encryption = [
     "sqlcipher3>=0.5.0",
 ]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=4.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov>=6.1.1",
     "httpx>=0.25.0",
-    "ruff>=0.4.0",
-    "mypy>=1.8.0",
-    "pip-audit>=2.7.0",
-    "semgrep>=1.68.0",
+    "ruff>=0.15.4",
+    "mypy>=1.15.0",
+    "pip-audit>=2.9.0",
+    "semgrep>=1.152.0",
 ]
 
 [project.scripts]
