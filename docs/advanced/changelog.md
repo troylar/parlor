@@ -5,6 +5,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## February 28, 2026
+
+### v1.83.4
+
+**Fixed:**
+
+- COM (Windows Office) operations now report actual error messages instead of opaque "Unable to read file" messages, making corporate security policy blocks diagnosable (#593)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.83.4)
+
 ## February 27, 2026
 
 ### v1.83.0
