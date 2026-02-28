@@ -47,11 +47,19 @@ Anteroom CLI - /path/to/your/project
 
 ## How It Works
 
-1. You type a prompt at the `you>` prompt
+1. You type a prompt at the input prompt (full-screen mode features a persistent header showing model, current directory, and git branch)
 2. A thinking spinner with elapsed timer appears while the AI generates
 3. When the AI calls tools, the spinner pauses and tool calls display inline
 4. The full response renders as Rich Markdown --- syntax-highlighted code, tables, headers, lists
 5. A context footer shows token usage, response size, elapsed time, and remaining headroom
+
+## Full-Screen Layout
+
+Anteroom CLI uses a full-screen terminal layout with:
+- **Persistent header** — Model name, working directory, and git branch information
+- **Scrolling output pane** — Rich-rendered responses with mouse scroll support, auto-scrolling to latest content
+- **Status toolbar** — Footer showing available commands and mode indicators
+- **Input area** — Multiline prompt with tab completion for /commands, @files, conversation slugs, and skill names
 
 ## Agentic Loop
 

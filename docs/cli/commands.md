@@ -347,10 +347,11 @@ See [Pack Commands](../packs/pack-commands.md) for detailed examples and output.
 
 ## Tab Completion
 
-Tab completion works for three categories:
+Tab completion works for four categories:
 
-- **Commands**: Type `/` then `Tab` to see all slash commands
-- **Skills**: Type `/` then `Tab` to see skill names
+- **Commands**: Type `/` then `Tab` to see all slash commands with descriptions
+- **Skills**: Type `/` then `Tab` to see skill names with one-line descriptions and source locations
+- **Conversation slugs**: Type `/resume <slug>` to complete recent conversation slugs
 - **File paths**: Type `@` then `Tab` to browse files and directories
 
 ## Paste Collapsing

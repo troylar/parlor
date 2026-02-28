@@ -32,6 +32,7 @@ from anteroom.cli.renderer import (
     configure_thresholds,
     cycle_verbosity,
     flush_buffered_text,
+    format_status_toolbar,
     get_plan_steps,
     get_verbosity,
     increment_streaming_chars,
@@ -3111,3 +3112,156 @@ class TestToolTicker:
             r._tool_start = 0
             r._repl_mode = False
             r._stdout = None
+
+
+class TestFormatStatusToolbar:
+    """Tests for the persistent bottom toolbar formatter."""
+
+    def test_returns_list_of_tuples(self):
+        result = format_status_toolbar(model="gpt-4o")
+        assert isinstance(result, list)
+        assert all(isinstance(t, tuple) and len(t) == 2 for t in result)
+
+    def test_shows_model(self):
+        result = format_status_toolbar(model="gpt-4o")
+        text = "".join(t[1] for t in result)
+        assert "gpt-4o" in text
+
+    def test_shows_token_usage(self):
+        result = format_status_toolbar(current_tokens=12300, max_context=128_000)
+        text = "".join(t[1] for t in result)
+        assert "12k" in text
+        assert "128k" in text
+        assert "10%" in text
+
+    def test_token_pressure_green(self):
+        result = format_status_toolbar(current_tokens=10_000, max_context=128_000)
+        token_entries = [t for t in result if "%" in t[1]]
+        assert token_entries
+        assert token_entries[0][0] == "class:bottom-toolbar.tokens"
+
+    def test_token_pressure_warn(self):
+        result = format_status_toolbar(current_tokens=70_000, max_context=128_000)
+        token_entries = [t for t in result if "%" in t[1]]
+        assert token_entries
+        assert token_entries[0][0] == "class:bottom-toolbar.tokens-warn"
+
+    def test_token_pressure_danger(self):
+        result = format_status_toolbar(current_tokens=100_000, max_context=128_000)
+        token_entries = [t for t in result if "%" in t[1]]
+        assert token_entries
+        assert token_entries[0][0] == "class:bottom-toolbar.tokens-danger"
+
+    def test_shows_message_count(self):
+        result = format_status_toolbar(message_count=14)
+        text = "".join(t[1] for t in result)
+        assert "14 msgs" in text
+
+    def test_hides_zero_messages(self):
+        result = format_status_toolbar(message_count=0)
+        text = "".join(t[1] for t in result)
+        assert "msgs" not in text
+
+    def test_shows_approval_mode(self):
+        result = format_status_toolbar(approval_mode="ask_for_writes")
+        text = "".join(t[1] for t in result)
+        assert "ask_for_writes" in text
+
+    def test_shows_tool_count(self):
+        result = format_status_toolbar(tool_count=8)
+        text = "".join(t[1] for t in result)
+        assert "8 tools" in text
+
+    def test_shows_mcp_connecting(self):
+        mcp = {"myserver": {"status": "connecting"}}
+        result = format_status_toolbar(mcp_statuses=mcp)
+        text = "".join(t[1] for t in result)
+        assert "MCP" in text
+        assert "myserver" in text
+
+    def test_hides_mcp_when_resolved(self):
+        mcp = {"myserver": {"status": "connected", "tool_count": 3}}
+        result = format_status_toolbar(mcp_statuses=mcp)
+        text = "".join(t[1] for t in result)
+        assert "MCP" not in text
+
+    def test_full_toolbar(self):
+        result = format_status_toolbar(
+            model="gpt-4o",
+            current_tokens=50_000,
+            max_context=128_000,
+            message_count=14,
+            approval_mode="ask_for_writes",
+            tool_count=8,
+        )
+        text = "".join(t[1] for t in result)
+        assert "gpt-4o" in text
+        assert "50k" in text
+        assert "14 msgs" in text
+        assert "ask_for_writes" in text
+        assert "8 tools" in text
+
+    def test_no_trailing_separator(self):
+        result = format_status_toolbar(model="gpt-4o", tool_count=5)
+        assert result[-1][0] != "class:bottom-toolbar.sep"
+
+
+# ---------------------------------------------------------------------------
+# Fullscreen mode bridge
+# ---------------------------------------------------------------------------
+
+
+class TestFullscreenBridge:
+    """Tests for use_fullscreen_output() and is_fullscreen()."""
+
+    def setup_method(self):
+        import anteroom.cli.renderer as mod
+
+        self._mod = mod
+        # Save originals
+        self._orig_console = mod.console
+        self._orig_stdout_console = mod._stdout_console
+        self._orig_stdout = mod._stdout
+        self._orig_repl_mode = mod._repl_mode
+        self._orig_fullscreen = mod._fullscreen_mode
+        self._orig_layout = mod._fullscreen_layout
+        self._orig_invalidate = mod._fullscreen_invalidate
+
+    def teardown_method(self):
+        mod = self._mod
+        mod.console = self._orig_console
+        mod._stdout_console = self._orig_stdout_console
+        mod._stdout = self._orig_stdout
+        mod._repl_mode = self._orig_repl_mode
+        mod._fullscreen_mode = self._orig_fullscreen
+        mod._fullscreen_layout = self._orig_layout
+        mod._fullscreen_invalidate = self._orig_invalidate
+
+    def test_is_fullscreen_false_by_default(self):
+        self._mod._fullscreen_mode = False
+        assert self._mod.is_fullscreen() is False
+
+    def test_use_fullscreen_output_sets_mode(self):
+        from prompt_toolkit.buffer import Buffer
+
+        from anteroom.cli.layout import AnteroomLayout
+
+        buf = Buffer(name="test")
+        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
+        calls = []
+        self._mod.use_fullscreen_output(layout, lambda: calls.append(1))
+        assert self._mod.is_fullscreen() is True
+        assert self._mod._fullscreen_layout is layout
+
+    def test_console_writes_to_output_pane(self):
+        from prompt_toolkit.buffer import Buffer
+
+        from anteroom.cli.layout import AnteroomLayout
+
+        buf = Buffer(name="test")
+        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
+        calls = []
+        self._mod.use_fullscreen_output(layout, lambda: calls.append(1))
+        self._mod.console.print("hello world")
+        assert layout.output.fragment_count > 0
+        assert len(calls) >= 1

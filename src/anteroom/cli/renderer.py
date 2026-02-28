@@ -56,6 +56,48 @@ def use_stdout_console() -> None:
     _repl_mode = True
 
 
+_fullscreen_mode: bool = False
+_fullscreen_layout: Any = None  # AnteroomLayout instance (avoid circular import)
+_fullscreen_invalidate: Any = None  # Callable[[], None]
+
+
+def use_fullscreen_output(layout: Any, invalidate_fn: Any) -> None:
+    """Switch renderer to full-screen mode.
+
+    All Rich output is captured as ANSI and redirected to the layout's
+    output pane.  The thinking spinner becomes a status-line update
+    instead of raw ANSI cursor manipulation.
+
+    Parameters
+    ----------
+    layout:
+        An ``AnteroomLayout`` instance whose ``output`` control receives
+        rendered fragments.
+    invalidate_fn:
+        Callable (typically ``app.invalidate``) that triggers a repaint
+        after new content is appended.
+    """
+    global console, _stdout_console, _stdout, _repl_mode
+    global _fullscreen_mode, _fullscreen_layout, _fullscreen_invalidate
+
+    from .layout import OutputPaneWriter
+
+    _fullscreen_mode = True
+    _fullscreen_layout = layout
+    _fullscreen_invalidate = invalidate_fn
+    _repl_mode = True
+
+    writer = OutputPaneWriter(layout.output, invalidate_fn)
+    console = Console(file=writer, force_terminal=True)
+    _stdout_console = Console(file=writer, force_terminal=True)
+    _stdout = writer  # type: ignore[assignment]
+
+
+def is_fullscreen() -> bool:
+    """Return whether the renderer is in full-screen layout mode."""
+    return _fullscreen_mode
+
+
 def configure_thresholds(
     esc_hint_delay: float | None = None,
     stall_display: float | None = None,
@@ -468,7 +510,11 @@ def start_thinking(*, newline: bool = False) -> None:
     _last_spinner_update = _thinking_start
     # Reset plan written lines — the block will be freshly written
     _plan_written_lines = 0
-    if _repl_mode:
+    if _fullscreen_mode and _fullscreen_layout:
+        # Fullscreen: update status line, no raw ANSI
+        _write_thinking_line(0.0)
+        _spinner = None
+    elif _repl_mode:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
@@ -599,6 +645,33 @@ def _write_thinking_block(
     _plan_written_lines = height  # remember how many plan lines we wrote
 
 
+def _build_status_fragments(
+    elapsed: float,
+    *,
+    error_msg: str = "",
+    countdown: int = 0,
+    cancel_msg: str = "",
+) -> list[tuple[str, str]]:
+    """Build prompt_toolkit fragments for the fullscreen status line."""
+    parts: list[tuple[str, str]] = [("class:status", " Thinking... ")]
+    if elapsed >= 0.5:
+        parts.append(("class:status.timer", f"{elapsed:.0f}s"))
+    if cancel_msg:
+        parts.append(("class:status.hint", f"  {cancel_msg}"))
+    elif error_msg:
+        parts.append(("class:status", f"  {error_msg}"))
+        if countdown > 0:
+            parts.append(("class:status.hint", f" \u00b7 retrying in {countdown}s"))
+            parts.append(("class:status.hint", "  esc to give up"))
+    else:
+        suffix = _phase_suffix(elapsed)
+        if suffix:
+            parts.append(("class:status.phase", f"  {suffix}"))
+        if elapsed >= _ESC_HINT_DELAY:
+            parts.append(("class:status.hint", "  esc to cancel"))
+    return parts
+
+
 def _write_thinking_line(
     elapsed: float,
     *,
@@ -611,11 +684,21 @@ def _write_thinking_line(
     When a plan checklist is active, delegates to ``_write_thinking_block()``
     to render the full plan + thinking block.
 
+    In fullscreen mode, updates the layout's status line instead of writing
+    raw ANSI cursor codes.
+
     Optional keyword args for special states:
     - ``error_msg``: pale-red inline error replacing phase text
     - ``countdown``: seconds remaining for auto-retry (shown after error_msg)
     - ``cancel_msg``: muted message like "cancelled" (user-initiated, not error)
     """
+    if _fullscreen_mode and _fullscreen_layout:
+        fragments = _build_status_fragments(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
+        _fullscreen_layout.set_status(fragments)
+        if _fullscreen_invalidate:
+            _fullscreen_invalidate()
+        return
+
     if _plan_visible and _plan_steps:
         _write_thinking_block(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
         return
@@ -674,7 +757,12 @@ async def stop_thinking(
         except (asyncio.CancelledError, Exception):
             pass
         _thinking_ticker_task = None
-    if _spinner:
+    if _fullscreen_mode and _fullscreen_layout:
+        elapsed = time.monotonic() - _thinking_start
+        _fullscreen_layout.clear_status()
+        if _fullscreen_invalidate:
+            _fullscreen_invalidate()
+    elif _spinner:
         elapsed = time.monotonic() - _thinking_start
         _spinner.stop()
         _spinner = None
@@ -724,7 +812,12 @@ def stop_thinking_sync() -> float:
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
         _thinking_ticker_task = None
-    if _spinner:
+    if _fullscreen_mode and _fullscreen_layout:
+        elapsed = time.monotonic() - _thinking_start
+        _fullscreen_layout.clear_status()
+        if _fullscreen_invalidate:
+            _fullscreen_invalidate()
+    elif _spinner:
         elapsed = time.monotonic() - _thinking_start
         _spinner.stop()
         _spinner = None
@@ -1107,8 +1200,17 @@ async def _tool_ticker() -> None:
             await asyncio.sleep(0.5)
             if _tool_start:
                 elapsed = time.monotonic() - _tool_start
-                label = f"  [{MUTED}]{escape(_tool_ticker_summary)}  {elapsed:.0f}s[/{MUTED}]"
-                if _tool_spinner:
+                if _fullscreen_mode and _fullscreen_layout:
+                    _fullscreen_layout.set_status(
+                        [
+                            ("class:status.phase", f"  {_tool_ticker_summary}  "),
+                            ("class:status.timer", f"{elapsed:.0f}s"),
+                        ]
+                    )
+                    if _fullscreen_invalidate:
+                        _fullscreen_invalidate()
+                elif _tool_spinner:
+                    label = f"  [{MUTED}]{escape(_tool_ticker_summary)}  {elapsed:.0f}s[/{MUTED}]"
                     _tool_spinner.update(label)
                 elif _repl_mode and _stdout:
                     muted = "\033[38;2;139;139;139m"
@@ -1142,7 +1244,11 @@ def stop_tool_ticker_sync() -> None:
     if _tool_ticker_task is not None:
         _tool_ticker_task.cancel()
         _tool_ticker_task = None
-    if _tool_spinner:
+    if _fullscreen_mode and _fullscreen_layout:
+        _fullscreen_layout.clear_status()
+        if _fullscreen_invalidate:
+            _fullscreen_invalidate()
+    elif _tool_spinner:
         _tool_spinner.stop()
         _tool_spinner = None
     elif _repl_mode and _stdout:
@@ -1452,8 +1558,65 @@ def render_compact_done(original: int, compacted: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# MCP status
+# Status toolbar
 # ---------------------------------------------------------------------------
+
+
+def format_status_toolbar(
+    *,
+    model: str = "",
+    current_tokens: int = 0,
+    max_context: int = 128_000,
+    message_count: int = 0,
+    approval_mode: str = "",
+    tool_count: int = 0,
+    mcp_statuses: dict[str, dict[str, Any]] | None = None,
+) -> list[tuple[str, str]]:
+    """Format the persistent bottom toolbar for the REPL.
+
+    Returns a list of (style, text) tuples for prompt_toolkit FormattedText.
+    """
+    parts: list[tuple[str, str]] = [("class:bottom-toolbar", " ")]
+
+    if model:
+        parts.append(("class:bottom-toolbar.model", model))
+        parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+
+    if max_context > 0:
+        pct = min(100, (current_tokens / max_context) * 100) if max_context else 0
+        token_text = f"{_format_tokens(current_tokens)}/{_format_tokens(max_context)} ({pct:.0f}%)"
+        if pct > 75:
+            parts.append(("class:bottom-toolbar.tokens-danger", token_text))
+        elif pct > 50:
+            parts.append(("class:bottom-toolbar.tokens-warn", token_text))
+        else:
+            parts.append(("class:bottom-toolbar.tokens", token_text))
+        parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+
+    if message_count > 0:
+        parts.append(("class:bottom-toolbar.dim", f"{message_count} msgs"))
+        parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+
+    if approval_mode:
+        parts.append(("class:bottom-toolbar.dim", approval_mode))
+        parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+
+    if tool_count > 0:
+        parts.append(("class:bottom-toolbar.dim", f"{tool_count} tools"))
+
+    # Append MCP connecting status if any servers are still resolving
+    if mcp_statuses:
+        connecting = [n for n, s in mcp_statuses.items() if s.get("status") == "connecting"]
+        if connecting:
+            parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+            parts.append(("class:bottom-toolbar.mcp", f"MCP: {', '.join(connecting)}"))
+
+    # Strip trailing separator if present
+    if parts and parts[-1][0] == "class:bottom-toolbar.sep":
+        parts.pop()
+
+    parts.append(("class:bottom-toolbar", " "))
+    return parts
 
 
 def format_mcp_toolbar(statuses: dict[str, dict[str, Any]]) -> list[tuple[str, str]] | None:
