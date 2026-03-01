@@ -2075,8 +2075,9 @@ async def _run_repl(
     history_path = config.app.data_dir / "cli_history"
 
     # Map Shift+Enter (CSI u: \x1b[13;2u) to Ctrl+J for terminals that
-    # support the kitty keyboard protocol (iTerm2, kitty, WezTerm, foot).
+    # support the kitty keyboard protocol (iTerm2, kitty, WezTerm, Warp, foot).
     # Terminal.app doesn't send this sequence — Shift+Enter = Enter there.
+    # We also request the kitty protocol at fullscreen startup (see below).
     try:
         from prompt_toolkit.input import vt100_parser
 
@@ -5000,9 +5001,35 @@ async def _run_repl(
             # Always exit the fullscreen application, even on unhandled exceptions
             _fs_app.exit()
 
-    _fs_app.after_render += lambda _app: None  # ensure event loop ticks
+    # Enable kitty keyboard protocol after the first render so the escape
+    # sequence is sent AFTER prompt_toolkit enters alternate screen mode.
+    # Without this, terminals like Warp discard the protocol enable when
+    # switching screen buffers.  Mode 1 (progressive enhancement) only
+    # disambiguates modified keys — regular keys are unaffected.
+    _kitty_proto_enabled: list[bool] = [False]
+
+    def _enable_kitty_protocol(_app: Any) -> None:
+        if _kitty_proto_enabled[0]:
+            return
+        try:
+            _app.output.write_raw("\x1b[>1u")
+            _app.output.flush()
+            _kitty_proto_enabled[0] = True
+        except (OSError, AttributeError):
+            pass
+
+    _fs_app.after_render += _enable_kitty_protocol
     asyncio.get_running_loop().call_soon(lambda: asyncio.create_task(_run_fullscreen()))
-    await _fs_app.run_async()
+
+    try:
+        await _fs_app.run_async()
+    finally:
+        if _kitty_proto_enabled[0]:
+            try:
+                sys.stdout.write("\x1b[<u")
+                sys.stdout.flush()
+            except OSError:
+                pass
 
     # Show resume hint after fullscreen exits
     if conv.get("id") and not is_first_message:

@@ -7,6 +7,7 @@ import io
 import pytest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
+from prompt_toolkit.layout.dimension import to_dimension
 
 from anteroom.cli.layout import (
     AnteroomLayout,
@@ -409,6 +410,141 @@ class TestAnteroomLayout:
         assert filt()
         al.clear_status()
         assert not filt()
+
+
+# ---------------------------------------------------------------------------
+# Dynamic input height (#669)
+# ---------------------------------------------------------------------------
+
+
+class TestInputWindowDynamicHeight:
+    """Tests for dynamic input window height (#669).
+
+    The input window's height callable returns Dimension(min=1, max=N, preferred=N)
+    where N = clamp(line_count, 1, 10). Setting max=preferred prevents the HSplit
+    from growing the input past what it needs during the weight-based fill phase.
+    """
+
+    def _make_layout(self):
+        buf = Buffer(name="test-input", multiline=True)
+        al = AnteroomLayout(
+            header_fn=lambda: [("class:header", " test ")],
+            footer_fn=lambda: [("class:footer", " status ")],
+            input_buffer=buf,
+        )
+        return al, buf
+
+    def _get_dim(self, al):
+        return to_dimension(al._input_window.height)
+
+    # -- Dimension value tests --
+
+    def test_single_line_preferred_is_one(self):
+        al, buf = self._make_layout()
+        buf.set_document(Document("hello"), bypass_readonly=True)
+        dim = self._get_dim(al)
+        assert dim.preferred == 1
+        assert dim.max == 1
+
+    def test_empty_buffer_preferred_is_one(self):
+        al, _buf = self._make_layout()
+        dim = self._get_dim(al)
+        assert dim.preferred == 1
+        assert dim.max == 1
+
+    def test_height_grows_with_lines(self):
+        al, buf = self._make_layout()
+        buf.set_document(Document("line1\nline2\nline3"), bypass_readonly=True)
+        dim = self._get_dim(al)
+        assert dim.preferred == 3
+        assert dim.max == 3
+
+    def test_height_capped_at_ten(self):
+        al, buf = self._make_layout()
+        text = "\n".join(f"line{i}" for i in range(15))
+        buf.set_document(Document(text), bypass_readonly=True)
+        dim = self._get_dim(al)
+        assert dim.preferred == 10
+        assert dim.max == 10
+
+    def test_height_shrinks_on_delete(self):
+        al, buf = self._make_layout()
+        buf.set_document(Document("a\nb\nc\nd"), bypass_readonly=True)
+        assert self._get_dim(al).preferred == 4
+        buf.set_document(Document("a"), bypass_readonly=True)
+        assert self._get_dim(al).preferred == 1
+
+    def test_max_equals_preferred(self):
+        al, buf = self._make_layout()
+        for n in (1, 2, 5, 10, 15):
+            text = "\n".join(f"l{i}" for i in range(n))
+            buf.set_document(Document(text), bypass_readonly=True)
+            dim = self._get_dim(al)
+            assert dim.max == dim.preferred, f"max != preferred for {n} lines"
+
+
+class TestInputWindowHSplitAllocation:
+    """Verify the HSplit actually allocates the right rows to the input window.
+
+    Uses _divide_heights with a mocked get_app() to test the real layout
+    algorithm without needing a running Application event loop.
+    """
+
+    def _make_layout(self):
+        buf = Buffer(name="test-input", multiline=True)
+        al = AnteroomLayout(
+            header_fn=lambda: [("class:header", " test ")],
+            footer_fn=lambda: [("class:footer", " status ")],
+            input_buffer=buf,
+        )
+        return al, buf
+
+    def _get_input_rows(self, al, buf, text, terminal_height=24):
+        from unittest.mock import MagicMock, patch
+
+        from prompt_toolkit.layout.screen import WritePosition
+
+        buf.set_document(Document(text), bypass_readonly=True)
+        wp = WritePosition(xpos=0, ypos=0, width=80, height=terminal_height)
+        mock_app = MagicMock()
+        mock_app.is_done = False
+        hsplit = al.layout.container.content
+        with patch("prompt_toolkit.layout.containers.get_app", return_value=mock_app):
+            heights = hsplit._divide_heights(wp)
+        assert heights is not None, "not enough space for layout"
+        return heights[-1]
+
+    def test_single_line_gets_one_row(self):
+        al, buf = self._make_layout()
+        assert self._get_input_rows(al, buf, "hello") == 1
+
+    def test_three_lines_get_three_rows(self):
+        al, buf = self._make_layout()
+        assert self._get_input_rows(al, buf, "a\nb\nc") == 3
+
+    def test_five_lines_get_five_rows(self):
+        al, buf = self._make_layout()
+        assert self._get_input_rows(al, buf, "a\nb\nc\nd\ne") == 5
+
+    def test_ten_lines_get_ten_rows(self):
+        al, buf = self._make_layout()
+        text = "\n".join(str(i) for i in range(10))
+        assert self._get_input_rows(al, buf, text) == 10
+
+    def test_fifteen_lines_capped_at_ten(self):
+        al, buf = self._make_layout()
+        text = "\n".join(str(i) for i in range(15))
+        assert self._get_input_rows(al, buf, text) == 10
+
+    def test_small_terminal_shares_space(self):
+        al, buf = self._make_layout()
+        text = "\n".join(str(i) for i in range(10))
+        rows = self._get_input_rows(al, buf, text, terminal_height=10)
+        assert 1 <= rows < 10, f"expected constrained rows, got {rows}"
+
+    def test_input_does_not_absorb_surplus(self):
+        al, buf = self._make_layout()
+        assert self._get_input_rows(al, buf, "hello", terminal_height=40) == 1
 
 
 # ---------------------------------------------------------------------------

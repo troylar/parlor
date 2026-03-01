@@ -355,7 +355,11 @@ class AnteroomLayout:
         )
         self._input_window = Window(
             content=self._input_control,
-            height=Dimension(min=1, max=10, preferred=1),
+            height=lambda: Dimension(
+                min=1,
+                max=min(10, max(1, self._input_buffer.document.line_count)),
+                preferred=min(10, max(1, self._input_buffer.document.line_count)),
+            ),
             wrap_lines=True,
             style="class:input",
             get_line_prefix=input_line_prefix,
