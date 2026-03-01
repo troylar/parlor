@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.89.5
+
+**Fixed:**
+
+- Added visual spacing between tool call checkmarks and narration text in CLI output (#680)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.89.5)
+
 ### v1.89.4
 
 **Fixed:**
