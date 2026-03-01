@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -101,6 +102,65 @@ def use_fullscreen_output(layout: Any, invalidate_fn: Any) -> None:
 def is_fullscreen() -> bool:
     """Return whether the renderer is in full-screen layout mode."""
     return _fullscreen_mode
+
+
+# ---------------------------------------------------------------------------
+# Fullscreen-safe logging handler
+# ---------------------------------------------------------------------------
+
+_original_log_handlers: list[logging.Handler] | None = None
+
+
+class FullscreenLogHandler(logging.Handler):
+    """Route log records through the renderer's console instead of raw stderr.
+
+    When fullscreen mode is active, the module-level ``console`` writes through
+    ``OutputPaneWriter`` into the layout's output pane.  This handler formats
+    log records and writes them via that console, preventing raw stderr writes
+    from corrupting the prompt_toolkit fullscreen layout.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            level = record.levelno
+            if level >= logging.ERROR:
+                console.print(f"[{ERROR_RED}]{escape(msg)}[/{ERROR_RED}]")
+            elif level >= logging.WARNING:
+                console.print(f"[{MUTED}]{escape(msg)}[/{MUTED}]")
+        except Exception:
+            self.handleError(record)
+
+
+def install_fullscreen_log_handler() -> None:
+    """Replace root logger's stderr handlers with a fullscreen-safe handler.
+
+    Saves original handlers so they can be restored on fullscreen exit.
+    """
+    global _original_log_handlers
+    root = logging.getLogger()
+    _original_log_handlers = list(root.handlers)
+    for h in list(root.handlers):
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, FullscreenLogHandler):
+            root.removeHandler(h)
+    handler = FullscreenLogHandler()
+    handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    root.addHandler(handler)
+
+
+def restore_log_handlers() -> None:
+    """Restore original log handlers after fullscreen exits."""
+    global _original_log_handlers
+    if _original_log_handlers is None:
+        return
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        if isinstance(h, FullscreenLogHandler):
+            root.removeHandler(h)
+    for h in _original_log_handlers:
+        if h not in root.handlers:
+            root.addHandler(h)
+    _original_log_handlers = None
 
 
 def configure_thresholds(

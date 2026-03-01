@@ -4968,6 +4968,7 @@ async def _run_repl(
     # -- Full-screen application lifecycle --
     if _use_fullscreen:
         renderer.use_fullscreen_output(_anteroom_layout, _fs_app.invalidate)
+        renderer.install_fullscreen_log_handler()
     renderer.set_tool_dedup(config.cli.tool_dedup)
     renderer.configure_thresholds(
         esc_hint_delay=config.cli.esc_hint_delay,
@@ -5004,6 +5005,10 @@ async def _run_repl(
     asyncio.get_running_loop().call_soon(lambda: asyncio.create_task(_run_fullscreen()))
 
     await _fs_app.run_async()
+
+    # Restore original log handlers now that fullscreen layout is gone
+    if _use_fullscreen:
+        renderer.restore_log_handlers()
 
     # Show resume hint after fullscreen exits
     if conv.get("id") and not is_first_message:

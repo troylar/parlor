@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from anteroom.cli.renderer import (
+    FullscreenLogHandler,
     Verbosity,
     _build_thinking_text,
     _collapse_plan,
@@ -37,10 +38,14 @@ from anteroom.cli.renderer import (
     get_verbosity,
     increment_streaming_chars,
     increment_thinking_tokens,
+    install_fullscreen_log_handler,
     is_plan_visible,
+    render_error,
     render_response_end,
     render_tool_call_end,
     render_tool_call_start,
+    render_warning,
+    restore_log_handlers,
     save_turn_history,
     set_retrying,
     set_thinking_phase,
@@ -3756,3 +3761,156 @@ class TestPhase3VisualPolish:
         assert self._mod._streaming_checkpoint >= cp_before
         # buffer should be empty after flush
         assert self._mod._streaming_buffer == []
+
+
+# ---------------------------------------------------------------------------
+# render_error / render_warning (#678)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderError:
+    """Tests for render_error() and render_warning()."""
+
+    def test_render_error_prints_red_bold(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_error("Connection timed out")
+            printed = str(mock_console.print.call_args_list[0])
+            assert "Connection timed out" in printed
+            assert "red bold" in printed
+
+    def test_render_error_escapes_markup(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_error("[bold]injection[/bold]")
+            printed = str(mock_console.print.call_args_list[0])
+            assert "\\[bold\\]" in printed or "\\[bold]" in printed
+
+    def test_render_warning_prints_yellow_bold(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_warning("Rate limited by API")
+            printed = str(mock_console.print.call_args_list[0])
+            assert "Rate limited by API" in printed
+            assert "yellow bold" in printed
+
+    def test_render_warning_escapes_markup(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_warning("[red]injection[/red]")
+            printed = str(mock_console.print.call_args_list[0])
+            assert "\\[red\\]" in printed or "\\[red]" in printed
+
+
+# ---------------------------------------------------------------------------
+# FullscreenLogHandler (#678)
+# ---------------------------------------------------------------------------
+
+
+class TestFullscreenLogHandler:
+    """Tests for the fullscreen-safe log handler."""
+
+    def test_handler_routes_error_through_console(self) -> None:
+        import logging
+
+        handler = FullscreenLogHandler()
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        record = logging.LogRecord(
+            name="anteroom.services.ai_service",
+            level=logging.ERROR,
+            pathname="",
+            lineno=0,
+            msg="Stream timed out",
+            args=(),
+            exc_info=None,
+        )
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            handler.emit(record)
+            assert mock_console.print.called
+            printed = str(mock_console.print.call_args_list[0])
+            assert "Stream timed out" in printed
+
+    def test_handler_routes_warning_through_console(self) -> None:
+        import logging
+
+        handler = FullscreenLogHandler()
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        record = logging.LogRecord(
+            name="anteroom.services.ai_service",
+            level=logging.WARNING,
+            pathname="",
+            lineno=0,
+            msg="Rate limited",
+            args=(),
+            exc_info=None,
+        )
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            handler.emit(record)
+            assert mock_console.print.called
+            printed = str(mock_console.print.call_args_list[0])
+            assert "Rate limited" in printed
+            assert "#8b8b8b" in printed  # MUTED color
+
+    def test_handler_does_not_raise_on_render_failure(self) -> None:
+        import logging
+        from unittest.mock import MagicMock
+
+        handler = FullscreenLogHandler()
+        handler.handleError = MagicMock()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.ERROR,
+            pathname="",
+            lineno=0,
+            msg="test message",
+            args=(),
+            exc_info=None,
+        )
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            mock_console.print.side_effect = Exception("render failed")
+            handler.emit(record)
+            handler.handleError.assert_called_once_with(record)
+
+
+class TestFullscreenLogHandlerLifecycle:
+    """Tests for install/restore of the fullscreen log handler."""
+
+    def test_install_replaces_stream_handlers(self) -> None:
+        import importlib
+        import logging
+
+        import anteroom.cli.renderer as mod
+
+        importlib.reload(mod)
+        root = logging.getLogger()
+        saved = list(root.handlers)
+        root.handlers.clear()
+        test_handler = logging.StreamHandler()
+        root.addHandler(test_handler)
+        try:
+            mod.install_fullscreen_log_handler()
+            fs_handlers = [h for h in root.handlers if type(h).__name__ == "FullscreenLogHandler"]
+            stream_handlers = [
+                h
+                for h in root.handlers
+                if isinstance(h, logging.StreamHandler) and type(h).__name__ != "FullscreenLogHandler"
+            ]
+            assert len(fs_handlers) == 1
+            assert len(stream_handlers) == 0
+        finally:
+            mod.restore_log_handlers()
+            root.handlers.clear()
+            root.handlers.extend(saved)
+
+    def test_restore_removes_fullscreen_handler(self) -> None:
+        import logging
+
+        root = logging.getLogger()
+        install_fullscreen_log_handler()
+        restore_log_handlers()
+        fs_handlers = [h for h in root.handlers if isinstance(h, FullscreenLogHandler)]
+        assert len(fs_handlers) == 0
+
+    def test_restore_without_install_is_noop(self) -> None:
+        import logging
+
+        root = logging.getLogger()
+        handlers_before = list(root.handlers)
+        restore_log_handlers()
+        assert root.handlers == handlers_before
