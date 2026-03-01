@@ -57,9 +57,12 @@ const Sidebar = (() => {
         try {
             const q = query.trim();
             const pp = _projectParam();
+            const typeEl = document.getElementById('sidebar-type-filter');
+            const typeFilter = typeEl ? typeEl.value : '';
             const params = [];
             if (q) params.push(`search=${encodeURIComponent(q)}`);
             if (pp) params.push(pp);
+            if (typeFilter) params.push(`type=${encodeURIComponent(typeFilter)}`);
             const qs = params.length ? `?${params.join('&')}` : '';
             conversations = await App.api(`/api/conversations${qs}`);
             render();
@@ -212,7 +215,7 @@ const Sidebar = (() => {
             });
         });
 
-        if (c.type && c.type !== 'chat') {
+        if (c.type && c.type !== 'chat' && ['note', 'document'].includes(c.type)) {
             const badge = document.createElement('span');
             badge.className = 'conv-type-badge conv-type-' + c.type;
             badge.textContent = c.type === 'note' ? 'note' : 'doc';

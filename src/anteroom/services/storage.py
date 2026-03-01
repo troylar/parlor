@@ -1493,8 +1493,17 @@ def search_similar_messages(
     if not has_vec_support(raw_conn):
         return []
 
+    if conversation_type and conversation_type not in VALID_CONVERSATION_TYPES:
+        conversation_type = None
+
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     embedding_bytes = _validate_embedding(embedding)
+
+    # When post-filtering by conversation_type, over-fetch from the vector index
+    # to compensate for rows that will be discarded. Without this, the caller
+    # may receive far fewer results than requested.
+    vec_k = limit * 4 if conversation_type else limit
+    vec_k = min(vec_k, _MAX_SEARCH_LIMIT)
 
     if conversation_id:
         rows = db.execute_fetchall(
@@ -1510,7 +1519,7 @@ def search_similar_messages(
             LEFT JOIN messages m ON m.id = knn.message_id
             LEFT JOIN conversations c ON c.id = knn.conversation_id
             """,
-            (embedding_bytes, limit, conversation_id),
+            (embedding_bytes, vec_k, conversation_id),
         )
     else:
         rows = db.execute_fetchall(
@@ -1526,7 +1535,7 @@ def search_similar_messages(
             LEFT JOIN messages m ON m.id = knn.message_id
             LEFT JOIN conversations c ON c.id = knn.conversation_id
             """,
-            (embedding_bytes, limit),
+            (embedding_bytes, vec_k),
         )
 
     results = []
@@ -1538,12 +1547,14 @@ def search_similar_messages(
             {
                 "message_id": d["message_id"],
                 "conversation_id": d["conversation_id"],
-                "content": d["content"],
-                "role": d["role"],
+                "content": d["content"] or "",
+                "role": d["role"] or "user",
                 "distance": d["distance"],
-                "conversation_type": d.get("conversation_type", "chat"),
+                "conversation_type": d.get("conversation_type") or "chat",
             }
         )
+        if len(results) >= limit:
+            break
     return results
 
 

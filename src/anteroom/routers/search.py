@@ -122,7 +122,7 @@ async def unified_search(
     if use_semantic and embedding_service:
         query_embedding = await embedding_service.embed(q)
         if query_embedding is not None:
-            results = storage.search_similar_messages(db, query_embedding, limit=limit)
+            results = storage.search_similar_messages(db, query_embedding, limit=limit, conversation_type=type)
             source_results = storage.search_similar_source_chunks(
                 db, query_embedding, limit=limit, project_id=project_id
             )
@@ -135,6 +135,7 @@ async def unified_search(
                         "content": r["content"],
                         "role": r["role"],
                         "distance": r["distance"],
+                        "conversation_type": r.get("conversation_type", "chat"),
                     }
                     for r in results
                 ],
