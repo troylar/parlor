@@ -95,6 +95,41 @@ git rebase origin/main
 git push --force-with-lease
 ```
 
+#### 3b-2. Post-rebase Bug Hunter (conditional)
+
+After rebasing, check whether the rebase introduced real code changes (not just a clean replay):
+
+```bash
+# Compare the tree before and after rebase
+# If rebase was clean, the diff will be empty
+git diff HEAD@{1}..HEAD --name-only -- 'src/**/*.py' 'tests/**/*.py'
+```
+
+**If no files changed** (clean replay): skip. The `/submit-pr` Bug Hunter already scanned this code.
+
+```
+  ✅ Rebase was a clean replay — Bug Hunter scan from submit-pr is still valid.
+```
+
+**If files changed** (conflict resolution or interaction with new main code): run the Bug Hunter on only the changed files. Use the same Opus agent prompt as `/submit-pr` Step 14, but scoped to the files that changed during rebase.
+
+The Bug Hunter must fix every issue it finds:
+1. Apply fixes to the code
+2. Run `ruff check` and `ruff format` on changed files
+3. Run `pytest tests/unit/ -x -q` to verify nothing breaks
+4. Stage and commit: `fix(<scope>): address post-rebase bug hunter findings (#<issue>)`
+5. Push: `git push --force-with-lease`
+6. Re-run once more on the fixed code (max 2 rounds)
+
+Report:
+```
+  🔍 Post-rebase Bug Hunter: N files changed during rebase
+     Round 1: N issues found, N fixed
+     Round 2: clean — no issues
+```
+
+If the Bug Hunter finds blocking issues it cannot fix automatically, abort the deploy and show the issues. Do not merge code with known bugs.
+
 #### 3c. Wait for CI
 
 If main had moved (Step 3a detected new commits), the rebase will trigger new CI runs. Wait for them:
@@ -409,6 +444,7 @@ On success:
   📎 Issues:   #<N> — <issue title> (https://github.com/troylar/anteroom/issues/<N>)
   🧪 CI:       ✅ passed
   🔄 Freshness: ✅ CI ran against current main / ⚠️ rebased and re-validated
+  🔍 Bug Hunter: ✅ skipped (clean replay) / 🔧 N issues fixed post-rebase
   📖 Docs:     ✅ up to date / ⚠️ N updates committed
   📦 PyPI:     https://pypi.org/project/anteroom/X.Y.Z/
   🏷️ Tag:      vX.Y.Z

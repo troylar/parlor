@@ -571,7 +571,70 @@ If the code review finds issues (score 80+):
 4. **If "Skip":**
    - Proceed without fixing. The review comment is already posted.
 
-### Step 14: Final Summary
+### Step 14: Bug Hunter (Opus, fix-all)
+
+After all code review fixes are committed, run a deep correctness scan on the **final** committed code. This is the last gate — it catches logic bugs, race conditions, and edge cases that pattern-based checks miss.
+
+Launch a single **Opus** agent with full read access to the codebase:
+
+**Prompt the agent with:**
+
+> You are a senior code reviewer doing a final deep-dive bug hunt. Your job is to find and fix every issue — no triage, no deferral. If you spot it, you fix it.
+>
+> Read every changed source file in full (not just the diff — you need surrounding context to understand call chains). For each file, also read its callers and callees to understand how the code is used.
+>
+> Hunt for:
+> - **Logic errors**: incorrect conditions, wrong variable references, inverted checks
+> - **Race conditions**: shared mutable state accessed from async code, TOCTOU issues
+> - **Unhandled edge cases**: empty collections, None values, missing dict keys, zero-length strings
+> - **Off-by-one errors**: incorrect loop bounds, wrong slice indices, fencepost errors
+> - **Incorrect assumptions**: `[-1]` on lists that may have multiple concurrent entries, assuming dict ordering, assuming single-threaded execution
+> - **State management bugs**: stale references after mutation, forgotten cleanup, missing resets between iterations
+> - **Resource leaks**: unclosed files/connections, missing `finally` blocks, async context managers not awaited
+> - **Error handling gaps**: bare `except:`, swallowed exceptions that hide bugs, error paths that leave state inconsistent
+> - **Incorrect error messages**: error text that doesn't match what actually went wrong
+> - **Dead code or unreachable branches**: conditions that can never be true, imports that are never used (beyond what ruff catches)
+> - **Type mismatches**: passing wrong types that duck-typing hides until runtime
+> - **Concurrency issues**: missing locks, incorrect lock ordering, deadlock potential
+>
+> For every issue you find:
+> 1. Fix the code
+> 2. If the fix is non-trivial, add a regression test
+> 3. Run `ruff check` and `ruff format` on changed files
+> 4. Run `pytest tests/unit/ -x -q` to verify nothing breaks
+>
+> Report what you found and fixed. Be thorough — check every changed file.
+
+**Get the changed files for the agent:**
+```bash
+git diff --name-only main..HEAD -- 'src/**/*.py'
+```
+
+**After the agent completes:**
+
+1. If it made fixes, stage and commit:
+   ```bash
+   git add <fixed files>
+   git commit -m "fix(<scope>): address bug hunter findings (#<issue>)"
+   ```
+2. Push: `git push`
+3. Re-run the Bug Hunter agent on the newly committed code (max 2 total rounds to prevent infinite loops)
+4. If round 2 finds more issues, fix and commit again. Do not run a third round.
+
+**Report format in the final summary:**
+```
+🔍 Bug Hunter
+  Round 1:  N issues found, N fixed
+  Round 2:  N issues found, N fixed (or "clean — no issues")
+  Files:    <list of files that were fixed>
+```
+
+If the Bug Hunter finds nothing in round 1, report:
+```
+🔍 Bug Hunter:   ✅ clean — no issues found
+```
+
+### Step 15: Final Summary
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -581,7 +644,8 @@ If the code review finds issues (score 80+):
   🔗 PR:          #<N> — <title>
   🌐 URL:         <url>
   🔍 Code Review: ✅ clean / ⚠️ N issues remaining
-  🔄 Fix Rounds:  <0-2> rounds applied
+  🔍 Bug Hunter:  ✅ clean / 🔧 N issues fixed in M rounds
+  🔄 Fix Rounds:  <0-2> code review + <0-2> bug hunter
 
 ────────────────────────────────────────────
   👉 Next: wait for CI, or request human review

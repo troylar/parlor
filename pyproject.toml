@@ -7,7 +7,7 @@ name = "anteroom"
 version = "1.87.0"
 description = "Anteroom - your gateway to AI conversation"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",

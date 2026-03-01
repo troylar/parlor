@@ -8,7 +8,7 @@ Anteroom is a self-hosted AI gateway that connects to any OpenAI-compatible API.
 
 An *anteroom* is the private chamber just outside a larger hall — a controlled space where you decide who enters and what leaves. Anteroom sits between your organization and AI: every prompt, every response, every tool call flows through a governed, auditable, self-hosted gateway that your security team controls.
 
-Think of it as the open-source version of what JPMorgan built for 250,000 employees and Goldman Sachs built for 46,500 — available to every regulated institution that can't afford a nine-figure custom build. Each instance is autonomous, lightweight, and runs wherever your team needs it. No central server. No cloud dependency. Just `pip install anteroom` and go.
+Think of it as the open-source alternative to what JPMorgan built for 250,000 employees and Goldman Sachs built for 46,500 — available to every regulated institution that can't afford a nine-figure custom build. Each instance is autonomous, lightweight, and runs wherever your team needs it. No central server. No cloud dependency. Just `pip install anteroom` and go.
 
 ## Who It's For
 

@@ -5,11 +5,15 @@
 <h1 align="center">Anteroom</h1>
 
 <p align="center">
-  <strong>Your private AI gateway. Self-hosted. Agentic. Secure.</strong>
+  <em>Your employees are already using ChatGPT. Your compliance team doesn't know.</em>
 </p>
 
 <p align="center">
-  Web UI + CLI. Any LLM. Enterprise security. No telemetry.<br>
+  <strong>Give your whole org AI &mdash; without giving up control.</strong>
+</p>
+
+<p align="center">
+  Self-hosted AI gateway. Web UI + agentic CLI. Any LLM. No telemetry.<br>
   <code>pip install anteroom</code>
 </p>
 
@@ -17,7 +21,7 @@
   <img src="https://img.shields.io/pypi/v/anteroom?style=for-the-badge&color=3b82f6&labelColor=0f1117" alt="PyPI Version">
   <img src="https://img.shields.io/badge/python-3.10%2B-10b981?style=for-the-badge&labelColor=0f1117" alt="Python 3.10+">
   <a href="https://codecov.io/gh/troylar/anteroom"><img src="https://img.shields.io/codecov/c/github/troylar/anteroom?style=for-the-badge&color=7c3aed&labelColor=0f1117&label=coverage" alt="Coverage"></a>
-  <img src="https://img.shields.io/github/license/troylar/anteroom?style=for-the-badge&color=e8913a&labelColor=0f1117" alt="License">
+  <img src="https://img.shields.io/badge/license-Apache%202.0-e8913a?style=for-the-badge&labelColor=0f1117" alt="Apache 2.0 License">
 </p>
 
 <p align="center">
@@ -43,7 +47,7 @@
 
 I'm a CTO at a Fortune 500 in a regulated industry where we can't use third-party AI tools &mdash; no ChatGPT, no Claude Code, no Cursor, no Copilot. But we *can* `pip install` open-source packages.
 
-So I built Anteroom: a self-hosted AI gateway with a polished web UI for everyone on the team and an agentic CLI for developers. It connects to **any OpenAI-compatible API** &mdash; Azure OpenAI, Ollama, LM Studio, or your company's internal endpoint. Your data never leaves your network.
+So I built Anteroom: a self-hosted AI gateway with a polished web UI for everyone on the team and an agentic CLI for developers. It connects to **any OpenAI-compatible API** &mdash; Azure OpenAI, Ollama, LM Studio, or your company's internal endpoint. Zero telemetry, no phone-home &mdash; data only goes to the LLM endpoint you choose. Go fully offline with local models.
 
 JPMorgan built a private AI gateway for 250,000 employees. Goldman Sachs built one for 46,500. Anteroom gives every regulated institution the same capability &mdash; without a nine-figure technology budget.
 
@@ -63,7 +67,7 @@ Anteroom threads the needle:
 
 | Problem | Anteroom |
 |---------|----------|
-| "AI tools send our data to the cloud" | Self-hosted, local-first. Data never leaves your network. |
+| "AI tools send our data to the cloud" | Self-hosted. Zero telemetry. Data only goes to the endpoint you choose. |
 | "Chat AI can't actually do things" | Agentic: edits files, runs commands, generates documents, creates presentations |
 | "Our compliance team won't approve it" | OWASP ASVS L2 security, HMAC-chained audit logs, DLP, bash sandboxing |
 | "It only works for developers" | Web UI for everyone + CLI for developers, same governed platform |
@@ -308,7 +312,7 @@ pip install anteroom[embeddings]  # adds local vector search
 ```bash
 git clone https://github.com/troylar/anteroom.git
 cd anteroom && pip install -e ".[dev]"
-pytest tests/ -v                    # 2900+ tests
+pytest tests/ -v                    # 4800+ tests
 ruff check src/ tests/              # lint
 ruff format src/ tests/             # format
 ```
@@ -332,7 +336,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture overview, dev setup, and
 <br>
 
 <p align="center">
-  <strong>MIT License</strong><br>
+  <strong>Apache License 2.0</strong> &mdash; free to use, modify, and distribute<br>
   <br>
   An <em>anteroom</em> is the private chamber just outside a larger hall &mdash;<br>
   a controlled space where you decide who enters and what leaves.<br>
