@@ -467,6 +467,81 @@ class TestOutputPaneWriter:
         assert len(calls) >= 1
 
 
+class TestBugfix670DoubleSpacing:
+    """Regression tests for #670: fullscreen markdown double-spacing on Windows.
+
+    Rich pads every line to Console.width with trailing spaces.  When the
+    prompt_toolkit output pane is narrower, wrap_lines=True wraps each padded
+    line, creating visual double-spacing.  OutputPaneWriter.flush() must strip
+    trailing whitespace and normalize \\r\\n before passing to prompt_toolkit.
+    """
+
+    def test_flush_strips_trailing_whitespace(self):
+        """Trailing spaces from Rich line-padding must be removed."""
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        # Simulate Rich output: text padded to 80 chars with trailing spaces
+        writer.write("Hello" + " " * 75 + "\n")
+        writer.write(" " * 80 + "\n")  # blank line = 80 spaces
+        writer.write("World" + " " * 75 + "\n")
+        writer.flush()
+        text = "".join(t for _, t in ctrl._output_fragments)
+        # No line should contain trailing spaces
+        for line in text.split("\n"):
+            assert line == line.rstrip(" "), f"Trailing spaces found: {line!r}"
+
+    def test_flush_normalizes_crlf(self):
+        """Windows \\r\\n line endings must be normalized to \\n."""
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        writer.write("Hello\r\nWorld\r\n")
+        writer.flush()
+        text = "".join(t for _, t in ctrl._output_fragments)
+        assert "\r" not in text
+
+    def test_markdown_no_padded_blank_lines(self):
+        """Rich Markdown rendered through OutputPaneWriter must not have padded lines."""
+        from rich.console import Console
+        from rich.markdown import Markdown
+        from rich.padding import Padding
+
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        c = Console(file=writer, force_terminal=True, width=80)
+        c.print(Padding(Markdown("Hello\n\nWorld"), (0, 2, 0, 2)))
+        text = "".join(t for _, t in ctrl._output_fragments)
+        for line in text.split("\n"):
+            assert len(line) < 40, f"Line too wide (likely padded): {line!r}"
+
+    def test_markdown_preserves_ansi_codes(self):
+        """ANSI styling codes must survive the trailing-space strip."""
+        from rich.console import Console
+        from rich.markdown import Markdown
+        from rich.padding import Padding
+
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        c = Console(file=writer, force_terminal=True, width=80)
+        c.print(Padding(Markdown("**Bold** and *italic*"), (0, 2, 0, 2)))
+        text = "".join(t for _, t in ctrl._output_fragments)
+        assert "Bold" in text
+        assert "italic" in text
+
+    def test_markdown_paragraph_spacing_correct(self):
+        """Paragraphs should have exactly one blank line between them, not two."""
+        from rich.console import Console
+        from rich.markdown import Markdown
+        from rich.padding import Padding
+
+        ctrl = OutputControl()
+        writer = OutputPaneWriter(ctrl, lambda: None)
+        c = Console(file=writer, force_terminal=True, width=80)
+        c.print(Padding(Markdown("Para 1\n\nPara 2\n\nPara 3"), (0, 2, 0, 2)))
+        text = "".join(t for _, t in ctrl._output_fragments)
+        # Should never have 3+ consecutive newlines (which would be 2+ blank lines)
+        assert "\n\n\n" not in text, f"Triple newline found (double blank line): {text!r}"
+
+
 # ---------------------------------------------------------------------------
 # Style
 # ---------------------------------------------------------------------------

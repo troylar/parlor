@@ -799,6 +799,14 @@ class OutputPaneWriter:
         text = "".join(pending)
         if not text:
             return
+        # Normalize Windows line endings (\r\n → \n) and strip trailing
+        # whitespace that Rich adds for line padding.  Rich pads every line
+        # (including blank lines) to Console.width with spaces.  When the
+        # prompt_toolkit output pane is narrower, wrap_lines=True wraps each
+        # padded line, creating visual double-spacing.  Stripping trailing
+        # spaces lets prompt_toolkit handle wrapping at the actual pane width.
+        text = text.replace("\r\n", "\n")
+        text = re.sub(r" +$", "", text, flags=re.MULTILINE)
         from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 
         fragments = _strip_bg(to_formatted_text(ANSI(text)))
