@@ -632,6 +632,11 @@ def start_thinking(*, newline: bool = False) -> None:
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
     global _plan_written_lines, _streaming_checkpoint
     _flush_dedup()
+    # Emit spacing after tool call block before AI narration text (#680).
+    # Must happen here because start_thinking() is called before
+    # render_response_end(), which would otherwise handle this.
+    if _tool_batch_active:
+        console.print()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
     _thinking_phase = ""

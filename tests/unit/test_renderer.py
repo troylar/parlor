@@ -307,11 +307,28 @@ class TestStartThinkingFlushesDedup:
         import anteroom.cli.renderer as r
 
         r._tool_batch_active = True
-        with patch("anteroom.cli.renderer._write_thinking_line"):
+        with patch("anteroom.cli.renderer._write_thinking_line"), \
+                patch("anteroom.cli.renderer.console") as mock_console:
             r._repl_mode = True
             start_thinking()
             r._repl_mode = False
         assert r._tool_batch_active is False
+        # Should have emitted a blank line for spacing (#680)
+        blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
+        assert len(blank_calls) >= 1
+
+    def test_start_thinking_no_spacing_without_tool_batch(self) -> None:
+        """start_thinking() should NOT emit a blank line when no tool batch was active."""
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = False
+        with patch("anteroom.cli.renderer._write_thinking_line"), \
+                patch("anteroom.cli.renderer.console") as mock_console:
+            r._repl_mode = True
+            start_thinking()
+            r._repl_mode = False
+        blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
+        assert len(blank_calls) == 0
 
     def test_repeated_tool_across_thinking_boundary_not_deduped(self) -> None:
         """Same tool before and after start_thinking() should both produce output."""
