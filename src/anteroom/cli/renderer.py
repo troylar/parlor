@@ -49,7 +49,7 @@ def use_stdout_console() -> None:
     Call from inside ``patch_stdout()`` context.
     """
     global console, _stdout_console, _stdout, _repl_mode
-    _real_stderr = os.fdopen(os.dup(sys.stderr.fileno()), "w")
+    _real_stderr = os.fdopen(os.dup(sys.stderr.fileno()), "w", newline="")
     console = Console(file=_real_stderr, force_terminal=True)
     _stdout_console = Console(file=_real_stderr, force_terminal=True)
     _stdout = _real_stderr
