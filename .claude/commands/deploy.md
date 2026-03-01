@@ -414,6 +414,71 @@ If any stale branches exist, add to the deploy report:
   💡 Tip: Run /cleanup to remove N stale branches
 ```
 
+### Step 7d: Update Landing Page Stats
+
+Update the anteroom.ai landing page stats to reflect the current release. The landing page source is at `/Users/troy/dev/github/troylar/anteroom-site`.
+
+1. **Gather current stats** (parallel):
+   ```bash
+   # Test count
+   pytest tests/ --collect-only -q 2>/dev/null | tail -1
+   # Lines of Python
+   find src/ -name '*.py' | xargs wc -l | tail -1
+   # Built-in tool count
+   grep -c "\".*\":" src/anteroom/tools/tiers.py  # or count DEFAULT_TOOL_TIERS entries
+   # Skill count
+   ls src/anteroom/cli/default_skills/*.yaml | wc -l
+   # Slash command count (from commands.py dispatch)
+   grep -c "elif cmd ==" src/anteroom/cli/commands.py
+   # Hard-blocked pattern count
+   grep -c "re.compile" src/anteroom/tools/security.py  # count _HARD_BLOCK_PATTERNS
+   ```
+
+2. **Read the TechHighlights component** in the anteroom-site repo:
+   ```bash
+   cat ~/dev/github/troylar/anteroom-site/src/components/TechHighlights.astro
+   ```
+
+3. **Compare current stats against the landing page values**. The TechHighlights section has a stats bar with values like:
+   - `N+ Tests`
+   - `NK Lines of Python`
+   - `N Built-in tools`
+   - `N Built-in skills`
+   - `N Slash commands`
+   - `N Artifact types`
+   - `N+ File types supported`
+   - `N Hard-blocked patterns`
+
+4. **If any stat is outdated**, update the component file:
+   - Round test count down to nearest hundred (e.g., 4666 → "4,600+")
+   - Round lines of code to nearest K (e.g., 41,234 → "41K")
+   - Use exact counts for tools, skills, commands, patterns
+
+5. **If changes were made**, commit and push in the anteroom-site repo:
+   ```bash
+   cd ~/dev/github/troylar/anteroom-site
+   git add src/components/TechHighlights.astro
+   git commit -m "chore: update stats for anteroom v$VERSION"
+   git push
+   ```
+
+6. **Report** in the deploy output:
+   ```
+   🌐 Landing page: ✅ stats up to date / ✅ N stats updated and pushed
+   ```
+
+   If any stat changed, list the changes:
+   ```
+   🌐 Landing page:
+      Tests: 4,800+ → 4,900+
+      Lines of Python: 39K → 41K
+   ```
+
+If the anteroom-site repo is not found at the expected path, skip with:
+```
+🌐 Landing page: ⏭️ anteroom-site repo not found at ~/dev/github/troylar/anteroom-site
+```
+
 ### Step 8: Verify
 
 1. Wait 30 seconds for PyPI to index
@@ -451,6 +516,7 @@ On success:
   🏷️ Release:  https://github.com/troylar/anteroom/releases/tag/vX.Y.Z
   📊 Version:  X.Y.Z-1 → X.Y.Z (<type> bump)
   📝 Changelog: ✅ docs/advanced/changelog.md updated
+  🌐 Landing:  ✅ stats up to date / ✅ N stats updated
   📋 Queue:    N open PRs remaining (N mergeable, N conflicting)
 
 ────────────────────────────────────────────
