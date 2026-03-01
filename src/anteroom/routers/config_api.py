@@ -9,7 +9,6 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..cli.instructions import discover_conventions
@@ -287,7 +286,7 @@ async def add_database(body: DatabaseAdd, request: Request) -> Any:
 
 
 @router.delete("/databases/{name}", status_code=204)
-async def remove_database(name: str, request: Request) -> Any:
+async def remove_database(name: str, request: Request) -> None:
     if name == "personal":
         raise HTTPException(status_code=400, detail="Cannot remove personal database")
     if not hasattr(request.app.state, "db_manager"):
@@ -300,7 +299,7 @@ async def remove_database(name: str, request: Request) -> Any:
 
     db_manager.remove(name)
     _remove_database_from_config(name)
-    return Response(status_code=204)
+    return None
 
 
 def _persist_database(name: str, path: str) -> None:

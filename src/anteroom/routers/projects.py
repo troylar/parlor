@@ -6,7 +6,6 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..services import storage
@@ -89,10 +88,10 @@ async def update_project(project_id: str, body: ProjectUpdate, request: Request)
 
 
 @router.delete("/projects/{project_id}", status_code=204)
-async def delete_project(project_id: str, request: Request) -> Any:
+async def delete_project(project_id: str, request: Request) -> None:
     _validate_uuid(project_id)
     db = request.app.state.db
     deleted = storage.delete_project(db, project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
-    return Response(status_code=204)
+    return None

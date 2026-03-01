@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import PlainTextResponse
 
 from ..models import (
     CanvasCreate,
@@ -227,7 +227,7 @@ async def update_conversation(conversation_id: str, body: ConversationUpdate, re
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(conversation_id: str, request: Request) -> Any:
+async def delete_conversation(conversation_id: str, request: Request) -> None:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     data_dir = request.app.state.config.app.data_dir
@@ -257,7 +257,7 @@ async def delete_conversation(conversation_id: str, request: Request) -> Any:
             )
         )
 
-    return Response(status_code=204)
+    return None
 
 
 @router.post("/conversations/{conversation_id}/entries", status_code=201)
@@ -330,7 +330,7 @@ async def update_message(conversation_id: str, message_id: str, body: MessageEdi
 
 
 @router.delete("/conversations/{conversation_id}/messages/{message_id}", status_code=204)
-async def delete_message(conversation_id: str, message_id: str, request: Request) -> Any:
+async def delete_message(conversation_id: str, message_id: str, request: Request) -> None:
     _validate_uuid(conversation_id)
     _validate_uuid(message_id)
     db = _get_db(request)
@@ -344,7 +344,7 @@ async def delete_message(conversation_id: str, message_id: str, request: Request
     deleted = storage.delete_message(db, conversation_id, message_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Message not found")
-    return Response(status_code=204)
+    return None
 
 
 @router.put("/conversations/{conversation_id}/document")
@@ -363,7 +363,7 @@ async def replace_document(conversation_id: str, body: DocumentContent, request:
 
 
 @router.delete("/conversations/{conversation_id}/messages", status_code=204)
-async def delete_messages_after(conversation_id: str, request: Request, after_position: int = Query(ge=0)) -> Any:
+async def delete_messages_after(conversation_id: str, request: Request, after_position: int = Query(ge=0)) -> None:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -372,7 +372,7 @@ async def delete_messages_after(conversation_id: str, request: Request, after_po
     data_dir = request.app.state.config.app.data_dir
     # SECURITY-REVIEW: after_position is int via Query(ge=0); all queries use parameterized ?
     storage.delete_messages_after_position(db, conversation_id, after_position, data_dir)
-    return Response(status_code=204)
+    return None
 
 
 @router.post("/conversations/{conversation_id}/rewind")
@@ -466,7 +466,7 @@ async def update_canvas(conversation_id: str, body: CanvasUpdate, request: Reque
 
 
 @router.delete("/conversations/{conversation_id}/canvas", status_code=204)
-async def delete_canvas(conversation_id: str, request: Request) -> Any:
+async def delete_canvas(conversation_id: str, request: Request) -> None:
     _validate_uuid(conversation_id)
     db = _get_db(request)
     conv = storage.get_conversation(db, conversation_id)
@@ -476,7 +476,7 @@ async def delete_canvas(conversation_id: str, request: Request) -> Any:
     if not canvas:
         raise HTTPException(status_code=404, detail="No canvas for this conversation")
     storage.delete_canvas(db, canvas["id"])
-    return Response(status_code=204)
+    return None
 
 
 # --- Folders ---
@@ -531,14 +531,14 @@ async def update_folder(folder_id: str, body: FolderUpdate, request: Request) ->
 
 
 @router.delete("/folders/{folder_id}", status_code=204)
-async def delete_folder(folder_id: str, request: Request) -> Any:
+async def delete_folder(folder_id: str, request: Request) -> None:
     _validate_uuid(folder_id)
     db = _get_db(request)
     # SECURITY-REVIEW: folder_id is UUID-validated above; parameterized queries in storage
     deleted = storage.delete_folder(db, folder_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Folder not found")
-    return Response(status_code=204)
+    return None
 
 
 # --- Tags ---
@@ -568,13 +568,13 @@ async def update_tag(tag_id: str, body: TagUpdate, request: Request) -> Any:
 
 
 @router.delete("/tags/{tag_id}", status_code=204)
-async def delete_tag(tag_id: str, request: Request) -> Any:
+async def delete_tag(tag_id: str, request: Request) -> None:
     _validate_uuid(tag_id)
     db = _get_db(request)
     deleted = storage.delete_tag(db, tag_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Tag not found")
-    return Response(status_code=204)
+    return None
 
 
 @router.post("/conversations/{conversation_id}/tags/{tag_id}", status_code=201)
@@ -590,12 +590,12 @@ async def add_tag(conversation_id: str, tag_id: str, request: Request) -> Any:
 
 
 @router.delete("/conversations/{conversation_id}/tags/{tag_id}", status_code=204)
-async def remove_tag(conversation_id: str, tag_id: str, request: Request) -> Any:
+async def remove_tag(conversation_id: str, tag_id: str, request: Request) -> None:
     _validate_uuid(conversation_id)
     _validate_uuid(tag_id)
     db = _get_db(request)
     storage.remove_tag_from_conversation(db, conversation_id, tag_id)
-    return Response(status_code=204)
+    return None
 
 
 @router.post("/conversations/{conversation_id}/copy", status_code=201)
