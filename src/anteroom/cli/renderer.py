@@ -1129,7 +1129,7 @@ def flush_buffered_text() -> None:
     stale checkpoint issues where subsequent token updates would truncate
     already-rendered content (tool frames, Markdown text).
     """
-    global _streaming_buffer, _streaming_checkpoint
+    global _streaming_buffer, _streaming_checkpoint, _tool_batch_active
     # Save whether streaming was active before stopping — we need this to
     # decide whether to truncate raw fragments. Cannot use _streaming_checkpoint
     # value alone since checkpoint 0 is valid (empty pane at conversation start).
@@ -1139,6 +1139,12 @@ def flush_buffered_text() -> None:
     _streaming_buffer = []
     if not text.strip():
         return
+
+    # Add spacing after tool call block before narration text.
+    # This handles mid-turn narration; render_response_end() handles end-of-turn.
+    if _tool_batch_active:
+        console.print()
+        _tool_batch_active = False
 
     # In fullscreen, truncate raw streamed text before rendering Markdown.
     if _fullscreen_mode and _fullscreen_layout and had_active_cursor:

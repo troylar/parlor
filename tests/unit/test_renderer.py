@@ -374,6 +374,80 @@ class TestFlushBufferedText:
         assert len(r._streaming_buffer) == 0
 
 
+class TestFlushBufferedTextToolSpacing:
+    """Tests for #680: blank line between tool call block and narration text."""
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._streaming_buffer.clear()
+        r._tool_batch_active = False
+
+    def test_flush_adds_spacing_after_tool_batch(self) -> None:
+        """flush_buffered_text() should print a blank line when _tool_batch_active is True."""
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        r._streaming_buffer.append("Some narration text")
+        with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
+            flush_buffered_text()
+            # Should print a blank line (spacing after tool block)
+            blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
+            assert len(blank_calls) == 1
+            assert r._tool_batch_active is False
+
+    def test_flush_no_spacing_without_tool_batch(self) -> None:
+        """flush_buffered_text() should NOT print a blank line when _tool_batch_active is False."""
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = False
+        r._streaming_buffer.append("Some narration text")
+        with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
+            flush_buffered_text()
+            blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
+            assert len(blank_calls) == 0
+
+    def test_flush_clears_tool_batch_flag(self) -> None:
+        """flush_buffered_text() should clear _tool_batch_active after emitting spacing."""
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        r._streaming_buffer.append("text")
+        with patch("anteroom.cli.renderer.console"), patch("anteroom.cli.renderer._stdout_console"):
+            flush_buffered_text()
+        assert r._tool_batch_active is False
+
+    def test_flush_empty_buffer_preserves_tool_batch(self) -> None:
+        """flush_buffered_text() with empty buffer should not clear _tool_batch_active."""
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        # Buffer is empty — early return before the spacing check
+        with patch("anteroom.cli.renderer.console"), patch("anteroom.cli.renderer._stdout_console"):
+            flush_buffered_text()
+        # _tool_batch_active stays True for render_response_end() to handle
+        assert r._tool_batch_active is True
+
+    def test_no_double_spacing_flush_then_response_end(self) -> None:
+        """If flush_buffered_text() already emitted spacing, render_response_end() should not add another."""
+        import anteroom.cli.renderer as r
+
+        r._tool_batch_active = True
+        r._streaming_buffer.append("mid-turn narration")
+        with patch("anteroom.cli.renderer.console"), patch("anteroom.cli.renderer._stdout_console"):
+            flush_buffered_text()
+        # _tool_batch_active is now False
+        assert r._tool_batch_active is False
+
+        # Now simulate end-of-turn with more text
+        r._streaming_buffer.append("final text")
+        with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
+            render_response_end()
+            # No blank line from console since _tool_batch_active was already cleared
+            blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
+            assert len(blank_calls) == 0
+
+
 class TestToolCallDimming:
     """Tests for #111/#140: muted intermediate CLI output."""
 
