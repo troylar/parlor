@@ -521,8 +521,9 @@ const App = (() => {
         selectEl.value = selectedValue || '';
     }
 
-    async function newConversation() {
-        const payload = {};
+    async function newConversation(type) {
+        const convType = type || document.getElementById('new-conv-type').value || 'chat';
+        const payload = { type: convType };
         if (state.currentProjectId) payload.project_id = state.currentProjectId;
         if (state.currentSpaceId) payload.space_id = state.currentSpaceId;
         const opts = {
@@ -532,7 +533,8 @@ const App = (() => {
         };
         const conv = await api('/api/conversations', opts);
         state.currentConversationId = conv.id;
-        state.currentConversationType = 'chat';
+        state.currentConversationType = convType;
+        Chat.setConversationType(convType);
         Chat.loadMessages([]);
         Canvas.resetCanvas();
         _currentModel = '';

@@ -541,6 +541,7 @@ class TestCreateIndexes:
             "idx_pack_attachments_unique",
             "idx_space_sources_unique",
             "idx_conversations_space",
+            "idx_conversations_type",
             "idx_folders_space",
             "idx_conversations_slug",
         }

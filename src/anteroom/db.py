@@ -556,6 +556,7 @@ def _create_indexes(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_space ON conversations(space_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_slug ON conversations(slug)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_type ON conversations(type)")
 
 
 def init_db(

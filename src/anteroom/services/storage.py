@@ -1484,6 +1484,7 @@ def search_similar_messages(
     embedding: list[float],
     limit: int = 20,
     conversation_id: str | None = None,
+    conversation_type: str | None = None,
 ) -> list[dict[str, Any]]:
     """Search for semantically similar messages using vec0 cosine similarity."""
     from ..db import has_vec_support
@@ -1492,8 +1493,17 @@ def search_similar_messages(
     if not has_vec_support(raw_conn):
         return []
 
+    if conversation_type and conversation_type not in VALID_CONVERSATION_TYPES:
+        conversation_type = None
+
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     embedding_bytes = _validate_embedding(embedding)
+
+    # When post-filtering by conversation_type, over-fetch from the vector index
+    # to compensate for rows that will be discarded. Without this, the caller
+    # may receive far fewer results than requested.
+    vec_k = limit * 4 if conversation_type else limit
+    vec_k = min(vec_k, _MAX_SEARCH_LIMIT)
 
     if conversation_id:
         rows = db.execute_fetchall(
@@ -1503,11 +1513,13 @@ def search_similar_messages(
                 FROM vec_messages
                 WHERE embedding MATCH ? AND k = ? AND conversation_id = ?
             )
-            SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role
+            SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role,
+                   c.type AS conversation_type
             FROM knn
             LEFT JOIN messages m ON m.id = knn.message_id
+            LEFT JOIN conversations c ON c.id = knn.conversation_id
             """,
-            (embedding_bytes, limit, conversation_id),
+            (embedding_bytes, vec_k, conversation_id),
         )
     else:
         rows = db.execute_fetchall(
@@ -1517,23 +1529,33 @@ def search_similar_messages(
                 FROM vec_messages
                 WHERE embedding MATCH ? AND k = ?
             )
-            SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role
+            SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role,
+                   c.type AS conversation_type
             FROM knn
             LEFT JOIN messages m ON m.id = knn.message_id
+            LEFT JOIN conversations c ON c.id = knn.conversation_id
             """,
-            (embedding_bytes, limit),
+            (embedding_bytes, vec_k),
         )
 
-    return [
-        {
-            "message_id": dict(r)["message_id"],
-            "conversation_id": dict(r)["conversation_id"],
-            "content": dict(r)["content"],
-            "role": dict(r)["role"],
-            "distance": dict(r)["distance"],
-        }
-        for r in rows
-    ]
+    results = []
+    for r in rows:
+        d = dict(r)
+        if conversation_type and d.get("conversation_type") != conversation_type:
+            continue
+        results.append(
+            {
+                "message_id": d["message_id"],
+                "conversation_id": d["conversation_id"],
+                "content": d["content"] or "",
+                "role": d["role"] or "user",
+                "distance": d["distance"],
+                "conversation_type": d.get("conversation_type") or "chat",
+            }
+        )
+        if len(results) >= limit:
+            break
+    return results
 
 
 def get_unembedded_messages(db: ThreadSafeConnection, limit: int = 100) -> list[dict[str, Any]]:

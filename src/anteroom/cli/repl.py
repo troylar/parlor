@@ -3310,15 +3310,21 @@ async def _run_repl(
                         try:
                             query_emb = await _emb_svc.embed(query)
                             if query_emb:
-                                sem_results = storage.search_similar_messages(db, query_emb, limit=20)
+                                sem_results = storage.search_similar_messages(
+                                    db, query_emb, limit=20, conversation_type=type_filter
+                                )
                                 if sem_results:
                                     renderer.console.print(f"\n[bold]Semantic search results for '{query}':[/bold]")
+                                    _type_badges = {"note": "[note]", "document": "[doc]"}
                                     for i, r in enumerate(sem_results):
                                         snippet = r["content"][:80].replace("\n", " ")
                                         dist = r.get("distance", 0)
                                         relevance = max(0, 100 - int(dist * 100))
+                                        ctype = r.get("conversation_type", "chat")
+                                        badge = _type_badges.get(ctype, "")
+                                        badge_str = f" {badge}" if badge else ""
                                         renderer.console.print(
-                                            f"  {i + 1}. [{r['role']}] {snippet}... "
+                                            f"  {i + 1}. [{r['role']}]{badge_str} {snippet}... "
                                             f"[{CHROME}]({relevance}% match, {r['conversation_id'][:8]}...)[/{CHROME}]"
                                         )
                                     renderer.console.print()

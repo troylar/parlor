@@ -336,6 +336,164 @@ class TestStripRagContext:
         assert strip_rag_context(prompt) == prompt
 
 
+class TestRetrievedChunkConversationType:
+    def test_conversation_type_field_default_none(self) -> None:
+        chunk = RetrievedChunk(content="test", source_type="message", source_label="Conv", distance=0.1)
+        assert chunk.conversation_type is None
+
+    def test_conversation_type_field_set(self) -> None:
+        chunk = RetrievedChunk(
+            content="test",
+            source_type="message",
+            source_label="Conv",
+            distance=0.1,
+            conversation_type="note",
+        )
+        assert chunk.conversation_type == "note"
+
+    @pytest.mark.asyncio
+    async def test_retrieve_context_populates_conversation_type(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config()
+
+        msg_results = [
+            {
+                "message_id": "m1",
+                "conversation_id": "c1",
+                "content": "note entry",
+                "role": "user",
+                "distance": 0.1,
+                "conversation_type": "note",
+            },
+            {
+                "message_id": "m2",
+                "conversation_id": "c2",
+                "content": "doc content",
+                "role": "user",
+                "distance": 0.2,
+                "conversation_type": "document",
+            },
+        ]
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=msg_results)
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+            mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
+
+            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+
+        assert len(chunks) == 2
+        assert chunks[0].conversation_type == "note"
+        assert chunks[1].conversation_type == "document"
+
+    @pytest.mark.asyncio
+    async def test_retrieve_context_defaults_missing_conversation_type_to_chat(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config()
+
+        msg_results = [
+            {
+                "message_id": "m1",
+                "conversation_id": "c1",
+                "content": "old message",
+                "role": "user",
+                "distance": 0.1,
+            },
+        ]
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=msg_results)
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+            mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
+
+            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+
+        assert len(chunks) == 1
+        assert chunks[0].conversation_type == "chat"
+
+
+class TestFormatRagContextTypeBadges:
+    def test_note_type_includes_badge(self) -> None:
+        chunks = [
+            RetrievedChunk(
+                content="note entry",
+                source_type="message",
+                source_label="My Notes",
+                distance=0.1,
+                conversation_id="c1",
+                conversation_type="note",
+            ),
+        ]
+        result = format_rag_context(chunks)
+        assert "[note]" in result
+        assert "My Notes" in result
+
+    def test_document_type_includes_badge(self) -> None:
+        chunks = [
+            RetrievedChunk(
+                content="doc content",
+                source_type="message",
+                source_label="Spec",
+                distance=0.1,
+                conversation_id="c1",
+                conversation_type="document",
+            ),
+        ]
+        result = format_rag_context(chunks)
+        assert "[doc]" in result
+        assert "Spec" in result
+
+    def test_chat_type_no_badge(self) -> None:
+        chunks = [
+            RetrievedChunk(
+                content="chat msg",
+                source_type="message",
+                source_label="Chat Conv",
+                distance=0.1,
+                conversation_id="c1",
+                conversation_type="chat",
+            ),
+        ]
+        result = format_rag_context(chunks)
+        assert "[note]" not in result
+        assert "[doc]" not in result
+        assert "Chat Conv" in result
+
+    def test_none_conversation_type_no_badge(self) -> None:
+        chunks = [
+            RetrievedChunk(
+                content="msg",
+                source_type="message",
+                source_label="Conv",
+                distance=0.1,
+                conversation_id="c1",
+                conversation_type=None,
+            ),
+        ]
+        result = format_rag_context(chunks)
+        assert "[note]" not in result
+        assert "[doc]" not in result
+        assert "Conv" in result
+
+    def test_source_chunk_no_badge(self) -> None:
+        chunks = [
+            RetrievedChunk(
+                content="source",
+                source_type="source_chunk",
+                source_label="README",
+                distance=0.1,
+                source_id="s1",
+            ),
+        ]
+        result = format_rag_context(chunks)
+        assert "[note]" not in result
+        assert "[doc]" not in result
+
+
 class TestRagConfigDefaults:
     def test_default_config(self) -> None:
         config = RagConfig()

@@ -15,6 +15,11 @@ const Sidebar = (() => {
             searchTimeout = setTimeout(() => search(searchInput.value), 300);
         });
 
+        const typeFilter = document.getElementById('sidebar-type-filter');
+        if (typeFilter) {
+            typeFilter.addEventListener('change', () => refresh());
+        }
+
         document.getElementById('btn-folder-add').addEventListener('click', () => _createFolder());
     }
 
@@ -26,7 +31,12 @@ const Sidebar = (() => {
     async function refresh() {
         try {
             const pp = _projectParam();
-            const qs = pp ? `?${pp}` : '';
+            const typeEl = document.getElementById('sidebar-type-filter');
+            const typeFilter = typeEl ? typeEl.value : '';
+            const params = [];
+            if (pp) params.push(pp);
+            if (typeFilter) params.push(`type=${encodeURIComponent(typeFilter)}`);
+            const qs = params.length ? `?${params.join('&')}` : '';
             const convUrl = `/api/conversations${qs}`;
             const folderUrl = pp ? `/api/folders?${pp}` : '/api/folders';
             [conversations, folders, allTags] = await Promise.all([
@@ -47,9 +57,12 @@ const Sidebar = (() => {
         try {
             const q = query.trim();
             const pp = _projectParam();
+            const typeEl = document.getElementById('sidebar-type-filter');
+            const typeFilter = typeEl ? typeEl.value : '';
             const params = [];
             if (q) params.push(`search=${encodeURIComponent(q)}`);
             if (pp) params.push(pp);
+            if (typeFilter) params.push(`type=${encodeURIComponent(typeFilter)}`);
             const qs = params.length ? `?${params.join('&')}` : '';
             conversations = await App.api(`/api/conversations${qs}`);
             render();
@@ -201,6 +214,13 @@ const Sidebar = (() => {
                 el.classList.remove('drop-candidate', 'drag-over');
             });
         });
+
+        if (c.type && c.type !== 'chat' && ['note', 'document'].includes(c.type)) {
+            const badge = document.createElement('span');
+            badge.className = 'conv-type-badge conv-type-' + c.type;
+            badge.textContent = c.type === 'note' ? 'note' : 'doc';
+            div.appendChild(badge);
+        }
 
         const title = document.createElement('span');
         title.className = 'conv-title';

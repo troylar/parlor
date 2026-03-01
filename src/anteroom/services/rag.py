@@ -26,6 +26,7 @@ class RetrievedChunk:
     message_id: str | None = None
     source_id: str | None = None
     chunk_id: str | None = None
+    conversation_type: str | None = None  # "chat", "note", or "document"
 
 
 async def retrieve_context(
@@ -78,6 +79,7 @@ async def retrieve_context(
                         distance=r["distance"],
                         conversation_id=r["conversation_id"],
                         message_id=r["message_id"],
+                        conversation_type=r.get("conversation_type", "chat"),
                     )
                 )
         except Exception:
@@ -127,9 +129,13 @@ def format_rag_context(chunks: list[RetrievedChunk]) -> str:
     if not chunks:
         return ""
 
+    type_labels = {"note": "[note]", "document": "[doc]"}
     parts: list[str] = []
     for chunk in chunks:
         label = chunk.source_label
+        type_tag = type_labels.get(chunk.conversation_type or "", "")
+        if type_tag:
+            label = f"{type_tag} {label}"
         # SECURITY-REVIEW: chunk.content is user-controlled (past messages / uploaded sources).
         # Wrapped in a defensive prompt envelope to mitigate indirect prompt injection.
         parts.append(wrap_untrusted(chunk.content, f"rag:{label}", "retrieved"))
