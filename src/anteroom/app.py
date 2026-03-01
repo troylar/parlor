@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import logging
 import os
 import secrets
@@ -353,6 +354,24 @@ def session_id_from_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:32]
 
 
+def _normalize_loopback(ip: str) -> str:
+    """Normalize loopback addresses to a canonical form for session IP binding.
+
+    Maps ``::1``, ``::ffff:127.0.0.1``, and ``127.0.0.1`` to the same
+    canonical value so that IPv4/IPv6 dual-stack localhost connections
+    don't trigger spurious session invalidation.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        if addr.is_loopback:
+            return "127.0.0.1"
+        return str(addr)
+    except ValueError:
+        return ip
+
+
 class BearerTokenMiddleware(BaseHTTPMiddleware):
     """Auth via bearer token header or HttpOnly session cookie with session expiry.
 
@@ -410,10 +429,11 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             security_logger.info("Session expired (idle timeout)")
             self._store.delete(session_id)
             return "expired"
-        if session.get("ip_address") and session["ip_address"] != client_ip:
+        stored_ip = session.get("ip_address", "")
+        if stored_ip and _normalize_loopback(stored_ip) != _normalize_loopback(client_ip):
             security_logger.warning(
                 "Session IP mismatch: expected %s, got %s",
-                session["ip_address"],
+                stored_ip,
                 client_ip,
             )
             self._store.delete(session_id)
@@ -427,10 +447,10 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         if state == "expired":
             security_logger.warning("Expired session from %s: %s", client_ip, path)
             _emit_auth_audit(request, "auth.session_expired", "warning", client_ip, path)
-            return JSONResponse(status_code=401, content={"detail": "Session expired"})
+            return self._make_401("Session expired")
         if state == "ip_mismatch":
             _emit_auth_audit(request, "auth.ip_mismatch", "warning", client_ip, path)
-            return JSONResponse(status_code=401, content={"detail": "Session invalidated"})
+            return self._make_401("Session invalidated")
         if state == "new":
             # Clean up expired sessions before limit check so stale entries don't inflate count
             self._store.cleanup_expired(
@@ -438,7 +458,8 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 self._session_config.absolute_timeout,
             )
             max_sessions = self._session_config.max_concurrent_sessions
-            if not self._store.create_if_allowed(session_id, client_ip, max_sessions):
+            normalized_ip = _normalize_loopback(client_ip)
+            if not self._store.create_if_allowed(session_id, normalized_ip, max_sessions):
                 security_logger.warning("Concurrent session limit reached from %s", client_ip)
                 _emit_auth_audit(request, "auth.session_limit", "warning", client_ip, path)
                 return JSONResponse(status_code=429, content={"detail": "Too many active sessions"})

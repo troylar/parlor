@@ -124,20 +124,43 @@ const App = (() => {
     function _handle401() {
         const now = Date.now();
         const key = '_anteroom_401_ts';
+        const retryKey = '_anteroom_401_retries';
         const prev = parseInt(sessionStorage.getItem(key) || '0', 10);
+        const retries = parseInt(sessionStorage.getItem(retryKey) || '0', 10);
         sessionStorage.setItem(key, String(now));
 
         if (now - prev < 5000) {
-            // Loop detected — show banner instead of reloading again
-            if (!document.getElementById('auth-error-banner')) {
-                const banner = document.createElement('div');
-                banner.id = 'auth-error-banner';
-                banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:var(--error,#dc2626);color:#fff;text-align:center;padding:12px 16px;font-size:14px;';
-                banner.textContent = 'Session expired. Please reload the page or navigate to / to get a fresh session.';
-                document.body.appendChild(banner);
+            // Rapid 401s detected — check if we should retry or give up
+            if (retries >= 3) {
+                // Too many retries — show banner with manual retry button
+                if (!document.getElementById('auth-error-banner')) {
+                    const banner = document.createElement('div');
+                    banner.id = 'auth-error-banner';
+                    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:var(--error,#dc2626);color:#fff;text-align:center;padding:12px 16px;font-size:14px;display:flex;justify-content:center;align-items:center;gap:12px;';
+                    const msg = document.createElement('span');
+                    msg.textContent = 'Session expired. Could not recover automatically.';
+                    const btn = document.createElement('button');
+                    btn.textContent = 'Retry';
+                    btn.style.cssText = 'background:#fff;color:#dc2626;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-weight:600;';
+                    btn.onclick = () => {
+                        sessionStorage.removeItem(key);
+                        sessionStorage.removeItem(retryKey);
+                        banner.remove();
+                        window.location.href = '/';
+                    };
+                    banner.appendChild(msg);
+                    banner.appendChild(btn);
+                    document.body.appendChild(banner);
+                }
+                return;
             }
+            // Auto-retry after a delay
+            sessionStorage.setItem(retryKey, String(retries + 1));
+            setTimeout(() => { window.location.href = '/'; }, 2000);
             return;
         }
+        // First 401 — reset retry counter and redirect immediately
+        sessionStorage.setItem(retryKey, '0');
         window.location.href = '/';
     }
 
@@ -715,10 +738,12 @@ const App = (() => {
             const elapsed = Date.now() - _esConnectedAt;
             _esFailCount++;
 
-            // Rapid failure (< 2s after connect) likely means 401.
-            // After 3 consecutive rapid failures, trigger auth recovery
-            // instead of looping forever.
-            if (elapsed < 2000 && _esFailCount >= 3) {
+            // Rapid failure (< 3s after connect) likely means 401.
+            // After 5 consecutive rapid failures, trigger auth recovery.
+            // Higher threshold avoids false positives — the server-side
+            // cookie refresh (since v1.89.4) means transient 401s
+            // self-heal within 1-2 reconnects.
+            if (elapsed < 3000 && _esFailCount >= 5) {
                 if (_eventSource) {
                     _eventSource.close();
                     _eventSource = null;
