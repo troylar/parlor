@@ -961,6 +961,7 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
             dlp_scanner=_dlp_scanner,
             injection_detector=_injection_detector,
             output_filter=_output_filter,
+            max_consecutive_text_only=getattr(getattr(_app_config, "cli", None), "max_consecutive_text_only", 3),
         )
         async for agent_event in _with_keepalive(agent_gen):
             if isinstance(agent_event, dict) and "comment" in agent_event:

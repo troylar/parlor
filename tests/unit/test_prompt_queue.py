@@ -644,6 +644,7 @@ class TestMessageQueue:
                 tool_executor=AsyncMock(return_value={}),
                 tools_openai=[],
                 message_queue=queue,
+                max_consecutive_text_only=0,  # disable limit for this test
             )
         )
 

@@ -216,6 +216,7 @@ async def run_agent_loop(
     dlp_scanner: Any | None = None,
     injection_detector: Any | None = None,
     output_filter: Any | None = None,
+    max_consecutive_text_only: int = 3,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -229,6 +230,7 @@ async def run_agent_loop(
     total_tool_calls = 0
     auto_plan_suggested = False
     request_tokens = 0  # tokens accumulated in this run_agent_loop invocation
+    consecutive_text_only = 0
 
     while iteration < max_iterations:
         iteration += 1
@@ -409,6 +411,18 @@ async def run_agent_loop(
             return
 
         if not tool_calls_pending:
+            consecutive_text_only += 1
+            if max_consecutive_text_only > 0 and consecutive_text_only > max_consecutive_text_only:
+                yield AgentEvent(
+                    kind="error",
+                    data={
+                        "message": (
+                            f"Agent produced {consecutive_text_only} consecutive text-only responses "
+                            "without tool calls. Stopping to prevent runaway loop."
+                        )
+                    },
+                )
+                return
             if assistant_content:
                 # Final DLP scan on complete assembled text (catches patterns split across chunks)
                 if dlp_scanner is not None and dlp_scanner.enabled and dlp_scanner.scan_output:
@@ -575,6 +589,7 @@ async def run_agent_loop(
                     }
                 )
             total_tool_calls += len(tool_calls_pending)
+            consecutive_text_only = 0
 
         if cancel_event and cancel_event.is_set():
             yield AgentEvent(kind="done", data={})

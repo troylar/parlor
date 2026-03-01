@@ -1661,6 +1661,7 @@ async def _run_one_shot(
                 dlp_scanner=dlp_scanner,
                 injection_detector=injection_detector,
                 output_filter=output_filter,
+                max_consecutive_text_only=config.cli.max_consecutive_text_only,
             ):
                 if event.kind == "thinking":
                     if not thinking:
@@ -4726,6 +4727,7 @@ async def _run_repl(
                         dlp_scanner=dlp_scanner,
                         injection_detector=injection_detector,
                         output_filter=output_filter,
+                        max_consecutive_text_only=config.cli.max_consecutive_text_only,
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(
