@@ -5001,35 +5001,12 @@ async def _run_repl(
             # Always exit the fullscreen application, even on unhandled exceptions
             _fs_app.exit()
 
-    # Enable kitty keyboard protocol after the first render so the escape
-    # sequence is sent AFTER prompt_toolkit enters alternate screen mode.
-    # Without this, terminals like Warp discard the protocol enable when
-    # switching screen buffers.  Mode 1 (progressive enhancement) only
-    # disambiguates modified keys — regular keys are unaffected.
-    _kitty_proto_enabled: list[bool] = [False]
-
-    def _enable_kitty_protocol(_app: Any) -> None:
-        if _kitty_proto_enabled[0]:
-            return
-        try:
-            _app.output.write_raw("\x1b[>1u")
-            _app.output.flush()
-            _kitty_proto_enabled[0] = True
-        except (OSError, AttributeError):
-            pass
-
-    _fs_app.after_render += _enable_kitty_protocol
     asyncio.get_running_loop().call_soon(lambda: asyncio.create_task(_run_fullscreen()))
 
     try:
         await _fs_app.run_async()
     finally:
-        if _kitty_proto_enabled[0]:
-            try:
-                sys.stdout.write("\x1b[<u")
-                sys.stdout.flush()
-            except OSError:
-                pass
+        pass
 
     # Show resume hint after fullscreen exits
     if conv.get("id") and not is_first_message:
