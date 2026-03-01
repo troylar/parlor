@@ -3483,26 +3483,28 @@ class TestPhase3VisualPolish:
         self._mod.clear_turn_history()
         assert self._mod._streaming_buffer == []
 
-    def test_tool_call_start_fullscreen_renders_frame(self):
+    def test_tool_call_start_fullscreen_defers_rendering(self):
+        """In fullscreen, render_tool_call_start appends no fragments —
+        all visual output is deferred to render_tool_call_end to avoid
+        frame/result disconnection during parallel tool execution."""
         layout, inv = self._setup_fullscreen()
         before = layout.output.fragment_count
         self._mod.render_tool_call_start("read_file", {"path": "src/test.py"})
         after = layout.output.fragment_count
-        assert after > before
-        styles = [s for s, _ in layout.output._output_fragments[before:]]
-        assert "class:tool.frame" in styles
-        assert "class:tool.name" in styles
+        assert after == before  # nothing rendered at start
 
-    def test_tool_call_start_filters_empty_args(self):
+    def test_tool_call_end_shows_args_via_summary(self):
+        """Result line includes humanized args from the summary."""
         layout, inv = self._setup_fullscreen()
+        self._mod._tool_start = time.monotonic()
+        self._mod._current_turn_tools.append(
+            {"tool_name": "glob_files", "summary": "Finding src/*", "status": "running", "output": None}
+        )
         before = layout.output.fragment_count
-        self._mod.render_tool_call_start("glob_files", {"pattern": "src/*", "path": "", "_internal": "x"})
+        self._mod.render_tool_call_end("glob_files", "success", {"content": "3 files"})
         frags = layout.output._output_fragments[before:]
         text = "".join(t for _, t in frags)
-        # Empty 'path' and internal '_internal' should be filtered out
-        assert "pattern: src/*" in text
-        assert "path:" not in text
-        assert "_internal" not in text
+        assert "Finding src/*" in text
 
     def test_tool_call_end_uses_humanized_summary(self):
         layout, inv = self._setup_fullscreen()

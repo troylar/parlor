@@ -391,7 +391,7 @@ def _humanize_tool(tool_name: str, arguments: dict[str, Any]) -> str:
     elif name_lower in ("grep", "search", "ripgrep"):
         pattern = arguments.get("pattern", arguments.get("query", ""))
         return f"Searching for '{pattern}'"
-    elif name_lower in ("glob", "find_files"):
+    elif name_lower in ("glob", "glob_files", "find_files"):
         pattern = arguments.get("pattern", "")
         return f"Finding {pattern}"
     elif name_lower == "run_agent":
@@ -1411,33 +1411,11 @@ def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
     _tool_start = time.monotonic()
 
     if _fullscreen_mode and _fullscreen_layout:
-        # Fullscreen: render compact tool call line with key args inline.
-        # Compact single-line format keeps stacked parallel calls scannable
-        # and pairs naturally with result lines that echo the key arg.
+        # Fullscreen: defer all visual output to render_tool_call_end().
+        # Parallel tool calls (asyncio.as_completed) cause starts to stack
+        # before results arrive, disconnecting frames from their results.
+        # Instead, render a single self-contained line per tool at completion.
         _tool_batch_active = True
-        visible_args = {
-            k: v for k, v in arguments.items() if not k.startswith("_") and v not in (None, "", [], {})
-        }
-        # Build inline arg summary: "command: ls -la" or "pattern: src/*"
-        arg_parts: list[str] = []
-        for k, v in list(visible_args.items())[:2]:
-            val = str(v)
-            if len(val) > 50:
-                val = val[:47] + "..."
-            arg_parts.append(f"{k}: {val}")
-        arg_text = ", ".join(arg_parts)
-        remaining = max(0, _SEPARATOR_WIDTH - len(tool_name) - 6)
-        fragments: list[tuple[str, str]] = [
-            ("class:tool.frame", "  \u250c\u2500 "),
-            ("class:tool.name", tool_name),
-            ("class:tool.frame", " \u2500" + "\u2500" * remaining + "\n"),
-        ]
-        if arg_text:
-            fragments.append(("class:tool.arg", f"  \u2502  {arg_text}\n"))
-        fragments.append(("class:tool.frame", "  \u2514" + "\u2500" * (remaining + len(tool_name) + 3) + "\n"))
-        _fullscreen_layout.append_output_fragments(fragments)
-        if _fullscreen_invalidate:
-            _fullscreen_invalidate()
         if tool_name not in ("ask_user", "ask_human"):
             start_tool_ticker(summary)
         return
@@ -1476,19 +1454,18 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
     summary = _current_turn_tools[-1]["summary"] if _current_turn_tools else tool_name
 
     if _fullscreen_mode and _fullscreen_layout:
-        # Fullscreen: render result line with humanized summary for pairing
-        # with the corresponding tool frame (e.g. "bash — ls -la" not just "bash")
+        # Fullscreen: single self-contained line per tool call.
+        # No separate frame — parallel tools (asyncio.as_completed) would
+        # stack all frames before any results, making them useless.
         if status == "success":
             icon_style, icon = "class:tool.ok", "  \u2713 "
         else:
             icon_style, icon = "class:tool.err", "  \u2717 "
         elapsed_str = f" ({elapsed:.1f}s)" if elapsed >= 0.1 else ""
         detail = _output_summary(output) if status == "success" else _error_summary(output)
-        # Use humanized summary (e.g. "bash — ls -la") for result line label
-        result_label = summary if summary != tool_name else tool_name
         fragments: list[tuple[str, str]] = [
             (icon_style, icon),
-            ("class:tool.name", result_label),
+            ("class:tool.name", summary),
             ("class:tool.elapsed", elapsed_str),
         ]
         if detail:
