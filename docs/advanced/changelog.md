@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.88.1
+
+**Improved:**
+
+- Fixed all 499 mypy type-check errors across 43 files for better code quality and IDE support (#610)
+- Fixed Starlette compatibility issue with 204 endpoints that broke test collection on newer versions (#610)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.88.1)
+
 ### v1.88.0
 
 **New:**
