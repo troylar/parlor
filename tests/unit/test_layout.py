@@ -1532,3 +1532,87 @@ class TestBugfix617:
             writer.fileno()
         except io.UnsupportedOperation as e:
             assert isinstance(e, OSError)
+
+
+class TestScrollIndicator:
+    """#257 Phase 3: Scroll position indicator on bottom separator."""
+
+    def _make_layout(self):
+        from prompt_toolkit.buffer import Buffer
+
+        buf = Buffer()
+        return AnteroomLayout(
+            header_fn=lambda: [("", "header")],
+            footer_fn=lambda: [("", "footer")],
+            input_buffer=buf,
+        )
+
+    def test_at_bottom_shows_plain_separator(self):
+        al = self._make_layout()
+        al._output._scroll_offset = 0
+        result = al._scroll_indicator_text()
+        # Should be all separator style, no indicator
+        styles = {s for s, _ in result}
+        assert "class:scroll.indicator" not in styles
+
+    def test_scrolled_up_shows_lines_below(self):
+        al = self._make_layout()
+        al._output._scroll_offset = 42
+        result = al._scroll_indicator_text()
+        text = "".join(t for _, t in result)
+        assert "42 lines below" in text
+        styles = {s for s, _ in result}
+        assert "class:scroll.indicator" in styles
+
+    def test_scroll_offset_1_shows_indicator(self):
+        al = self._make_layout()
+        al._output._scroll_offset = 1
+        result = al._scroll_indicator_text()
+        text = "".join(t for _, t in result)
+        assert "1 lines below" in text
+
+
+class TestApprovalModePrompt:
+    """#257 Phase 3: Approval mode-aware prompt coloring."""
+
+    def test_auto_mode_gold(self):
+        from anteroom.cli.layout import set_approval_mode
+
+        set_approval_mode("auto")
+        result = input_line_prefix(0, 0)
+        assert result[0][0] == "class:prompt.auto"
+
+    def test_ask_mode_strict(self):
+        from anteroom.cli.layout import set_approval_mode
+
+        set_approval_mode("ask")
+        result = input_line_prefix(0, 0)
+        assert result[0][0] == "class:prompt.strict"
+
+    def test_ask_for_writes_caution(self):
+        from anteroom.cli.layout import set_approval_mode
+
+        set_approval_mode("ask_for_writes")
+        result = input_line_prefix(0, 0)
+        assert result[0][0] == "class:prompt.caution"
+
+    def test_unknown_mode_fallback(self):
+        from anteroom.cli.layout import set_approval_mode
+
+        set_approval_mode("unknown_mode")
+        result = input_line_prefix(0, 0)
+        assert result[0][0] == "class:prompt"
+
+    def test_empty_mode_fallback(self):
+        from anteroom.cli.layout import set_approval_mode
+
+        set_approval_mode("")
+        result = input_line_prefix(0, 0)
+        assert result[0][0] == "class:prompt"
+
+    def test_continuation_line_unaffected(self):
+        from anteroom.cli.layout import set_approval_mode
+
+        set_approval_mode("auto")
+        result = input_line_prefix(1, 0)
+        assert result[0][0] == "class:prompt.continuation"

@@ -2352,6 +2352,11 @@ async def _run_repl(
         mouse_support=_use_fullscreen,
     )
 
+    # Set approval mode for prompt coloring
+    from anteroom.cli.layout import set_approval_mode
+
+    set_approval_mode(config.safety.approval_mode)
+
     current_model = config.ai.model
     _pending_resume_info = False
 
@@ -2741,8 +2746,8 @@ async def _run_repl(
             if not text:
                 continue
 
-            # Echo the user's input into the output pane so it stays visible
-            _anteroom_layout.append_output_fragments([("class:prompt", "> "), ("", text + "\n\n")])
+            # Render styled user turn separator with input text
+            renderer.render_user_turn(text)
             _fs_app.invalidate()
 
             if agent_busy.is_set():
@@ -4843,7 +4848,9 @@ async def _run_repl(
                             renderer.render_newline()
                             renderer.render_response_end()
                             renderer.render_newline()
-                            renderer.console.print(f"[{CHROME}]Processing queued message...[/{CHROME}]")
+                            # Show styled separator for the queued user message
+                            queued_content = event.data.get("content", "")
+                            renderer.render_user_turn(queued_content)
                             renderer.render_newline()
                             renderer.clear_turn_history()
                             response_token_count = 0

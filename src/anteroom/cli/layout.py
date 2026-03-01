@@ -192,10 +192,30 @@ def _shorten_path(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+_APPROVAL_PROMPT_STYLES = {
+    "auto": "class:prompt.auto",
+    "ask_for_dangerous": "class:prompt.safe",
+    "ask_for_writes": "class:prompt.caution",
+    "ask": "class:prompt.strict",
+}
+
+_current_approval_mode: str = ""
+
+
+def set_approval_mode(mode: str) -> None:
+    """Update the approval mode used for prompt prefix coloring."""
+    global _current_approval_mode
+    _current_approval_mode = mode
+
+
 def input_line_prefix(line_number: int, wrap_count: int) -> "StyleAndTextTuples":
-    """Prompt prefix for the input area: ``> `` on line 0, ``  `` after."""
+    """Prompt prefix for the input area: ``> `` on line 0, ``  `` after.
+
+    Color varies by approval mode when set.
+    """
     if line_number == 0:
-        return [("class:prompt", "> ")]
+        style = _APPROVAL_PROMPT_STYLES.get(_current_approval_mode, "class:prompt")
+        return [(style, "> ")]
     return [("class:prompt.continuation", ". ")]
 
 
@@ -428,6 +448,12 @@ class AnteroomLayout:
             style="class:picker.frame",
         )
 
+        self._bottom_sep_window = Window(
+            content=FormattedTextControl(self._scroll_indicator_text),
+            height=1,
+            style="class:separator",
+        )
+
         self._layout = Layout(
             FloatContainer(
                 content=HSplit(
@@ -436,7 +462,7 @@ class AnteroomLayout:
                         Window(height=1, char="\u2500", style="class:separator"),
                         self._output_window,
                         self._status_window,
-                        Window(height=1, char="\u2500", style="class:separator"),
+                        self._bottom_sep_window,
                         self._footer_window,
                         self._input_window,
                     ]
@@ -484,6 +510,19 @@ class AnteroomLayout:
         if self._dialog_event is not None:
             self._dialog_event.set()
         return False  # do not append to history
+
+    def _scroll_indicator_text(self) -> list[tuple[str, str]]:
+        """Build bottom separator fragments with scroll offset indicator."""
+        offset = self._output._scroll_offset
+        if offset <= 0:
+            return [("class:separator", "\u2500" * 80)]
+        label = f" \u2191 {offset} lines below "
+        pad = max(0, (80 - len(label)) // 2)
+        return [
+            ("class:separator", "\u2500" * pad),
+            ("class:scroll.indicator", label),
+            ("class:separator", "\u2500" * pad),
+        ]
 
     # -- Public API --------------------------------------------------------
 
@@ -841,5 +880,26 @@ def create_anteroom_style() -> Style:
             "picker.preview.role-ai": "#94A3B8 bold",
             "picker.preview.content": "#e0e0e0",
             "picker.preview.empty": "#6b7280 italic",
+            # Turn separators
+            "turn.user": "#94A3B8 bold",
+            "turn.ai": "#C5A059 bold",
+            "turn.user.text": "#94A3B8",
+            # Tool call blocks — intentionally dimmer than main text
+            "tool.frame": "#3a3a4e",
+            "tool.name": "#8b8b8b bold",
+            "tool.arg": "#6b7280",
+            "tool.ok": "#4a8a6a",
+            "tool.err": "#b05555",
+            "tool.elapsed": "#6b7280",
+            "tool.detail": "#6b7280",
+            # Scroll indicator
+            "scroll.indicator": "#C5A059",
+            # Approval mode prompts
+            "prompt.auto": "#C5A059 bold",
+            "prompt.safe": "#4EC9B0 bold",
+            "prompt.caution": "#569CD6 bold",
+            "prompt.strict": "#CD6B6B bold",
+            # Streaming cursor
+            "streaming.cursor": "#C5A059",
         }
     )

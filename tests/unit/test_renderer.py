@@ -3398,3 +3398,173 @@ class TestBugfix617Renderer:
         self._mod._stdout = fake_stdout
         self._mod.render_newline()
         assert fake_stdout.getvalue() == "\n"
+
+
+class TestPhase3VisualPolish:
+    """#257 Phase 3: Turn separators, tool frames, streaming cursor."""
+
+    def setup_method(self):
+        import importlib
+
+        import anteroom.cli.renderer as mod
+
+        importlib.reload(mod)
+        self._mod = mod
+        self._orig_fs = self._mod._fullscreen_mode
+        self._orig_layout = self._mod._fullscreen_layout
+        self._orig_invalidate = self._mod._fullscreen_invalidate
+        self._orig_repl = self._mod._repl_mode
+
+    def teardown_method(self):
+        self._mod._fullscreen_mode = self._orig_fs
+        self._mod._fullscreen_layout = self._orig_layout
+        self._mod._fullscreen_invalidate = self._orig_invalidate
+        self._mod._repl_mode = self._orig_repl
+        self._mod._fs_ai_turn_rendered = False
+        self._mod._streaming_cursor_active = False
+        self._mod._streaming_checkpoint = 0
+        self._mod._streaming_buffer = []
+
+    def _setup_fullscreen(self):
+        from prompt_toolkit.buffer import Buffer
+
+        from anteroom.cli.layout import AnteroomLayout
+
+        layout = AnteroomLayout(
+            header_fn=lambda: [("", "h")],
+            footer_fn=lambda: [("", "f")],
+            input_buffer=Buffer(),
+        )
+        invalidated = []
+        self._mod._fullscreen_mode = True
+        self._mod._fullscreen_layout = layout
+        self._mod._fullscreen_invalidate = lambda: invalidated.append(1)
+        self._mod._repl_mode = True
+        return layout, invalidated
+
+    def test_render_user_turn_appends_fragments(self):
+        layout, inv = self._setup_fullscreen()
+        before = layout.output.fragment_count
+        self._mod.render_user_turn("Hello world")
+        after = layout.output.fragment_count
+        assert after > before
+        text = "".join(t for _, t in layout.output._output_fragments[before:])
+        assert "You" in text
+        assert "Hello world" in text
+
+    def test_render_user_turn_noop_without_fullscreen(self):
+        self._mod._fullscreen_mode = False
+        self._mod._fullscreen_layout = None
+        self._mod.render_user_turn("test")
+
+    def test_render_ai_turn_start_appends_separator(self):
+        layout, inv = self._setup_fullscreen()
+        before = layout.output.fragment_count
+        self._mod.render_ai_turn_start()
+        after = layout.output.fragment_count
+        assert after > before
+        text = "".join(t for _, t in layout.output._output_fragments[before:])
+        assert "AI" in text
+
+    def test_render_ai_turn_not_duplicated(self):
+        layout, inv = self._setup_fullscreen()
+        self._mod.render_ai_turn_start()
+        count_after_first = layout.output.fragment_count
+        self._mod.render_ai_turn_start()
+        assert layout.output.fragment_count == count_after_first
+
+    def test_clear_turn_history_resets_ai_flag(self):
+        self._mod._fs_ai_turn_rendered = True
+        self._mod.clear_turn_history()
+        assert not self._mod._fs_ai_turn_rendered
+
+    def test_clear_turn_history_clears_streaming_buffer(self):
+        self._mod._streaming_buffer = ["leftover", "tokens"]
+        self._mod.clear_turn_history()
+        assert self._mod._streaming_buffer == []
+
+    def test_tool_call_start_fullscreen_renders_frame(self):
+        layout, inv = self._setup_fullscreen()
+        before = layout.output.fragment_count
+        self._mod.render_tool_call_start("read_file", {"path": "src/test.py"})
+        after = layout.output.fragment_count
+        assert after > before
+        styles = [s for s, _ in layout.output._output_fragments[before:]]
+        assert "class:tool.frame" in styles
+        assert "class:tool.name" in styles
+
+    def test_tool_call_start_filters_empty_args(self):
+        layout, inv = self._setup_fullscreen()
+        before = layout.output.fragment_count
+        self._mod.render_tool_call_start("glob_files", {"pattern": "src/*", "path": "", "_internal": "x"})
+        frags = layout.output._output_fragments[before:]
+        text = "".join(t for _, t in frags)
+        # Empty 'path' and internal '_internal' should be filtered out
+        assert "pattern: src/*" in text
+        assert "path:" not in text
+        assert "_internal" not in text
+
+    def test_tool_call_end_uses_humanized_summary(self):
+        layout, inv = self._setup_fullscreen()
+        self._mod._tool_start = time.monotonic()
+        self._mod._current_turn_tools.append(
+            {"tool_name": "bash", "summary": "bash \u2014 ls -la", "status": "running", "output": None}
+        )
+        before = layout.output.fragment_count
+        self._mod.render_tool_call_end("bash", "success", {"content": "total 42"})
+        frags = layout.output._output_fragments[before:]
+        text = "".join(t for _, t in frags)
+        # Result line should use humanized summary, not just "bash"
+        assert "ls -la" in text
+
+    def test_tool_call_end_fullscreen_success(self):
+        layout, inv = self._setup_fullscreen()
+        self._mod._tool_start = time.monotonic()
+        self._mod._current_turn_tools.append(
+            {"tool_name": "read_file", "summary": "Reading test.py", "status": "running", "output": None}
+        )
+        before = layout.output.fragment_count
+        self._mod.render_tool_call_end("read_file", "success", {"content": "file data"})
+        after = layout.output.fragment_count
+        assert after > before
+        styles = [s for s, _ in layout.output._output_fragments[before:]]
+        assert "class:tool.ok" in styles
+
+    def test_tool_call_end_fullscreen_error(self):
+        layout, inv = self._setup_fullscreen()
+        self._mod._tool_start = time.monotonic()
+        self._mod._current_turn_tools.append(
+            {"tool_name": "read_file", "summary": "Reading test.py", "status": "running", "output": None}
+        )
+        before = layout.output.fragment_count
+        self._mod.render_tool_call_end("read_file", "error", {"error": "Permission denied"})
+        after = layout.output.fragment_count
+        assert after > before
+        styles = [s for s, _ in layout.output._output_fragments[before:]]
+        assert "class:tool.err" in styles
+
+    def test_streaming_cursor_appears_during_tokens(self):
+        layout, inv = self._setup_fullscreen()
+        self._mod.render_token("Hello")
+        assert self._mod._streaming_cursor_active
+        frags = layout.output._output_fragments
+        text = "".join(t for _, t in frags)
+        assert "\u258a" in text
+
+    def test_streaming_cursor_gone_after_response_end(self):
+        layout, inv = self._setup_fullscreen()
+        self._mod.render_token("Hello world")
+        assert self._mod._streaming_cursor_active
+        self._mod.render_response_end()
+        assert not self._mod._streaming_cursor_active
+        frags = layout.output._output_fragments
+        cursor_frags = [t for s, t in frags if s == "class:streaming.cursor"]
+        assert not cursor_frags
+
+    def test_user_turn_truncates_long_text(self):
+        layout, inv = self._setup_fullscreen()
+        long_text = "x" * 100
+        self._mod.render_user_turn(long_text)
+        text = "".join(t for _, t in layout.output._output_fragments)
+        assert "..." in text
+        assert len([c for c in text if c == "x"]) <= 60
