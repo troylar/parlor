@@ -439,6 +439,12 @@ async def run_agent_loop(
                             data={"matches": [m.rule_name for m in of_result.matches]},
                         )
                 yield AgentEvent(kind="assistant_message", data={"content": assistant_content})
+            # Append the final assistant response to the conversation history so
+            # subsequent turns (including queued messages) see the complete context.
+            # Tool-call iterations already append to messages above; this covers
+            # the final no-tool-call response that was previously missing.
+            if assistant_content:
+                messages.append({"role": "assistant", "content": assistant_content})
             yield AgentEvent(kind="done", data={})
 
             # Check message queue for follow-up messages
