@@ -120,6 +120,58 @@ class TestOutputControl:
         content = ctrl.create_content(80, 20)
         assert content.cursor_position.y == content.line_count - 1
 
+    def test_checkpoint_returns_fragment_count(self):
+        ctrl = OutputControl()
+        assert ctrl.checkpoint() == 0
+        ctrl.append_text("one")
+        ctrl.append_text("two")
+        assert ctrl.checkpoint() == 2
+
+    def test_truncate_to_removes_trailing_fragments(self):
+        ctrl = OutputControl()
+        ctrl.append_text("keep-1")
+        ctrl.append_text("keep-2")
+        cp = ctrl.checkpoint()
+        ctrl.append_text("remove-1")
+        ctrl.append_text("remove-2")
+        assert ctrl.fragment_count == 4
+        ctrl.truncate_to(cp)
+        assert ctrl.fragment_count == 2
+        assert ctrl._output_fragments[0] == ("", "keep-1")
+        assert ctrl._output_fragments[1] == ("", "keep-2")
+
+    def test_truncate_to_noop_at_current_length(self):
+        ctrl = OutputControl()
+        ctrl.append_text("hello")
+        cp = ctrl.checkpoint()
+        ctrl.truncate_to(cp)
+        assert ctrl.fragment_count == 1
+
+    def test_checkpoint_truncate_cycle(self):
+        """Simulates the streaming cursor pattern: checkpoint, append cursor, truncate, repeat."""
+        ctrl = OutputControl()
+        ctrl.append_text("prefix\n")
+        cp = ctrl.checkpoint()
+        # First cursor render
+        ctrl.append_text("▊")
+        assert ctrl.fragment_count == 2
+        ctrl.truncate_to(cp)
+        assert ctrl.fragment_count == 1
+        # Second cursor render with new token
+        ctrl.append_text("token1 ▊")
+        assert ctrl.fragment_count == 2
+        ctrl.truncate_to(cp)
+        assert ctrl.fragment_count == 1
+
+    def test_append_newline_resets_scroll(self):
+        ctrl = OutputControl()
+        for i in range(50):
+            ctrl.append_text(f"line {i}\n")
+        ctrl.scroll_up(20)
+        ctrl.append_newline()
+        content = ctrl.create_content(80, 20)
+        assert content.cursor_position.y == content.line_count - 1
+
     def test_scroll_to_top(self):
         ctrl = OutputControl()
         for i in range(50):
@@ -445,6 +497,12 @@ class TestStyle:
         class_names = [rule[0] for rule in style.style_rules]
         assert "bottom-toolbar" in class_names
         assert "bottom-toolbar.model" in class_names
+
+    def test_style_has_plan_styles(self):
+        style = create_anteroom_style()
+        class_names = [rule[0] for rule in style.style_rules]
+        for name in ("plan.header", "plan.pending", "plan.active", "plan.complete", "plan.failed"):
+            assert name in class_names, f"missing plan style: {name}"
 
 
 # ---------------------------------------------------------------------------

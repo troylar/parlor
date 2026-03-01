@@ -77,6 +77,7 @@ class OutputControl(FormattedTextControl):
     def append_newline(self) -> None:
         """Append a line break."""
         self._output_fragments.append(("", "\n"))
+        self._scroll_offset = 0
 
     def clear(self) -> None:
         """Remove all content from the output pane."""
@@ -85,6 +86,14 @@ class OutputControl(FormattedTextControl):
     @property
     def fragment_count(self) -> int:
         return len(self._output_fragments)
+
+    def checkpoint(self) -> int:
+        """Return current fragment count as a checkpoint for later truncation."""
+        return len(self._output_fragments)
+
+    def truncate_to(self, checkpoint: int) -> None:
+        """Remove all fragments from *checkpoint* onward."""
+        del self._output_fragments[checkpoint:]
 
     def scroll_up(self, lines: int = 10) -> None:
         """Scroll up (back through history) by *lines*."""
@@ -901,5 +910,11 @@ def create_anteroom_style() -> Style:
             "prompt.strict": "#CD6B6B bold",
             # Streaming cursor
             "streaming.cursor": "#C5A059",
+            # Plan checklist
+            "plan.header": "#C5A059 bold",
+            "plan.pending": "#6b7280",
+            "plan.active": "#e8b830",
+            "plan.complete": "#4a8a6a",
+            "plan.failed": "#b05555",
         }
     )

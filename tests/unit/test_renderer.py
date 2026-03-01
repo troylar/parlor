@@ -3570,3 +3570,94 @@ class TestPhase3VisualPolish:
         text = "".join(t for _, t in layout.output._output_fragments)
         assert "..." in text
         assert len([c for c in text if c == "x"]) <= 60
+
+    def test_stop_streaming_cursor_noop_when_inactive(self):
+        """_stop_streaming_cursor is a no-op when cursor is already inactive."""
+        layout, inv = self._setup_fullscreen()
+        layout.output.append_text("preserved content")
+        before = layout.output.fragment_count
+        self._mod._streaming_cursor_active = False
+        self._mod._stop_streaming_cursor()
+        assert layout.output.fragment_count == before
+
+    def test_streaming_checkpoint_preserved_across_stop(self):
+        """_stop_streaming_cursor must not reset _streaming_checkpoint to 0;
+        render_response_end handles the reset after using the checkpoint."""
+        layout, inv = self._setup_fullscreen()
+        layout.output.append_text("pre-existing\n")
+        self._mod.render_token("token1 ")
+        assert self._mod._streaming_checkpoint > 0
+        cp_before = self._mod._streaming_checkpoint
+        self._mod._stop_streaming_cursor()
+        # checkpoint should NOT have been zeroed
+        assert self._mod._streaming_checkpoint == cp_before
+
+    def test_plan_update_during_active_streaming(self):
+        """Updating a plan step while streaming tokens must preserve both
+        the plan block and the streaming cursor."""
+        layout, inv = self._setup_fullscreen()
+        # Start a plan
+        self._mod.start_plan(["Step one", "Step two"])
+        # Start streaming tokens
+        self._mod.render_token("Hello ")
+        assert self._mod._streaming_cursor_active
+        # Update plan while streaming
+        self._mod.update_plan_step(0, "complete")
+        # Both plan and streaming cursor should be present
+        assert self._mod._streaming_cursor_active
+        text = "".join(t for _, t in layout.output._output_fragments)
+        assert "\u2713" in text  # completed step icon
+        assert "Hello " in text  # streamed token preserved
+        assert "\u258a" in text  # streaming cursor still present
+
+    def test_clear_plan_removes_fragments_from_pane(self):
+        """clear_plan must remove plan fragments from the fullscreen output pane."""
+        layout, inv = self._setup_fullscreen()
+        layout.output.append_text("conversation content\n")
+        pre_plan = layout.output.fragment_count
+        self._mod.start_plan(["Step A", "Step B"])
+        assert layout.output.fragment_count > pre_plan
+        self._mod.clear_plan()
+        assert layout.output.fragment_count == pre_plan
+
+    def test_flush_buffered_text_safe_without_active_cursor(self):
+        """flush_buffered_text must not wipe the pane when no streaming cursor was active."""
+        layout, inv = self._setup_fullscreen()
+        layout.output.append_text("important history\n")
+        before = layout.output.fragment_count
+        self._mod._streaming_buffer = ["some text"]
+        self._mod._streaming_checkpoint = 0
+        self._mod._streaming_cursor_active = False
+        self._mod.flush_buffered_text()
+        # History must be preserved — not truncated
+        assert layout.output.fragment_count >= before
+
+    def test_flush_buffered_text_works_at_checkpoint_zero(self):
+        """flush_buffered_text must truncate raw fragments even when checkpoint is 0
+        (empty pane at conversation start)."""
+        layout, inv = self._setup_fullscreen()
+        # Simulate streaming starting on an empty pane (checkpoint = 0)
+        self._mod.render_token("Hello world")
+        assert self._mod._streaming_checkpoint == 0
+        assert self._mod._streaming_cursor_active
+        raw_count = layout.output.fragment_count
+        assert raw_count > 0  # raw text + cursor in the pane
+        self._mod.flush_buffered_text()
+        # Raw streamed text + cursor should have been truncated back to checkpoint 0
+        # (Rich markdown rendering goes through _stdout_console, not the pane fragments)
+        assert not self._mod._streaming_cursor_active
+        assert self._mod._streaming_buffer == []
+
+    def test_flush_buffered_text_fullscreen(self):
+        """flush_buffered_text renders accumulated tokens into the pane
+        and advances _streaming_checkpoint so subsequent streaming doesn't
+        overwrite the flushed content."""
+        layout, inv = self._setup_fullscreen()
+        self._mod.render_token("Hello ")
+        self._mod.render_token("world")
+        cp_before = self._mod._streaming_checkpoint
+        self._mod.flush_buffered_text()
+        # checkpoint should advance past the rendered markdown
+        assert self._mod._streaming_checkpoint >= cp_before
+        # buffer should be empty after flush
+        assert self._mod._streaming_buffer == []

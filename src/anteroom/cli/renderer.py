@@ -162,6 +162,60 @@ _tool_batch_active: bool = False
 _plan_steps: list[dict[str, str]] = []  # [{"text": "...", "status": "pending|in_progress|complete"}]
 _plan_visible: bool = False
 _plan_written_lines: int = 0  # lines currently on screen (for cursor-up on redraw)
+_plan_checkpoint: int = 0  # OutputControl fragment index for plan block (fullscreen)
+
+
+def _render_plan_to_pane() -> None:
+    """Render the plan checklist into the fullscreen output pane.
+
+    Truncates back to ``_plan_checkpoint`` and re-appends all steps,
+    allowing in-place updates without ANSI cursor codes.
+
+    Safe to call while streaming is active — saves and restores the
+    streaming cursor state so both plan updates and token streaming
+    remain consistent.
+    """
+    global _streaming_checkpoint, _streaming_cursor_active
+    if not _fullscreen_layout or not _plan_steps:
+        return
+
+    output = _fullscreen_layout.output
+
+    # If the streaming cursor is active, stop it first so its fragments
+    # are removed cleanly before we truncate back to the plan checkpoint.
+    was_streaming = _streaming_cursor_active
+    if was_streaming:
+        _stop_streaming_cursor()
+
+    output.truncate_to(_plan_checkpoint)
+
+    # Plan header
+    output.append([("class:plan.header", "  Plan\n")])
+
+    # Steps
+    _step_icons = {
+        "pending": ("\u25cb", "class:plan.pending"),  # ○
+        "in_progress": ("\u25b8", "class:plan.active"),  # ▸
+        "complete": ("\u2713", "class:plan.complete"),  # ✓
+        "failed": ("\u2717", "class:plan.failed"),  # ✗
+    }
+    for step in _plan_steps:
+        status = step["status"]
+        icon, style = _step_icons.get(status, ("\u25cb", "class:plan.pending"))
+        output.append([(style, f"    {icon} {step['text']}\n")])
+
+    output.append_newline()
+
+    # Update streaming checkpoint to be after the plan block
+    _streaming_checkpoint = output.checkpoint()
+
+    # Restore streaming cursor if it was active — re-render buffer + cursor
+    if was_streaming:
+        _streaming_cursor_active = True
+        _update_streaming_cursor()
+
+    if _fullscreen_invalidate:
+        _fullscreen_invalidate()
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +229,14 @@ def start_plan(steps: list[str]) -> None:
     Call this when a plan is approved and execution begins.
     The checklist is rendered above the thinking line during agentic runs.
     """
-    global _plan_steps, _plan_visible, _plan_written_lines
+    global _plan_steps, _plan_visible, _plan_written_lines, _plan_checkpoint, _streaming_checkpoint
     _plan_steps = [{"text": s, "status": "pending"} for s in steps]
     _plan_visible = True
     _plan_written_lines = 0
+
+    if _fullscreen_mode and _fullscreen_layout:
+        _plan_checkpoint = _fullscreen_layout.output.checkpoint()
+        _render_plan_to_pane()
 
 
 def update_plan_step(index: int, status: str) -> None:
@@ -189,6 +247,11 @@ def update_plan_step(index: int, status: str) -> None:
     if not _plan_steps or index < 0 or index >= len(_plan_steps):
         return
     _plan_steps[index]["status"] = status
+
+    if _fullscreen_mode and _fullscreen_layout:
+        _render_plan_to_pane()
+        return
+
     # Redraw if thinking block is on screen
     if _repl_mode and _thinking_start and _stdout and _plan_written_lines > 0:
         elapsed = time.monotonic() - _thinking_start
@@ -197,10 +260,15 @@ def update_plan_step(index: int, status: str) -> None:
 
 def clear_plan() -> None:
     """Clear plan state entirely (e.g. on /plan off or new conversation)."""
-    global _plan_steps, _plan_visible, _plan_written_lines
+    global _plan_steps, _plan_visible, _plan_written_lines, _plan_checkpoint, _streaming_checkpoint
+    # Remove plan fragments from the fullscreen output pane before resetting checkpoint
+    if _fullscreen_mode and _fullscreen_layout and _plan_checkpoint > 0:
+        _fullscreen_layout.output.truncate_to(_plan_checkpoint)
+        _streaming_checkpoint = _fullscreen_layout.output.checkpoint()
     _plan_steps = []
     _plan_visible = False
     _plan_written_lines = 0
+    _plan_checkpoint = 0
 
 
 def _plan_block_height() -> int:
@@ -562,7 +630,7 @@ def start_thinking(*, newline: bool = False) -> None:
     """
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
-    global _plan_written_lines
+    global _plan_written_lines, _streaming_checkpoint
     _flush_dedup()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
@@ -606,7 +674,7 @@ def start_thinking(*, newline: bool = False) -> None:
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
         _thinking_ticker_task = None
-    # Start a background ticker so the timer advances even when no tokens arrive
+    # Start background ticker
     try:
         loop = asyncio.get_running_loop()
         _thinking_ticker_task = loop.create_task(_thinking_ticker())
@@ -1061,15 +1129,28 @@ def flush_buffered_text() -> None:
     stale checkpoint issues where subsequent token updates would truncate
     already-rendered content (tool frames, Markdown text).
     """
-    global _streaming_buffer
+    global _streaming_buffer, _streaming_checkpoint
+    # Save whether streaming was active before stopping — we need this to
+    # decide whether to truncate raw fragments. Cannot use _streaming_checkpoint
+    # value alone since checkpoint 0 is valid (empty pane at conversation start).
+    had_active_cursor = _streaming_cursor_active
     _stop_streaming_cursor()
     text = "".join(_streaming_buffer)
     _streaming_buffer = []
     if not text.strip():
         return
+
+    # In fullscreen, truncate raw streamed text before rendering Markdown.
+    if _fullscreen_mode and _fullscreen_layout and had_active_cursor:
+        _fullscreen_layout.output.truncate_to(_streaming_checkpoint)
+
     from rich.padding import Padding
 
     _stdout_console.print(Padding(_make_markdown(text), (0, 2, 0, 2)))
+
+    # Update checkpoint so subsequent streaming starts after this rendered block
+    if _fullscreen_mode and _fullscreen_layout:
+        _streaming_checkpoint = _fullscreen_layout.output.checkpoint()
 
 
 def _flush_dedup() -> None:
@@ -1102,30 +1183,24 @@ def _update_streaming_cursor() -> None:
     """Update the streaming cursor position — truncate to checkpoint, re-append text + cursor."""
     if not (_streaming_cursor_active and _fullscreen_mode and _fullscreen_layout):
         return
-    # Truncate to checkpoint (removes previous text + cursor)
-    frags = _fullscreen_layout.output._output_fragments
-    del frags[_streaming_checkpoint:]
-    # Re-append current buffered text + cursor
+    output = _fullscreen_layout.output
+    output.truncate_to(_streaming_checkpoint)
     text = "".join(_streaming_buffer)
     if text:
-        _fullscreen_layout.output._output_fragments.append(("class:output", text))
-    _fullscreen_layout.output._output_fragments.append(("class:streaming.cursor", "\u258a"))
-    _fullscreen_layout.output._scroll_offset = 0
+        output.append_text(text, "class:output")
+    output.append_text("\u258a", "class:streaming.cursor")
     if _fullscreen_invalidate:
         _fullscreen_invalidate()
 
 
 def _stop_streaming_cursor() -> None:
-    """Remove the streaming cursor and clear checkpoint state."""
-    global _streaming_cursor_active, _streaming_checkpoint
+    """Remove the streaming cursor glyph and raw text, preserving checkpoint for render_response_end."""
+    global _streaming_cursor_active
     if not _streaming_cursor_active:
         return
     if _fullscreen_mode and _fullscreen_layout:
-        # Truncate everything from checkpoint (text + cursor)
-        frags = _fullscreen_layout.output._output_fragments
-        del frags[_streaming_checkpoint:]
+        _fullscreen_layout.output.truncate_to(_streaming_checkpoint)
     _streaming_cursor_active = False
-    _streaming_checkpoint = 0
 
 
 def render_token(content: str) -> None:
@@ -1142,13 +1217,15 @@ def render_token(content: str) -> None:
 
 def render_response_end() -> None:
     """Render the complete buffered response with Rich Markdown."""
-    global _streaming_buffer, _tool_batch_active
+    global _streaming_buffer, _tool_batch_active, _streaming_checkpoint
     _stop_streaming_cursor()
     _flush_dedup()
+
     full_text = "".join(_streaming_buffer)
     _streaming_buffer = []
 
     if not full_text.strip():
+        _streaming_checkpoint = 0
         _tool_batch_active = False
         return
 
@@ -1156,6 +1233,8 @@ def render_response_end() -> None:
     if _tool_batch_active:
         console.print()
         _tool_batch_active = False
+
+    _streaming_checkpoint = 0
 
     from rich.padding import Padding
 
