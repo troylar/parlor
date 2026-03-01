@@ -251,3 +251,68 @@ class TestConsecutiveTextOnlyLimit:
         error_events = [e for e in events if e.kind == "error"]
         assert len(error_events) == 1
         assert "consecutive text-only" in error_events[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_limit_of_one_stops_on_second_text_only(self) -> None:
+        """max_consecutive_text_only=1 allows first text-only, stops on second."""
+        text_round = _make_stream_events(content="proceeding...")
+        ai = _mock_ai_service(text_round)
+
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        await queue.put({"role": "user", "content": "msg"})
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "start"}]
+
+        async def _executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
+            return {"output": "ok"}
+
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=ai,
+                messages=messages,
+                tool_executor=_executor,
+                tools_openai=None,
+                message_queue=queue,
+                max_consecutive_text_only=1,
+            )
+        )
+
+        # First text-only allowed (consecutive=1, not > 1), second triggers error (consecutive=2 > 1)
+        error_events = [e for e in events if e.kind == "error"]
+        assert len(error_events) == 1
+        assert "2" in error_events[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_counter_reset_produces_done_event(self) -> None:
+        """After a tool call resets the counter, subsequent text-only turn completes normally with done event."""
+        text_round = _make_stream_events(content="thinking...")
+        tool_round = _make_stream_events(
+            content="using tool",
+            tool_calls=[_tc("tc1", "read_file", {"path": "/tmp/x"})],
+        )
+        final_text = _make_stream_events(content="done!")
+        ai = _mock_ai_service(text_round, tool_round, final_text)
+
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        await queue.put({"role": "user", "content": "msg"})
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "start"}]
+
+        async def _executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
+            return {"output": "ok"}
+
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=ai,
+                messages=messages,
+                tool_executor=_executor,
+                tools_openai=[{"type": "function", "function": {"name": "read_file"}}],
+                message_queue=queue,
+                max_consecutive_text_only=2,
+            )
+        )
+
+        done_events = [e for e in events if e.kind == "done"]
+        error_events = [e for e in events if e.kind == "error"]
+        assert len(done_events) >= 1
+        assert len(error_events) == 0
