@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.89.1
+
+**Fixed:**
+
+- Fixed CLI fullscreen markdown double-spacing on Windows Git Bash — Rich line padding caused visual wrapping in narrower panes (#670)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.89.1)
+
 ### v1.89.0
 
 **New:**
