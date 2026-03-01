@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.89.7
+
+**Fixed:**
+
+- CLI fullscreen streaming errors (timeouts, retries, connection failures) no longer corrupt the prompt area — log output is now routed through the layout's output pane (#678)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.89.7)
+
 ### v1.89.6
 
 **Fixed:**
