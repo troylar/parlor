@@ -7,6 +7,17 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.89.0
+
+**New:**
+
+- Knowledge notebooks: conversations now support `note` and `document` types beyond chat (#83)
+- Type-aware semantic and keyword search with `?type=` filter in API, CLI, and web UI (#83)
+- Web UI type picker dropdown and sidebar type badges for visual distinction (#83)
+- RAG context labels retrieved chunks with `[note]`/`[doc]` type badges (#83)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.89.0)
+
 ### v1.88.3
 
 **Improved:**
