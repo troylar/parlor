@@ -2075,9 +2075,9 @@ async def _run_repl(
     history_path = config.app.data_dir / "cli_history"
 
     # Map Shift+Enter (CSI u: \x1b[13;2u) to Ctrl+J for terminals that
-    # support the kitty keyboard protocol (iTerm2, kitty, WezTerm, Warp, foot).
+    # natively send kitty keyboard protocol sequences (iTerm2, kitty, WezTerm).
     # Terminal.app doesn't send this sequence — Shift+Enter = Enter there.
-    # We also request the kitty protocol at fullscreen startup (see below).
+    # See #673 for Warp terminal limitations.
     try:
         from prompt_toolkit.input import vt100_parser
 
@@ -5003,10 +5003,7 @@ async def _run_repl(
 
     asyncio.get_running_loop().call_soon(lambda: asyncio.create_task(_run_fullscreen()))
 
-    try:
-        await _fs_app.run_async()
-    finally:
-        pass
+    await _fs_app.run_async()
 
     # Show resume hint after fullscreen exits
     if conv.get("id") and not is_first_message:
