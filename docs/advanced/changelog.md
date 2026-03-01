@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.88.2
+
+**Fixed:**
+
+- Fixed double-spaced Markdown output on Windows Git Bash (#658)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.88.2)
+
 ### v1.88.1
 
 **Improved:**
