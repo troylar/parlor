@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.89.3
+
+**Fixed:**
+
+- Multiline input now grows dynamically in CLI fullscreen mode — input area expands up to 10 rows as you type (#669)
+- Removed kitty protocol activation that caused Ctrl+C to output garbage in iTerm2 (#669)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.89.3)
+
 ### v1.89.2
 
 **Fixed:**
