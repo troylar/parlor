@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.88.3
+
+**Improved:**
+
+- Added UX testing rule and integrated coverage checks into `/new-issue`, `/start-work`, `/submit-pr`, `/code-review` (#665)
+- Rewrote VISION.md with enterprise server-mode positioning and phased ROADMAP.md (#665)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.88.3)
+
 ### v1.88.2
 
 **Fixed:**
