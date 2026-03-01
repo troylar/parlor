@@ -3760,8 +3760,8 @@ class TestRenderError:
     def test_render_error_escapes_markup(self) -> None:
         with patch("anteroom.cli.renderer.console") as mock_console:
             render_error("[bold]injection[/bold]")
-            # The Rich escape() should prevent the markup from being interpreted
-            assert mock_console.print.called
+            printed = str(mock_console.print.call_args_list[0])
+            assert "\\[bold\\]" in printed or "\\[bold]" in printed
 
     def test_render_warning_prints_yellow_bold(self) -> None:
         with patch("anteroom.cli.renderer.console") as mock_console:
@@ -3769,6 +3769,12 @@ class TestRenderError:
             printed = str(mock_console.print.call_args_list[0])
             assert "Rate limited by API" in printed
             assert "yellow bold" in printed
+
+    def test_render_warning_escapes_markup(self) -> None:
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            render_warning("[red]injection[/red]")
+            printed = str(mock_console.print.call_args_list[0])
+            assert "\\[red\\]" in printed or "\\[red]" in printed
 
 
 # ---------------------------------------------------------------------------
@@ -3816,23 +3822,29 @@ class TestFullscreenLogHandler:
         with patch("anteroom.cli.renderer.console") as mock_console:
             handler.emit(record)
             assert mock_console.print.called
+            printed = str(mock_console.print.call_args_list[0])
+            assert "Rate limited" in printed
+            assert "#8b8b8b" in printed  # MUTED color
 
-    def test_handler_does_not_raise_on_format_error(self) -> None:
+    def test_handler_does_not_raise_on_render_failure(self) -> None:
         import logging
+        from unittest.mock import MagicMock
 
         handler = FullscreenLogHandler()
+        handler.handleError = MagicMock()
         record = logging.LogRecord(
             name="test",
             level=logging.ERROR,
             pathname="",
             lineno=0,
-            msg="bad %s %s",
-            args=("only_one",),
+            msg="test message",
+            args=(),
             exc_info=None,
         )
         with patch("anteroom.cli.renderer.console") as mock_console:
             mock_console.print.side_effect = Exception("render failed")
             handler.emit(record)
+            handler.handleError.assert_called_once_with(record)
 
 
 class TestFullscreenLogHandlerLifecycle:
