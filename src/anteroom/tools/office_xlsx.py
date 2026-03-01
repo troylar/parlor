@@ -337,7 +337,7 @@ async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
     handler = _lib_dispatch.get(action)
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
-    return handler(resolved, path, working_dir=working_dir, **kwargs)
+    return dict(handler(resolved, path, working_dir=working_dir, **kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +412,7 @@ async def _dispatch_com(
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
     try:
-        return await manager.run_com(handler, manager, resolved, display_path, **kwargs)
+        return dict(await manager.run_com(handler, manager, resolved, display_path, **kwargs))
     except Exception as exc:
         return {"error": f"COM {action} failed on {display_path}: {type(exc).__name__}: {exc}"}
 

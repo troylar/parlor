@@ -419,7 +419,7 @@ async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
     handler = _lib_dispatch.get(action)
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
-    return handler(resolved, path, working_dir=working_dir, **kwargs)
+    return dict(handler(resolved, path, working_dir=working_dir, **kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +458,7 @@ async def _dispatch_com(
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
     try:
-        return await manager.run_com(handler, manager, resolved, display_path, **kwargs)
+        return dict(await manager.run_com(handler, manager, resolved, display_path, **kwargs))
     except Exception as exc:
         return {"error": f"COM {action} failed on {display_path}: {type(exc).__name__}: {exc}"}
 
@@ -735,7 +735,8 @@ def _edit_com(manager: Any, resolved: str, display_path: str, **kwargs: Any) -> 
         ("delete_slides", delete_slides),
         ("duplicate_slides", duplicate_slides),
     ]:
-        if len(_arr) > _MAX_EDIT_OPS:
+        _arr_sized: list[Any] = _arr  # type: ignore[assignment]
+        if len(_arr_sized) > _MAX_EDIT_OPS:
             prs.Close()
             return {"error": f"Too many {_arr_name} entries (max {_MAX_EDIT_OPS})"}
 
@@ -2943,7 +2944,8 @@ def _edit_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, Any]
         ("delete_slides", delete_slides),
         ("duplicate_slides", duplicate_slides),
     ]:
-        if len(_arr) > _MAX_EDIT_OPS:
+        _arr_sized: list[Any] = _arr  # type: ignore[assignment]
+        if len(_arr_sized) > _MAX_EDIT_OPS:
             return {"error": f"Too many {_arr_name} entries (max {_MAX_EDIT_OPS})"}
 
     if len(template_fill) > _MAX_EDIT_OPS:

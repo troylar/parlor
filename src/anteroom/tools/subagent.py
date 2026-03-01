@@ -251,7 +251,7 @@ async def _run_subagent(
             arguments["_confirm_callback"] = _confirm_callback
             arguments["_config"] = _config
         if _tool_registry.has_tool(tool_name):
-            return await _tool_registry.call_tool(tool_name, arguments, confirm_callback=_confirm_callback)
+            return dict(await _tool_registry.call_tool(tool_name, arguments, confirm_callback=_confirm_callback))
         if _mcp_manager:
             verdict = _tool_registry.check_safety(tool_name, arguments)
             if verdict and verdict.needs_approval:
@@ -269,10 +269,10 @@ async def _run_subagent(
                 rl_v = _rl.check(tool_name)
                 if rl_v and rl_v.exceeded and _rl.config.action == "block":
                     return {"error": rl_v.reason, "safety_blocked": True, "rate_limited": True}
-            result = await _mcp_manager.call_tool(tool_name, arguments)
+            mcp_result: dict[str, Any] = dict(await _mcp_manager.call_tool(tool_name, arguments))
             if _rl is not None:
-                _rl.record_call(success="error" not in result)
-            return result
+                _rl.record_call(success="error" not in mcp_result)
+            return mcp_result
         raise ValueError(f"Unknown tool: {tool_name}")
 
     # Isolated message history for the child

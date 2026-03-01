@@ -18,7 +18,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 import yaml
 
@@ -218,7 +221,7 @@ def _read_artifact_content(path: Path) -> tuple[str, dict[str, Any]]:
 
 
 def install_pack(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     manifest: PackManifest,
     pack_dir: Path,
     *,
@@ -305,7 +308,7 @@ def install_pack(
     }
 
 
-def remove_pack(db: sqlite3.Connection, namespace: str, name: str) -> bool:
+def remove_pack(db: ThreadSafeConnection, namespace: str, name: str) -> bool:
     """Remove a pack and any artifacts not referenced by other packs.
 
     Returns ``True`` if the pack was found and removed.
@@ -344,7 +347,7 @@ def remove_pack(db: sqlite3.Connection, namespace: str, name: str) -> bool:
 
 
 def update_pack(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     manifest: PackManifest,
     pack_dir: Path,
     *,
@@ -458,7 +461,7 @@ def update_pack(
     }
 
 
-def list_packs(db: sqlite3.Connection) -> list[dict[str, Any]]:
+def list_packs(db: ThreadSafeConnection) -> list[dict[str, Any]]:
     """List all installed packs with artifact counts."""
     rows = db.execute(
         """SELECT p.id, p.name, p.namespace, p.version, p.description,
@@ -473,7 +476,7 @@ def list_packs(db: sqlite3.Connection) -> list[dict[str, Any]]:
     return [_pack_row_to_dict(r) for r in rows]
 
 
-def get_pack(db: sqlite3.Connection, namespace: str, name: str) -> dict[str, Any] | None:
+def get_pack(db: ThreadSafeConnection, namespace: str, name: str) -> dict[str, Any] | None:
     """Get a pack with its full artifact list."""
     pack_row = _get_pack_row(db, namespace, name)
     if not pack_row:
@@ -496,7 +499,7 @@ def get_pack(db: sqlite3.Connection, namespace: str, name: str) -> dict[str, Any
     return result
 
 
-def load_project_packs(db: sqlite3.Connection, project_dir: Path) -> list[dict[str, Any]]:
+def load_project_packs(db: ThreadSafeConnection, project_dir: Path) -> list[dict[str, Any]]:
     """Scan ``.anteroom/packs/`` in a project and install any not yet in the DB."""
     packs_root = project_dir / _ANTEROOM_DIR / _PACKS_DIR
     if not packs_root.is_dir():
@@ -564,7 +567,7 @@ def _copy_to_project(pack_dir: Path, manifest: PackManifest, project_dir: Path) 
     logger.info("Copied pack to project: %s", dest)
 
 
-def _get_pack_row(db: sqlite3.Connection, namespace: str, name: str) -> Any:
+def _get_pack_row(db: ThreadSafeConnection, namespace: str, name: str) -> Any:
     """Fetch a pack row by namespace and name."""
     return db.execute(
         "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
@@ -573,7 +576,7 @@ def _get_pack_row(db: sqlite3.Connection, namespace: str, name: str) -> Any:
     ).fetchone()
 
 
-def _get_pack_rows(db: sqlite3.Connection, namespace: str, name: str) -> list[Any]:
+def _get_pack_rows(db: ThreadSafeConnection, namespace: str, name: str) -> list[Any]:
     """Fetch all pack rows matching namespace and name."""
     return db.execute(
         "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
@@ -582,7 +585,7 @@ def _get_pack_rows(db: sqlite3.Connection, namespace: str, name: str) -> list[An
     ).fetchall()
 
 
-def get_pack_by_source_path(db: sqlite3.Connection, source_path: str) -> dict[str, Any] | None:
+def get_pack_by_source_path(db: ThreadSafeConnection, source_path: str) -> dict[str, Any] | None:
     """Get a pack by its source_path. Returns None if not found."""
     row = db.execute(
         "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
@@ -594,7 +597,7 @@ def get_pack_by_source_path(db: sqlite3.Connection, source_path: str) -> dict[st
     return _pack_row_to_dict(row)
 
 
-def get_pack_by_id(db: sqlite3.Connection, pack_id: str) -> dict[str, Any] | None:
+def get_pack_by_id(db: ThreadSafeConnection, pack_id: str) -> dict[str, Any] | None:
     """Get a pack by its unique ID, including artifacts."""
     row = db.execute(
         "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
@@ -618,7 +621,7 @@ def get_pack_by_id(db: sqlite3.Connection, pack_id: str) -> dict[str, Any] | Non
 
 
 def resolve_pack(
-    db: sqlite3.Connection, namespace: str, name: str
+    db: ThreadSafeConnection, namespace: str, name: str
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Resolve a pack by namespace/name.
 
@@ -633,7 +636,7 @@ def resolve_pack(
     return None, []
 
 
-def remove_pack_by_id(db: sqlite3.Connection, pack_id: str) -> bool:
+def remove_pack_by_id(db: ThreadSafeConnection, pack_id: str) -> bool:
     """Remove a pack by its unique ID."""
     row = db.execute("SELECT id FROM packs WHERE id = ?", (pack_id,)).fetchone()
     if not row:

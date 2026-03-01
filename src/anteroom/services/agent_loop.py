@@ -513,10 +513,10 @@ async def run_agent_loop(
         else:
             tasks = [asyncio.create_task(_execute_tool(tc, tool_executor, cancel_event)) for tc in tool_calls_pending]
             for coro in asyncio.as_completed(tasks):
-                tc, result, status = await coro
+                tc, result, tool_status = await coro
                 yield AgentEvent(
                     kind="tool_call_end",
-                    data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": status},
+                    data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": tool_status},
                 )
                 # Strip internal metadata before sending to the LLM
                 # _approval_decision: safety gate audit field

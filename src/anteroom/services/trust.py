@@ -15,6 +15,7 @@ import stat
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def load_trust_store(data_dir: Path | None = None) -> list[TrustDecision]:
         return []
 
 
-def _acquire_lock(data_dir: Path | None = None):
+def _acquire_lock(data_dir: Path | None = None) -> tuple[Any, Any]:
     """Acquire an exclusive file lock for the trust store. Returns (lock_file, fcntl_mod) or (None, None)."""
     try:
         import fcntl as _fcntl
@@ -79,7 +80,7 @@ def _acquire_lock(data_dir: Path | None = None):
     return lock_f, _fcntl
 
 
-def _release_lock(lock_f, fcntl_mod) -> None:
+def _release_lock(lock_f: Any, fcntl_mod: Any) -> None:
     """Release the file lock."""
     if lock_f is not None and fcntl_mod is not None:
         try:

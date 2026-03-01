@@ -9,15 +9,17 @@ import os
 import secrets
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from .config import AppConfig, SessionConfig, ensure_identity, load_config
 from .db import DatabaseManager, has_vec_support, init_db
@@ -26,7 +28,7 @@ from .services.embeddings import create_embedding_service, get_effective_dimensi
 from .services.event_bus import EventBus
 from .services.ip_allowlist import check_ip_allowed
 from .services.mcp_manager import McpManager
-from .services.session_store import create_session_store
+from .services.session_store import MemorySessionStore, SQLiteSessionStore, create_session_store
 from .tools import ToolRegistry, register_default_tools
 
 logger = logging.getLogger(__name__)
@@ -263,7 +265,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.tls_enabled = tls_enabled
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         response = await call_next(request)
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -297,7 +299,7 @@ class MaxBodySizeMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.max_body_size = max_body_size
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > self.max_body_size:
             security_logger.warning(
@@ -320,7 +322,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.window = window_seconds
         self._hits: OrderedDict[str, list[float]] = OrderedDict()
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
@@ -374,9 +376,9 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
         self._store_initialized = False
 
     @property
-    def _store(self):
+    def _store(self) -> MemorySessionStore | SQLiteSessionStore:
         """Access the session store — set during _ensure_store."""
-        return self.__store
+        return self.__store  # type: ignore[no-any-return]
 
     def _ensure_store(self, request: Request) -> None:
         """Adopt the session store from app.state. Falls back to in-memory."""
@@ -459,7 +461,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
             )
         return response
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         path = request.url.path
         if not (path.startswith("/api/") or path.startswith("/v1/")):
             return await call_next(request)
@@ -501,7 +503,7 @@ class BearerTokenMiddleware(BaseHTTPMiddleware):
                 # Defense-in-depth: validate Origin header if present
                 origin = request.headers.get("origin")
                 if origin:
-                    allowed = getattr(request.app.state, "_allowed_origins", set())
+                    allowed: set[str] = getattr(request.app.state, "_allowed_origins", set())
                     if allowed and origin not in allowed:
                         security_logger.warning("Origin mismatch from %s: %s", client_ip, origin)
                         _emit_auth_audit(request, "auth.origin_mismatch", "warning", client_ip, path)
@@ -614,7 +616,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
         app.state.injection_detector = InjectionDetector(_inj_cfg)
 
     @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
+    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         security_logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
         return JSONResponse(status_code=500, content={"detail": "An internal error occurred"})
 
@@ -704,7 +706,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
         logger.info("OpenAI-compatible proxy enabled at /v1/")
 
     @app.post("/api/logout")
-    async def logout(request: Request):
+    async def logout(request: Request) -> JSONResponse:
         cookie_token = request.cookies.get("anteroom_session", "")
         if cookie_token:
             sid = session_id_from_token(cookie_token)
@@ -720,7 +722,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
     secure_cookies = config.app.tls
 
     @app.get("/")
-    async def index():
+    async def index() -> Any:
         """Serve index.html and set auth token via HttpOnly cookie + CSRF cookie."""
         import re
 

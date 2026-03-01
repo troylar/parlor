@@ -33,7 +33,9 @@ def _validate_uuid(value: str) -> str:
 
 
 @router.get("/events")
-async def event_stream(request: Request, db: str = "personal", conversation_id: str | None = None, client_id: str = ""):
+async def event_stream(
+    request: Request, db: str = "personal", conversation_id: str | None = None, client_id: str = ""
+) -> Any:
     """Long-lived SSE connection for real-time updates.
 
     Subscribes to:
@@ -48,7 +50,7 @@ async def event_stream(request: Request, db: str = "personal", conversation_id: 
 
     if not hasattr(request.app.state, "event_bus"):
 
-        async def empty():
+        async def empty() -> Any:
             yield {"event": "error", "data": json.dumps({"message": "Event bus not available"})}
 
         return EventSourceResponse(empty())
@@ -63,7 +65,7 @@ async def event_stream(request: Request, db: str = "personal", conversation_id: 
         conv_channel = f"conversation:{conversation_id}"
         conv_queue = event_bus.subscribe(conv_channel)
 
-    async def generate():
+    async def generate() -> Any:
         try:
             while True:
                 if await request.is_disconnected():

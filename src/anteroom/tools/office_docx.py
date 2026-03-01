@@ -252,7 +252,7 @@ async def handle(action: str, path: str, **kwargs: Any) -> dict[str, Any]:
     handler = _lib_dispatch.get(action)
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
-    return handler(resolved, path, working_dir=working_dir, **kwargs)
+    return dict(handler(resolved, path, working_dir=working_dir, **kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +291,7 @@ async def _dispatch_com(
     if handler is None:
         return {"error": f"Unknown action: {action}. Available: {', '.join(_ALL_ACTIONS)}"}
     try:
-        return await manager.run_com(handler, manager, resolved, display_path, working_dir=working_dir, **kwargs)
+        return dict(await manager.run_com(handler, manager, resolved, display_path, working_dir=working_dir, **kwargs))
     except Exception as exc:
         return {"error": f"COM {action} failed on {display_path}: {type(exc).__name__}: {exc}"}
 
@@ -649,7 +649,7 @@ def _track_changes_com(manager: Any, resolved: str, display_path: str, **kwargs:
         op = kwargs.get("operation", "list")
 
         if op == "list":
-            revisions: list[dict[str, str]] = []
+            revisions: list[dict[str, Any]] = []
             for i in range(1, doc.Revisions.Count + 1):
                 rev = doc.Revisions(i)
                 revisions.append(
@@ -699,7 +699,7 @@ def _comments_com(manager: Any, resolved: str, display_path: str, **kwargs: Any)
         op = kwargs.get("operation", "read")
 
         if op == "read":
-            comments: list[dict[str, str]] = []
+            comments: list[dict[str, Any]] = []
             for i in range(1, doc.Comments.Count + 1):
                 c = doc.Comments(i)
                 comments.append(
@@ -823,22 +823,22 @@ def _headers_footers_lib(resolved: str, display_path: str, **kwargs: Any) -> dic
         }
 
     if op == "set":
-        header_text = kwargs.get("header_text")
-        footer_text = kwargs.get("footer_text")
+        new_header_text = kwargs.get("header_text")
+        new_footer_text = kwargs.get("footer_text")
 
-        if header_text is not None:
+        if new_header_text is not None:
             section.header.is_linked_to_previous = False
             if section.header.paragraphs:
-                section.header.paragraphs[0].text = header_text
+                section.header.paragraphs[0].text = new_header_text
             else:
-                section.header.add_paragraph(header_text)
+                section.header.add_paragraph(new_header_text)
 
-        if footer_text is not None:
+        if new_footer_text is not None:
             section.footer.is_linked_to_previous = False
             if section.footer.paragraphs:
-                section.footer.paragraphs[0].text = footer_text
+                section.footer.paragraphs[0].text = new_footer_text
             else:
-                section.footer.add_paragraph(footer_text)
+                section.footer.add_paragraph(new_footer_text)
 
         doc.save(resolved)
         return {
@@ -1269,14 +1269,14 @@ def _sections_com(manager: Any, resolved: str, display_path: str, **kwargs: Any)
         if op == "add":
             start_type = kwargs.get("start_type", "new_page")
             # Map to COM constants
-            type_map = {
+            com_type_map: dict[str, int] = {
                 "continuous": 0,
                 "new_column": 1,
                 "new_page": 2,
                 "even_page": 3,
                 "odd_page": 4,
             }
-            xl_type = type_map.get(start_type, 2)
+            xl_type = com_type_map.get(start_type, 2)
             rng = doc.Content
             rng.Start = rng.End
             rng.InsertBreak(Type=xl_type)
@@ -1330,13 +1330,13 @@ def _sections_lib(resolved: str, display_path: str, **kwargs: Any) -> dict[str, 
         from docx.enum.section import WD_SECTION_START
 
         start_type = kwargs.get("start_type", "new_page")
-        type_map = {
+        section_type_map: dict[str, Any] = {
             "continuous": WD_SECTION_START.CONTINUOUS,
             "new_page": WD_SECTION_START.NEW_PAGE,
             "even_page": WD_SECTION_START.EVEN_PAGE,
             "odd_page": WD_SECTION_START.ODD_PAGE,
         }
-        section_start = type_map.get(start_type, WD_SECTION_START.NEW_PAGE)
+        section_start = section_type_map.get(start_type, WD_SECTION_START.NEW_PAGE)
         doc.add_section(section_start)
         doc.save(resolved)
         return {

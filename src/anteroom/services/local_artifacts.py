@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import logging
 import re
-import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 from .artifact_storage import upsert_artifact
 from .artifacts import ArtifactSource, ArtifactType, build_fqn
@@ -113,7 +115,7 @@ def discover_local_artifacts(
 
 
 def load_local_artifacts(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     data_dir: Path,
     *,
     project_dir: Path | None = None,

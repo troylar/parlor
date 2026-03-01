@@ -242,8 +242,8 @@ class LocalEmbeddingService:
         truncated = text[: MAX_INPUT_TOKENS * 4]
         try:
             model = self._ensure_model()
-            embeddings = await asyncio.to_thread(lambda: list(model.embed([truncated])))
-            return embeddings[0].tolist()
+            embeddings: list[Any] = await asyncio.to_thread(lambda: list(model.embed([truncated])))
+            return list(embeddings[0].tolist())
         except EmbeddingPermanentError:
             raise
         except MemoryError as e:
@@ -264,9 +264,14 @@ class LocalEmbeddingService:
             try:
                 model = self._ensure_model()
                 indices, clean_texts = zip(*non_empty)
-                embeddings = await asyncio.to_thread(lambda ct=list(clean_texts): list(model.embed(ct)))
-                for idx, emb in zip(indices, embeddings):
-                    batch_results[idx] = emb.tolist()
+                clean_list: list[str] = list(clean_texts)
+
+                def _embed_batch(ct: list[str] = clean_list) -> list[Any]:
+                    return list(model.embed(ct))
+
+                raw_embs: list[Any] = await asyncio.to_thread(_embed_batch)
+                for idx, emb in zip(indices, raw_embs):
+                    batch_results[idx] = list(emb.tolist())
             except EmbeddingPermanentError:
                 raise
             except MemoryError as e:
@@ -317,10 +322,10 @@ def create_embedding_service(config: AppConfig) -> EmbeddingService | LocalEmbed
     if not api_key and not api_key_command:
         return None
 
-    provider: TokenProvider | None = None
+    token_provider: TokenProvider | None = None
     if api_key_command:
-        provider = TokenProvider(api_key_command)
-        api_key = provider.get_token()
+        token_provider = TokenProvider(api_key_command)
+        api_key = token_provider.get_token()
 
     kwargs: dict[str, Any] = {
         "base_url": base_url,
@@ -336,6 +341,6 @@ def create_embedding_service(config: AppConfig) -> EmbeddingService | LocalEmbed
         model=config.embeddings.model,
         dimensions=dims,
     )
-    if provider:
-        service._set_token_provider(provider)
+    if token_provider:
+        service._set_token_provider(token_provider)
     return service

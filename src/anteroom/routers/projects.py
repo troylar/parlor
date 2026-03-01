@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..services import storage
@@ -34,7 +34,7 @@ def _validate_uuid(value: str) -> str:
 
 
 @router.get("/projects")
-async def list_projects(request: Request):
+async def list_projects(request: Request) -> Any:
     db = request.app.state.db
     return storage.list_projects(db)
 
@@ -47,7 +47,7 @@ def _get_identity(request: Request) -> tuple[str | None, str | None]:
 
 
 @router.post("/projects", status_code=201)
-async def create_project(body: ProjectCreate, request: Request):
+async def create_project(body: ProjectCreate, request: Request) -> Any:
     db = request.app.state.db
     uid, uname = _get_identity(request)
     return storage.create_project(
@@ -61,7 +61,7 @@ async def create_project(body: ProjectCreate, request: Request):
 
 
 @router.get("/projects/{project_id}")
-async def get_project(project_id: str, request: Request):
+async def get_project(project_id: str, request: Request) -> Any:
     _validate_uuid(project_id)
     db = request.app.state.db
     proj = storage.get_project(db, project_id)
@@ -71,7 +71,7 @@ async def get_project(project_id: str, request: Request):
 
 
 @router.patch("/projects/{project_id}")
-async def update_project(project_id: str, body: ProjectUpdate, request: Request):
+async def update_project(project_id: str, body: ProjectUpdate, request: Request) -> Any:
     _validate_uuid(project_id)
     db = request.app.state.db
     kwargs = {}
@@ -88,10 +88,10 @@ async def update_project(project_id: str, body: ProjectUpdate, request: Request)
 
 
 @router.delete("/projects/{project_id}", status_code=204)
-async def delete_project(project_id: str, request: Request):
+async def delete_project(project_id: str, request: Request) -> None:
     _validate_uuid(project_id)
     db = request.app.state.db
     deleted = storage.delete_project(db, project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
-    return Response(status_code=204)
+    return None

@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import logging
 import re
-import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,7 +35,7 @@ class ImportResult:
 
 
 def import_skills(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     skills_dir: Path,
 ) -> ImportResult:
     """Import YAML skill files from a directory into the artifact system.
@@ -82,7 +85,7 @@ def import_skills(
 
 
 def import_instructions(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     instructions_path: Path,
 ) -> ImportResult:
     """Import an ANTEROOM.md file by splitting sections into instruction artifacts.
@@ -131,7 +134,7 @@ def import_instructions(
 
 
 def import_all(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     data_dir: Path,
     *,
     project_dir: Path | None = None,

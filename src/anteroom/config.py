@@ -7,6 +7,7 @@ import os
 import re
 import stat
 from dataclasses import dataclass, field
+from dataclasses import field as _dc_field
 from pathlib import Path
 from typing import Any
 
@@ -730,7 +731,7 @@ class ComplianceRule:
     must_match: str = ""  # regex pattern
     must_not_be_empty: bool = False
     must_contain: Any = _UNSET
-    _compiled_pattern: Any = field(default=None, repr=False, compare=False)
+    _compiled_pattern: Any = _dc_field(default=None, repr=False, compare=False)
 
 
 @dataclass

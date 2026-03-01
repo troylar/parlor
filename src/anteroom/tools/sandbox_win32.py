@@ -84,7 +84,7 @@ def create_job_object(config: OsSandboxConfig) -> int | None:
     try:
         handle = _kernel32.CreateJobObjectW(None, None)
         if not handle:
-            logger.warning("CreateJobObjectW failed: %s", ctypes.get_last_error())
+            logger.warning("CreateJobObjectW failed: %s", ctypes.get_last_error())  # type: ignore[attr-defined]
             return None
 
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
@@ -118,7 +118,7 @@ def create_job_object(config: OsSandboxConfig) -> int | None:
             ctypes.sizeof(info),
         )
         if not success:
-            logger.warning("SetInformationJobObject failed: %s", ctypes.get_last_error())
+            logger.warning("SetInformationJobObject failed: %s", ctypes.get_last_error())  # type: ignore[attr-defined]
             _kernel32.CloseHandle(handle)
             return None
 
@@ -128,7 +128,7 @@ def create_job_object(config: OsSandboxConfig) -> int | None:
             config.max_processes,
             f"{config.cpu_time_limit}s" if config.cpu_time_limit else "unlimited",
         )
-        return handle
+        return int(handle)
 
     except OSError:
         logger.warning("Job Object creation failed", exc_info=True)
@@ -146,13 +146,13 @@ def assign_process(job_handle: int, pid: int) -> bool:
     try:
         proc_handle = _kernel32.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, pid)
         if not proc_handle:
-            logger.warning("OpenProcess(%d) failed: %s", pid, ctypes.get_last_error())
+            logger.warning("OpenProcess(%d) failed: %s", pid, ctypes.get_last_error())  # type: ignore[attr-defined]
             return False
 
         try:
             success = _kernel32.AssignProcessToJobObject(job_handle, proc_handle)
             if not success:
-                logger.warning("AssignProcessToJobObject failed: %s", ctypes.get_last_error())
+                logger.warning("AssignProcessToJobObject failed: %s", ctypes.get_last_error())  # type: ignore[attr-defined]
                 return False
             return True
         finally:

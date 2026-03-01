@@ -2170,7 +2170,7 @@ class TestSamplingParameters:
 
         async def _empty_gen(self):
             return
-            yield  # noqa: unreachable - makes this an async generator
+            yield  # makes this an async generator
 
         mock_stream.__aiter__ = _empty_gen
         mock_stream.close = AsyncMock()

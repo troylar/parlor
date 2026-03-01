@@ -11,14 +11,19 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import filetype
 
 from ..tools.path_utils import safe_resolve_pathlib
 from .slug import generate_slug
 
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
+
 logger = logging.getLogger(__name__)
+
+_UNSET: Any = object()  # Sentinel for "not provided" optional params
 
 
 VALID_CONVERSATION_TYPES = {"chat", "note", "document"}
@@ -74,7 +79,7 @@ def _uuid() -> str:
 
 
 def create_project(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     name: str,
     instructions: str = "",
     model: str | None = None,
@@ -101,24 +106,24 @@ def create_project(
     }
 
 
-def get_project(db: sqlite3.Connection, project_id: str) -> dict[str, Any] | None:
+def get_project(db: ThreadSafeConnection, project_id: str) -> dict[str, Any] | None:
     row = db.execute_fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
     if not row:
         return None
     return dict(row)
 
 
-def list_projects(db: sqlite3.Connection) -> list[dict[str, Any]]:
+def list_projects(db: ThreadSafeConnection) -> list[dict[str, Any]]:
     rows = db.execute_fetchall("SELECT * FROM projects ORDER BY updated_at DESC")
     return [dict(r) for r in rows]
 
 
 def update_project(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     project_id: str,
     name: str | None = None,
     instructions: str | None = None,
-    model: str | None = ...,
+    model: str | None = _UNSET,
 ) -> dict[str, Any] | None:
     proj = get_project(db, project_id)
     if not proj:
@@ -128,7 +133,7 @@ def update_project(
         cols["name"] = name
     if instructions is not None:
         cols["instructions"] = instructions
-    if model is not ...:
+    if model is not _UNSET:
         cols["model"] = model or None
     set_clause, params = _build_set_clause(cols)
     params.append(project_id)
@@ -137,14 +142,14 @@ def update_project(
     return get_project(db, project_id)
 
 
-def get_project_by_name(db: sqlite3.Connection, name: str) -> dict[str, Any] | None:
+def get_project_by_name(db: ThreadSafeConnection, name: str) -> dict[str, Any] | None:
     row = db.execute_fetchone("SELECT * FROM projects WHERE LOWER(name) = LOWER(?)", (name,))
     if not row:
         return None
     return dict(row)
 
 
-def delete_project(db: sqlite3.Connection, project_id: str) -> bool:
+def delete_project(db: ThreadSafeConnection, project_id: str) -> bool:
     proj = get_project(db, project_id)
     if not proj:
         return False
@@ -154,7 +159,7 @@ def delete_project(db: sqlite3.Connection, project_id: str) -> bool:
 
 
 def update_conversation_project(
-    db: sqlite3.Connection, conversation_id: str, project_id: str | None
+    db: ThreadSafeConnection, conversation_id: str, project_id: str | None
 ) -> dict[str, Any] | None:
     now = _now()
     db.execute(
@@ -166,7 +171,7 @@ def update_conversation_project(
 
 
 def update_conversation_space(
-    db: sqlite3.Connection, conversation_id: str, space_id: str | None
+    db: ThreadSafeConnection, conversation_id: str, space_id: str | None
 ) -> dict[str, Any] | None:
     now = _now()
     db.execute(
@@ -177,7 +182,7 @@ def update_conversation_space(
     return get_conversation(db, conversation_id)
 
 
-def count_project_conversations(db: sqlite3.Connection, project_id: str) -> int:
+def count_project_conversations(db: ThreadSafeConnection, project_id: str) -> int:
     row = db.execute_fetchone(
         "SELECT COUNT(*) AS cnt FROM conversations WHERE project_id = ?",
         (project_id,),
@@ -189,7 +194,7 @@ def count_project_conversations(db: sqlite3.Connection, project_id: str) -> int:
 
 
 def create_folder(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     name: str,
     parent_id: str | None = None,
     project_id: str | None = None,
@@ -225,7 +230,7 @@ def create_folder(
 
 
 def list_folders(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     project_id: str | None = None,
 ) -> list[dict[str, Any]]:
     if project_id:
@@ -244,10 +249,10 @@ def list_folders(
 
 
 def update_folder(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     folder_id: str,
     name: str | None = None,
-    parent_id: str | None = ...,
+    parent_id: str | None = _UNSET,
     collapsed: bool | None = None,
     position: int | None = None,
 ) -> dict[str, Any] | None:
@@ -257,7 +262,7 @@ def update_folder(
     cols: dict[str, Any] = {"updated_at": _now()}
     if name is not None:
         cols["name"] = name
-    if parent_id is not ...:
+    if parent_id is not _UNSET:
         cols["parent_id"] = parent_id
     if collapsed is not None:
         cols["collapsed"] = 1 if collapsed else 0
@@ -275,7 +280,7 @@ def update_folder(
     return d
 
 
-def _get_descendant_folder_ids(db: sqlite3.Connection, folder_id: str) -> list[str]:
+def _get_descendant_folder_ids(db: ThreadSafeConnection, folder_id: str) -> list[str]:
     """Recursively collect all descendant folder IDs."""
     ids = []
     children = db.execute_fetchall("SELECT id FROM folders WHERE parent_id = ?", (folder_id,))
@@ -286,7 +291,7 @@ def _get_descendant_folder_ids(db: sqlite3.Connection, folder_id: str) -> list[s
     return ids
 
 
-def delete_folder(db: sqlite3.Connection, folder_id: str) -> bool:
+def delete_folder(db: ThreadSafeConnection, folder_id: str) -> bool:
     row = db.execute_fetchone("SELECT * FROM folders WHERE id = ?", (folder_id,))
     if not row:
         return False
@@ -299,7 +304,7 @@ def delete_folder(db: sqlite3.Connection, folder_id: str) -> bool:
 
 
 def move_conversation_to_folder(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     folder_id: str | None,
 ) -> None:
@@ -315,7 +320,7 @@ def move_conversation_to_folder(
 
 
 def create_tag(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     name: str,
     color: str = "#3b82f6",
     user_id: str | None = None,
@@ -338,13 +343,13 @@ def create_tag(
     }
 
 
-def list_tags(db: sqlite3.Connection) -> list[dict[str, Any]]:
+def list_tags(db: ThreadSafeConnection) -> list[dict[str, Any]]:
     rows = db.execute_fetchall("SELECT * FROM tags ORDER BY name")
     return [dict(r) for r in rows]
 
 
 def update_tag(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     tag_id: str,
     name: str | None = None,
     color: str | None = None,
@@ -367,7 +372,7 @@ def update_tag(
     return dict(updated) if updated else None
 
 
-def delete_tag(db: sqlite3.Connection, tag_id: str) -> bool:
+def delete_tag(db: ThreadSafeConnection, tag_id: str) -> bool:
     row = db.execute_fetchone("SELECT * FROM tags WHERE id = ?", (tag_id,))
     if not row:
         return False
@@ -376,7 +381,7 @@ def delete_tag(db: sqlite3.Connection, tag_id: str) -> bool:
     return True
 
 
-def add_tag_to_conversation(db: sqlite3.Connection, conversation_id: str, tag_id: str) -> bool:
+def add_tag_to_conversation(db: ThreadSafeConnection, conversation_id: str, tag_id: str) -> bool:
     try:
         db.execute(
             "INSERT OR IGNORE INTO conversation_tags (conversation_id, tag_id) VALUES (?, ?)",
@@ -388,7 +393,7 @@ def add_tag_to_conversation(db: sqlite3.Connection, conversation_id: str, tag_id
         return False
 
 
-def remove_tag_from_conversation(db: sqlite3.Connection, conversation_id: str, tag_id: str) -> bool:
+def remove_tag_from_conversation(db: ThreadSafeConnection, conversation_id: str, tag_id: str) -> bool:
     db.execute(
         "DELETE FROM conversation_tags WHERE conversation_id = ? AND tag_id = ?",
         (conversation_id, tag_id),
@@ -397,7 +402,7 @@ def remove_tag_from_conversation(db: sqlite3.Connection, conversation_id: str, t
     return True
 
 
-def get_conversation_tags(db: sqlite3.Connection, conversation_id: str) -> list[dict[str, Any]]:
+def get_conversation_tags(db: ThreadSafeConnection, conversation_id: str) -> list[dict[str, Any]]:
     rows = db.execute_fetchall(
         "SELECT t.* FROM tags t JOIN conversation_tags ct ON ct.tag_id = t.id"
         " WHERE ct.conversation_id = ? ORDER BY t.name",
@@ -410,7 +415,7 @@ def get_conversation_tags(db: sqlite3.Connection, conversation_id: str) -> list[
 
 
 def create_conversation(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     title: str = "New Conversation",
     project_id: str | None = None,
     user_id: str | None = None,
@@ -448,7 +453,7 @@ def create_conversation(
     }
 
 
-def get_conversation(db: sqlite3.Connection, conversation_id: str) -> dict[str, Any] | None:
+def get_conversation(db: ThreadSafeConnection, conversation_id: str) -> dict[str, Any] | None:
     row = db.execute_fetchone("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
     if not row:
         # Fallback: try slug lookup
@@ -475,7 +480,7 @@ DEFAULT_PAGE_LIMIT = 100
 
 
 def list_conversations(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     search: str | None = None,
     project_id: str | None = None,
     limit: int = DEFAULT_PAGE_LIMIT,
@@ -532,7 +537,7 @@ def list_conversations(
     return results
 
 
-def update_conversation_title(db: sqlite3.Connection, conversation_id: str, title: str) -> dict[str, Any] | None:
+def update_conversation_title(db: ThreadSafeConnection, conversation_id: str, title: str) -> dict[str, Any] | None:
     now = _now()
     db.execute(
         "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
@@ -542,7 +547,7 @@ def update_conversation_title(db: sqlite3.Connection, conversation_id: str, titl
     return get_conversation(db, conversation_id)
 
 
-def list_conversation_slugs(db: sqlite3.Connection, limit: int = 50) -> list[tuple[str, str]]:
+def list_conversation_slugs(db: ThreadSafeConnection, limit: int = 50) -> list[tuple[str, str]]:
     """Return (slug, title) pairs for conversations that have slugs, ordered by most recent."""
     rows = db.execute_fetchall(
         "SELECT slug, title FROM conversations WHERE slug IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
@@ -551,7 +556,7 @@ def list_conversation_slugs(db: sqlite3.Connection, limit: int = 50) -> list[tup
     return [(row["slug"], row["title"] or "") for row in rows]
 
 
-def update_conversation_slug(db: sqlite3.Connection, conversation_id: str, slug: str) -> dict[str, Any] | None:
+def update_conversation_slug(db: ThreadSafeConnection, conversation_id: str, slug: str) -> dict[str, Any] | None:
     """Update the slug of a conversation. Raises sqlite3.IntegrityError on duplicate."""
     now = _now()
     db.execute(
@@ -563,7 +568,7 @@ def update_conversation_slug(db: sqlite3.Connection, conversation_id: str, slug:
 
 
 def update_conversation_type(
-    db: sqlite3.Connection, conversation_id: str, conversation_type: str
+    db: ThreadSafeConnection, conversation_id: str, conversation_type: str
 ) -> dict[str, Any] | None:
     if conversation_type not in VALID_CONVERSATION_TYPES:
         raise ValueError(f"Invalid conversation type: {conversation_type!r}")
@@ -576,7 +581,9 @@ def update_conversation_type(
     return get_conversation(db, conversation_id)
 
 
-def update_conversation_model(db: sqlite3.Connection, conversation_id: str, model: str | None) -> dict[str, Any] | None:
+def update_conversation_model(
+    db: ThreadSafeConnection, conversation_id: str, model: str | None
+) -> dict[str, Any] | None:
     now = _now()
     db.execute(
         "UPDATE conversations SET model = ?, updated_at = ? WHERE id = ?",
@@ -587,7 +594,7 @@ def update_conversation_model(db: sqlite3.Connection, conversation_id: str, mode
 
 
 def fork_conversation(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     up_to_position: int,
 ) -> dict[str, Any]:
@@ -680,8 +687,8 @@ def fork_conversation(
 
 
 def copy_conversation_to_db(
-    source_db: sqlite3.Connection,
-    target_db: sqlite3.Connection,
+    source_db: ThreadSafeConnection,
+    target_db: ThreadSafeConnection,
     conversation_id: str,
 ) -> dict[str, Any] | None:
     """Copy a conversation with all messages, attachments, and tool calls to another database."""
@@ -750,7 +757,7 @@ def copy_conversation_to_db(
     return get_conversation(target_db, new_cid)
 
 
-def delete_empty_conversations(db: sqlite3.Connection, data_dir: Path, exclude_ids: set[str] | None = None) -> int:
+def delete_empty_conversations(db: ThreadSafeConnection, data_dir: Path, exclude_ids: set[str] | None = None) -> int:
     """Delete conversations that have no messages. Returns count deleted."""
     rows = db.execute_fetchall(
         "SELECT id FROM conversations WHERE id NOT IN (SELECT DISTINCT conversation_id FROM messages)"
@@ -768,7 +775,7 @@ def delete_empty_conversations(db: sqlite3.Connection, data_dir: Path, exclude_i
     return count
 
 
-def delete_conversation(db: sqlite3.Connection, conversation_id: str, data_dir: Path) -> bool:
+def delete_conversation(db: ThreadSafeConnection, conversation_id: str, data_dir: Path) -> bool:
     conv = get_conversation(db, conversation_id)
     if not conv:
         return False
@@ -784,7 +791,7 @@ def delete_conversation(db: sqlite3.Connection, conversation_id: str, data_dir: 
 
 
 def create_message(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     role: str,
     content: str,
@@ -843,7 +850,7 @@ def create_message(
 
 
 def update_message_usage(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     message_id: str,
     prompt_tokens: int,
     completion_tokens: int,
@@ -858,7 +865,7 @@ def update_message_usage(
 
 
 def get_usage_stats(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     since: str | None = None,
     conversation_id: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -891,7 +898,7 @@ def get_usage_stats(
     return [dict(row) for row in rows]
 
 
-def get_conversation_token_total(db: sqlite3.Connection, conversation_id: str) -> int:
+def get_conversation_token_total(db: ThreadSafeConnection, conversation_id: str) -> int:
     """Get total tokens consumed in a conversation."""
     row = db.execute_fetchone(
         "SELECT COALESCE(SUM(total_tokens), 0) FROM messages WHERE conversation_id = ? AND total_tokens IS NOT NULL",
@@ -900,7 +907,7 @@ def get_conversation_token_total(db: sqlite3.Connection, conversation_id: str) -
     return int(row[0]) if row else 0
 
 
-def get_daily_token_total(db: sqlite3.Connection) -> int:
+def get_daily_token_total(db: ThreadSafeConnection) -> int:
     """Get total tokens consumed today (UTC calendar day).
 
     Uses date('now') which returns UTC midnight as the day boundary.
@@ -912,7 +919,7 @@ def get_daily_token_total(db: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
-def list_messages(db: sqlite3.Connection, conversation_id: str) -> list[dict[str, Any]]:
+def list_messages(db: ThreadSafeConnection, conversation_id: str) -> list[dict[str, Any]]:
     rows = db.execute_fetchall(
         "SELECT * FROM messages WHERE conversation_id = ? ORDER BY position",
         (conversation_id,),
@@ -927,7 +934,7 @@ def list_messages(db: sqlite3.Connection, conversation_id: str) -> list[dict[str
 
 
 def update_message_content(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     message_id: str,
     new_content: str,
@@ -947,7 +954,7 @@ def update_message_content(
 
 
 def delete_message(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     message_id: str,
 ) -> bool:
@@ -966,7 +973,7 @@ def delete_message(
 
 
 def replace_document_content(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     content: str,
     user_id: str | None = None,
@@ -999,7 +1006,7 @@ def replace_document_content(
 
 
 def delete_messages_after_position(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     position: int,
     data_dir: Path | None = None,
@@ -1199,7 +1206,7 @@ def _validate_upload(mime_type: str, data: bytes, filename: str) -> None:
 
 
 def save_attachment(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     message_id: str,
     conversation_id: str,
     filename: str,
@@ -1235,14 +1242,14 @@ def save_attachment(
     }
 
 
-def get_attachment(db: sqlite3.Connection, attachment_id: str) -> dict[str, Any] | None:
+def get_attachment(db: ThreadSafeConnection, attachment_id: str) -> dict[str, Any] | None:
     row = db.execute_fetchone("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
     if not row:
         return None
     return dict(row)
 
 
-def list_attachments(db: sqlite3.Connection, message_id: str) -> list[dict[str, Any]]:
+def list_attachments(db: ThreadSafeConnection, message_id: str) -> list[dict[str, Any]]:
     rows = db.execute_fetchall("SELECT * FROM attachments WHERE message_id = ?", (message_id,))
     return [dict(r) for r in rows]
 
@@ -1251,7 +1258,7 @@ def list_attachments(db: sqlite3.Connection, message_id: str) -> list[dict[str, 
 
 
 def register_user(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     user_id: str,
     display_name: str,
     public_key: str,
@@ -1276,7 +1283,7 @@ def register_user(
 
 
 def create_tool_call(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     message_id: str,
     tool_name: str,
     server_name: str,
@@ -1306,7 +1313,7 @@ def create_tool_call(
 
 
 def update_tool_call(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     tool_call_id: str,
     output_data: Any,
     status: str,
@@ -1318,7 +1325,7 @@ def update_tool_call(
     db.commit()
 
 
-def list_tool_calls(db: sqlite3.Connection, message_id: str) -> list[dict[str, Any]]:
+def list_tool_calls(db: ThreadSafeConnection, message_id: str) -> list[dict[str, Any]]:
     rows = db.execute_fetchall("SELECT * FROM tool_calls WHERE message_id = ?", (message_id,))
     result = []
     for r in rows:
@@ -1334,7 +1341,7 @@ def list_tool_calls(db: sqlite3.Connection, message_id: str) -> list[dict[str, A
 
 
 def create_canvas(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     conversation_id: str,
     title: str = "Untitled",
     content: str = "",
@@ -1365,14 +1372,14 @@ def create_canvas(
     }
 
 
-def get_canvas(db: sqlite3.Connection, canvas_id: str) -> dict[str, Any] | None:
+def get_canvas(db: ThreadSafeConnection, canvas_id: str) -> dict[str, Any] | None:
     row = db.execute_fetchone("SELECT * FROM canvases WHERE id = ?", (canvas_id,))
     if not row:
         return None
     return dict(row)
 
 
-def get_canvas_for_conversation(db: sqlite3.Connection, conversation_id: str) -> dict[str, Any] | None:
+def get_canvas_for_conversation(db: ThreadSafeConnection, conversation_id: str) -> dict[str, Any] | None:
     row = db.execute_fetchone(
         "SELECT * FROM canvases WHERE conversation_id = ? ORDER BY updated_at DESC LIMIT 1",
         (conversation_id,),
@@ -1383,7 +1390,7 @@ def get_canvas_for_conversation(db: sqlite3.Connection, conversation_id: str) ->
 
 
 def update_canvas(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     canvas_id: str,
     content: str | None = None,
     title: str | None = None,
@@ -1413,7 +1420,7 @@ def update_canvas(
     return get_canvas(db, canvas_id)
 
 
-def delete_canvas(db: sqlite3.Connection, canvas_id: str) -> bool:
+def delete_canvas(db: ThreadSafeConnection, canvas_id: str) -> bool:
     canvas = get_canvas(db, canvas_id)
     if not canvas:
         return False
@@ -1442,7 +1449,7 @@ def _validate_embedding(embedding: list[float]) -> bytes:
 
 
 def store_embedding(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     message_id: str,
     conversation_id: str,
     embedding: list[float],
@@ -1473,7 +1480,7 @@ def store_embedding(
 
 
 def search_similar_messages(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     embedding: list[float],
     limit: int = 20,
     conversation_id: str | None = None,
@@ -1529,7 +1536,7 @@ def search_similar_messages(
     ]
 
 
-def get_unembedded_messages(db: sqlite3.Connection, limit: int = 100) -> list[dict[str, Any]]:
+def get_unembedded_messages(db: ThreadSafeConnection, limit: int = 100) -> list[dict[str, Any]]:
     """Get messages that don't have embeddings yet."""
     rows = db.execute_fetchall(
         """
@@ -1549,7 +1556,7 @@ _VALID_EMBEDDING_STATUSES = frozenset({"skipped", "failed", "embedded"})
 
 
 def mark_embedding_skipped(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     message_id: str,
     conversation_id: str,
     content_hash: str,
@@ -1571,7 +1578,7 @@ def mark_embedding_skipped(
     db.commit()
 
 
-def delete_embeddings_for_conversation(db: sqlite3.Connection, conversation_id: str) -> None:
+def delete_embeddings_for_conversation(db: ThreadSafeConnection, conversation_id: str) -> None:
     """Delete all embeddings for a conversation."""
     from ..db import has_vec_support
 
@@ -1586,7 +1593,7 @@ def delete_embeddings_for_conversation(db: sqlite3.Connection, conversation_id: 
         conn.execute("DELETE FROM message_embeddings WHERE conversation_id = ?", (conversation_id,))
 
 
-def get_embedding_stats(db: sqlite3.Connection) -> dict[str, Any]:
+def get_embedding_stats(db: ThreadSafeConnection) -> dict[str, Any]:
     """Get embedding statistics."""
     total_row = db.execute_fetchone("SELECT COUNT(*) FROM messages WHERE role IN ('user', 'assistant')")
     total_messages = total_row[0] if total_row else 0
@@ -1648,7 +1655,7 @@ def chunk_text(text: str, max_size: int = 1000, overlap: int = 200) -> list[str]
 
 
 def create_source(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     source_type: str,
     title: str,
     content: str | None = None,
@@ -1719,7 +1726,7 @@ def create_source(
     return source
 
 
-def get_source(db: sqlite3.Connection, source_id: str) -> dict[str, Any] | None:
+def get_source(db: ThreadSafeConnection, source_id: str) -> dict[str, Any] | None:
     row = db.execute_fetchone("SELECT * FROM sources WHERE id = ?", (source_id,))
     if not row:
         return None
@@ -1730,7 +1737,7 @@ def get_source(db: sqlite3.Connection, source_id: str) -> dict[str, Any] | None:
 
 
 def list_sources(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     search: str | None = None,
     source_type: str | None = None,
     tag_id: str | None = None,
@@ -1788,7 +1795,7 @@ def list_sources(
 
 
 def update_source(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     source_id: str,
     title: str | None = None,
     content: str | None = None,
@@ -1823,11 +1830,11 @@ def update_source(
     return get_source(db, source_id)
 
 
-def delete_source(db: sqlite3.Connection, source_id: str, data_dir: Path | None = None) -> bool:
-    source = db.execute_fetchone("SELECT * FROM sources WHERE id = ?", (source_id,))
-    if not source:
+def delete_source(db: ThreadSafeConnection, source_id: str, data_dir: Path | None = None) -> bool:
+    source_row = db.execute_fetchone("SELECT * FROM sources WHERE id = ?", (source_id,))
+    if not source_row:
         return False
-    source = dict(source)
+    source = dict(source_row)
 
     # Remove file from disk if it exists
     if data_dir and source.get("storage_path"):
@@ -1848,7 +1855,7 @@ def delete_source(db: sqlite3.Connection, source_id: str, data_dir: Path | None 
 
 
 def save_source_file(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     title: str,
     filename: str,
     mime_type: str,
@@ -1944,7 +1951,7 @@ def save_source_file(
 # --- Source Chunks ---
 
 
-def create_source_chunks(db: sqlite3.Connection, source_id: str, chunks: list[str]) -> list[dict[str, Any]]:
+def create_source_chunks(db: ThreadSafeConnection, source_id: str, chunks: list[str]) -> list[dict[str, Any]]:
     """Bulk insert source chunks with content hashing."""
     import hashlib
 
@@ -1972,7 +1979,7 @@ def create_source_chunks(db: sqlite3.Connection, source_id: str, chunks: list[st
     return result
 
 
-def list_source_chunks(db: sqlite3.Connection, source_id: str) -> list[dict[str, Any]]:
+def list_source_chunks(db: ThreadSafeConnection, source_id: str) -> list[dict[str, Any]]:
     rows = db.execute_fetchall(
         "SELECT * FROM source_chunks WHERE source_id = ? ORDER BY chunk_index",
         (source_id,),
@@ -1980,7 +1987,7 @@ def list_source_chunks(db: sqlite3.Connection, source_id: str) -> list[dict[str,
     return [dict(r) for r in rows]
 
 
-def get_unembedded_source_chunks(db: sqlite3.Connection, limit: int = 100) -> list[dict[str, Any]]:
+def get_unembedded_source_chunks(db: ThreadSafeConnection, limit: int = 100) -> list[dict[str, Any]]:
     """Get source chunks that don't have embeddings yet."""
     rows = db.execute_fetchall(
         """
@@ -1997,7 +2004,7 @@ def get_unembedded_source_chunks(db: sqlite3.Connection, limit: int = 100) -> li
 
 
 def mark_source_chunk_embedding_skipped(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     chunk_id: str,
     source_id: str,
     content_hash: str,
@@ -2019,7 +2026,7 @@ def mark_source_chunk_embedding_skipped(
 # --- Source Tags ---
 
 
-def get_source_tags(db: sqlite3.Connection, source_id: str) -> list[dict[str, Any]]:
+def get_source_tags(db: ThreadSafeConnection, source_id: str) -> list[dict[str, Any]]:
     rows = db.execute_fetchall(
         "SELECT t.* FROM tags t JOIN source_tags st ON st.tag_id = t.id WHERE st.source_id = ? ORDER BY t.name",
         (source_id,),
@@ -2027,7 +2034,7 @@ def get_source_tags(db: sqlite3.Connection, source_id: str) -> list[dict[str, An
     return [dict(r) for r in rows]
 
 
-def add_tag_to_source(db: sqlite3.Connection, source_id: str, tag_id: str) -> bool:
+def add_tag_to_source(db: ThreadSafeConnection, source_id: str, tag_id: str) -> bool:
     try:
         db.execute(
             "INSERT OR IGNORE INTO source_tags (source_id, tag_id) VALUES (?, ?)",
@@ -2039,7 +2046,7 @@ def add_tag_to_source(db: sqlite3.Connection, source_id: str, tag_id: str) -> bo
         return False
 
 
-def remove_tag_from_source(db: sqlite3.Connection, source_id: str, tag_id: str) -> bool:
+def remove_tag_from_source(db: ThreadSafeConnection, source_id: str, tag_id: str) -> bool:
     db.execute(
         "DELETE FROM source_tags WHERE source_id = ? AND tag_id = ?",
         (source_id, tag_id),
@@ -2052,7 +2059,7 @@ def remove_tag_from_source(db: sqlite3.Connection, source_id: str, tag_id: str) 
 
 
 def create_source_group(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     name: str,
     description: str = "",
     user_id: str | None = None,
@@ -2077,12 +2084,12 @@ def create_source_group(
     }
 
 
-def list_source_groups(db: sqlite3.Connection) -> list[dict[str, Any]]:
+def list_source_groups(db: ThreadSafeConnection) -> list[dict[str, Any]]:
     rows = db.execute_fetchall("SELECT * FROM source_groups ORDER BY name")
     return [dict(r) for r in rows]
 
 
-def get_source_group(db: sqlite3.Connection, group_id: str) -> dict[str, Any] | None:
+def get_source_group(db: ThreadSafeConnection, group_id: str) -> dict[str, Any] | None:
     row = db.execute_fetchone("SELECT * FROM source_groups WHERE id = ?", (group_id,))
     if not row:
         return None
@@ -2090,7 +2097,7 @@ def get_source_group(db: sqlite3.Connection, group_id: str) -> dict[str, Any] | 
 
 
 def update_source_group(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     group_id: str,
     name: str | None = None,
     description: str | None = None,
@@ -2110,7 +2117,7 @@ def update_source_group(
     return get_source_group(db, group_id)
 
 
-def delete_source_group(db: sqlite3.Connection, group_id: str) -> bool:
+def delete_source_group(db: ThreadSafeConnection, group_id: str) -> bool:
     group = get_source_group(db, group_id)
     if not group:
         return False
@@ -2119,7 +2126,7 @@ def delete_source_group(db: sqlite3.Connection, group_id: str) -> bool:
     return True
 
 
-def add_source_to_group(db: sqlite3.Connection, group_id: str, source_id: str) -> bool:
+def add_source_to_group(db: ThreadSafeConnection, group_id: str, source_id: str) -> bool:
     try:
         db.execute(
             "INSERT OR IGNORE INTO source_group_members (group_id, source_id) VALUES (?, ?)",
@@ -2131,7 +2138,7 @@ def add_source_to_group(db: sqlite3.Connection, group_id: str, source_id: str) -
         return False
 
 
-def remove_source_from_group(db: sqlite3.Connection, group_id: str, source_id: str) -> bool:
+def remove_source_from_group(db: ThreadSafeConnection, group_id: str, source_id: str) -> bool:
     db.execute(
         "DELETE FROM source_group_members WHERE group_id = ? AND source_id = ?",
         (group_id, source_id),
@@ -2144,7 +2151,7 @@ def remove_source_from_group(db: sqlite3.Connection, group_id: str, source_id: s
 
 
 def link_source_to_project(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     project_id: str,
     source_id: str | None = None,
     group_id: str | None = None,
@@ -2170,7 +2177,7 @@ def link_source_to_project(
 
 
 def unlink_source_from_project(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     project_id: str,
     source_id: str | None = None,
     group_id: str | None = None,
@@ -2197,7 +2204,7 @@ def unlink_source_from_project(
     return True
 
 
-def get_project_sources(db: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
+def get_project_sources(db: ThreadSafeConnection, project_id: str) -> list[dict[str, Any]]:
     """Resolve all project source links to a flat list of sources."""
     links = db.execute_fetchall(
         "SELECT * FROM project_sources WHERE project_id = ?",
@@ -2206,8 +2213,8 @@ def get_project_sources(db: sqlite3.Connection, project_id: str) -> list[dict[st
     seen: set[str] = set()
     sources: list[dict[str, Any]] = []
 
-    for link in links:
-        link = dict(link)
+    for link_row in links:
+        link = dict(link_row)
         if link["source_id"]:
             if link["source_id"] not in seen:
                 row = db.execute_fetchone("SELECT * FROM sources WHERE id = ?", (link["source_id"],))
@@ -2220,8 +2227,8 @@ def get_project_sources(db: sqlite3.Connection, project_id: str) -> list[dict[st
                 " WHERE sgm.group_id = ?",
                 (link["group_id"],),
             )
-            for m in members:
-                m = dict(m)
+            for m_row in members:
+                m = dict(m_row)
                 if m["id"] not in seen:
                     seen.add(m["id"])
                     sources.append(m)
@@ -2231,8 +2238,8 @@ def get_project_sources(db: sqlite3.Connection, project_id: str) -> list[dict[st
                 " JOIN tags t ON t.id = st.tag_id WHERE t.name = ?",
                 (link["tag_filter"],),
             )
-            for t in tagged:
-                t = dict(t)
+            for t_row in tagged:
+                t = dict(t_row)
                 if t["id"] not in seen:
                     seen.add(t["id"])
                     sources.append(t)
@@ -2244,7 +2251,7 @@ def get_project_sources(db: sqlite3.Connection, project_id: str) -> list[dict[st
 
 
 def link_source_to_space(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     space_id: str,
     source_id: str | None = None,
     group_id: str | None = None,
@@ -2271,7 +2278,7 @@ def link_source_to_space(
 
 
 def unlink_source_from_space(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     space_id: str,
     source_id: str | None = None,
     group_id: str | None = None,
@@ -2299,7 +2306,7 @@ def unlink_source_from_space(
     return True
 
 
-def get_space_sources(db: sqlite3.Connection, space_id: str) -> list[dict[str, Any]]:
+def get_space_sources(db: ThreadSafeConnection, space_id: str) -> list[dict[str, Any]]:
     """Resolve all space source links to a flat list of sources."""
     ss_cols = "space_id, source_id, group_id, tag_filter, created_at"
     src_cols = (
@@ -2315,8 +2322,8 @@ def get_space_sources(db: sqlite3.Connection, space_id: str) -> list[dict[str, A
     seen: set[str] = set()
     sources: list[dict[str, Any]] = []
 
-    for link in links:
-        link = dict(link)
+    for link_row in links:
+        link = dict(link_row)
         if link["source_id"]:
             if link["source_id"] not in seen:
                 row = db.execute_fetchone(
@@ -2332,8 +2339,8 @@ def get_space_sources(db: sqlite3.Connection, space_id: str) -> list[dict[str, A
                 " WHERE sgm.group_id = ?",
                 (link["group_id"],),
             )
-            for m in members:
-                m = dict(m)
+            for m_row in members:
+                m = dict(m_row)
                 if m["id"] not in seen:
                     seen.add(m["id"])
                     sources.append(m)
@@ -2343,8 +2350,8 @@ def get_space_sources(db: sqlite3.Connection, space_id: str) -> list[dict[str, A
                 " JOIN tags t ON t.id = st.tag_id WHERE t.name = ?",
                 (link["tag_filter"],),
             )
-            for t in tagged:
-                t = dict(t)
+            for t_row in tagged:
+                t = dict(t_row)
                 if t["id"] not in seen:
                     seen.add(t["id"])
                     sources.append(t)
@@ -2356,7 +2363,7 @@ def get_space_sources(db: sqlite3.Connection, space_id: str) -> list[dict[str, A
 
 
 def create_source_from_attachment(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     attachment_id: str,
     data_dir: Path,
     user_id: str | None = None,
@@ -2430,7 +2437,7 @@ def create_source_from_attachment(
 
 
 def store_source_chunk_embedding(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     chunk_id: str,
     source_id: str,
     embedding: list[float],
@@ -2460,7 +2467,7 @@ def store_source_chunk_embedding(
 
 
 def search_similar_source_chunks(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     embedding: list[float],
     limit: int = 20,
     source_id: str | None = None,

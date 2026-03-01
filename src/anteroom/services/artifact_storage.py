@@ -7,7 +7,10 @@ import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 from .artifacts import ArtifactSource, ArtifactType, content_hash, validate_fqn
 
@@ -29,7 +32,7 @@ def _uuid() -> str:
 
 
 def create_artifact(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     fqn: str,
     artifact_type: str | ArtifactType,
     namespace: str,
@@ -101,7 +104,7 @@ def create_artifact(
     }
 
 
-def get_artifact(db: sqlite3.Connection, artifact_id: str) -> dict[str, Any] | None:
+def get_artifact(db: ThreadSafeConnection, artifact_id: str) -> dict[str, Any] | None:
     """Fetch an artifact by primary key."""
     row = db.execute_fetchone(f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts WHERE id = ?", (artifact_id,))
     if not row:
@@ -109,7 +112,7 @@ def get_artifact(db: sqlite3.Connection, artifact_id: str) -> dict[str, Any] | N
     return _row_to_dict(row)
 
 
-def get_artifact_by_fqn(db: sqlite3.Connection, fqn: str) -> dict[str, Any] | None:
+def get_artifact_by_fqn(db: ThreadSafeConnection, fqn: str) -> dict[str, Any] | None:
     """Fetch an artifact by its fully-qualified name."""
     row = db.execute_fetchone(f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts WHERE fqn = ?", (fqn,))
     if not row:
@@ -118,7 +121,7 @@ def get_artifact_by_fqn(db: sqlite3.Connection, fqn: str) -> dict[str, Any] | No
 
 
 def list_artifacts(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     artifact_type: str | ArtifactType | None = None,
     namespace: str | None = None,
     source: str | ArtifactSource | None = None,
@@ -145,7 +148,7 @@ def list_artifacts(
 
 
 def update_artifact(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     artifact_id: str,
     content: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -193,7 +196,7 @@ def update_artifact(
     return get_artifact(db, artifact_id)
 
 
-def delete_artifact(db: sqlite3.Connection, artifact_id: str, *, commit: bool = True) -> bool:
+def delete_artifact(db: ThreadSafeConnection, artifact_id: str, *, commit: bool = True) -> bool:
     """Delete an artifact and its version history (CASCADE)."""
     existing = get_artifact(db, artifact_id)
     if not existing:
@@ -204,7 +207,7 @@ def delete_artifact(db: sqlite3.Connection, artifact_id: str, *, commit: bool = 
     return True
 
 
-def list_artifact_versions(db: sqlite3.Connection, artifact_id: str) -> list[dict[str, Any]]:
+def list_artifact_versions(db: ThreadSafeConnection, artifact_id: str) -> list[dict[str, Any]]:
     """List all versions of an artifact, newest first."""
     rows = db.execute_fetchall(
         f"SELECT {_VERSION_COLUMNS} FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC",
@@ -214,7 +217,7 @@ def list_artifact_versions(db: sqlite3.Connection, artifact_id: str) -> list[dic
 
 
 def upsert_artifact(
-    db: sqlite3.Connection,
+    db: ThreadSafeConnection,
     fqn: str,
     artifact_type: str | ArtifactType,
     namespace: str,

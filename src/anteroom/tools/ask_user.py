@@ -59,9 +59,8 @@ async def handle(
             "error": "No interactive input available. Make your best judgment and proceed.",
         }
 
-    clean_options = [o[:256] for o in (options or []) if o and o.strip()][:20]
-    if not clean_options:
-        clean_options = None
+    _clean_options_list = [o[:256] for o in (options or []) if o and o.strip()][:20]
+    clean_options: list[str] | None = _clean_options_list if _clean_options_list else None
 
     try:
         answer = await _ask_callback(question.strip(), clean_options)

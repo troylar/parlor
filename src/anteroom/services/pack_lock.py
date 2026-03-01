@@ -10,9 +10,11 @@ team members can ``aroom pack restore`` to clone the exact revisions.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 import yaml
 
@@ -24,7 +26,7 @@ _LOCK_FILE = "anteroom.lock.yaml"
 _ANTEROOM_DIR = ".anteroom"
 
 
-def generate_lock(db: sqlite3.Connection) -> dict[str, Any]:
+def generate_lock(db: ThreadSafeConnection) -> dict[str, Any]:
     """Generate lock data from the current installed packs and artifacts.
 
     Returns a dict suitable for serializing to YAML.
@@ -141,7 +143,7 @@ def read_lock(project_dir: Path) -> dict[str, Any] | None:
     return data
 
 
-def validate_lock(db: sqlite3.Connection, project_dir: Path) -> list[str]:
+def validate_lock(db: ThreadSafeConnection, project_dir: Path) -> list[str]:
     """Validate the lock file against current DB state.
 
     Returns a list of warning messages. Empty list means lock is valid.

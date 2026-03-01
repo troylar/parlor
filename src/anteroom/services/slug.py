@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 import secrets
-import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..db import ThreadSafeConnection
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
 
@@ -255,7 +258,7 @@ NOUNS = [
 MAX_RETRIES = 5
 
 
-def generate_slug(db: sqlite3.Connection) -> str:
+def generate_slug(db: ThreadSafeConnection) -> str:
     """Generate a unique adjective-color-noun slug."""
     for _ in range(MAX_RETRIES):
         slug = f"{secrets.choice(ADJECTIVES)}-{secrets.choice(COLORS)}-{secrets.choice(NOUNS)}"
@@ -267,7 +270,7 @@ def generate_slug(db: sqlite3.Connection) -> str:
     return f"{base}-{secrets.randbelow(900) + 100}"
 
 
-def suggest_unique_slug(db: sqlite3.Connection, desired: str) -> str | None:
+def suggest_unique_slug(db: ThreadSafeConnection, desired: str) -> str | None:
     """If `desired` is taken, return the next available variant (desired-2, desired-3, ...).
 
     Returns None if `desired` is already available.
