@@ -33,6 +33,7 @@ class ProviderPreset:
     suggested_models: list[str] = field(default_factory=list)
     url_template: bool = False
     notes: str = ""
+    provider_type: str = "openai"
 
 
 PROVIDER_PRESETS: list[ProviderPreset] = [
@@ -41,6 +42,14 @@ PROVIDER_PRESETS: list[ProviderPreset] = [
         base_url="https://api.openai.com/v1",
         needs_api_key=True,
         suggested_models=["gpt-4o", "gpt-4o-mini", "gpt-4", "o1", "o3-mini"],
+    ),
+    ProviderPreset(
+        name="Anthropic (Claude)",
+        base_url="https://api.anthropic.com",
+        needs_api_key=True,
+        suggested_models=["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001", "claude-opus-4-20250514"],
+        provider_type="anthropic",
+        notes="Requires pip install anteroom[anthropic]",
     ),
     ProviderPreset(
         name="Azure OpenAI",
@@ -195,6 +204,7 @@ def _test_connection_with_spinner(
     api_key_command: str,
     model: str,
     verify_ssl: bool = True,
+    provider: str = "openai",
 ) -> tuple[bool, list[str]]:
     from ..config import AIConfig
     from ..services.ai_service import create_ai_service
@@ -205,6 +215,7 @@ def _test_connection_with_spinner(
         api_key_command=api_key_command,
         model=model,
         verify_ssl=verify_ssl,
+        provider=provider,
     )
     ai_service = create_ai_service(ai_config)
 
@@ -423,7 +434,9 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
         test_now = Confirm.ask(f"\n[{SLATE}]Test connection now?[/]", default=True)
         if test_now:
             temp_model = team_ai.get("model") or (preset.suggested_models[0] if preset.suggested_models else "gpt-4")
-            connected, models = _test_connection_with_spinner(base_url, api_key, api_key_command, temp_model)
+            connected, models = _test_connection_with_spinner(
+                base_url, api_key, api_key_command, temp_model, provider=preset.provider_type
+            )
             if connected:
                 available_models = models
             else:
@@ -438,7 +451,9 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
                         return False
                     if retry_choice == "continue":
                         break
-                    connected, models = _test_connection_with_spinner(base_url, api_key, api_key_command, temp_model)
+                    connected, models = _test_connection_with_spinner(
+                        base_url, api_key, api_key_command, temp_model, provider=preset.provider_type
+                    )
                     if connected:
                         available_models = models
                         break
@@ -474,6 +489,8 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
                 "model": model,
             }
         }
+        if preset.provider_type != "openai":
+            config_data["ai"]["provider"] = preset.provider_type
         if api_key:
             config_data["ai"]["api_key"] = api_key
         if api_key_command:

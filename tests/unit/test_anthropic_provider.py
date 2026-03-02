@@ -9,6 +9,17 @@ import pytest
 
 from anteroom.config import AIConfig
 
+# Skip tests that need the anthropic package when it's not installed.
+# Pure conversion function tests don't need it; service tests do.
+try:
+    import anthropic  # noqa: F401
+
+    HAS_ANTHROPIC = True
+except ImportError:
+    HAS_ANTHROPIC = False
+
+requires_anthropic = pytest.mark.skipif(not HAS_ANTHROPIC, reason="anthropic package not installed")
+
 
 def _make_config(**overrides) -> AIConfig:
     defaults = {
@@ -193,6 +204,7 @@ class TestServiceConstruction:
         with pytest.raises(ImportError, match="anthropic package is not installed"):
             AnthropicService(config)
 
+    @requires_anthropic
     @patch("anteroom.services.anthropic_provider.anthropic")
     @patch("anteroom.services.anthropic_provider.HAS_ANTHROPIC", True)
     def test_strips_v1_suffix(self, mock_anthropic):
@@ -203,6 +215,7 @@ class TestServiceConstruction:
         call_kwargs = mock_anthropic.AsyncAnthropic.call_args[1]
         assert call_kwargs["base_url"] == "https://api.example.com"
 
+    @requires_anthropic
     @patch("anteroom.services.anthropic_provider.anthropic")
     @patch("anteroom.services.anthropic_provider.HAS_ANTHROPIC", True)
     def test_default_base_url_passes_none(self, mock_anthropic):
@@ -228,6 +241,7 @@ def _make_mock_stream_context(events):
     return mock_ctx
 
 
+@requires_anthropic
 class TestStreamChat:
     @pytest.fixture
     def mock_service(self):
@@ -365,6 +379,7 @@ class TestStreamChat:
 # ---------------------------------------------------------------------------
 
 
+@requires_anthropic
 class TestGenerateTitle:
     @pytest.mark.asyncio
     async def test_returns_title(self):
@@ -405,6 +420,7 @@ class TestGenerateTitle:
 # ---------------------------------------------------------------------------
 
 
+@requires_anthropic
 class TestValidateConnection:
     @pytest.mark.asyncio
     async def test_success(self):
@@ -432,6 +448,7 @@ class TestValidateConnection:
 # ---------------------------------------------------------------------------
 
 
+@requires_anthropic
 class TestComplete:
     @pytest.mark.asyncio
     async def test_returns_text(self):
@@ -473,6 +490,7 @@ class TestComplete:
 
 
 class TestCreateAiServiceFactory:
+    @requires_anthropic
     @patch("anteroom.services.anthropic_provider.anthropic")
     @patch("anteroom.services.anthropic_provider.HAS_ANTHROPIC", True)
     def test_anthropic_provider_selected(self, mock_anthropic):
@@ -497,6 +515,7 @@ class TestCreateAiServiceFactory:
 # ---------------------------------------------------------------------------
 
 
+@requires_anthropic
 class TestValidateConnectionErrors:
     @pytest.mark.asyncio
     async def test_generic_error(self):
@@ -532,6 +551,7 @@ class TestValidateConnectionErrors:
             assert ok is True
 
 
+@requires_anthropic
 class TestStreamChatKwargs:
     @pytest.mark.asyncio
     async def test_temperature_and_top_p_forwarded(self):
@@ -601,6 +621,7 @@ class TestStreamChatKwargs:
             assert call_kwargs["tools"][0]["name"] == "bash"
 
 
+@requires_anthropic
 class TestTokenRefresh:
     def test_try_refresh_without_provider_returns_false(self):
         with (
@@ -625,6 +646,7 @@ class TestTokenRefresh:
             assert svc._resolve_api_key() == "my-key"
 
 
+@requires_anthropic
 class TestCompleteEdgeCases:
     @pytest.mark.asyncio
     async def test_complete_empty_response_returns_none(self):
@@ -662,6 +684,7 @@ class TestCompleteEdgeCases:
             assert call_kwargs["max_tokens"] == 500
 
 
+@requires_anthropic
 class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_generic_error_yields_error_event(self):
