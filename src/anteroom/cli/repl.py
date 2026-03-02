@@ -900,6 +900,67 @@ async def _run_mcp_startup_live(
         renderer.console.print(f"  [{MUTED}]MCP: {', '.join(parts)}[/{MUTED}]\n")
 
 
+async def _resolve_pack_interactive(
+    db: Any,
+    ns: str,
+    name: str,
+    *,
+    escape_markup: bool = False,
+) -> dict[str, Any] | None:
+    """Resolve a pack by namespace/name, prompting the user to disambiguate if needed.
+
+    Returns the pack dict on success, ``None`` if not found or user cancels.
+    When *escape_markup* is True, Rich markup characters in ``ns``/``name`` are
+    escaped in console output (used by attach/detach which accept arbitrary input).
+    """
+    _pm, _pc = packs_service.resolve_pack(db, ns, name)
+    if not _pm and _pc:
+        if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
+            _pk_body: list[tuple[str, str]] = [
+                ("class:dialog.body", f"  Multiple packs match @{ns}/{name}:\n\n"),
+            ]
+            for _pi, _c in enumerate(_pc, 1):
+                _pk_body.append(
+                    (
+                        "class:dialog.body",
+                        f"  [{_pi}] {_c.get('namespace', '')}/{_c.get('name', '')} "
+                        f"v{_c.get('version', '')} [{_c['id'][:8]}...]\n",
+                    )
+                )
+            _pk_ans = await renderer.get_fullscreen_layout().show_dialog(
+                title="Select Pack",
+                body_fragments=_pk_body,
+            )
+            if _pk_ans is not None:
+                try:
+                    _idx = int(_pk_ans.strip()) - 1
+                    if 0 <= _idx < len(_pc):
+                        _pm = _pc[_idx]
+                except ValueError:
+                    pass
+        else:
+            if escape_markup:
+                from rich.markup import escape as rich_escape
+
+                display_ns, display_name = rich_escape(ns), rich_escape(name)
+            else:
+                display_ns, display_name = ns, name
+            renderer.console.print(f"\nMultiple packs match @{display_ns}/{display_name}:")
+            for _pi, _c in enumerate(_pc, 1):
+                renderer.console.print(
+                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
+                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
+                )
+            try:
+                _ch = input(f"Select (1-{len(_pc)}): ").strip()
+                _idx = int(_ch) - 1
+                if 0 <= _idx < len(_pc):
+                    _pm = _pc[_idx]
+            except (ValueError, EOFError, KeyboardInterrupt):
+                pass
+    return _pm
+
+
 async def run_cli(
     config: AppConfig,
     prompt: str | None = None,
@@ -3833,46 +3894,7 @@ async def _run_repl(
                         ns, _, name = ref.rpartition("/")
                         if not ns:
                             ns = "default"
-                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
-                        if not _pm and _pc:
-                            if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                                _pk_body: list[tuple[str, str]] = [
-                                    ("class:dialog.body", f"  Multiple packs match @{ns}/{name}:\n\n"),
-                                ]
-                                for _pi, _c in enumerate(_pc, 1):
-                                    _pk_body.append(
-                                        (
-                                            "class:dialog.body",
-                                            f"  [{_pi}] {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                            f"v{_c.get('version', '')} [{_c['id'][:8]}...]\n",
-                                        )
-                                    )
-                                _pk_ans = await renderer.get_fullscreen_layout().show_dialog(
-                                    title="Select Pack",
-                                    body_fragments=_pk_body,
-                                )
-                                if _pk_ans is not None:
-                                    try:
-                                        _idx = int(_pk_ans.strip()) - 1
-                                        if 0 <= _idx < len(_pc):
-                                            _pm = _pc[_idx]
-                                    except ValueError:
-                                        pass
-                            else:
-                                renderer.console.print(f"\nMultiple packs match @{ns}/{name}:")
-                                for _pi, _c in enumerate(_pc, 1):
-                                    renderer.console.print(
-                                        f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                        f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
-                                    )
-                                try:
-                                    _ch = input(f"Select (1-{len(_pc)}): ").strip()
-                                    _idx = int(_ch) - 1
-                                    if 0 <= _idx < len(_pc):
-                                        _pm = _pc[_idx]
-                                except (ValueError, EOFError, KeyboardInterrupt):
-                                    continue
-                        pack_info = _pm
+                        pack_info = await _resolve_pack_interactive(db, ns, name)
                         if not pack_info:
                             renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
                             continue
@@ -3920,45 +3942,7 @@ async def _run_repl(
                         ns, _, name = ref.rpartition("/")
                         if not ns:
                             ns = "default"
-                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
-                        if not _pm and _pc:
-                            if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                                _pk_body: list[tuple[str, str]] = [
-                                    ("class:dialog.body", f"  Multiple packs match @{ns}/{name}:\n\n"),
-                                ]
-                                for _pi, _c in enumerate(_pc, 1):
-                                    _pk_body.append(
-                                        (
-                                            "class:dialog.body",
-                                            f"  [{_pi}] {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                            f"v{_c.get('version', '')} [{_c['id'][:8]}...]\n",
-                                        )
-                                    )
-                                _pk_ans = await renderer.get_fullscreen_layout().show_dialog(
-                                    title="Select Pack",
-                                    body_fragments=_pk_body,
-                                )
-                                if _pk_ans is not None:
-                                    try:
-                                        _idx = int(_pk_ans.strip()) - 1
-                                        if 0 <= _idx < len(_pc):
-                                            _pm = _pc[_idx]
-                                    except ValueError:
-                                        pass
-                            else:
-                                renderer.console.print(f"\nMultiple packs match @{ns}/{name}:")
-                                for _pi, _c in enumerate(_pc, 1):
-                                    renderer.console.print(
-                                        f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                        f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
-                                    )
-                                try:
-                                    _ch = input(f"Select (1-{len(_pc)}): ").strip()
-                                    _idx = int(_ch) - 1
-                                    if 0 <= _idx < len(_pc):
-                                        _pm = _pc[_idx]
-                                except (ValueError, EOFError, KeyboardInterrupt):
-                                    continue
+                        _pm = await _resolve_pack_interactive(db, ns, name)
                         if not _pm:
                             renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
                             continue
@@ -4058,47 +4042,7 @@ async def _run_repl(
 
                         from ..services.pack_attachments import attach_pack
 
-                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
-                        if not _pm and _pc:
-                            if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                                _pk_body: list[tuple[str, str]] = [
-                                    ("class:dialog.body", f"  Multiple packs match @{ns}/{name}:\n\n"),
-                                ]
-                                for _pi, _c in enumerate(_pc, 1):
-                                    _pk_body.append(
-                                        (
-                                            "class:dialog.body",
-                                            f"  [{_pi}] {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                            f"v{_c.get('version', '')} [{_c['id'][:8]}...]\n",
-                                        )
-                                    )
-                                _pk_ans = await renderer.get_fullscreen_layout().show_dialog(
-                                    title="Select Pack",
-                                    body_fragments=_pk_body,
-                                )
-                                if _pk_ans is not None:
-                                    try:
-                                        _idx = int(_pk_ans.strip()) - 1
-                                        if 0 <= _idx < len(_pc):
-                                            _pm = _pc[_idx]
-                                    except ValueError:
-                                        pass
-                            else:
-                                renderer.console.print(
-                                    f"\nMultiple packs match @{rich_escape(ns)}/{rich_escape(name)}:"
-                                )
-                                for _pi, _c in enumerate(_pc, 1):
-                                    renderer.console.print(
-                                        f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                        f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
-                                    )
-                                try:
-                                    _ch = input(f"Select (1-{len(_pc)}): ").strip()
-                                    _idx = int(_ch) - 1
-                                    if 0 <= _idx < len(_pc):
-                                        _pm = _pc[_idx]
-                                except (ValueError, EOFError, KeyboardInterrupt):
-                                    continue
+                        _pm = await _resolve_pack_interactive(db, ns, name, escape_markup=True)
                         if not _pm:
                             renderer.console.print(
                                 f"[{CHROME}]Pack @{rich_escape(ns)}/{rich_escape(name)} not found.[/{CHROME}]\n"
@@ -4130,47 +4074,7 @@ async def _run_repl(
 
                         from ..services.pack_attachments import detach_pack
 
-                        _pm, _pc = packs_service.resolve_pack(db, ns, name)
-                        if not _pm and _pc:
-                            if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                                _pk_body: list[tuple[str, str]] = [
-                                    ("class:dialog.body", f"  Multiple packs match @{ns}/{name}:\n\n"),
-                                ]
-                                for _pi, _c in enumerate(_pc, 1):
-                                    _pk_body.append(
-                                        (
-                                            "class:dialog.body",
-                                            f"  [{_pi}] {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                            f"v{_c.get('version', '')} [{_c['id'][:8]}...]\n",
-                                        )
-                                    )
-                                _pk_ans = await renderer.get_fullscreen_layout().show_dialog(
-                                    title="Select Pack",
-                                    body_fragments=_pk_body,
-                                )
-                                if _pk_ans is not None:
-                                    try:
-                                        _idx = int(_pk_ans.strip()) - 1
-                                        if 0 <= _idx < len(_pc):
-                                            _pm = _pc[_idx]
-                                    except ValueError:
-                                        pass
-                            else:
-                                renderer.console.print(
-                                    f"\nMultiple packs match @{rich_escape(ns)}/{rich_escape(name)}:"
-                                )
-                                for _pi, _c in enumerate(_pc, 1):
-                                    renderer.console.print(
-                                        f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
-                                        f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
-                                    )
-                                try:
-                                    _ch = input(f"Select (1-{len(_pc)}): ").strip()
-                                    _idx = int(_ch) - 1
-                                    if 0 <= _idx < len(_pc):
-                                        _pm = _pc[_idx]
-                                except (ValueError, EOFError, KeyboardInterrupt):
-                                    continue
+                        _pm = await _resolve_pack_interactive(db, ns, name, escape_markup=True)
                         if not _pm:
                             renderer.console.print(
                                 f"[{CHROME}]Pack @{rich_escape(ns)}/{rich_escape(name)} not found.[/{CHROME}]\n"
