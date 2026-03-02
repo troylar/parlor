@@ -966,6 +966,11 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                 "max_consecutive_text_only",
                 CliConfig.max_consecutive_text_only,
             ),
+            max_line_repeats=getattr(
+                getattr(_app_config, "cli", None),
+                "max_line_repeats",
+                CliConfig.max_line_repeats,
+            ),
         )
         async for agent_event in _with_keepalive(agent_gen):
             if isinstance(agent_event, dict) and "comment" in agent_event:

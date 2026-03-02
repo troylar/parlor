@@ -1662,6 +1662,7 @@ async def _run_one_shot(
                 injection_detector=injection_detector,
                 output_filter=output_filter,
                 max_consecutive_text_only=config.cli.max_consecutive_text_only,
+                max_line_repeats=config.cli.max_line_repeats,
             ):
                 if event.kind == "thinking":
                     if not thinking:
@@ -4758,6 +4759,7 @@ async def _run_repl(
                         injection_detector=injection_detector,
                         output_filter=output_filter,
                         max_consecutive_text_only=config.cli.max_consecutive_text_only,
+                        max_line_repeats=config.cli.max_line_repeats,
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(

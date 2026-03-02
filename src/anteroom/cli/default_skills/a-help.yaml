@@ -122,6 +122,7 @@ prompt: |
   | builtin_tools               | bool  | true    | —                    |
   | max_tool_iterations         | int   | 50      | —                    |
   | max_consecutive_text_only   | int   | 3       | —                    |
+  | max_line_repeats            | int   | 5       | —                    |
   | context_warn_tokens         | int   | 80000   | —                    |
   | context_auto_compact_tokens | int   | 100000  | —                    |
   | tool_dedup                  | bool  | true    | AI_CHAT_TOOL_DEDUP   |

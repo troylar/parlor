@@ -217,6 +217,7 @@ async def run_agent_loop(
     injection_detector: Any | None = None,
     output_filter: Any | None = None,
     max_consecutive_text_only: int = 3,
+    max_line_repeats: int = 5,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -423,6 +424,29 @@ async def run_agent_loop(
                     },
                 )
                 return
+            if max_line_repeats > 0 and assistant_content:
+                lines = [ln.strip() for ln in assistant_content.splitlines() if ln.strip()]
+                if lines:
+                    max_run = 1
+                    current_run = 1
+                    for i in range(1, len(lines)):
+                        if lines[i] == lines[i - 1]:
+                            current_run += 1
+                            if current_run > max_run:
+                                max_run = current_run
+                        else:
+                            current_run = 1
+                    if max_run >= max_line_repeats:
+                        yield AgentEvent(
+                            kind="error",
+                            data={
+                                "message": (
+                                    f"Repetitive output detected: same line repeated {max_run} times "
+                                    "in a single response. Stopping degenerate LLM output."
+                                )
+                            },
+                        )
+                        return
             if assistant_content:
                 # Final DLP scan on complete assembled text (catches patterns split across chunks)
                 if dlp_scanner is not None and dlp_scanner.enabled and dlp_scanner.scan_output:

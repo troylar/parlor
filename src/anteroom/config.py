@@ -353,6 +353,7 @@ class CliConfig:
     builtin_tools: bool = True
     max_tool_iterations: int = 50
     max_consecutive_text_only: int = 3  # stop after N text-only responses with no tool calls (0 = disabled)
+    max_line_repeats: int = 5  # stop if a single response repeats the same line N+ times (0 = disabled)
     context_warn_tokens: int = 80_000
     context_auto_compact_tokens: int = 100_000
     tool_dedup: bool = True  # collapse consecutive similar tool calls; False = show all
