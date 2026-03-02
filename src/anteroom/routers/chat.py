@@ -341,14 +341,16 @@ def _build_tool_list(
         tools_openai = [t for t in tools_openai if t.get("function", {}).get("name") in PLAN_MODE_ALLOWED_TOOLS]
         plan_prompt = "\n\n" + build_planning_system_prompt(plan_path)
 
+    from ..tools import cap_tools
+
+    tools_openai = cap_tools(tools_openai, set(tool_registry.list_tools()), limit=max_tools)
+
+    # Append invoke_skill AFTER cap_tools so it's never dropped by tool capping
+    # (matches CLI behavior where invoke_skill is appended post-cap)
     if skill_registry is not None:
         invoke_def = skill_registry.get_invoke_skill_definition()
         if invoke_def:
             tools_openai.append(invoke_def)
-
-    from ..tools import cap_tools
-
-    tools_openai = cap_tools(tools_openai, set(tool_registry.list_tools()), limit=max_tools)
 
     return tools_openai, plan_path, plan_prompt
 
@@ -769,8 +771,9 @@ async def _execute_web_tool(ctx: ToolExecutorContext, tool_name: str, arguments:
             args = sanitize_trust_tags(args[:2000])
             prompt = _expand_args(prompt, f"<skill_args>{args}</skill_args>")
         queue = _message_queues.get(ctx.conversation_id)
-        if queue is not None:
-            await queue.put({"role": "user", "content": prompt})
+        if queue is None:
+            return {"error": "Skill invocation unavailable (no active message queue)"}
+        await queue.put({"role": "user", "content": prompt})
         return {"status": "skill_invoked", "skill": skill_name}
     elif tool_name == "ask_user":
         arguments = {**arguments, "_ask_callback": _ask_user}

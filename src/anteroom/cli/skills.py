@@ -370,6 +370,8 @@ class SkillRegistry:
                     prompt = data.get("prompt", art.content)
             except yaml.YAMLError:
                 pass
+            if not prompt or not prompt.strip():
+                continue
             self._skills[key] = Skill(
                 name=art.name,
                 description=description,

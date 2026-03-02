@@ -831,3 +831,23 @@ class TestLoadFromArtifacts:
         skill = sr.get("deploy")
         assert skill is not None
         assert skill.prompt == "Just a raw prompt with no YAML structure"
+
+    def test_artifact_empty_prompt_skipped(self) -> None:
+        from unittest.mock import MagicMock
+
+        from anteroom.services.artifacts import ArtifactSource, ArtifactType
+
+        art = MagicMock()
+        art.name = "empty"
+        art.type = ArtifactType.SKILL
+        art.content = "name: empty\ndescription: Empty skill\nprompt: ''\n"
+        art.source = ArtifactSource.GLOBAL
+        art.fqn = "@ns/skill/empty"
+
+        registry = MagicMock()
+        registry.list_all.return_value = [art]
+
+        sr = SkillRegistry()
+        added = sr.load_from_artifacts(registry)
+        assert added == 0
+        assert not sr.has_skill("empty")
