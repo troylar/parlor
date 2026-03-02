@@ -117,7 +117,7 @@ CLI (cli/)         ──┘         │
 - **`routers/usage.py`** — Token usage statistics endpoint with per-model aggregation and cost estimates
 - **`routers/plan.py`** — Plan mode endpoints: read, approve, reject
 - **`routers/artifacts.py`** — Artifact API (read-only Phase 1): `GET /api/artifacts` (list with type/namespace/source filters), `GET /api/artifacts/{fqn}` (show with version history)
-- **`routers/artifact_health.py`** — Artifact health check endpoint: `POST /api/artifact-health` (triggers health check, optionally auto-fixes issues). Accepts `fix` boolean flag. Returns `HealthReport` JSON
+- **`routers/artifact_health.py`** — Artifact health check endpoint: `GET /api/artifacts/check` (triggers health check). Returns `HealthReport` JSON
 - **`routers/packs.py`** — Pack API (read-only Phase 2): `GET /api/packs` (list with artifact counts), `GET /api/packs/{namespace}/{name}` (show with artifact details), `GET /api/packs/by-id/{pack_id}` (show by pack ID), `DELETE /api/packs/by-id/{pack_id}` (remove by pack ID). Strips `source_path` from responses to prevent info disclosure
 - **`routers/spaces.py`** — Spaces API: `GET/POST /api/spaces` (list/create), `GET/DELETE /api/spaces/{id}` (show/delete), `GET /api/spaces/{id}/paths` (mapped dirs), `POST /api/spaces/{id}/refresh` (re-parse YAML), `GET/POST/DELETE /api/spaces/{id}/sources` (source linking), `GET /api/spaces/{id}/packs` (attached packs). Each space response includes `origin` field indicating "local" (project-scoped, in `.anteroom/`) or "global" (user-scoped, in `~/.anteroom/spaces/`). Pydantic validation on name pattern and path traversal. Error messages sanitized to prevent path disclosure
 
