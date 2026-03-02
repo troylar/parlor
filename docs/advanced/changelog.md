@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 2, 2026
 
+### v1.90.2
+
+**Fixed:**
+
+- LLM degenerate output (same line repeated dozens of times in one response) is now detected and stopped after 5 repeats — configurable via `cli.max_line_repeats` (#691)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.90.2)
+
 ### v1.90.1
 
 **Fixed:**
