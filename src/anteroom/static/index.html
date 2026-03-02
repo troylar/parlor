@@ -303,6 +303,10 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
                     <span class="plan-toggle-label">Plan</span>
                 </button>
+                <button class="btn-artifacts-toggle" id="btn-artifacts-toggle" title="Toggle artifacts panel">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                    <span class="artifacts-toggle-label">Artifacts</span>
+                </button>
                 <div class="model-selector" id="model-selector">
                     <button class="model-selector-btn" id="model-selector-btn" type="button">
                         <span class="model-selector-label" id="model-selector-label">Default model</span>
@@ -494,6 +498,47 @@
                 <button class="canvas-save-btn" id="canvas-save" disabled>Save</button>
             </div>
         </aside>
+
+        <!-- Artifacts Panel -->
+        <aside class="artifacts-panel" id="artifacts-panel" style="display:none">
+            <div class="artifacts-header">
+                <span class="artifacts-title">Artifacts</span>
+                <div class="artifacts-header-actions">
+                    <button class="artifacts-close" id="artifacts-close" title="Close artifacts">&times;</button>
+                </div>
+            </div>
+            <div class="artifacts-view-tabs">
+                <button class="artifacts-view-tab active" data-view="artifacts">Artifacts</button>
+                <button class="artifacts-view-tab" data-view="packs">Packs</button>
+            </div>
+            <div class="artifacts-toolbar" id="artifacts-toolbar">
+                <select class="artifacts-filter" id="artifacts-type-filter">
+                    <option value="">All types</option>
+                    <option value="skill">Skill</option>
+                    <option value="rule">Rule</option>
+                    <option value="instruction">Instruction</option>
+                    <option value="context">Context</option>
+                    <option value="memory">Memory</option>
+                    <option value="mcp_server">MCP Server</option>
+                    <option value="config_overlay">Config Overlay</option>
+                </select>
+                <select class="artifacts-filter" id="artifacts-source-filter">
+                    <option value="">All sources</option>
+                    <option value="built_in">Built-in</option>
+                    <option value="global">Global</option>
+                    <option value="team">Team</option>
+                    <option value="project">Project</option>
+                    <option value="local">Local</option>
+                    <option value="inline">Inline</option>
+                </select>
+            </div>
+            <div class="artifacts-list" id="artifacts-list">
+                <!-- Populated by JS -->
+            </div>
+            <div class="artifacts-detail" id="artifacts-detail" style="display:none">
+                <!-- Detail view populated by JS -->
+            </div>
+        </aside>
     </div>
 
     <script src="/vendor/purify.min.js" integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu" crossorigin="anonymous"></script>
@@ -507,6 +552,7 @@
     <script src="/js/sidebar.js"></script>
     <script src="/js/canvas.js"></script>
     <script src="/js/sources.js"></script>
+    <script src="/js/artifacts.js"></script>
     <script src="/js/palette.js"></script>
     <script src="/js/attachments.js"></script>
 </body>
