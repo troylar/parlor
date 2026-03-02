@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from anteroom.tools.office_docx import _MAX_CONTENT_BLOCKS, AVAILABLE, DEFINITION, handle
+from anteroom.tools.office_docx import _MAX_CONTENT_BLOCKS, _MAX_EDIT_OPS, AVAILABLE, DEFINITION, handle
 
 _needs_docx = pytest.mark.skipif(not AVAILABLE, reason="requires python-docx: pip install anteroom[office]")
 
@@ -963,3 +963,365 @@ class TestComDispatchErrorHandling:
         assert "error" in result
         assert "Access denied by security policy" in result["error"]
         assert "RuntimeError" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Enriched read output tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_docx
+class TestEnrichedRead:
+    @pytest.mark.asyncio
+    async def test_read_includes_paragraph_formatting(self, tmp_path):
+        import docx as _docx
+        from docx.shared import Pt
+
+        doc = _docx.Document()
+        para = doc.add_paragraph()
+        run = para.add_run("Bold text")
+        run.bold = True
+        run.font.size = Pt(14)
+        doc.save(str(tmp_path / "fmt.docx"))
+        result = await handle(action="read", path="fmt.docx")
+        assert "error" not in result
+        assert "bold" in result["content"]
+        assert "size=14" in result["content"]
+        assert "Bold text" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_includes_italic(self, tmp_path):
+        import docx as _docx
+
+        doc = _docx.Document()
+        para = doc.add_paragraph()
+        run = para.add_run("Italic text")
+        run.italic = True
+        doc.save(str(tmp_path / "italic.docx"))
+        result = await handle(action="read", path="italic.docx")
+        assert "italic" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_includes_underline(self, tmp_path):
+        import docx as _docx
+
+        doc = _docx.Document()
+        para = doc.add_paragraph()
+        run = para.add_run("Underlined")
+        run.underline = True
+        doc.save(str(tmp_path / "ul.docx"))
+        result = await handle(action="read", path="ul.docx")
+        assert "underline" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_includes_style_name(self, tmp_path):
+        await handle(
+            action="create",
+            path="style.docx",
+            content_blocks=[
+                {"type": "heading", "text": "Title", "level": 1},
+                {"type": "paragraph", "text": "Normal paragraph"},
+            ],
+        )
+        result = await handle(action="read", path="style.docx")
+        assert "style=Heading 1" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_includes_font_name(self, tmp_path):
+        import docx as _docx
+
+        doc = _docx.Document()
+        para = doc.add_paragraph()
+        run = para.add_run("Courier text")
+        run.font.name = "Courier New"
+        doc.save(str(tmp_path / "font.docx"))
+        result = await handle(action="read", path="font.docx")
+        assert "font=Courier New" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_table_cell_multi_paragraph(self, tmp_path):
+        import docx as _docx
+
+        doc = _docx.Document()
+        table = doc.add_table(rows=1, cols=1)
+        cell = table.rows[0].cells[0]
+        cell.paragraphs[0].text = "First paragraph"
+        cell.add_paragraph("Second paragraph")
+        doc.save(str(tmp_path / "tbl.docx"))
+        result = await handle(action="read", path="tbl.docx")
+        assert "error" not in result
+        assert "P0" in result["content"]
+        assert "P1" in result["content"]
+        assert "First paragraph" in result["content"]
+        assert "Second paragraph" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_table_dimensions(self, tmp_path):
+        await handle(
+            action="create",
+            path="tbl_dim.docx",
+            content_blocks=[
+                {"type": "table", "rows": [["A", "B", "C"], ["1", "2", "3"]]},
+            ],
+        )
+        result = await handle(action="read", path="tbl_dim.docx")
+        assert "2 rows x 3 cols" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_returns_section_count(self, tmp_path):
+        await handle(
+            action="create",
+            path="sec.docx",
+            content_blocks=[{"type": "paragraph", "text": "content"}],
+        )
+        result = await handle(action="read", path="sec.docx")
+        assert "error" not in result
+        assert "sections" in result
+        assert result["sections"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_read_returns_sections_info(self, tmp_path):
+        await handle(
+            action="create",
+            path="secinfo.docx",
+            content_blocks=[{"type": "paragraph", "text": "content"}],
+        )
+        result = await handle(action="read", path="secinfo.docx")
+        assert "error" not in result
+        assert "sections_info" in result
+        si = result["sections_info"][0]
+        assert "orientation" in si
+        assert "page_width" in si
+        assert "page_height" in si
+
+    @pytest.mark.asyncio
+    async def test_read_returns_doc_properties(self, tmp_path):
+        import docx as _docx
+
+        doc = _docx.Document()
+        doc.core_properties.title = "Test Title"
+        doc.core_properties.author = "Test Author"
+        doc.add_paragraph("content")
+        doc.save(str(tmp_path / "props.docx"))
+        result = await handle(action="read", path="props.docx")
+        assert "error" not in result
+        assert "properties" in result
+        assert result["properties"]["title"] == "Test Title"
+        assert result["properties"]["author"] == "Test Author"
+
+    @pytest.mark.asyncio
+    async def test_read_headers_footers_shown(self, tmp_path):
+        await handle(
+            action="create",
+            path="hf_read.docx",
+            content_blocks=[{"type": "paragraph", "text": "Body"}],
+        )
+        await handle(
+            action="headers_footers",
+            path="hf_read.docx",
+            operation="set",
+            header_text="Report Header",
+            footer_text="Page Footer",
+        )
+        result = await handle(action="read", path="hf_read.docx")
+        assert "error" not in result
+        assert "Report Header" in result["content"]
+        assert "Page Footer" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_paragraph_index_format(self, tmp_path):
+        """Verify that paragraphs use P0, P1, P2... indexing."""
+        await handle(
+            action="create",
+            path="pidx.docx",
+            content_blocks=[
+                {"type": "paragraph", "text": "First"},
+                {"type": "paragraph", "text": "Second"},
+                {"type": "paragraph", "text": "Third"},
+            ],
+        )
+        result = await handle(action="read", path="pidx.docx")
+        assert "P0" in result["content"] or "P1" in result["content"]
+
+
+# ---------------------------------------------------------------------------
+# template_fill tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_docx
+class TestTemplateFill:
+    @pytest.mark.asyncio
+    async def test_template_fill_basic(self, tmp_path):
+        await handle(
+            action="create",
+            path="tpl.docx",
+            content_blocks=[
+                {"type": "paragraph", "text": "Hello {{name}}, welcome to {{company}}!"},
+            ],
+        )
+        result = await handle(
+            action="template_fill",
+            path="tpl.docx",
+            template_data={"name": "Alice", "company": "Acme Corp"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] >= 2
+        assert result["keys_processed"] == 2
+        read = await handle(action="read", path="tpl.docx")
+        assert "Alice" in read["content"]
+        assert "Acme Corp" in read["content"]
+        assert "{{name}}" not in read["content"]
+
+    @pytest.mark.asyncio
+    async def test_template_fill_in_tables(self, tmp_path):
+        await handle(
+            action="create",
+            path="tpl_tbl.docx",
+            content_blocks=[
+                {"type": "table", "rows": [["Name", "Value"], ["{{item}}", "{{price}}"]]},
+            ],
+        )
+        result = await handle(
+            action="template_fill",
+            path="tpl_tbl.docx",
+            template_data={"item": "Widget", "price": "$9.99"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] >= 2
+        read = await handle(action="read", path="tpl_tbl.docx")
+        assert "Widget" in read["content"]
+        assert "$9.99" in read["content"]
+
+    @pytest.mark.asyncio
+    async def test_template_fill_in_headers_footers(self, tmp_path):
+        await handle(
+            action="create",
+            path="tpl_hf.docx",
+            content_blocks=[{"type": "paragraph", "text": "Body"}],
+        )
+        await handle(
+            action="headers_footers",
+            path="tpl_hf.docx",
+            operation="set",
+            header_text="Report: {{title}}",
+            footer_text="Page {{page}}",
+        )
+        result = await handle(
+            action="template_fill",
+            path="tpl_hf.docx",
+            template_data={"title": "Q4 Report", "page": "1"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] >= 2
+
+    @pytest.mark.asyncio
+    async def test_template_fill_no_data(self):
+        result = await handle(action="template_fill", path="test.docx")
+        assert "error" in result
+        assert "template_data is required" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_template_fill_empty_data(self):
+        result = await handle(action="template_fill", path="test.docx", template_data={})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_template_fill_too_many_keys(self):
+        big_data = {f"key{i}": f"val{i}" for i in range(_MAX_EDIT_OPS + 1)}
+        result = await handle(action="template_fill", path="test.docx", template_data=big_data)
+        assert "error" in result
+        assert "Too many" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_template_fill_file_not_found(self):
+        result = await handle(
+            action="template_fill",
+            path="missing.docx",
+            template_data={"key": "val"},
+        )
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_template_fill_no_matches(self, tmp_path):
+        await handle(
+            action="create",
+            path="nomatch.docx",
+            content_blocks=[{"type": "paragraph", "text": "no tokens here"}],
+        )
+        result = await handle(
+            action="template_fill",
+            path="nomatch.docx",
+            template_data={"missing": "value"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] == 0
+
+    @pytest.mark.asyncio
+    async def test_template_fill_preserves_formatting(self, tmp_path):
+        import docx as _docx
+        from docx.shared import Pt
+
+        doc = _docx.Document()
+        para = doc.add_paragraph()
+        run = para.add_run("{{name}}")
+        run.bold = True
+        run.font.size = Pt(16)
+        doc.save(str(tmp_path / "fmt_tpl.docx"))
+
+        result = await handle(
+            action="template_fill",
+            path="fmt_tpl.docx",
+            template_data={"name": "Alice"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] >= 1
+
+        # Verify formatting preserved
+        doc2 = _docx.Document(str(tmp_path / "fmt_tpl.docx"))
+        assert doc2.paragraphs[0].runs[0].bold is True
+        assert doc2.paragraphs[0].runs[0].font.size == Pt(16)
+        assert doc2.paragraphs[0].runs[0].text == "Alice"
+
+    @pytest.mark.asyncio
+    async def test_template_fill_multiple_occurrences(self, tmp_path):
+        await handle(
+            action="create",
+            path="multi.docx",
+            content_blocks=[
+                {"type": "paragraph", "text": "{{name}} likes {{name}}"},
+            ],
+        )
+        result = await handle(
+            action="template_fill",
+            path="multi.docx",
+            template_data={"name": "Alice"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] >= 1
+        read = await handle(action="read", path="multi.docx")
+        assert "{{name}}" not in read["content"]
+        assert "Alice" in read["content"]
+
+
+# ---------------------------------------------------------------------------
+# New action definition tests
+# ---------------------------------------------------------------------------
+
+
+class TestNewActionDefinitions:
+    def test_template_fill_in_definition(self):
+        actions = DEFINITION["parameters"]["properties"]["action"]["enum"]
+        assert "template_fill" in actions
+
+    def test_template_data_param(self):
+        props = DEFINITION["parameters"]["properties"]
+        assert "template_data" in props
+        assert props["template_data"]["type"] == "object"
+
+    def test_description_mentions_template_fill(self):
+        assert "template fill" in DEFINITION["description"].lower()
+
+    def test_description_mentions_formatting_annotations(self):
+        assert "formatting annotations" in DEFINITION["description"].lower()

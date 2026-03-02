@@ -255,7 +255,7 @@ All other actions work cross-platform via the library backend (`python-docx`, `o
 
 ### docx
 
-Create, read, and edit Word documents (.docx). Supports 14 actions.
+Create, read, and edit Word documents (.docx). Supports 15 actions.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -263,13 +263,14 @@ Create, read, and edit Word documents (.docx). Supports 14 actions.
 | `path` | string | yes | File path (relative to working directory or absolute) |
 | `content_blocks` | array | no | Content blocks for create/edit. Each: `{type: "heading"\|"paragraph"\|"table", text?, level?, rows?}` |
 | `replacements` | array | no | Find/replace pairs for edit: `[{old: str, new: str}]` |
+| `template_data` | object | no | Key-value pairs for template_fill action |
 
 **Available actions:**
 
 | Action | Description |
 |---|---|
 | `create` | Create a document from heading, paragraph, and table blocks |
-| `read` | Extract text with heading levels and tables as JSON |
+| `read` | Extract text with per-paragraph formatting annotations (bold, italic, font size, style), table cell multi-paragraph structure, headers/footers, section layout, and document properties |
 | `edit` | Find-replace across paragraphs and optionally append new blocks |
 | `track_changes` | Accept, reject, or list tracked changes (COM only) |
 | `comments` | Add, read, resolve, or delete comments (COM only) |
@@ -282,12 +283,13 @@ Create, read, and edit Word documents (.docx). Supports 14 actions.
 | `bookmarks` | Add, read, or delete bookmarks (COM only) |
 | `toc` | Insert or update a table of contents (COM only) |
 | `find_regex` | Find text using regex patterns |
+| `template_fill` | Replace {{key}} placeholders with values from template_data across all content, headers, and footers |
 
 Max 200 content blocks per call. Output truncated at 100,000 characters.
 
 ### xlsx
 
-Create, read, and edit Excel spreadsheets (.xlsx). Supports 23 actions.
+Create, read, and edit Excel spreadsheets (.xlsx). Supports 28 actions.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -299,13 +301,14 @@ Create, read, and edit Excel spreadsheets (.xlsx). Supports 23 actions.
 | `updates` | array | no | Cell updates for edit: `[{cell: "A1", value: 42}]` |
 | `append_rows` | array | no | Rows to append: `[[value, ...]]` |
 | `add_sheets` | array | no | New sheets to add: `[{name, rows?}]` |
+| `template_data` | object | no | Key-value pairs for template_fill action |
 
 **Available actions:**
 
 | Action | Description |
 |---|---|
 | `create` | Create a workbook with named sheets, headers, and row data |
-| `read` | Read cell data as JSON with optional range and sheet filter |
+| `read` | Read cell data as JSON with formulas, merged ranges, cell formatting (bold/fill/number format), column widths, row heights, data validations, conditional formatting rules, named ranges, freeze pane state, auto-filter references, and hidden sheets |
 | `edit` | Update cells, append rows, or add sheets |
 | `format_cells` | Apply fonts, borders, fills, alignment, and number formats |
 | `merge_cells` | Merge or unmerge cell ranges |
@@ -327,6 +330,11 @@ Create, read, and edit Excel spreadsheets (.xlsx). Supports 23 actions.
 | `pivot_tables` | Create pivot tables (COM only) |
 | `sparklines` | Add sparkline charts (COM only) |
 | `slicers` | Add data slicers (COM only) |
+| `template_fill` | Replace {{key}} placeholders with values from template_data across all sheets |
+| `manage_sheets` | List, rename, hide, show, delete, or reorder sheets |
+| `resize` | Set column widths and row heights |
+| `insert_delete` | Insert or delete rows and columns |
+| `copy_range` | Copy cell ranges between sheets |
 
 Max 10,000 rows. Output truncated at 100,000 characters.
 

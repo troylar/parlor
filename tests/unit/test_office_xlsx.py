@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from anteroom.tools.office_xlsx import (
+    _MAX_EDIT_OPS,
     _MAX_ROWS,
     AVAILABLE,
     DEFINITION,
@@ -1299,3 +1300,884 @@ class TestComDispatchErrorHandling:
         assert "error" in result
         assert "Access denied by security policy" in result["error"]
         assert "RuntimeError" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Enriched read output tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_openpyxl
+class TestEnrichedRead:
+    @pytest.mark.asyncio
+    async def test_read_returns_formulas(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = 10
+        ws["A2"] = 20
+        ws["A3"] = "=SUM(A1:A2)"
+        wb.save(str(tmp_path / "formulas.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="formulas.xlsx")
+        assert "error" not in result
+        assert "formulas" in result
+        assert "A3" in result["formulas"]
+        assert result["formulas"]["A3"] == "=SUM(A1:A2)"
+
+    @pytest.mark.asyncio
+    async def test_read_returns_merged_ranges(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "merged"
+        ws.merge_cells("A1:C1")
+        wb.save(str(tmp_path / "merged.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="merged.xlsx")
+        assert "error" not in result
+        assert "merged_ranges" in result
+        assert "A1:C1" in result["merged_ranges"]
+
+    @pytest.mark.asyncio
+    async def test_read_returns_formatting(self, tmp_path):
+        import openpyxl
+        from openpyxl.styles import Font
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "bold text"
+        ws["A1"].font = Font(bold=True, size=14)
+        wb.save(str(tmp_path / "fmt.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="fmt.xlsx")
+        assert "error" not in result
+        assert "formatting" in result
+        assert "A1" in result["formatting"]
+        assert result["formatting"]["A1"]["bold"] is True
+        assert result["formatting"]["A1"]["size"] == 14
+
+    @pytest.mark.asyncio
+    async def test_read_returns_column_widths(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "wide"
+        ws.column_dimensions["A"].width = 25.0
+        wb.save(str(tmp_path / "widths.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="widths.xlsx")
+        assert "error" not in result
+        assert "column_widths" in result
+        assert result["column_widths"]["A"] == 25.0
+
+    @pytest.mark.asyncio
+    async def test_read_returns_row_heights(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "tall"
+        ws.row_dimensions[1].height = 30.0
+        wb.save(str(tmp_path / "heights.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="heights.xlsx")
+        assert "error" not in result
+        assert "row_heights" in result
+        assert result["row_heights"][1] == 30.0
+
+    @pytest.mark.asyncio
+    async def test_read_returns_freeze_pane(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "data"
+        ws.freeze_panes = "B2"
+        wb.save(str(tmp_path / "freeze.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="freeze.xlsx")
+        assert "error" not in result
+        assert "freeze_pane" in result
+        assert result["freeze_pane"] == "B2"
+
+    @pytest.mark.asyncio
+    async def test_read_returns_auto_filter(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Name", "Age"])
+        ws.append(["Alice", 30])
+        ws.auto_filter.ref = "A1:B2"
+        wb.save(str(tmp_path / "filter.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="filter.xlsx")
+        assert "error" not in result
+        assert "auto_filter" in result
+        assert result["auto_filter"] == "A1:B2"
+
+    @pytest.mark.asyncio
+    async def test_read_returns_named_ranges(self, tmp_path):
+        import openpyxl
+        from openpyxl.workbook.defined_name import DefinedName
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Data"
+        ws["A1"] = "value"
+        dn = DefinedName("my_range", attr_text="'Data'!$A$1")
+        wb.defined_names.add(dn)
+        wb.save(str(tmp_path / "named.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="named.xlsx")
+        assert "error" not in result
+        assert "named_ranges" in result
+        assert any(nr["name"] == "my_range" for nr in result["named_ranges"])
+
+    @pytest.mark.asyncio
+    async def test_read_returns_data_validations(self, tmp_path):
+        import openpyxl
+        from openpyxl.worksheet.datavalidation import DataValidation
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "pick"
+        dv = DataValidation(type="list", formula1='"Yes,No"', allow_blank=True)
+        dv.sqref = "A1"
+        ws.add_data_validation(dv)
+        wb.save(str(tmp_path / "validation.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="validation.xlsx")
+        assert "error" not in result
+        assert "data_validations" in result
+        assert len(result["data_validations"]) >= 1
+        assert result["data_validations"][0]["type"] == "list"
+
+    @pytest.mark.asyncio
+    async def test_read_returns_hidden_sheets(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "Visible"
+        ws1["A1"] = "visible"
+        ws2 = wb.create_sheet("Hidden")
+        ws2["A1"] = "secret"
+        ws2.sheet_state = "hidden"
+        wb.save(str(tmp_path / "hidden.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="hidden.xlsx")
+        assert "error" not in result
+        assert "hidden_sheets" in result
+        assert any("Hidden" in h for h in result["hidden_sheets"])
+
+    @pytest.mark.asyncio
+    async def test_read_returns_number_format(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = 0.15
+        ws["A1"].number_format = "0.00%"
+        wb.save(str(tmp_path / "numfmt.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="numfmt.xlsx")
+        assert "error" not in result
+        assert "formatting" in result
+        assert "A1" in result["formatting"]
+        assert result["formatting"]["A1"]["number_format"] == "0.00%"
+
+    @pytest.mark.asyncio
+    async def test_read_plain_file_no_extra_keys(self, tmp_path):
+        """A plain file with no formatting should not include extra enrichment keys."""
+        result = await handle(
+            action="create",
+            path="plain.xlsx",
+            sheets=[{"name": "Data", "headers": ["A", "B"], "rows": [["1", "2"]]}],
+        )
+        assert "error" not in result
+        result = await handle(action="read", path="plain.xlsx")
+        assert "error" not in result
+        assert "formulas" not in result
+        assert "merged_ranges" not in result
+
+    @pytest.mark.asyncio
+    async def test_read_with_cell_range_still_enriched(self, tmp_path):
+        import openpyxl
+        from openpyxl.styles import Font
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "bold"
+        ws["A1"].font = Font(bold=True)
+        ws["A2"] = "=A1"
+        wb.save(str(tmp_path / "range.xlsx"))
+        wb.close()
+        result = await handle(action="read", path="range.xlsx", cell_range="A1:A2")
+        assert "error" not in result
+        assert result["rows_read"] == 2
+
+
+# ---------------------------------------------------------------------------
+# template_fill tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_openpyxl
+class TestTemplateFill:
+    @pytest.mark.asyncio
+    async def test_template_fill_basic(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Hello {{name}}"
+        ws["B1"] = "{{greeting}} World"
+        wb.save(str(tmp_path / "tpl.xlsx"))
+        wb.close()
+        result = await handle(
+            action="template_fill",
+            path="tpl.xlsx",
+            template_data={"name": "Alice", "greeting": "Hi"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] >= 2
+        assert result["keys_processed"] == 2
+        # Verify replacement
+        read = await handle(action="read", path="tpl.xlsx")
+        assert "Alice" in read["content"]
+        assert "Hi" in read["content"]
+        assert "{{name}}" not in read["content"]
+
+    @pytest.mark.asyncio
+    async def test_template_fill_across_sheets(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "Sheet1"
+        ws1["A1"] = "{{company}}"
+        ws2 = wb.create_sheet("Sheet2")
+        ws2["A1"] = "{{company}}"
+        wb.save(str(tmp_path / "multi.xlsx"))
+        wb.close()
+        result = await handle(
+            action="template_fill",
+            path="multi.xlsx",
+            template_data={"company": "Acme Corp"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] >= 2
+
+    @pytest.mark.asyncio
+    async def test_template_fill_no_data(self):
+        result = await handle(action="template_fill", path="test.xlsx")
+        assert "error" in result
+        assert "template_data is required" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_template_fill_empty_data(self):
+        result = await handle(action="template_fill", path="test.xlsx", template_data={})
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_template_fill_too_many_keys(self):
+        big_data = {f"key{i}": f"val{i}" for i in range(_MAX_EDIT_OPS + 1)}
+        result = await handle(action="template_fill", path="test.xlsx", template_data=big_data)
+        assert "error" in result
+        assert "Too many" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_template_fill_no_matches(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "no tokens here"
+        wb.save(str(tmp_path / "nomatch.xlsx"))
+        wb.close()
+        result = await handle(
+            action="template_fill",
+            path="nomatch.xlsx",
+            template_data={"missing": "value"},
+        )
+        assert "error" not in result
+        assert result["tokens_replaced"] == 0
+
+    @pytest.mark.asyncio
+    async def test_template_fill_file_not_found(self):
+        result = await handle(
+            action="template_fill",
+            path="missing.xlsx",
+            template_data={"key": "val"},
+        )
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_template_fill_preserves_non_template_cells(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "{{name}}"
+        ws["B1"] = 42
+        ws["C1"] = "=A1"
+        wb.save(str(tmp_path / "preserve.xlsx"))
+        wb.close()
+        result = await handle(
+            action="template_fill",
+            path="preserve.xlsx",
+            template_data={"name": "Bob"},
+        )
+        assert "error" not in result
+        read = await handle(action="read", path="preserve.xlsx")
+        import json
+
+        rows = json.loads(read["content"])
+        assert rows[0][1] == 42
+
+
+# ---------------------------------------------------------------------------
+# manage_sheets tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_openpyxl
+class TestManageSheets:
+    @pytest.mark.asyncio
+    async def test_rename_sheet(self, tmp_path):
+        await _create_test_workbook("manage.xlsx")
+        result = await handle(
+            action="manage_sheets",
+            path="manage.xlsx",
+            sheet_operations=[{"op": "rename", "sheet": "Data", "new_name": "Renamed"}],
+        )
+        assert "error" not in result
+        assert result["operations_completed"] == 1
+        read = await handle(action="read", path="manage.xlsx")
+        assert "Renamed" in read["sheets_available"]
+
+    @pytest.mark.asyncio
+    async def test_copy_sheet(self, tmp_path):
+        await _create_test_workbook("copy.xlsx")
+        result = await handle(
+            action="manage_sheets",
+            path="copy.xlsx",
+            sheet_operations=[{"op": "copy", "sheet": "Data", "new_name": "Data Copy"}],
+        )
+        assert "error" not in result
+        read = await handle(action="read", path="copy.xlsx")
+        assert "Data Copy" in read["sheets_available"]
+
+    @pytest.mark.asyncio
+    async def test_delete_sheet(self, tmp_path):
+        await handle(
+            action="create",
+            path="del.xlsx",
+            sheets=[
+                {"name": "Keep", "rows": [["a"]]},
+                {"name": "Remove", "rows": [["b"]]},
+            ],
+        )
+        result = await handle(
+            action="manage_sheets",
+            path="del.xlsx",
+            sheet_operations=[{"op": "delete", "sheet": "Remove"}],
+        )
+        assert "error" not in result
+        read = await handle(action="read", path="del.xlsx")
+        assert "Remove" not in read["sheets_available"]
+
+    @pytest.mark.asyncio
+    async def test_delete_only_sheet_errors(self, tmp_path):
+        await _create_test_workbook("solo.xlsx")
+        result = await handle(
+            action="manage_sheets",
+            path="solo.xlsx",
+            sheet_operations=[{"op": "delete", "sheet": "Data"}],
+        )
+        assert "error" in result
+        assert "only sheet" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_hide_and_unhide(self, tmp_path):
+        await handle(
+            action="create",
+            path="vis.xlsx",
+            sheets=[
+                {"name": "Show", "rows": [["a"]]},
+                {"name": "Hide", "rows": [["b"]]},
+            ],
+        )
+        result = await handle(
+            action="manage_sheets",
+            path="vis.xlsx",
+            sheet_operations=[{"op": "hide", "sheet": "Hide"}],
+        )
+        assert "error" not in result
+        read = await handle(action="read", path="vis.xlsx")
+        assert any("Hide" in h for h in read.get("hidden_sheets", []))
+
+        result = await handle(
+            action="manage_sheets",
+            path="vis.xlsx",
+            sheet_operations=[{"op": "unhide", "sheet": "Hide"}],
+        )
+        assert "error" not in result
+
+    @pytest.mark.asyncio
+    async def test_unknown_op(self, tmp_path):
+        await _create_test_workbook("unk.xlsx")
+        result = await handle(
+            action="manage_sheets",
+            path="unk.xlsx",
+            sheet_operations=[{"op": "explode", "sheet": "Data"}],
+        )
+        assert "error" in result
+        assert "Unknown sheet operation" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_sheet_not_found(self, tmp_path):
+        await _create_test_workbook("nf.xlsx")
+        result = await handle(
+            action="manage_sheets",
+            path="nf.xlsx",
+            sheet_operations=[{"op": "rename", "sheet": "Missing", "new_name": "X"}],
+        )
+        assert "error" in result
+        assert "not found" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_no_operations(self):
+        result = await handle(action="manage_sheets", path="test.xlsx")
+        assert "error" in result
+        assert "sheet_operations is required" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_too_many_operations(self):
+        ops = [{"op": "rename", "sheet": f"S{i}", "new_name": f"R{i}"} for i in range(_MAX_EDIT_OPS + 1)]
+        result = await handle(action="manage_sheets", path="test.xlsx", sheet_operations=ops)
+        assert "error" in result
+        assert "Too many" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_reorder_sheet(self, tmp_path):
+        await handle(
+            action="create",
+            path="reorder.xlsx",
+            sheets=[
+                {"name": "First", "rows": [["a"]]},
+                {"name": "Second", "rows": [["b"]]},
+                {"name": "Third", "rows": [["c"]]},
+            ],
+        )
+        result = await handle(
+            action="manage_sheets",
+            path="reorder.xlsx",
+            sheet_operations=[{"op": "reorder", "sheet": "Third", "position": 1}],
+        )
+        assert "error" not in result
+
+    @pytest.mark.asyncio
+    async def test_multiple_operations(self, tmp_path):
+        await handle(
+            action="create",
+            path="batch.xlsx",
+            sheets=[
+                {"name": "Alpha", "rows": [["a"]]},
+                {"name": "Beta", "rows": [["b"]]},
+            ],
+        )
+        result = await handle(
+            action="manage_sheets",
+            path="batch.xlsx",
+            sheet_operations=[
+                {"op": "rename", "sheet": "Alpha", "new_name": "First"},
+                {"op": "copy", "sheet": "Beta", "new_name": "Beta Copy"},
+            ],
+        )
+        assert "error" not in result
+        assert result["operations_completed"] == 2
+
+
+# ---------------------------------------------------------------------------
+# resize tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_openpyxl
+class TestResize:
+    @pytest.mark.asyncio
+    async def test_resize_column(self, tmp_path):
+        await _create_test_workbook("resize.xlsx")
+        result = await handle(
+            action="resize",
+            path="resize.xlsx",
+            resize_ops=[{"target": "column", "index": "A", "size": 20.0}],
+        )
+        assert "error" not in result
+        assert result["resized"] == 1
+        read = await handle(action="read", path="resize.xlsx")
+        assert "column_widths" in read
+        assert read["column_widths"]["A"] == 20.0
+
+    @pytest.mark.asyncio
+    async def test_resize_row(self, tmp_path):
+        await _create_test_workbook("resize_row.xlsx")
+        result = await handle(
+            action="resize",
+            path="resize_row.xlsx",
+            resize_ops=[{"target": "row", "index": 1, "size": 30.0}],
+        )
+        assert "error" not in result
+        assert result["resized"] == 1
+        read = await handle(action="read", path="resize_row.xlsx")
+        assert "row_heights" in read
+        assert read["row_heights"][1] == 30.0
+
+    @pytest.mark.asyncio
+    async def test_resize_multiple(self, tmp_path):
+        await _create_test_workbook("resize_multi.xlsx")
+        result = await handle(
+            action="resize",
+            path="resize_multi.xlsx",
+            resize_ops=[
+                {"target": "column", "index": "A", "size": 15.0},
+                {"target": "column", "index": "B", "size": 25.0},
+                {"target": "row", "index": 1, "size": 40.0},
+            ],
+        )
+        assert "error" not in result
+        assert result["resized"] == 3
+
+    @pytest.mark.asyncio
+    async def test_resize_no_ops(self):
+        result = await handle(action="resize", path="test.xlsx")
+        assert "error" in result
+        assert "resize_ops is required" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_resize_invalid_target(self, tmp_path):
+        await _create_test_workbook("inv.xlsx")
+        result = await handle(
+            action="resize",
+            path="inv.xlsx",
+            resize_ops=[{"target": "cell", "index": "A", "size": 10}],
+        )
+        assert "error" in result
+        assert "Invalid resize target" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_resize_negative_size(self, tmp_path):
+        await _create_test_workbook("neg.xlsx")
+        result = await handle(
+            action="resize",
+            path="neg.xlsx",
+            resize_ops=[{"target": "column", "index": "A", "size": -5}],
+        )
+        assert "error" in result
+        assert "non-negative" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_resize_missing_params(self, tmp_path):
+        await _create_test_workbook("miss.xlsx")
+        result = await handle(
+            action="resize",
+            path="miss.xlsx",
+            resize_ops=[{"target": "column"}],
+        )
+        assert "error" in result
+        assert "'index' and 'size'" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# insert_delete tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_openpyxl
+class TestInsertDelete:
+    @pytest.mark.asyncio
+    async def test_insert_rows(self, tmp_path):
+        await _create_test_workbook("ins.xlsx")
+        result = await handle(
+            action="insert_delete",
+            path="ins.xlsx",
+            insert_delete_ops=[{"op": "insert_rows", "index": 2, "count": 3}],
+        )
+        assert "error" not in result
+        assert result["operations_completed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_rows(self, tmp_path):
+        await handle(
+            action="create",
+            path="del.xlsx",
+            sheets=[{"name": "Data", "rows": [["a"], ["b"], ["c"], ["d"], ["e"]]}],
+        )
+        result = await handle(
+            action="insert_delete",
+            path="del.xlsx",
+            insert_delete_ops=[{"op": "delete_rows", "index": 2, "count": 2}],
+        )
+        assert "error" not in result
+        read = await handle(action="read", path="del.xlsx")
+        assert read["rows_read"] == 3
+
+    @pytest.mark.asyncio
+    async def test_insert_cols(self, tmp_path):
+        await _create_test_workbook("ins_col.xlsx")
+        result = await handle(
+            action="insert_delete",
+            path="ins_col.xlsx",
+            insert_delete_ops=[{"op": "insert_cols", "index": 2, "count": 1}],
+        )
+        assert "error" not in result
+
+    @pytest.mark.asyncio
+    async def test_delete_cols(self, tmp_path):
+        await _create_test_workbook("del_col.xlsx")
+        result = await handle(
+            action="insert_delete",
+            path="del_col.xlsx",
+            insert_delete_ops=[{"op": "delete_cols", "index": 1, "count": 1}],
+        )
+        assert "error" not in result
+
+    @pytest.mark.asyncio
+    async def test_unknown_op(self, tmp_path):
+        await _create_test_workbook("unk.xlsx")
+        result = await handle(
+            action="insert_delete",
+            path="unk.xlsx",
+            insert_delete_ops=[{"op": "shuffle", "index": 1}],
+        )
+        assert "error" in result
+        assert "Unknown op" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_no_ops(self):
+        result = await handle(action="insert_delete", path="test.xlsx")
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_missing_index(self, tmp_path):
+        await _create_test_workbook("noidx.xlsx")
+        result = await handle(
+            action="insert_delete",
+            path="noidx.xlsx",
+            insert_delete_ops=[{"op": "insert_rows"}],
+        )
+        assert "error" in result
+        assert "'index'" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_multiple_operations(self, tmp_path):
+        await handle(
+            action="create",
+            path="multi.xlsx",
+            sheets=[{"name": "Data", "rows": [["a", "b"], ["c", "d"], ["e", "f"]]}],
+        )
+        result = await handle(
+            action="insert_delete",
+            path="multi.xlsx",
+            insert_delete_ops=[
+                {"op": "insert_rows", "index": 2, "count": 1},
+                {"op": "insert_cols", "index": 1, "count": 1},
+            ],
+        )
+        assert "error" not in result
+        assert result["operations_completed"] == 2
+
+    @pytest.mark.asyncio
+    async def test_default_count_is_one(self, tmp_path):
+        await handle(
+            action="create",
+            path="default.xlsx",
+            sheets=[{"name": "Data", "rows": [["a"], ["b"], ["c"]]}],
+        )
+        result = await handle(
+            action="insert_delete",
+            path="default.xlsx",
+            insert_delete_ops=[{"op": "insert_rows", "index": 2}],
+        )
+        assert "error" not in result
+        read = await handle(action="read", path="default.xlsx")
+        assert read["rows_read"] == 4  # 3 original + 1 inserted
+
+
+# ---------------------------------------------------------------------------
+# copy_range tests
+# ---------------------------------------------------------------------------
+
+
+@_needs_openpyxl
+class TestCopyRange:
+    @pytest.mark.asyncio
+    async def test_copy_range_basic(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Hello"
+        ws["A2"] = "World"
+        wb.save(str(tmp_path / "cp.xlsx"))
+        wb.close()
+        result = await handle(
+            action="copy_range",
+            path="cp.xlsx",
+            source_range="A1:A2",
+            dest_cell="C1",
+        )
+        assert "error" not in result
+        assert result["cells_copied"] == 2
+        read = await handle(action="read", path="cp.xlsx")
+        import json
+
+        rows = json.loads(read["content"])
+        assert rows[0][2] == "Hello"
+        assert rows[1][2] == "World"
+
+    @pytest.mark.asyncio
+    async def test_copy_range_values_only(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = 10
+        ws["A2"] = "=A1*2"
+        wb.save(str(tmp_path / "vals.xlsx"))
+        wb.close()
+        result = await handle(
+            action="copy_range",
+            path="vals.xlsx",
+            source_range="A1:A2",
+            dest_cell="C1",
+            copy_values_only=True,
+        )
+        assert "error" not in result
+        assert result["values_only"] is True
+
+    @pytest.mark.asyncio
+    async def test_copy_range_cross_sheet(self, tmp_path):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "Source"
+        ws1["A1"] = "data"
+        wb.create_sheet("Dest")
+        wb.save(str(tmp_path / "cross.xlsx"))
+        wb.close()
+        result = await handle(
+            action="copy_range",
+            path="cross.xlsx",
+            source_range="A1:A1",
+            dest_cell="B1",
+            sheet_name="Source",
+            dest_sheet="Dest",
+        )
+        assert "error" not in result
+
+    @pytest.mark.asyncio
+    async def test_copy_range_missing_params(self):
+        result = await handle(action="copy_range", path="test.xlsx", source_range="A1:A2")
+        assert "error" in result
+        assert "dest_cell" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_copy_range_missing_source(self):
+        result = await handle(action="copy_range", path="test.xlsx", dest_cell="C1")
+        assert "error" in result
+        assert "source_range" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_copy_range_file_not_found(self):
+        result = await handle(
+            action="copy_range",
+            path="missing.xlsx",
+            source_range="A1:A1",
+            dest_cell="B1",
+        )
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_copy_range_with_formatting(self, tmp_path):
+        import openpyxl
+        from openpyxl.styles import Font
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "bold"
+        ws["A1"].font = Font(bold=True)
+        wb.save(str(tmp_path / "fmtcp.xlsx"))
+        wb.close()
+        result = await handle(
+            action="copy_range",
+            path="fmtcp.xlsx",
+            source_range="A1:A1",
+            dest_cell="C1",
+            copy_values_only=False,
+        )
+        assert "error" not in result
+        # Verify formatting was copied
+        wb2 = openpyxl.load_workbook(str(tmp_path / "fmtcp.xlsx"))
+        assert wb2.active["C1"].font.bold is True
+        wb2.close()
+
+    @pytest.mark.asyncio
+    async def test_copy_range_dest_sheet_not_found(self, tmp_path):
+        await _create_test_workbook("dst.xlsx")
+        result = await handle(
+            action="copy_range",
+            path="dst.xlsx",
+            source_range="A1:A1",
+            dest_cell="B1",
+            dest_sheet="Nonexistent",
+        )
+        assert "error" in result
+        assert "not found" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# New action definition tests
+# ---------------------------------------------------------------------------
+
+
+class TestNewActionDefinitions:
+    def test_new_actions_in_definition(self):
+        actions = DEFINITION["parameters"]["properties"]["action"]["enum"]
+        assert "template_fill" in actions
+        assert "manage_sheets" in actions
+        assert "resize" in actions
+        assert "insert_delete" in actions
+        assert "copy_range" in actions
+
+    def test_template_data_param(self):
+        props = DEFINITION["parameters"]["properties"]
+        assert "template_data" in props
+        assert props["template_data"]["type"] == "object"
+
+    def test_sheet_operations_param(self):
+        props = DEFINITION["parameters"]["properties"]
+        assert "sheet_operations" in props
+        assert props["sheet_operations"]["type"] == "array"
+
+    def test_resize_ops_param(self):
+        props = DEFINITION["parameters"]["properties"]
+        assert "resize_ops" in props
+
+    def test_insert_delete_ops_param(self):
+        props = DEFINITION["parameters"]["properties"]
+        assert "insert_delete_ops" in props
+
+    def test_copy_range_params(self):
+        props = DEFINITION["parameters"]["properties"]
+        assert "source_range" in props
+        assert "dest_cell" in props
+        assert "copy_values_only" in props
+        assert "dest_sheet" in props
