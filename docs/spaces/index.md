@@ -7,7 +7,7 @@ Spaces are named workspaces that bundle repos, packs, sources, instructions, and
 | Concept | What It Is |
 |---------|-----------|
 | **Space** | A named workspace defined by a YAML file |
-| **Space file** | A YAML file defining the workspace (can live anywhere on the filesystem) |
+| **Space file** | A YAML file defining the workspace (local to project by default, or global in `~/.anteroom/spaces/`) |
 | **Local config** | `<name>.local.yaml` — machine-specific overrides (repos root, paths) |
 | **Space paths** | Directories mapped to a space for auto-detection |
 | **Config overlay** | Config values from the space file merged into Anteroom's config |
@@ -41,7 +41,8 @@ Spaces work in both the CLI and the web UI:
 | Feature | CLI | Web UI |
 |---------|-----|--------|
 | List spaces | `aroom space list` | Space picker sidebar |
-| Create space | `aroom space create <path>` | — (file-based creation) |
+| Create space | `aroom space create <name>` | — (CLI operation) |
+| Init space (auto-name) | `aroom space init` | — (CLI operation) |
 | Switch space | `/space switch <name>` | Click space in sidebar |
 | Clone repos | `aroom space clone <name>` | — (terminal operation) |
 | View sources | `/space show` | `GET /api/spaces/{id}/sources` |

@@ -329,6 +329,13 @@
                 <span>You are offline. Reconnecting when network is available...</span>
             </div>
 
+            <!-- Active space indicator (hidden by default) -->
+            <div class="chat-space-indicator" id="chat-space-indicator" style="display:none">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+                <span id="chat-space-indicator-name"></span>
+                <span class="space-origin" id="chat-space-indicator-origin"></span>
+            </div>
+
             <!-- Messages container -->
             <div class="messages-container" id="messages-container">
                 <div class="welcome-message" id="welcome-message">

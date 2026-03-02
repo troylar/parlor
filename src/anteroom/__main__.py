@@ -1196,25 +1196,27 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
 
     from .db import get_db
     from .services.space_storage import (
+        count_space_conversations,
         create_space,
         delete_space,
         list_spaces,
         resolve_space,
+        sync_space_paths,
         update_space,
     )
     from .services.spaces import (
-        SpaceConfig,
         file_hash,
-        get_spaces_dir,
+        is_local_space,
         parse_space_file,
+        slugify_dir_name,
         validate_space,
-        write_space_file,
+        write_space_template,
     )
 
     console = Console()
     action = getattr(args, "space_action", None)
     if not action:
-        console.print("Usage: aroom space {list,create,load,show,delete,refresh,clone,map,move-root}")
+        console.print("Usage: aroom space {list,create,init,load,show,delete,refresh,clone,map,move-root}")
         return
 
     db = get_db(config.app.data_dir / "anteroom.db")
@@ -1235,36 +1237,64 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
     if action == "list":
         spaces = list_spaces(db)
         if not spaces:
-            console.print("[dim]No spaces found. Create one with:[/dim] aroom space create <path>")
+            console.print("[dim]No spaces found. Create one with:[/dim] aroom space create <name>")
+            console.print("[dim]  or from inside a project:[/dim] aroom space init")
             return
         table = Table(title="Spaces")
         table.add_column("Name", style="bold")
-        table.add_column("File Path")
+        table.add_column("Origin")
+        table.add_column("Conversations", justify="right")
         table.add_column("Last Loaded")
         for s in spaces:
-            table.add_row(s["name"], s["file_path"], s.get("last_loaded_at", ""))
+            fp = s["file_path"]
+            origin = "local" if (fp and is_local_space(fp)) else "global"
+            count = count_space_conversations(db, s["id"])
+            table.add_row(
+                s["name"],
+                origin,
+                str(count),
+                s.get("last_loaded_at", ""),
+            )
         console.print(table)
 
-    elif action == "create":
+    elif action in ("create", "init"):
         import re as _re
 
-        name = args.name
+        cwd = Path.cwd()
+
+        if action == "init":
+            name = slugify_dir_name(cwd.name)
+            if not name:
+                console.print(
+                    "[red]Error:[/red] Cannot derive a space name from the current directory. "
+                    "Use [bold]aroom space create <name>[/bold] instead."
+                )
+                return
+        else:
+            name = args.name
+
         if not _re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$", name):
             console.print(
                 f"[red]Error:[/red] Invalid space name: {escape(name)!r} (must be alphanumeric, hyphens, underscores)"
             )
             return
-        spaces_dir = get_spaces_dir()
-        target = spaces_dir / f"{name}.yaml"
+
+        # Default: create local space in cwd/.anteroom/space.yaml
+        target = cwd / ".anteroom" / "space.yaml"
         if target.exists():
-            console.print(f"[red]Error:[/red] Space file already exists: {target}")
+            console.print(f"[yellow]Space file already exists:[/yellow] {target}")
+            console.print("  Use [bold]aroom space load[/bold] to register it, or edit it directly.")
             return
-        template_cfg = SpaceConfig(name=name)
-        write_space_file(target, template_cfg)
+
+        write_space_template(target, name)
         s = create_space(db, name, str(target), file_hash(target))
-        console.print(f"[green]Created space:[/green] {escape(s['name'])} (id: {s['id'][:8]}...)")
+        # Map cwd so resolve_space_by_cwd() finds this space
+        sync_space_paths(db, s["id"], [{"local_path": str(cwd)}])
+        console.print(f"[green]Created local space:[/green] {escape(s['name'])}")
         console.print(f"  File: {target}")
-        console.print("  Edit this file to add repos, pack sources, packs, and config overrides.")
+        console.print()
+        console.print("  This space will activate automatically when you run [bold]aroom chat[/bold]")
+        console.print("  from this directory.  Edit the YAML to add instructions, packs, and config.")
 
     elif action == "load":
         path = Path(args.path).expanduser().resolve()
@@ -1816,8 +1846,9 @@ def main() -> None:
     space_parser = subparsers.add_parser("space", help="Manage spaces")
     space_subparsers = space_parser.add_subparsers(dest="space_action")
     space_subparsers.add_parser("list", help="List all spaces")
-    space_create_parser = space_subparsers.add_parser("create", help="Create a new space with a starter template")
+    space_create_parser = space_subparsers.add_parser("create", help="Create a local space in the current directory")
     space_create_parser.add_argument("name", help="Space name")
+    space_subparsers.add_parser("init", help="Create a local space, deriving the name from the directory")
     space_load_parser = space_subparsers.add_parser("load", help="Load an existing space YAML file")
     space_load_parser.add_argument("path", help="Path to space YAML file")
     space_show_parser = space_subparsers.add_parser("show", help="Show space details")

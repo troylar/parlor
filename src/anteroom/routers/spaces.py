@@ -20,6 +20,7 @@ from ..services.space_storage import (
     get_space_paths,
     list_spaces,
 )
+from ..services.spaces import is_local_space
 from ..services.storage import (
     get_space_sources,
     link_source_to_space,
@@ -61,7 +62,11 @@ def _get_db(request: Request) -> Any:
 
 @router.get("/spaces")
 async def api_list_spaces(request: Request) -> list[dict[str, Any]]:
-    return list_spaces(_get_db(request))
+    spaces = list_spaces(_get_db(request))
+    for s in spaces:
+        fp = s.get("file_path", "")
+        s["origin"] = "local" if (fp and is_local_space(fp)) else "global"
+    return spaces
 
 
 @router.post("/spaces", status_code=201)
@@ -75,6 +80,8 @@ async def api_get_space(request: Request, space_id: str) -> dict[str, Any]:
     space = get_space(_get_db(request), space_id)
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
+    fp = space.get("file_path", "")
+    space["origin"] = "local" if (fp and is_local_space(fp)) else "global"
     return space
 
 

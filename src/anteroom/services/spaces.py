@@ -1,8 +1,14 @@
 """Space file parser and manager.
 
-Spaces are YAML-based workspace definitions stored in ``~/.anteroom/spaces/``.
-Each ``.yaml`` file defines repos, pack sources, packs, sources, instructions,
-and config overrides for a named workspace.
+Spaces are YAML-based workspace definitions that can live in two locations:
+
+- **Local (project)**: ``.anteroom/space.yaml`` inside a project directory.
+  Auto-discovered when you ``cd`` into the project and run ``aroom chat``.
+- **Global**: ``~/.anteroom/spaces/<name>.yaml``. Available from any directory.
+
+``space create`` and ``space init`` default to creating a local space file in
+the current directory.  ``space list`` shows origin (local/global) and which
+space is active.
 """
 
 from __future__ import annotations
@@ -176,6 +182,94 @@ def get_space_config_overlay(space_file_path: Path) -> dict[str, Any]:
     except Exception:
         logger.warning("Could not read space config overlay from %s", space_file_path)
         return {}
+
+
+def is_local_space(file_path: str) -> bool:
+    """Return ``True`` if *file_path* is NOT inside the global spaces directory."""
+    try:
+        resolved = Path(file_path).expanduser().resolve()
+        global_dir = get_spaces_dir().resolve()
+        return not resolved.is_relative_to(global_dir)
+    except Exception:
+        return True
+
+
+def slugify_dir_name(name: str) -> str:
+    """Convert a directory name to a valid space name.
+
+    Strips leading dots/hyphens, replaces disallowed characters with hyphens,
+    collapses runs, and truncates to 64 characters.  Returns an empty string
+    if nothing useful remains.
+    """
+    s = name.lstrip(".-")
+    s = re.sub(r"[^a-zA-Z0-9_-]", "-", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s[:64] if _NAME_PATTERN.match(s[:64] if s else "") else ""
+
+
+_SPACE_TEMPLATE = """\
+# Anteroom Space: {name}
+# This file configures an AI workspace for this project.
+#
+# When you run `aroom chat` from this directory, this space activates
+# automatically — your tools, instructions, and config apply instantly.
+#
+# Docs: https://github.com/troylar/anteroom/blob/main/docs/spaces.md
+
+name: {name}
+version: "1"
+
+# ---------------------------------------------------------------------------
+# Instructions: free-form guidance the AI receives at the start of each chat.
+# ---------------------------------------------------------------------------
+# instructions: |
+#   This is a Python FastAPI project.  Use pytest for tests.
+#   Always run `ruff check` before committing.
+
+# ---------------------------------------------------------------------------
+# Repos: git repositories to clone when bootstrapping this space.
+# ---------------------------------------------------------------------------
+# repos:
+#   - https://github.com/org/shared-context.git
+
+# ---------------------------------------------------------------------------
+# Packs: pre-built bundles of skills, rules, and instructions to install.
+# ---------------------------------------------------------------------------
+# packs:
+#   - namespace/pack-name
+
+# ---------------------------------------------------------------------------
+# Pack sources: git repos that contain pack definitions (for private packs).
+# ---------------------------------------------------------------------------
+# pack_sources:
+#   - url: https://github.com/org/anteroom-packs.git
+#     branch: main
+
+# ---------------------------------------------------------------------------
+# Sources: files or URLs to load into the knowledge base.
+# ---------------------------------------------------------------------------
+# sources:
+#   - path: docs/architecture.md
+#   - url: https://example.com/api-reference
+
+# ---------------------------------------------------------------------------
+# Config: override any anteroom setting for this workspace.
+# ---------------------------------------------------------------------------
+# config:
+#   model: gpt-4o
+#   approval_mode: ask_for_writes
+#   temperature: 0.7
+"""
+
+
+def write_space_template(path: Path, name: str) -> None:
+    """Write a self-documenting space YAML template to *path*.
+
+    The template contains commented-out examples for every section so a new
+    user can understand what's possible without consulting external docs.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_SPACE_TEMPLATE.replace("{name}", name), encoding="utf-8")
 
 
 def validate_space(config: SpaceConfig) -> list[str]:

@@ -889,7 +889,15 @@ const App = (() => {
         spaces.forEach(s => {
             const item = document.createElement('div');
             item.className = 'project-item' + (state.currentSpaceId === s.id ? ' active' : '');
-            item.innerHTML = `<span>${DOMPurify.sanitize(s.name)}</span>`;
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = s.name;
+            if (s.origin) {
+                const badge = document.createElement('span');
+                badge.className = 'space-origin';
+                badge.textContent = s.origin;
+                nameSpan.appendChild(badge);
+            }
+            item.appendChild(nameSpan);
             item.addEventListener('click', async () => {
                 state.currentSpaceId = s.id;
                 document.getElementById('space-select').value = s.id;
@@ -899,14 +907,26 @@ const App = (() => {
             list.appendChild(item);
         });
 
+        const chatIndicator = document.getElementById('chat-space-indicator');
+        const chatIndicatorName = document.getElementById('chat-space-indicator-name');
+        const chatIndicatorOrigin = document.getElementById('chat-space-indicator-origin');
+
         if (state.currentSpaceId) {
             const active = spaces.find(s => s.id === state.currentSpaceId);
             if (active && activeBar && activeName) {
                 activeName.textContent = active.name;
                 activeBar.style.display = 'flex';
             }
-        } else if (activeBar) {
-            activeBar.style.display = 'none';
+            if (active && chatIndicator && chatIndicatorName) {
+                chatIndicatorName.textContent = active.name;
+                if (chatIndicatorOrigin) {
+                    chatIndicatorOrigin.textContent = active.origin || '';
+                }
+                chatIndicator.style.display = 'flex';
+            }
+        } else {
+            if (activeBar) activeBar.style.display = 'none';
+            if (chatIndicator) chatIndicator.style.display = 'none';
         }
     }
 

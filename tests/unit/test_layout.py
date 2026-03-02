@@ -275,7 +275,7 @@ class TestFormatHeader:
 
     def test_space_name(self):
         h = format_header(space_name="my-space")
-        assert any(f[1] == "my-space" for f in h)
+        assert any(f[1] == "Space: my-space" for f in h)
 
     def test_conv_title(self):
         h = format_header(conv_title="Fix login bug")
@@ -303,7 +303,7 @@ class TestFormatHeader:
         assert "/tmp/test" in texts
         assert "main" in texts
         assert "proj" in texts
-        assert "space" in texts
+        assert "Space: space" in texts
         assert "My Chat" in texts
         assert "PLAN" in texts
 

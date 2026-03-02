@@ -4,14 +4,13 @@ Spaces organize your Anteroom experience into named workspaces. Each space bundl
 
 ## Spaces
 
-A space is defined by a single YAML file that can live anywhere on the filesystem. The most common locations are:
+A space is defined by a single YAML file. The default workflow is local-first: `aroom space create <name>` (or `aroom space init`) creates a `.anteroom/space.yaml` file in your current project directory. For zero-config setup, `space init` derives the space name from the directory name.
 
-- **Personal config:** `~/.anteroom/spaces/<name>.yaml` — for personal workspaces
-- **Inside a git repo:** `<repo-root>/.anteroom/space.yaml` — for team-shared spaces versioned with the project
+Spaces can also be managed globally at `~/.anteroom/spaces/<name>.yaml` for workspaces not tied to a single project directory.
 
 When a space is registered and activated, Anteroom loads its configuration and injects its context into every conversation. The space file is portable — it contains no machine-specific paths.
 
-```yaml title="~/.anteroom/spaces/backend-api.yaml"
+```yaml title=".anteroom/space.yaml"
 name: backend-api
 version: "1"
 
@@ -42,13 +41,15 @@ Space names must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`:
 
 ## Space File Location
 
-Space files are portable and can live anywhere:
+By default, `aroom space create` and `aroom space init` create a local space file in your project directory. Global spaces under `~/.anteroom/spaces/` are for workspaces not tied to a specific directory.
 
-| Location | Best For | Example |
-|----------|----------|---------|
-| `~/.anteroom/spaces/` | Personal workspaces | `~/.anteroom/spaces/backend-api.yaml` |
-| Inside a git repo | Team-shared spaces | `<repo>/.anteroom/space.yaml` |
-| Any filesystem path | Custom workflows | `/opt/spaces/production.yaml` |
+| Location | Best For | How to Create | Origin |
+|----------|----------|---------------|--------|
+| `<project>/.anteroom/space.yaml` | Project-local spaces (default) | `aroom space create <name>` or `aroom space init` | `local` |
+| `~/.anteroom/spaces/<name>.yaml` | Global personal workspaces | Create the file manually, then `aroom space load <path>` | `global` |
+| Inside a git repo | Team-shared spaces | `aroom space create` from the repo root | `local` |
+
+A space file NOT under `~/.anteroom/spaces/` is considered "local". The `aroom space list` command shows the origin of each space.
 
 When a space file lives inside a git repo, changes to the space can be committed and shared via `git pull`. The companion `.local.yaml` file (machine-specific) should be added to `.gitignore`.
 

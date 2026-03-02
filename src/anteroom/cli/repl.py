@@ -3609,10 +3609,15 @@ async def _run_repl(
                         sub = "list"
 
                     if sub == "list" or (cmd == "/space" and not sub):
+                        from ..services.spaces import is_local_space as _is_local
+
                         spaces = _list_spaces(db)
                         if not spaces:
                             renderer.console.print(
-                                f"[{CHROME}]No spaces. Create one with: aroom space create <path>[/{CHROME}]\n"
+                                f"[{CHROME}]No spaces. Create one with: /space create <name>[/{CHROME}]"
+                            )
+                            renderer.console.print(
+                                f"[{CHROME}]  or: /space init  (derives name from directory)[/{CHROME}]\n"
                             )
                             continue
                         renderer.console.print("\n[bold]Spaces:[/bold]")
@@ -3623,8 +3628,11 @@ async def _run_repl(
                                 if (_active_space[0] and _active_space[0]["id"] == sp["id"])
                                 else ""
                             )
+                            _fp = sp["file_path"]
+                            origin = "local" if (_fp and _is_local(_fp)) else "global"
                             renderer.console.print(
-                                f"  {sp['name']} — {cnt} conversations{active} [{MUTED}]{sp['id'][:8]}...[/{MUTED}]"
+                                f"  {sp['name']}{active}"
+                                f" [{MUTED}]{origin} · {cnt} conversations · {sp['id'][:8]}...[/{MUTED}]"
                             )
                         renderer.console.print()
 
@@ -3701,38 +3709,60 @@ async def _run_repl(
                         extra_system_prompt = _strip_space_instructions(extra_system_prompt)
                         renderer.console.print(f"[{CHROME}]Cleared space: {old_name}[/{CHROME}]\n")
 
-                    elif sub == "create":
-                        name = parts[2].strip() if len(parts) >= 3 else ""
-                        if not name:
-                            renderer.console.print(f"[{CHROME}]Usage: /space create <name>[/{CHROME}]\n")
-                            continue
+                    elif sub in ("create", "init"):
                         import re as _re_mod
+
+                        from ..services.space_storage import (
+                            create_space as _cs,
+                        )
+                        from ..services.space_storage import (
+                            sync_space_paths as _ssp,
+                        )
+                        from ..services.spaces import file_hash as _fh2
+                        from ..services.spaces import slugify_dir_name as _slug
+                        from ..services.spaces import write_space_template as _wst
+
+                        _cwd = Path(working_dir)
+
+                        if sub == "init":
+                            name = _slug(_cwd.name)
+                            if not name:
+                                renderer.render_error(
+                                    "Cannot derive a space name from this directory. Use /space create <name> instead."
+                                )
+                                continue
+                        else:
+                            name = parts[2].strip() if len(parts) >= 3 else ""
+                            if not name:
+                                renderer.console.print(f"[{CHROME}]Usage: /space create <name>[/{CHROME}]\n")
+                                continue
 
                         if not _re_mod.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$", name):
                             renderer.render_error(
                                 f"Invalid space name: {name!r} (must be alphanumeric, hyphens, underscores)"
                             )
                             continue
-                        from ..services.space_storage import create_space as _cs
-                        from ..services.spaces import SpaceConfig as _SpaceConfig
-                        from ..services.spaces import file_hash as _fh2
-                        from ..services.spaces import get_spaces_dir as _gsd
-                        from ..services.spaces import write_space_file as _wsf
 
-                        sdir = _gsd()
-                        spath = sdir / f"{name}.yaml"
+                        spath = _cwd / ".anteroom" / "space.yaml"
                         if spath.exists():
-                            renderer.render_error(f"Space file already exists: {spath}")
+                            renderer.console.print(f"[yellow]Space file already exists:[/yellow] {spath}")
+                            renderer.console.print(
+                                "  Use [bold]/space load[/bold] to register it, or edit it directly.\n"
+                            )
                             continue
-                        _wsf(spath, _SpaceConfig(name=name))
+
+                        _wst(spath, name)
                         sp = _cs(db, name, str(spath), _fh2(spath))
-                        renderer.console.print(
-                            f"[green]Created space: {sp['name']}[/green] [{MUTED}]{sp['id'][:8]}...[/{MUTED}]\n"
-                        )
-                        renderer.console.print(f"  File: {spath}\n")
-                        renderer.console.print(
-                            "  Edit this file to add repos, pack sources, packs, and config overrides.\n"
-                        )
+                        _ssp(db, sp["id"], [{"local_path": str(_cwd)}])
+
+                        # Auto-activate the new space
+                        _active_space[0] = sp
+                        _update_conv_space(db, conv["id"], sp["id"])
+                        _inject_space_instructions(sp)
+
+                        renderer.console.print(f"[green]Created local space: {sp['name']}[/green]\n")
+                        renderer.console.print(f"  File: {spath}")
+                        renderer.console.print("  Edit the YAML to add instructions, packs, and config.\n")
 
                     elif sub == "load":
                         target = parts[2].strip() if len(parts) >= 3 else ""

@@ -8,57 +8,72 @@ Terminal commands for managing spaces outside of a chat session.
 
 ### `aroom space list`
 
-List all registered spaces.
+List all registered spaces with origin, conversation count, and active marker.
 
 ```bash
 $ aroom space list
-┌──────────────┬─────────────────────────────────────────┬──────────────────────────┐
-│ Name         │ File Path                               │ Last Loaded              │
-├──────────────┼─────────────────────────────────────────┼──────────────────────────┤
-│ backend-api  │ /home/dev/.anteroom/spaces/backend-api…  │ 2025-01-15T10:30:00+00:00│
-│ ml-pipeline  │ /home/dev/.anteroom/spaces/ml-pipeline…  │ 2025-01-15T09:15:00+00:00│
-└──────────────┴─────────────────────────────────────────┴──────────────────────────┘
+┌──────────────┬────────┬───────┬────────┐
+│ Name         │ Origin │ Convs │ Active │
+├──────────────┼────────┼───────┼────────┤
+│ backend-api  │ local  │    12 │   *    │
+│ ml-pipeline  │ global │     3 │        │
+└──────────────┴────────┴───────┴────────┘
 ```
+
+- **Origin**: `local` if the space file is in a project directory, `global` if under `~/.anteroom/spaces/`
+- **Convs**: number of conversations in that space
+- **Active**: `*` marks the currently active space
 
 If no spaces exist, shows a hint:
 
 ```
-No spaces found. Create one with: aroom space create <path>
+No spaces found. Create one with: aroom space create <name>
 ```
 
-### `aroom space create <path>`
+### `aroom space create <name>`
 
-Register a space from a YAML file. The file can be at any path — personal config, inside a git repo, or elsewhere.
+Create a new local space file at `.anteroom/space.yaml` in the current directory.
 
 ```bash
-$ aroom space create ~/.anteroom/spaces/backend-api.yaml
-Created space: backend-api (id: a1b2c3d4...)
-
-# Or from a git-versioned space file:
-$ aroom space create ~/projects/acme/.anteroom/space.yaml
-Created space: acme-platform (id: e5f6a7b8...)
+$ cd ~/projects/acme
+$ aroom space create acme-platform
+Created space: acme-platform
+  Space file: /home/dev/projects/acme/.anteroom/space.yaml
 ```
 
 **What happens:**
 
-1. Reads and parses the YAML file
-2. Validates the space (name, URLs, sources, structure)
-3. Checks for name conflicts
-4. Creates the space record in the database with a SHA-256 file hash
+1. Creates `.anteroom/space.yaml` in the current directory with a self-documenting YAML template
+2. The template includes commented examples for repos, packs, sources, instructions, and config
+3. Validates the space name
+4. Checks for name conflicts
+5. Creates the space record in the database with a SHA-256 file hash
 
 **Errors:**
 
 ```bash
-$ aroom space create nonexistent.yaml
-Error: File not found: /path/to/nonexistent.yaml
+$ aroom space create -bad-name
+Error: Invalid space name: '-bad-name'
 
-$ aroom space create bad-name.yaml
-Validation errors:
-  - Invalid space name: '-bad-name'
-
-$ aroom space create duplicate.yaml
+$ aroom space create backend-api
 Error: Space 'backend-api' already exists
+
+$ aroom space create my-project
+Error: Space file already exists: /home/dev/projects/acme/.anteroom/space.yaml
 ```
+
+### `aroom space init`
+
+Create a new local space file, deriving the name from the current directory.
+
+```bash
+$ cd ~/projects/my-project
+$ aroom space init
+Created space: my-project
+  Space file: /home/dev/projects/my-project/.anteroom/space.yaml
+```
+
+Equivalent to `aroom space create <dirname>` where `<dirname>` is the name of the current directory (e.g., in `/home/dev/my-project`, the space name is `my-project`). Same validation and behavior as `space create`.
 
 ### `aroom space show <name>`
 
@@ -169,16 +184,16 @@ In-session commands for managing spaces during a chat.
 
 ### `/space` or `/space list` or `/spaces`
 
-List all spaces with conversation counts.
+List all spaces with origin, conversation counts, and active markers.
 
 ```
 > /spaces
 Spaces:
-  backend-api — 12 conversations (active) a1b2c3d4...
-  ml-pipeline — 3 conversations 5e6f7a8b...
+  * backend-api — local — 12 conversations
+    ml-pipeline — global — 3 conversations
 ```
 
-The active space is highlighted with `(active)`.
+The active space is marked with `*`. Origin shows whether the space file is `local` (in a project directory) or `global` (in `~/.anteroom/spaces/`).
 
 ### `/space switch <name>`
 
@@ -232,16 +247,29 @@ Cleared space: backend-api
 
 Removes the space association from the current conversation and strips space instructions from the system prompt.
 
-### `/space create <path>`
+### `/space create <name>`
 
-Register a new space from within the REPL.
+Create a new local space file from within the REPL.
 
 ```
-> /space create ~/.anteroom/spaces/new-project.yaml
-Created space: new-project (a1b2c3d4...)
+> /space create new-project
+Created space: new-project
+  Space file: /home/dev/projects/new-project/.anteroom/space.yaml
 ```
 
-Same validation as `aroom space create`.
+Same behavior as `aroom space create` — creates `.anteroom/space.yaml` in the current directory with a self-documenting template.
+
+### `/space init`
+
+Create a new local space file, deriving the name from the current directory.
+
+```
+> /space init
+Created space: my-project
+  Space file: /home/dev/projects/my-project/.anteroom/space.yaml
+```
+
+Same behavior as `aroom space init`.
 
 ## Auto-Detection
 
@@ -280,7 +308,8 @@ This overrides auto-detection.
 | Action | CLI | REPL |
 |--------|-----|------|
 | List spaces | `aroom space list` | `/spaces` or `/space list` |
-| Create space | `aroom space create <path>` | `/space create <path>` |
+| Create space | `aroom space create <name>` | `/space create <name>` |
+| Init space (auto-name) | `aroom space init` | `/space init` |
 | Show details | `aroom space show <name>` | `/space show [name]` |
 | Delete space | `aroom space delete <name>` | — |
 | Refresh file | `aroom space refresh <name>` | `/space refresh` |

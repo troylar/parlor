@@ -2861,6 +2861,71 @@ body {
     color: var(--error);
 }
 
+/* Space active bar (mirrors project-active-bar) */
+.space-active-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px 8px;
+    gap: 8px;
+}
+.space-active-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    min-width: 0;
+}
+.space-active-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.space-active-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+.btn-space-action {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition-speed) var(--easing),
+                background var(--transition-speed) var(--easing);
+}
+.btn-space-action:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+.space-origin {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 4px;
+}
+
+/* Space indicator in chat header */
+.chat-space-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
 
 /* ============================================================
    RAW TOGGLE

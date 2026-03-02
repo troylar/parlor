@@ -1,16 +1,18 @@
 # Space File Format
 
-The space file is the single source of truth for a workspace. It's a YAML file that can live anywhere on the filesystem — in `~/.anteroom/spaces/` for personal use, inside a git repo for team sharing, or any other path. It defines everything Anteroom needs to configure itself for a project, team, or workflow.
+The space file is the single source of truth for a workspace. By default, `aroom space create` and `aroom space init` create it at `.anteroom/space.yaml` in your current project directory. Global spaces can also be managed under `~/.anteroom/spaces/`. It defines everything Anteroom needs to configure itself for a project, team, or workflow.
 
 ## File Locations
 
-Space files can live anywhere. Common patterns:
+The default location is local to your project. Global spaces are for workspaces not tied to a single directory.
 
-| Location | Use Case | Example |
-|----------|----------|---------|
-| `~/.anteroom/spaces/<name>.yaml` | Personal workspace | `~/.anteroom/spaces/backend-api.yaml` |
-| `<repo>/.anteroom/space.yaml` | Team-shared, version-controlled | `~/projects/acme/.anteroom/space.yaml` |
-| Any path | Custom deployments | `/opt/anteroom/spaces/production.yaml` |
+| Location | Use Case | How to Create | Origin |
+|----------|----------|---------------|--------|
+| `<project>/.anteroom/space.yaml` | Project-local (default) | `aroom space create <name>` or `aroom space init` | `local` |
+| `<repo>/.anteroom/space.yaml` | Team-shared, version-controlled | `aroom space create <name>` from repo root | `local` |
+| `~/.anteroom/spaces/<name>.yaml` | Global personal workspace | Create manually, then `aroom space load <path>` | `global` |
+
+When created with `space create` or `space init`, the space file includes a self-documenting YAML template with commented examples for every section (repos, packs, sources, instructions, config).
 
 Each space file has a companion `.local.yaml` for machine-specific overrides:
 
@@ -301,7 +303,7 @@ Anteroom validates space files at multiple points:
 
 | When | What's Checked |
 |------|----------------|
-| `aroom space create` | Full validation: name, URLs, sources, structure |
+| `aroom space create` / `space init` | Full validation: name, URLs, sources, structure |
 | `parse_space_file()` | File exists, size limit, valid YAML, name present and valid |
 | `validate_space()` | URL schemes, path traversal, name pattern |
 | Hot reload | Valid YAML, dict structure, name present |

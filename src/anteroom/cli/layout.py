@@ -174,7 +174,7 @@ def format_header(
         _sep_append("class:header.project", project_name)
 
     if space_name:
-        _sep_append("class:header.space", space_name)
+        _sep_append("class:header.space", f"Space: {space_name}")
 
     if conv_title:
         _sep_append("class:header.title", conv_title)

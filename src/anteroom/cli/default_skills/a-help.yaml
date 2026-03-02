@@ -417,6 +417,16 @@ prompt: |
   | aroom pack     | detach NAMESPACE/NAME   | Detach a pack from global/project scope (--project) |
   | aroom pack     | add-source URL          | Add a git pack source to personal config       |
   | aroom projects |                         | List named projects with metadata              |
+  | aroom space    | list                    | List spaces with origin (local/global) and conversation count |
+  | aroom space    | create NAME             | Create a new global space in ~/.anteroom/spaces/ |
+  | aroom space    | init                    | Create a local space in current project (.anteroom/space.yaml) |
+  | aroom space    | load NAME_OR_ID         | Register/sync space with database              |
+  | aroom space    | show NAME_OR_ID         | Show space details and configuration            |
+  | aroom space    | delete NAME_OR_ID       | Delete a space from database                   |
+  | aroom space    | refresh NAME_OR_ID      | Re-parse space YAML and update config          |
+  | aroom space    | clone NAME_OR_ID        | Clone repos and install packs from space       |
+  | aroom space    | map NAME_OR_ID          | Show mapped directories for a space            |
+  | aroom space    | move-root NAME_OR_ID    | Move space repos to a new root directory       |
 
   ### Built-in Tools
 
@@ -594,6 +604,18 @@ prompt: |
   - `aroom pack attach NAMESPACE/NAME [--project]` — attach pack to scope
   - `aroom pack detach NAMESPACE/NAME [--project]` — detach pack from scope
   - `aroom pack add-source URL` — add a git pack source to config
+
+  ### Space Commands
+  - `aroom space list` — list spaces with origin (local/global) and conversation count
+  - `aroom space create NAME` — create a new global space in ~/.anteroom/spaces/
+  - `aroom space init` — create a local space in current project (.anteroom/space.yaml) with auto-derived name
+  - `aroom space load NAME_OR_ID` — register or sync space with database
+  - `aroom space show NAME_OR_ID` — show space details and configuration
+  - `aroom space delete NAME_OR_ID` — delete a space from database
+  - `aroom space refresh NAME_OR_ID` — re-parse space YAML and update config
+  - `aroom space clone NAME_OR_ID` — clone repos and install packs from space definition
+  - `aroom space map NAME_OR_ID` — show mapped directories for a space
+  - `aroom space move-root NAME_OR_ID` — move space repos to a new root directory
 
   ### Artifact Commands
   - `aroom artifact list [--type TYPE] [--namespace NS] [--source SOURCE]` — list artifacts

@@ -12,11 +12,14 @@ from anteroom.services.spaces import (
     SpaceSource,
     file_hash,
     get_spaces_dir,
+    is_local_space,
     parse_local_file,
     parse_space_file,
+    slugify_dir_name,
     validate_space,
     write_local_file,
     write_space_file,
+    write_space_template,
 )
 
 
@@ -196,3 +199,78 @@ class TestHelpers:
         cfg = SpaceConfig(name="test")
         with pytest.raises(AttributeError):
             cfg.name = "other"  # type: ignore[misc]
+
+
+class TestSlugifyDirName:
+    def test_simple_name(self) -> None:
+        assert slugify_dir_name("myproject") == "myproject"
+
+    def test_strips_leading_dots(self) -> None:
+        assert slugify_dir_name(".hidden") == "hidden"
+
+    def test_strips_leading_hyphens(self) -> None:
+        assert slugify_dir_name("--start") == "start"
+
+    def test_replaces_spaces(self) -> None:
+        assert slugify_dir_name("my project") == "my-project"
+
+    def test_collapses_hyphens(self) -> None:
+        assert slugify_dir_name("a   b") == "a-b"
+
+    def test_empty_after_strip(self) -> None:
+        assert slugify_dir_name("...") == ""
+
+    def test_all_spaces(self) -> None:
+        assert slugify_dir_name("   ") == ""
+
+    def test_truncates_to_64(self) -> None:
+        result = slugify_dir_name("a" * 100)
+        assert len(result) == 64
+
+    def test_special_chars(self) -> None:
+        assert slugify_dir_name("my@project!v2") == "my-project-v2"
+
+    def test_empty_string(self) -> None:
+        assert slugify_dir_name("") == ""
+
+    def test_underscores_preserved(self) -> None:
+        assert slugify_dir_name("my_project") == "my_project"
+
+
+class TestIsLocalSpace:
+    def test_global_path(self) -> None:
+        global_path = str(get_spaces_dir() / "myspace.yaml")
+        assert is_local_space(global_path) is False
+
+    def test_local_path(self, tmp_path: Path) -> None:
+        local_path = str(tmp_path / ".anteroom" / "space.yaml")
+        assert is_local_space(local_path) is True
+
+    def test_empty_string(self) -> None:
+        assert is_local_space("") is True
+
+
+class TestWriteSpaceTemplate:
+    def test_creates_file(self, tmp_path: Path) -> None:
+        target = tmp_path / ".anteroom" / "space.yaml"
+        write_space_template(target, "myproject")
+        assert target.exists()
+
+    def test_contains_name(self, tmp_path: Path) -> None:
+        target = tmp_path / "space.yaml"
+        write_space_template(target, "myproject")
+        content = target.read_text()
+        assert "name: myproject" in content
+
+    def test_parseable_yaml(self, tmp_path: Path) -> None:
+        target = tmp_path / "space.yaml"
+        write_space_template(target, "myproject")
+        cfg = parse_space_file(target)
+        assert cfg.name == "myproject"
+        assert cfg.version == "1"
+        assert cfg.instructions == ""
+
+    def test_creates_parent_dirs(self, tmp_path: Path) -> None:
+        target = tmp_path / "deep" / "nested" / "space.yaml"
+        write_space_template(target, "test")
+        assert target.exists()
