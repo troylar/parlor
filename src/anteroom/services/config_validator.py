@@ -114,6 +114,8 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "seed",
         "allowed_domains",
         "block_localhost_api",
+        "provider",
+        "max_output_tokens",
     },
     "app": {"host", "port", "data_dir", "tls"},
     "cli": {

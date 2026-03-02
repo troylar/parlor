@@ -196,7 +196,7 @@ Claude Code skills (`.claude/commands/`) and auto-loaded rules (`.claude/rules/`
 PyPI: `anteroom`. Deploy via `/deploy` skill (merge PR, CI, version bump, build, `twine upload`).
 
 **Optional Dependencies** (declared in `pyproject.toml`):
-- **`anthropic`** — `anthropic>=0.25.0`. Required when `ai.provider: anthropic`. Enable with: `pip install anteroom[anthropic]`
+- **`anthropic`** — `anthropic>=0.40.0`. Required when `ai.provider: anthropic`. Enable with: `pip install anteroom[anthropic]`
 - **`office`** — `python-docx>=1.0`, `openpyxl>=3.1.0`, `python-pptx>=1.0`. Required for built-in docx/xlsx/pptx tools. Enable with: `pip install anteroom[office]`
 - **`office-com`** — `python-docx>=1.0`, `openpyxl>=3.1.0`, `python-pptx>=1.0`, `pywin32>=306` (Windows only). Full COM backend for native Office automation. Enable with: `pip install anteroom[office-com]`
 - **`encryption`** — `sqlcipher3>=0.5.0`. Required only if `config.storage.encrypt_at_rest: true`. Enable with: `pip install anteroom[encryption]`

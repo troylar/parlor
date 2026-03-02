@@ -994,6 +994,15 @@ def load_config(
         except (ValueError, TypeError):
             seed = None
 
+    provider = str(ai_raw.get("provider", os.environ.get("AI_CHAT_PROVIDER", "openai")))
+    if provider not in ("openai", "anthropic"):
+        provider = "openai"
+
+    try:
+        max_output_tokens = int(ai_raw.get("max_output_tokens", os.environ.get("AI_CHAT_MAX_OUTPUT_TOKENS", 4096)))
+    except (ValueError, TypeError):
+        max_output_tokens = 4096
+
     _raw_allowed_domains = ai_raw.get("allowed_domains", [])
     if not isinstance(_raw_allowed_domains, list):
         _raw_allowed_domains = []
@@ -1037,6 +1046,8 @@ def load_config(
         seed=seed,
         allowed_domains=allowed_domains,
         block_localhost_api=block_localhost_api,
+        provider=provider,
+        max_output_tokens=max_output_tokens,
     )
 
     app_raw = raw.get("app", {})
