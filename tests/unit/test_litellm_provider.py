@@ -212,6 +212,17 @@ class TestBuildKwargs:
         kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}])
         assert kwargs["extra_headers"]["HTTP-Referer"] == "https://anteroom.ai"
 
+    def test_api_key_omitted_when_empty(self) -> None:
+        """Bedrock/Vertex: omitting api_key lets LiteLLM use provider-native auth."""
+        svc = _make_service(_make_config(api_key="", model="bedrock/anthropic.claude-3-sonnet", base_url=""))
+        kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}])
+        assert "api_key" not in kwargs
+
+    def test_api_key_included_when_set(self) -> None:
+        svc = _make_service()
+        kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}])
+        assert kwargs["api_key"] == "sk-or-test-key"
+
 
 # ---------------------------------------------------------------------------
 # Streaming

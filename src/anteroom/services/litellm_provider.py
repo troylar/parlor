@@ -74,10 +74,15 @@ class LiteLLMService:
         kwargs: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
-            "api_key": self._resolve_api_key(),
             "stream": stream,
             "timeout": float(self.config.request_timeout),
         }
+        # Only pass api_key when explicitly configured. Omitting it lets
+        # LiteLLM fall through to provider-native auth (e.g. boto3 for
+        # Bedrock, GCP ADC for Vertex AI).
+        api_key = self._resolve_api_key()
+        if api_key:
+            kwargs["api_key"] = api_key
         if self.config.base_url:
             kwargs["api_base"] = self.config.base_url
         if tools:

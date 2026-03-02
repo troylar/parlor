@@ -113,6 +113,70 @@ ai:
 
 See the [LiteLLM provider list](https://docs.litellm.ai/docs/providers) for the full list of supported providers and their model name formats.
 
+## AWS Bedrock
+
+Bedrock uses AWS IAM credentials instead of API keys. LiteLLM picks these up automatically from your environment --- no `api_key` needed.
+
+### Option 1: Environment Variables
+
+```bash
+$ export AWS_ACCESS_KEY_ID="your-access-key"
+$ export AWS_SECRET_ACCESS_KEY="your-secret-key"
+$ export AWS_REGION_NAME="us-east-1"
+```
+
+```yaml title="~/.anteroom/config.yaml"
+ai:
+  provider: "litellm"
+  model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+```
+
+### Option 2: AWS Profile / SSO
+
+```bash
+$ export AWS_PROFILE="my-sso-profile"
+```
+
+```yaml title="~/.anteroom/config.yaml"
+ai:
+  provider: "litellm"
+  model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+```
+
+### Option 3: IAM Role (EC2/ECS/Lambda)
+
+If Anteroom runs on an AWS compute resource with an attached IAM role, no credentials are needed at all:
+
+```yaml title="~/.anteroom/config.yaml"
+ai:
+  provider: "litellm"
+  model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+```
+
+### Option 4: Dynamic Credentials via `api_key_command`
+
+Use `api_key_command` to generate temporary credentials:
+
+```yaml title="~/.anteroom/config.yaml"
+ai:
+  provider: "litellm"
+  api_key_command: "aws sts get-caller-identity --query Account --output text && aws configure get aws_access_key_id"
+  model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+```
+
+!!! info "Bedrock model names"
+    Bedrock models use the `bedrock/` prefix. Common models:
+
+    - `bedrock/anthropic.claude-3-sonnet-20240229-v1:0`
+    - `bedrock/anthropic.claude-3-haiku-20240307-v1:0`
+    - `bedrock/meta.llama3-1-405b-instruct-v1:0`
+    - `bedrock/amazon.titan-text-express-v1`
+
+    See the [LiteLLM Bedrock docs](https://docs.litellm.ai/docs/providers/bedrock) for the full list.
+
+!!! warning "Don't set `api_key` for Bedrock"
+    When using Bedrock with AWS credentials (env vars, profiles, IAM roles), leave `api_key` empty. Setting it causes LiteLLM to skip the AWS credential chain.
+
 ## Tips
 
 - **Model switching**: Use `/model` in the CLI or the command palette in the web UI to switch models mid-session
