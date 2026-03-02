@@ -352,6 +352,11 @@ class TestConcurrent401BrowserRecovery:
         # queues a navigation but JS continues executing synchronously.
         # The test checks that the banner does NOT appear despite 5 rapid calls.
         result = page.evaluate("""() => {
+            // Verify _handle401 is accessible (prefixed with _ but exposed for testing)
+            if (typeof App._handle401 !== 'function') {
+                throw new Error('App._handle401 is not a function — export may have been removed');
+            }
+
             // Clear any prior state
             sessionStorage.removeItem('_anteroom_401_ts');
             sessionStorage.removeItem('_anteroom_401_retries');
@@ -399,7 +404,9 @@ class TestConcurrent401BrowserRecovery:
         )
 
         page.evaluate("App.api('/api/config').catch(() => {})")
-        page.wait_for_timeout(500)
+
+        # Wait for the banner to appear (replaces arbitrary timeout)
+        page.wait_for_selector("#auth-error-banner", timeout=5000)
 
         # Banner SHOULD appear — genuine repeated failure
         assert page.locator("#auth-error-banner").count() == 1
