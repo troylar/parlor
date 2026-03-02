@@ -5,6 +5,20 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## March 2, 2026
+
+### v1.90.0
+
+**New:**
+
+- Local-first space creation: `space create` writes `.anteroom/space.yaml` in your project directory by default (#686)
+- `space init` derives space name from directory name for zero-argument setup (#686)
+- `space list` shows origin (local/global), conversation count, and active indicator (#686)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.90.0)
+
+---
+
 ## March 1, 2026
 
 ### v1.89.8
