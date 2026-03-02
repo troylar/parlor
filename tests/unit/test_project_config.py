@@ -230,9 +230,7 @@ class TestLoadProjectConfig:
         with patch("anteroom.services.config_validator.validate_config", return_value=mock_result):
             import logging
 
-            with patch.object(
-                logging.getLogger("anteroom.services.project_config"), "warning"
-            ) as mock_warn:
+            with patch.object(logging.getLogger("anteroom.services.project_config"), "warning") as mock_warn:
                 raw, _ = load_project_config(cfg, data_dir)
                 mock_warn.assert_called()
 

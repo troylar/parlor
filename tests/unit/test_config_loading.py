@@ -1079,9 +1079,7 @@ class TestBashSandboxConfig:
         config, _ = load_config(cfg)
         assert config.safety.bash.sandbox.cpu_time_limit is None
 
-    def test_sandbox_cpu_time_limit_invalid_returns_none(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_sandbox_cpu_time_limit_invalid_returns_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AI_CHAT_BASH_SANDBOX_CPU_TIME_LIMIT", "bad")
         cfg = _minimal(tmp_path)
         config, _ = load_config(cfg)
@@ -1510,9 +1508,7 @@ class TestRagConfig:
         config, _ = load_config(cfg)
         assert config.rag.similarity_threshold == 0.8
 
-    def test_rag_similarity_threshold_invalid_falls_back(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_rag_similarity_threshold_invalid_falls_back(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AI_CHAT_RAG_SIMILARITY_THRESHOLD", "bad")
         cfg = _minimal(tmp_path)
         config, _ = load_config(cfg)
@@ -1805,9 +1801,7 @@ class TestAuditConfig:
         config, _ = load_config(cfg)
         assert config.audit.tamper_protection == "none"
 
-    def test_audit_tamper_protection_invalid_falls_back(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_audit_tamper_protection_invalid_falls_back(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AI_CHAT_AUDIT_TAMPER_PROTECTION", "sha256")
         cfg = _minimal(tmp_path)
         config, _ = load_config(cfg)
@@ -2198,9 +2192,7 @@ class TestSpaceConfigLayer:
 
 
 class TestApiKeyCommand:
-    def test_api_key_command_accepted_without_api_key(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_api_key_command_accepted_without_api_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("AI_CHAT_API_KEY", raising=False)
         cfg = _write_config(
             tmp_path,

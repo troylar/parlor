@@ -114,12 +114,15 @@ class TestGetUsageNoPeriod:
 
 
 class TestGetUsageWithPeriod:
-    @pytest.mark.parametrize("period,label", [
-        ("day", "Today"),
-        ("week", "This week"),
-        ("month", "This month"),
-        ("all", "All time"),
-    ])
+    @pytest.mark.parametrize(
+        "period,label",
+        [
+            ("day", "Today"),
+            ("week", "This week"),
+            ("month", "This month"),
+            ("all", "All time"),
+        ],
+    )
     def test_single_period_returns_one_key(self, period: str, label: str) -> None:
         app = _make_app()
         with patch("anteroom.routers.usage.storage") as mock_storage:
@@ -276,13 +279,15 @@ class TestTokenAggregation:
     def test_none_token_values_treated_as_zero(self) -> None:
         """Stats with None token values should be summed as 0."""
         app = _make_app()
-        stats = [{
-            "model": "gpt-4o",
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "total_tokens": None,
-            "message_count": None,
-        }]
+        stats = [
+            {
+                "model": "gpt-4o",
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": None,
+                "message_count": None,
+            }
+        ]
         with patch("anteroom.routers.usage.storage") as mock_storage:
             mock_storage.get_usage_stats.return_value = stats
             client = TestClient(app)
@@ -349,9 +354,7 @@ class TestCostCalculation:
 
     def test_custom_model_costs_used(self) -> None:
         """Custom usage config model costs are applied."""
-        custom_cfg = UsageConfig(
-            model_costs={"custom-model": {"input": 1.0, "output": 2.0}}
-        )
+        custom_cfg = UsageConfig(model_costs={"custom-model": {"input": 1.0, "output": 2.0}})
         app = _make_app(usage_cfg=custom_cfg)
         stats = [_stat(model="custom-model", prompt_tokens=1_000_000, completion_tokens=1_000_000)]
         with patch("anteroom.routers.usage.storage") as mock_storage:
@@ -383,13 +386,15 @@ class TestCostCalculation:
     def test_none_model_name_treated_as_unknown(self) -> None:
         """A None model value should not raise and should resolve to zero cost."""
         app = _make_app()
-        stats = [{
-            "model": None,
-            "prompt_tokens": 1_000_000,
-            "completion_tokens": 1_000_000,
-            "total_tokens": 2_000_000,
-            "message_count": 1,
-        }]
+        stats = [
+            {
+                "model": None,
+                "prompt_tokens": 1_000_000,
+                "completion_tokens": 1_000_000,
+                "total_tokens": 2_000_000,
+                "message_count": 1,
+            }
+        ]
         with patch("anteroom.routers.usage.storage") as mock_storage:
             mock_storage.get_usage_stats.return_value = stats
             client = TestClient(app)
@@ -479,8 +484,12 @@ class TestResponseShape:
             resp = client.get("/api/usage?period=all")
         result = resp.json()["All time"]
         required_keys = (
-            "prompt_tokens", "completion_tokens", "total_tokens",
-            "message_count", "estimated_cost", "by_model",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "message_count",
+            "estimated_cost",
+            "by_model",
         )
         for key in required_keys:
             assert key in result, f"Missing key: {key}"

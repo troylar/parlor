@@ -661,8 +661,7 @@ class TestGroupMembership:
             mock_storage.add_source_to_group.return_value = True
             client = TestClient(app)
             resp = client.post(
-                "/api/source-groups/12345678-1234-1234-1234-123456789012"
-                "/sources/12345678-1234-1234-1234-123456789013"
+                "/api/source-groups/12345678-1234-1234-1234-123456789012/sources/12345678-1234-1234-1234-123456789013"
             )
             assert resp.status_code == 201
             assert resp.json()["status"] == "added"
@@ -673,8 +672,7 @@ class TestGroupMembership:
             mock_storage.add_source_to_group.return_value = False
             client = TestClient(app)
             resp = client.post(
-                "/api/source-groups/12345678-1234-1234-1234-123456789012"
-                "/sources/12345678-1234-1234-1234-123456789013"
+                "/api/source-groups/12345678-1234-1234-1234-123456789012/sources/12345678-1234-1234-1234-123456789013"
             )
             assert resp.status_code == 400
             assert "Failed to add source to group" in resp.json()["detail"]
@@ -682,17 +680,13 @@ class TestGroupMembership:
     def test_add_source_to_group_invalid_group_uuid(self) -> None:
         app = _make_app()
         client = TestClient(app)
-        resp = client.post(
-            "/api/source-groups/not-a-uuid/sources/12345678-1234-1234-1234-123456789013"
-        )
+        resp = client.post("/api/source-groups/not-a-uuid/sources/12345678-1234-1234-1234-123456789013")
         assert resp.status_code == 400
 
     def test_add_source_to_group_invalid_source_uuid(self) -> None:
         app = _make_app()
         client = TestClient(app)
-        resp = client.post(
-            "/api/source-groups/12345678-1234-1234-1234-123456789012/sources/not-a-uuid"
-        )
+        resp = client.post("/api/source-groups/12345678-1234-1234-1234-123456789012/sources/not-a-uuid")
         assert resp.status_code == 400
 
     def test_remove_source_from_group_success(self) -> None:
@@ -701,8 +695,7 @@ class TestGroupMembership:
             mock_storage.remove_source_from_group.return_value = None
             client = TestClient(app)
             resp = client.delete(
-                "/api/source-groups/12345678-1234-1234-1234-123456789012"
-                "/sources/12345678-1234-1234-1234-123456789013"
+                "/api/source-groups/12345678-1234-1234-1234-123456789012/sources/12345678-1234-1234-1234-123456789013"
             )
             assert resp.status_code == 200
             assert resp.json()["status"] == "removed"
@@ -711,15 +704,11 @@ class TestGroupMembership:
     def test_remove_source_from_group_invalid_group_uuid(self) -> None:
         app = _make_app()
         client = TestClient(app)
-        resp = client.delete(
-            "/api/source-groups/not-a-uuid/sources/12345678-1234-1234-1234-123456789013"
-        )
+        resp = client.delete("/api/source-groups/not-a-uuid/sources/12345678-1234-1234-1234-123456789013")
         assert resp.status_code == 400
 
     def test_remove_source_from_group_invalid_source_uuid(self) -> None:
         app = _make_app()
         client = TestClient(app)
-        resp = client.delete(
-            "/api/source-groups/12345678-1234-1234-1234-123456789012/sources/not-a-uuid"
-        )
+        resp = client.delete("/api/source-groups/12345678-1234-1234-1234-123456789012/sources/not-a-uuid")
         assert resp.status_code == 400

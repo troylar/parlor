@@ -1087,12 +1087,15 @@ class TestStreamChatEventsKinds:
         ctx = _make_stream_context()
         tool_id = "call_abc123"
         events = [
-            _make_agent_event("tool_call_start", {
-                "id": tool_id,
-                "tool_name": "bash",
-                "index": 0,
-                "arguments": {"command": "ls"},
-            }),
+            _make_agent_event(
+                "tool_call_start",
+                {
+                    "id": tool_id,
+                    "tool_name": "bash",
+                    "index": 0,
+                    "arguments": {"command": "ls"},
+                },
+            ),
             _make_agent_event("done", {}),
         ]
 
@@ -1120,19 +1123,25 @@ class TestStreamChatEventsKinds:
         tool_id = "call_xyz"
         assistant_msg = {"id": "msg_1", "position": 1}
         events = [
-            _make_agent_event("tool_call_start", {
-                "id": tool_id,
-                "tool_name": "bash",
-                "index": 0,
-                "arguments": {"command": "echo hi"},
-            }),
+            _make_agent_event(
+                "tool_call_start",
+                {
+                    "id": tool_id,
+                    "tool_name": "bash",
+                    "index": 0,
+                    "arguments": {"command": "echo hi"},
+                },
+            ),
             _make_agent_event("assistant_message", {"content": "I'll run bash"}),
-            _make_agent_event("tool_call_end", {
-                "id": tool_id,
-                "tool_name": "bash",
-                "output": {"stdout": "hi", "_approval_decision": "auto"},
-                "status": "success",
-            }),
+            _make_agent_event(
+                "tool_call_end",
+                {
+                    "id": tool_id,
+                    "tool_name": "bash",
+                    "output": {"stdout": "hi", "_approval_decision": "auto"},
+                    "status": "success",
+                },
+            ),
             _make_agent_event("done", {}),
         ]
 
@@ -1164,12 +1173,15 @@ class TestStreamChatEventsKinds:
         """usage events are consumed internally, not emitted as SSE events."""
         ctx = _make_stream_context()
         events = [
-            _make_agent_event("usage", {
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
-                "total_tokens": 150,
-                "model": "gpt-4o",
-            }),
+            _make_agent_event(
+                "usage",
+                {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                    "model": "gpt-4o",
+                },
+            ),
             _make_agent_event("done", {}),
         ]
 
@@ -1519,19 +1531,25 @@ class TestStreamChatEventsKinds:
         assistant_msg = {"id": "msg_plan", "position": 1}
         tool_id = "call_plan"
         events = [
-            _make_agent_event("tool_call_start", {
-                "id": tool_id,
-                "tool_name": "write_file",
-                "index": 0,
-                "arguments": {"path": str(plan_path), "content": "# Plan"},
-            }),
+            _make_agent_event(
+                "tool_call_start",
+                {
+                    "id": tool_id,
+                    "tool_name": "write_file",
+                    "index": 0,
+                    "arguments": {"path": str(plan_path), "content": "# Plan"},
+                },
+            ),
             _make_agent_event("assistant_message", {"content": "Writing plan"}),
-            _make_agent_event("tool_call_end", {
-                "id": tool_id,
-                "tool_name": "write_file",
-                "output": {"status": "ok"},
-                "status": "success",
-            }),
+            _make_agent_event(
+                "tool_call_end",
+                {
+                    "id": tool_id,
+                    "tool_name": "write_file",
+                    "output": {"status": "ok"},
+                    "status": "success",
+                },
+            ),
             _make_agent_event("done", {}),
         ]
 
@@ -1563,19 +1581,25 @@ class TestStreamChatEventsKinds:
         assistant_msg = {"id": "msg_c", "position": 1}
         tool_id = "call_canvas"
         events = [
-            _make_agent_event("tool_call_start", {
-                "id": tool_id,
-                "tool_name": "create_canvas",
-                "index": 0,
-                "arguments": {"title": "Test"},
-            }),
+            _make_agent_event(
+                "tool_call_start",
+                {
+                    "id": tool_id,
+                    "tool_name": "create_canvas",
+                    "index": 0,
+                    "arguments": {"title": "Test"},
+                },
+            ),
             _make_agent_event("assistant_message", {"content": "Creating canvas"}),
-            _make_agent_event("tool_call_end", {
-                "id": tool_id,
-                "tool_name": "create_canvas",
-                "output": {"status": "created", "id": canvas_id},
-                "status": "success",
-            }),
+            _make_agent_event(
+                "tool_call_end",
+                {
+                    "id": tool_id,
+                    "tool_name": "create_canvas",
+                    "output": {"status": "created", "id": canvas_id},
+                    "status": "success",
+                },
+            ),
             _make_agent_event("done", {}),
         ]
 
@@ -1753,6 +1777,7 @@ class TestParseChatRequestJSON:
         # Synchronous mock for is_disconnected (returns False so not stale)
         mock_request.is_disconnected = AsyncMock(return_value=False)
         import time
+
         _active_streams[conv_id] = {
             "started_at": time.monotonic(),
             "request": mock_request,
@@ -1778,6 +1803,7 @@ class TestParseChatRequestJSON:
         mock_request = MagicMock()
         mock_request.is_disconnected = AsyncMock(return_value=False)
         import time
+
         _active_streams[conv_id] = {
             "started_at": time.monotonic(),
             "request": mock_request,
@@ -1829,6 +1855,7 @@ class TestStreamStatusEndpoint:
     def test_active_stream(self) -> None:
         conv_id = str(uuid.uuid4())
         import time
+
         _active_streams[conv_id] = {
             "started_at": time.monotonic() - 5,
             "request": MagicMock(),

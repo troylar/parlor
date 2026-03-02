@@ -1141,9 +1141,7 @@ class TestStartupStatusCallback:
             await asyncio.sleep(999)
 
         with patch.object(mgr, "_do_connect", side_effect=hang_forever):
-            await mgr._connect_one(
-                config, status_callback=lambda n, s: callback_calls.append((n, s))
-            )
+            await mgr._connect_one(config, status_callback=lambda n, s: callback_calls.append((n, s)))
 
         assert len(callback_calls) == 1
         name, status = callback_calls[0]
@@ -1194,6 +1192,7 @@ class TestDoConnectSseTransport:
         mgr = McpManager([config])
 
         mcp_mock = MagicMock()
+
         # Make McpError a real class so isinstance() works during error handling
         class FakeMcpError(Exception):
             pass
@@ -1278,9 +1277,7 @@ class TestDoConnectStdioSuccessPath:
 
         mock_stack = AsyncMock(spec=AsyncExitStack)
         # First enter_async_context returns (read, write) streams, second returns session
-        mock_stack.enter_async_context = AsyncMock(
-            side_effect=[(MagicMock(), MagicMock()), mock_session]
-        )
+        mock_stack.enter_async_context = AsyncMock(side_effect=[(MagicMock(), MagicMock()), mock_session])
         mock_stack.callback = MagicMock()
         mock_stack.aclose = AsyncMock()
 
@@ -1331,9 +1328,7 @@ class TestDoConnectStdioSuccessPath:
         mock_session.list_tools = AsyncMock(return_value=mock_tools_result)
 
         mock_stack = AsyncMock(spec=AsyncExitStack)
-        mock_stack.enter_async_context = AsyncMock(
-            side_effect=[(MagicMock(), MagicMock()), mock_session]
-        )
+        mock_stack.enter_async_context = AsyncMock(side_effect=[(MagicMock(), MagicMock()), mock_session])
         mock_stack.callback = MagicMock()
         mock_stack.aclose = AsyncMock()
 
@@ -1367,9 +1362,7 @@ class TestDoConnectStdioSuccessPath:
         mock_session.list_tools = AsyncMock(return_value=mock_tools_result)
 
         mock_stack = AsyncMock(spec=AsyncExitStack)
-        mock_stack.enter_async_context = AsyncMock(
-            side_effect=[(MagicMock(), MagicMock()), mock_session]
-        )
+        mock_stack.enter_async_context = AsyncMock(side_effect=[(MagicMock(), MagicMock()), mock_session])
         mock_stack.callback = MagicMock()
         mock_stack.aclose = AsyncMock()
 
@@ -1405,9 +1398,7 @@ class TestDoConnectStdioSuccessPath:
         mock_session.list_tools = AsyncMock(return_value=mock_tools_result)
 
         mock_stack = AsyncMock(spec=AsyncExitStack)
-        mock_stack.enter_async_context = AsyncMock(
-            side_effect=[(MagicMock(), MagicMock()), mock_session]
-        )
+        mock_stack.enter_async_context = AsyncMock(side_effect=[(MagicMock(), MagicMock()), mock_session])
         mock_stack.callback = MagicMock()
         mock_stack.aclose = AsyncMock()
 
@@ -1679,9 +1670,7 @@ class TestToolWarningThresholdWithFilters:
     """Tests for tool warning threshold with active filters (line 136)."""
 
     @pytest.mark.asyncio()
-    async def test_tool_warning_with_active_filter_changes_hint(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_tool_warning_with_active_filter_changes_hint(self, caplog: pytest.LogCaptureFixture) -> None:
         """When any server has an active filter and threshold is exceeded, the hint changes (line 136)."""
         import logging
 

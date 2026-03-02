@@ -1107,8 +1107,7 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
             elif kind == "tool_call_end":
                 if not current_assistant_msg:
                     logger.warning(
-                        "tool_call_end received before assistant_message — "
-                        "tool call %s (%s) will not be stored in DB",
+                        "tool_call_end received before assistant_message — tool call %s (%s) will not be stored in DB",
                         data.get("id", "?"),
                         data.get("tool_name", "?"),
                     )
