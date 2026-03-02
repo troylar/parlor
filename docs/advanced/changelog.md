@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 1, 2026
 
+### v1.89.8
+
+**Fixed:**
+
+- Agent loop no longer gets stuck spamming text-only responses — stops after 3 consecutive text-only turns with no tool calls (#679)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.89.8)
+
 ### v1.89.7
 
 **Fixed:**
