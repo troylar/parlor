@@ -263,7 +263,7 @@ def install_pack(
                 namespace=manifest.namespace,
                 name=art_name,
                 content=content,
-                source=ArtifactSource.PROJECT,
+                source=ArtifactSource.PROJECT if project_dir is not None else ArtifactSource.GLOBAL,
                 metadata=metadata,
                 commit=False,
             )
@@ -407,7 +407,7 @@ def update_pack(
                 namespace=manifest.namespace,
                 name=art_name,
                 content=content,
-                source=ArtifactSource.PROJECT,
+                source=ArtifactSource.PROJECT if project_dir is not None else ArtifactSource.GLOBAL,
                 metadata=metadata,
                 commit=False,
             )
@@ -642,24 +642,24 @@ def remove_pack_by_id(db: ThreadSafeConnection, pack_id: str) -> bool:
     if not row:
         return False
 
-    art_rows = db.execute(
-        "SELECT artifact_id FROM pack_artifacts WHERE pack_id = ?",
-        (pack_id,),
-    ).fetchall()
-    artifact_ids = [r[0] if isinstance(r, (tuple, list)) else r["artifact_id"] for r in art_rows]
+    with db.transaction():
+        art_rows = db.execute(
+            "SELECT artifact_id FROM pack_artifacts WHERE pack_id = ?",
+            (pack_id,),
+        ).fetchall()
+        artifact_ids = [r[0] if isinstance(r, (tuple, list)) else r["artifact_id"] for r in art_rows]
 
-    db.execute("DELETE FROM pack_artifacts WHERE pack_id = ?", (pack_id,))
-    db.execute("DELETE FROM pack_attachments WHERE pack_id = ?", (pack_id,))
-    db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
+        db.execute("DELETE FROM pack_artifacts WHERE pack_id = ?", (pack_id,))
+        db.execute("DELETE FROM pack_attachments WHERE pack_id = ?", (pack_id,))
+        db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
 
-    for aid in artifact_ids:
-        ref = db.execute("SELECT COUNT(*) FROM pack_artifacts WHERE artifact_id = ?", (aid,)).fetchone()
-        count = ref[0] if isinstance(ref, (tuple, list)) else ref["COUNT(*)"]
-        if count == 0:
-            db.execute("DELETE FROM artifact_versions WHERE artifact_id = ?", (aid,))
-            db.execute("DELETE FROM artifacts WHERE id = ?", (aid,))
+        for aid in artifact_ids:
+            ref = db.execute("SELECT COUNT(*) FROM pack_artifacts WHERE artifact_id = ?", (aid,)).fetchone()
+            count = ref[0] if isinstance(ref, (tuple, list)) else ref["COUNT(*)"]
+            if count == 0:
+                db.execute("DELETE FROM artifact_versions WHERE artifact_id = ?", (aid,))
+                db.execute("DELETE FROM artifacts WHERE id = ?", (aid,))
 
-    db.commit()
     return True
 
 

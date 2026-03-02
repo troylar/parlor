@@ -663,3 +663,35 @@ class TestRemovePackById:
 
     def test_remove_by_id_missing(self, db: ThreadSafeConnection) -> None:
         assert remove_pack_by_id(db, "nonexistent") is False
+
+    def test_remove_by_id_transactional(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        """remove_pack_by_id uses a transaction — all-or-nothing."""
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        pack_id = result["id"]
+
+        assert remove_pack_by_id(db, pack_id) is True
+        assert get_pack_by_id(db, pack_id) is None
+        row = db.execute("SELECT COUNT(*) FROM pack_artifacts WHERE pack_id = ?", (pack_id,)).fetchone()
+        assert row[0] == 0
+
+
+class TestInstallPackSource:
+    def test_install_pack_global_source_when_no_project_dir(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+
+        art = db.execute("SELECT source FROM artifacts LIMIT 1").fetchone()
+        assert art["source"] == "global"
+
+    def test_install_pack_project_source_when_project_dir_set(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        project = tmp_path / "proj"
+        project.mkdir()
+        install_pack(db, manifest, pack_dir, project_dir=project)
+
+        art = db.execute("SELECT source FROM artifacts LIMIT 1").fetchone()
+        assert art["source"] == "project"
