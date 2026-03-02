@@ -23,7 +23,7 @@ ai:
   temperature: null                             # Model temperature for randomness (0.0–2.0, null = provider default)
   top_p: null                                   # Nucleus sampling parameter (0.0–1.0, null = provider default)
   seed: null                                    # Random seed for deterministic output (null = provider default)
-  provider: "openai"                            # AI backend: "openai" (default, any OpenAI-compatible API) or "anthropic"
+  provider: "openai"                            # AI backend: "openai", "anthropic", or "litellm" (100+ providers)
   max_output_tokens: 4096                       # Max generated tokens per response (default: 4096; required by some providers)
   allowed_domains: []                           # Egress domain allowlist (empty = no restriction)
   block_localhost_api: false                    # When true, reject localhost/127.0.0.1 as base_url
@@ -207,7 +207,7 @@ required:
 | `temperature` | float or null | `null` | Model temperature for response randomness (0.0–2.0; null = provider default); env: `AI_CHAT_TEMPERATURE` |
 | `top_p` | float or null | `null` | Nucleus sampling parameter (0.0–1.0; null = provider default); env: `AI_CHAT_TOP_P` |
 | `seed` | integer or null | `null` | Random seed for deterministic output (null = provider default); env: `AI_CHAT_SEED` |
-| `provider` | string | `openai` | AI backend to use: `openai` (default, works with any OpenAI-compatible API) or `anthropic` (native Anthropic Messages API, requires `pip install anteroom[anthropic]`); env: `AI_CHAT_PROVIDER` |
+| `provider` | string | `openai` | AI backend to use: `openai` (default, works with any OpenAI-compatible API), `anthropic` (native Anthropic Messages API, requires `pip install anteroom[anthropic]`), or `litellm` (100+ providers via LiteLLM — OpenRouter, Replicate, Together, Cohere, etc., requires `pip install anteroom[providers]`); env: `AI_CHAT_PROVIDER` |
 | `max_output_tokens` | integer | `4096` | Maximum tokens to generate per response. Required by some providers (e.g. Anthropic). Ignored when the provider does not support the parameter; env: `AI_CHAT_MAX_OUTPUT_TOKENS` |
 | `allowed_domains` | list[string] | `[]` | Egress domain allowlist for API requests (empty list = no restriction). Domains are matched case-insensitively as exact matches. Fails closed: unparseable URLs are rejected; env: `AI_CHAT_ALLOWED_DOMAINS` (comma-separated) |
 | `block_localhost_api` | boolean | `false` | When true, reject localhost/127.0.0.1/[::1] as the API base_url. Useful in enterprise environments to prevent accidental connections to local services; env: `AI_CHAT_BLOCK_LOCALHOST_API` |

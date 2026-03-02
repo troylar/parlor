@@ -6,7 +6,7 @@ Anteroom runs on Python 3.10+ and installs via pip.
 
 - Python 3.10 or later
 - pip (included with Python)
-- An OpenAI-compatible API endpoint (OpenAI, Azure, Ollama, LM Studio, etc.)
+- An OpenAI-compatible API endpoint (OpenAI, Azure, Ollama, LM Studio, etc.), or an API key for any LLM provider (OpenRouter, Anthropic, Replicate, etc.)
 
 ## Install
 
@@ -91,6 +91,7 @@ All checks passed.
 Anteroom has optional dependency groups for additional capabilities:
 
 ```bash
+$ pip install anteroom[providers]    # 100+ LLM providers via LiteLLM (OpenRouter, Replicate, etc.)
 $ pip install anteroom[office]       # MS Office tools (docx, xlsx, pptx)
 $ pip install anteroom[docs]         # PDF and DOCX text extraction
 $ pip install anteroom[embeddings]   # Local embeddings via fastembed

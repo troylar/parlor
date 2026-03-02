@@ -39,7 +39,7 @@ class TestProviderPresets:
                 assert _validate_url(preset.base_url), f"{preset.name} has invalid URL: {preset.base_url}"
 
     def test_preset_count(self) -> None:
-        assert len(PROVIDER_PRESETS) == 7
+        assert len(PROVIDER_PRESETS) == 8
 
     def test_openai_preset(self) -> None:
         openai = PROVIDER_PRESETS[0]
@@ -48,12 +48,12 @@ class TestProviderPresets:
         assert "gpt-4o" in openai.suggested_models
 
     def test_ollama_no_key(self) -> None:
-        ollama = PROVIDER_PRESETS[3]
+        ollama = PROVIDER_PRESETS[4]
         assert ollama.name == "Ollama"
         assert ollama.needs_api_key is False
 
     def test_azure_is_template(self) -> None:
-        azure = PROVIDER_PRESETS[2]
+        azure = PROVIDER_PRESETS[3]
         assert azure.url_template is True
         assert "{resource}" in azure.base_url
 
@@ -163,7 +163,7 @@ class TestRunInitWizard:
         config_path = tmp_path / "config.yaml"
 
         prompt_responses = {
-            "Provider": "4",  # Ollama
+            "Provider": "5",  # Ollama
             "Base URL": "http://localhost:11434/v1",
             "Model (number or name)": "1",  # first model
             "Choice": "8",  # Done (shifted from 7 to 8 with identity option)
@@ -292,7 +292,7 @@ class TestWizardIdentity:
         config_path = tmp_path / "config.yaml"
 
         prompt_responses = {
-            "Provider": "4",  # Ollama
+            "Provider": "5",  # Ollama
             "Base URL": "http://localhost:11434/v1",
             "Model (number or name)": "1",
             "Choice": "8",
@@ -350,7 +350,7 @@ class TestWizardIdentity:
 
 class TestAzureUrlTemplate:
     def test_azure_template_filling(self) -> None:
-        azure = PROVIDER_PRESETS[2]
+        azure = PROVIDER_PRESETS[3]
         url = azure.base_url.replace("{resource}", "myresource").replace("{deployment}", "mydeployment")
         assert url == "https://myresource.openai.azure.com/openai/deployments/mydeployment"
         assert "{" not in url
@@ -402,7 +402,7 @@ class TestConnectionTestFailurePath:
 
 class TestCollectBaseUrl:
     def test_azure_template_builds_url(self) -> None:
-        azure = PROVIDER_PRESETS[2]
+        azure = PROVIDER_PRESETS[3]
         prompt_responses = iter(["myresource", "mydeployment"])
         with (
             patch("anteroom.cli.setup.Prompt.ask", side_effect=lambda *a, **kw: next(prompt_responses)),
@@ -432,7 +432,7 @@ class TestCollectBaseUrl:
         assert url == "https://api.openai.com/v1"
 
     def test_no_key_preset_uses_default_url(self) -> None:
-        ollama = PROVIDER_PRESETS[3]
+        ollama = PROVIDER_PRESETS[4]
         with (
             patch("anteroom.cli.setup.Prompt.ask", return_value="http://localhost:11434/v1"),
             patch("anteroom.cli.setup.console"),
@@ -443,7 +443,7 @@ class TestCollectBaseUrl:
 
 class TestCollectApiKey:
     def test_no_key_needed(self) -> None:
-        ollama = PROVIDER_PRESETS[3]
+        ollama = PROVIDER_PRESETS[4]
         with patch("anteroom.cli.setup.console"):
             key, cmd = _collect_api_key(ollama)
         assert key == ""
@@ -819,7 +819,7 @@ class TestWizardConnectionTestPaths:
         config_path = tmp_path / "config.yaml"
 
         prompt_responses = {
-            "Provider": "4",  # Ollama (no API key needed)
+            "Provider": "5",  # Ollama (no API key needed)
             "Base URL": "http://localhost:11434/v1",
             "Model (number or name)": "1",
             "Display name": "TestUser",
@@ -870,7 +870,7 @@ class TestWizardConnectionTestPaths:
         config_path.write_text(yaml.dump({"ai": {"base_url": "http://old"}}))
 
         prompt_responses = {
-            "Provider": "4",  # Ollama
+            "Provider": "5",  # Ollama
             "Base URL": "http://localhost:11434/v1",
             "Model (number or name)": "1",
             "Display name": "TestUser",
@@ -1008,7 +1008,7 @@ class TestConfigEditorChoices:
             if "Choice" in prompt:
                 return "1" if call_count[0] == 1 else "8"
             if "Provider" in prompt:
-                return "4"  # Ollama
+                return "5"  # Ollama
             if "Base URL" in prompt:
                 return "http://localhost:11434/v1"
             return str(kwargs.get("default", ""))

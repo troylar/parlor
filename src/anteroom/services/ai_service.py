@@ -45,6 +45,11 @@ def create_ai_service(config: AIConfig) -> "AIService":
 
         return AnthropicService(config, token_provider=token_prov)  # type: ignore[return-value]
 
+    if config.provider == "litellm":
+        from .litellm_provider import LiteLLMService
+
+        return LiteLLMService(config, token_provider=token_prov)  # type: ignore[return-value]
+
     return AIService(config, token_provider=token_prov)
 
 

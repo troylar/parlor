@@ -52,6 +52,18 @@ PROVIDER_PRESETS: list[ProviderPreset] = [
         notes="Requires pip install anteroom[anthropic]",
     ),
     ProviderPreset(
+        name="OpenRouter (via LiteLLM)",
+        base_url="https://openrouter.ai/api/v1",
+        needs_api_key=True,
+        suggested_models=[
+            "openrouter/openai/gpt-4o",
+            "openrouter/anthropic/claude-sonnet-4",
+            "openrouter/google/gemini-2.5-pro",
+        ],
+        provider_type="litellm",
+        notes="Access 200+ models via a single API key. Requires pip install anteroom[providers]",
+    ),
+    ProviderPreset(
         name="Azure OpenAI",
         base_url="https://{resource}.openai.azure.com/openai/deployments/{deployment}",
         needs_api_key=True,

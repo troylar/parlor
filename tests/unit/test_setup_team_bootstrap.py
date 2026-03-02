@@ -348,7 +348,7 @@ class TestWizardSkipsTeamProvidedSettings:
         def mock_prompt_ask(prompt: str, **kwargs: object) -> str:
             prompts_asked.append(prompt)
             if "Provider" in prompt:
-                return "4"  # Ollama
+                return "5"  # Ollama
             if "Model" in prompt:
                 return "1"
             if "Display name" in prompt:

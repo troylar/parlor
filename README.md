@@ -21,7 +21,7 @@
   <img src="https://img.shields.io/pypi/v/anteroom?style=for-the-badge&color=3b82f6&labelColor=0f1117" alt="PyPI Version">
   <img src="https://img.shields.io/badge/python-3.10%2B-10b981?style=for-the-badge&labelColor=0f1117" alt="Python 3.10+">
   <a href="https://codecov.io/gh/troylar/anteroom"><img src="https://img.shields.io/codecov/c/github/troylar/anteroom?style=for-the-badge&color=7c3aed&labelColor=0f1117&label=coverage" alt="Coverage"></a>
-  <img src="https://img.shields.io/badge/tests-5%2C800%2B-10b981?style=for-the-badge&labelColor=0f1117" alt="5,800+ Tests">
+  <img src="https://img.shields.io/badge/tests-6%2C000%2B-10b981?style=for-the-badge&labelColor=0f1117" alt="6,000+ Tests">
   <img src="https://img.shields.io/badge/license-Apache%202.0-e8913a?style=for-the-badge&labelColor=0f1117" alt="Apache 2.0 License">
 </p>
 
@@ -230,12 +230,15 @@ Built to [OWASP ASVS Level 2](SECURITY.md) standards. Not bolted on &mdash; bake
 
 ### Works with any LLM
 
-Any endpoint that speaks the OpenAI protocol:
+Any endpoint that speaks the OpenAI protocol, plus 100+ providers via LiteLLM:
 
 - **Azure OpenAI** &mdash; your enterprise deployment
 - **OpenAI** &mdash; GPT-4o, o1, o3, etc.
+- **Anthropic** &mdash; Claude 3.5 Sonnet, Opus, Haiku
+- **OpenRouter** &mdash; access 50+ open models (Llama, Mixtral, etc.) with one API key
 - **Ollama / LM Studio** &mdash; fully offline, fully private
 - **vLLM / TGI** &mdash; self-hosted open models
+- **Replicate, Together, Cohere, Bedrock** &mdash; via LiteLLM (`pip install anteroom[providers]`)
 - **Any OpenAI-compatible API**
 
 ---
@@ -313,7 +316,7 @@ pip install anteroom[embeddings]  # adds local vector search
 ```bash
 git clone https://github.com/troylar/anteroom.git
 cd anteroom && pip install -e ".[dev]"
-pytest tests/ -v                    # 5800+ tests
+pytest tests/ -v                    # 6000+ tests
 ruff check src/ tests/              # lint
 ruff format src/ tests/             # format
 ```
