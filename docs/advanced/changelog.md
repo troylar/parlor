@@ -7,6 +7,21 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 2, 2026
 
+### v1.90.3
+
+**Fixed:**
+
+- Token usage now correctly persisted to the database after streaming responses (#689)
+- Duplicate database names properly rejected with 409 error (#689)
+- `aroom usage` command fixed — was using incorrect database path (#689)
+- Destructive command detection now catches separated flags like `rm -v -r -f /` (#689)
+
+**Improved:**
+
+- 948 new unit tests added, bringing total from ~4,900 to 5,800+ (#689)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.90.3)
+
 ### v1.90.2
 
 **Fixed:**
