@@ -328,3 +328,95 @@ class TestBrowserNewChat:
         input_el = page.locator("#message-input")
         assert input_el.is_visible()
         assert input_el.is_enabled()
+
+
+@requires_playwright
+class TestConcurrent401BrowserRecovery:
+    """Verify concurrent 401s don't produce the 'Could not recover' banner (#687)."""
+
+    def test_concurrent_401s_recover_without_banner(self, page, base_url: str) -> None:
+        """Multiple simultaneous 401 responses should trigger a single recovery redirect,
+        not exhaust the retry counter and show the error banner.
+
+        Without the _recovering guard: call 1 takes the "first 401" path (resets
+        counter, queues redirect). Calls 2-5 see rapid 401s and increment the retry
+        counter to 3+, showing the permanent banner. With the guard: only call 1
+        proceeds, calls 2-5 are no-ops.
+        """
+        # Load page normally — auth cookies are set, init completes
+        page.goto(f"{base_url}/")
+        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_selector("#btn-send", timeout=10000)
+
+        # Call _handle401() 5 times synchronously. window.location.href = '/'
+        # queues a navigation but JS continues executing synchronously.
+        # The test checks that the banner does NOT appear despite 5 rapid calls.
+        result = page.evaluate("""() => {
+            // Verify _handle401 is accessible (prefixed with _ but exposed for testing)
+            if (typeof App._handle401 !== 'function') {
+                throw new Error('App._handle401 is not a function — export may have been removed');
+            }
+
+            // Clear any prior state
+            sessionStorage.removeItem('_anteroom_401_ts');
+            sessionStorage.removeItem('_anteroom_401_retries');
+
+            // Fire 5 synchronous _handle401 calls (simulates concurrent 401s)
+            for (let i = 0; i < 5; i++) {
+                App._handle401();
+            }
+
+            return {
+                bannerPresent: !!document.getElementById('auth-error-banner'),
+                retries: sessionStorage.getItem('_anteroom_401_retries'),
+            };
+        }""")
+
+        # The banner must NOT appear — the _recovering flag prevents counter exhaustion
+        assert result["bannerPresent"] is False, "Banner should not appear from concurrent 401s"
+        # Only the first call should have set retries to '0' (first-401 path);
+        # remaining calls were no-ops
+        assert result["retries"] == "0", f"Expected retries='0', got {result['retries']!r}"
+
+    def test_banner_appears_after_genuine_repeated_failures(self, page, base_url: str) -> None:
+        """The banner should still appear when recovery genuinely fails across
+        multiple page loads (retry counter reaches 3 via separate redirect cycles).
+        """
+        page.goto(f"{base_url}/")
+        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_selector("#btn-send", timeout=10000)
+
+        # Simulate the state of 3 prior failed recovery attempts by
+        # pre-populating sessionStorage (as if 3 redirects already failed)
+        page.evaluate("""() => {
+            sessionStorage.setItem('_anteroom_401_ts', String(Date.now()));
+            sessionStorage.setItem('_anteroom_401_retries', '3');
+        }""")
+
+        # A single 401 now should show the banner (retries >= 3, within 5s window)
+        page.route(
+            "**/api/config",
+            lambda route: route.fulfill(
+                status=401,
+                body='{"detail":"Session expired"}',
+                headers={"Content-Type": "application/json"},
+            ),
+        )
+
+        page.evaluate("App.api('/api/config').catch(() => {})")
+
+        # Wait for the banner to appear (replaces arbitrary timeout)
+        page.wait_for_selector("#auth-error-banner", timeout=5000)
+
+        # Banner SHOULD appear — genuine repeated failure
+        assert page.locator("#auth-error-banner").count() == 1
+        assert page.locator("#auth-error-banner button").text_content() == "Retry"
+
+        # Clean up
+        page.unroute("**/api/config")
+        page.evaluate("""() => {
+            sessionStorage.removeItem('_anteroom_401_ts');
+            sessionStorage.removeItem('_anteroom_401_retries');
+            const banner = document.getElementById('auth-error-banner');
+            if (banner) banner.remove();
+        }""")
