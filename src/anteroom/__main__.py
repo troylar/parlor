@@ -369,7 +369,7 @@ def _run_usage(
     from .db import init_db
     from .services import storage
 
-    db = init_db(config.app.data_dir)
+    db = init_db(config.app.data_dir / "chat.db")
     usage_cfg = config.cli.usage
     now = datetime.now(timezone.utc)
 

@@ -76,8 +76,10 @@ _HARD_BLOCK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Mass recursive deletion
     (
         re.compile(
-            r"\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?-[a-zA-Z]*r|"
-            r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+)?-[a-zA-Z]*f",
+            r"\brm\s+(-{1,2}[a-zA-Z][-a-zA-Z]*\s+)*-[a-zA-Z]*f[a-zA-Z]*\s+(-{1,2}[a-zA-Z][-a-zA-Z]*\s+)*-[a-zA-Z]*r|"
+            r"\brm\s+(-{1,2}[a-zA-Z][-a-zA-Z]*\s+)*-[a-zA-Z]*r[a-zA-Z]*\s+(-{1,2}[a-zA-Z][-a-zA-Z]*\s+)*-[a-zA-Z]*f|"
+            r"\brm\s+(-{1,2}[a-zA-Z][-a-zA-Z]*\s+)*-[a-zA-Z]*rf[a-zA-Z]*\b|"
+            r"\brm\s+(-{1,2}[a-zA-Z][-a-zA-Z]*\s+)*-[a-zA-Z]*fr[a-zA-Z]*\b",
             re.IGNORECASE,
         ),
         "recursive forced deletion (rm -rf)",

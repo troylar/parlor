@@ -972,12 +972,12 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                 CliConfig.max_line_repeats,
             ),
         )
+        _pending_usage: dict[str, Any] | None = None
         async for agent_event in _with_keepalive(agent_gen):
             if isinstance(agent_event, dict) and "comment" in agent_event:
                 yield agent_event
                 continue
 
-            _pending_usage: dict[str, Any] | None = None
             kind = agent_event.kind
             data = agent_event.data
 
@@ -1041,9 +1041,10 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                             }
 
             elif kind == "tool_call_start":
-                _canvas_args_accum.clear()
-                _canvas_content_sent.clear()
-                _canvas_stream_started.clear()
+                idx = data.get("index", 0)
+                _canvas_args_accum.pop(idx, None)
+                _canvas_content_sent.pop(idx, None)
+                _canvas_stream_started.discard(idx)
                 _pending_tool_inputs[data["id"]] = data["arguments"]
                 yield {
                     "event": "tool_call_start",
@@ -1104,6 +1105,13 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                     )
 
             elif kind == "tool_call_end":
+                if not current_assistant_msg:
+                    logger.warning(
+                        "tool_call_end received before assistant_message — "
+                        "tool call %s (%s) will not be stored in DB",
+                        data.get("id", "?"),
+                        data.get("tool_name", "?"),
+                    )
                 if current_assistant_msg:
                     tool_input = _pending_tool_inputs.pop(data["id"], {})
                     if ctx.tool_registry.has_tool(data["tool_name"]):

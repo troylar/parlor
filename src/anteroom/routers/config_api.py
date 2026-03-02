@@ -255,6 +255,8 @@ async def add_database(body: DatabaseAdd, request: Request) -> Any:
         existing = db_manager.list_databases()
         if any(d["name"] == body.name for d in existing):
             raise HTTPException(status_code=409, detail=f"Database '{body.name}' already exists")
+    except HTTPException:
+        raise
     except Exception:
         pass
 
