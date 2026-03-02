@@ -3906,9 +3906,7 @@ async def _run_repl(
                                 for err in result.errors:
                                     renderer.render_error(err)
                             else:
-                                renderer.console.print(
-                                    f"[green]Cloned space: {_sp_match['name']}[/green]\n"
-                                )
+                                renderer.console.print(f"[green]Cloned space: {_sp_match['name']}[/green]\n")
                         except Exception as e:
                             renderer.render_error(str(e))
 
@@ -4237,9 +4235,7 @@ async def _run_repl(
                             continue
                         renderer.console.print("\n[bold]Artifacts:[/bold]")
                         for a in arts:
-                            renderer.console.print(
-                                f"  {a['fqn']}  [{a.get('type', '?')}]  ({a.get('source', '?')})"
-                            )
+                            renderer.console.print(f"  {a['fqn']}  [{a.get('type', '?')}]  ({a.get('source', '?')})")
                         renderer.console.print()
 
                     elif sub == "show":
