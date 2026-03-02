@@ -102,6 +102,8 @@ class LiteLLMService:
         tools: list[dict[str, Any]] | None = None,
         cancel_event: asyncio.Event | None = None,
         extra_system_prompt: str | None = None,
+        *,
+        _retry_on_auth: bool = True,
     ) -> AsyncGenerator[dict[str, Any], None]:
         system_content = self.config.system_prompt
         if extra_system_prompt:
@@ -211,10 +213,13 @@ class LiteLLMService:
                 last_error = e
                 err_msg = str(e).lower()
 
-                # Authentication errors — try refresh, then fail
+                # Authentication errors — try refresh once, then fail
                 if "auth" in err_msg or "401" in err_msg or "invalid api key" in err_msg:
-                    if self._try_refresh_token():
-                        async for event in self.stream_chat(messages, tools, cancel_event, extra_system_prompt):
+                    if _retry_on_auth and self._try_refresh_token():
+                        kwargs["api_key"] = self._resolve_api_key()
+                        async for event in self.stream_chat(
+                            messages, tools, cancel_event, extra_system_prompt, _retry_on_auth=False
+                        ):
                             yield event
                     else:
                         yield {
@@ -294,7 +299,7 @@ class LiteLLMService:
         yield {
             "event": "error",
             "data": {
-                "message": f"API request failed ({max_attempts} attempts): {type(last_error).__name__}",
+                "message": f"API request failed after {max_attempts} attempts",
                 "code": "timeout",
                 "retryable": True,
             },
@@ -332,9 +337,9 @@ class LiteLLMService:
             if response.choices:
                 return True, "Connected successfully", [self.config.model]
             return False, "No response from API", []
-        except Exception as e:
-            logger.error("Connection validation failed: %s", e)
-            return False, f"Connection failed: {type(e).__name__}", []
+        except Exception:
+            logger.exception("Connection validation failed")
+            return False, "Connection failed", []
 
     async def complete(
         self,

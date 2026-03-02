@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from anteroom.config import AIConfig
+from anteroom.services.token_provider import TokenProvider
 
 # Inject a mock litellm module before importing litellm_provider,
 # so that the try/except import succeeds and `litellm` is bound as a module attribute.
@@ -72,6 +74,14 @@ class TestLiteLLMServiceConstruction:
         with patch("anteroom.services.litellm_provider.HAS_LITELLM", True):
             svc = LiteLLMService(_make_config())
             assert svc.config.provider == "litellm"
+
+    def test_egress_blocked_raises(self) -> None:
+        with (
+            patch("anteroom.services.litellm_provider.HAS_LITELLM", True),
+            patch("anteroom.services.litellm_provider.check_egress_allowed", return_value=False),
+        ):
+            with pytest.raises(ValueError, match="Egress blocked"):
+                LiteLLMService(_make_config())
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +152,26 @@ class TestBuildKwargs:
         svc = _make_service()
         kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}])
         assert kwargs["api_base"] == "https://openrouter.ai/api/v1"
+
+    def test_top_p_passed(self) -> None:
+        svc = _make_service(_make_config(top_p=0.9))
+        kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}])
+        assert kwargs["top_p"] == 0.9
+
+    def test_seed_passed(self) -> None:
+        svc = _make_service(_make_config(seed=42))
+        kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}])
+        assert kwargs["seed"] == 42
+
+    def test_max_completion_tokens_passed(self) -> None:
+        svc = _make_service()
+        kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}], max_completion_tokens=100)
+        assert kwargs["max_completion_tokens"] == 100
+
+    def test_openrouter_headers_via_base_url(self) -> None:
+        svc = _make_service(_make_config(model="gpt-4o", base_url="https://openrouter.ai/api/v1"))
+        kwargs = svc._build_kwargs([{"role": "user", "content": "hi"}])
+        assert kwargs["extra_headers"]["HTTP-Referer"] == "https://anteroom.ai"
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +439,166 @@ class TestLiteLLMComplete:
         with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
             result = await svc.complete([{"role": "user", "content": "question"}])
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Inheritance check — LiteLLMService has the AIService interface
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Token provider
+# ---------------------------------------------------------------------------
+
+
+class TestLiteLLMTokenProvider:
+    def test_resolve_api_key_from_token_provider(self) -> None:
+        svc = _make_service()
+        mock_tp = MagicMock(spec=TokenProvider)
+        mock_tp.get_token.return_value = "refreshed-key"
+        svc._token_provider = mock_tp
+        assert svc._resolve_api_key() == "refreshed-key"
+        mock_tp.get_token.assert_called_once()
+
+    def test_resolve_api_key_fallback_to_config(self) -> None:
+        svc = _make_service()
+        assert svc._resolve_api_key() == "sk-or-test-key"
+
+    def test_try_refresh_token_success(self) -> None:
+        svc = _make_service()
+        mock_tp = MagicMock(spec=TokenProvider)
+        svc._token_provider = mock_tp
+        assert svc._try_refresh_token() is True
+        mock_tp.refresh.assert_called_once()
+
+    def test_try_refresh_token_no_provider(self) -> None:
+        svc = _make_service()
+        assert svc._try_refresh_token() is False
+
+    def test_try_refresh_token_failure(self) -> None:
+        from anteroom.services.token_provider import TokenProviderError
+
+        svc = _make_service()
+        mock_tp = MagicMock(spec=TokenProvider)
+        mock_tp.refresh.side_effect = TokenProviderError("fail")
+        svc._token_provider = mock_tp
+        assert svc._try_refresh_token() is False
+
+    @pytest.mark.asyncio
+    async def test_auth_error_with_successful_refresh(self) -> None:
+        svc = _make_service()
+        mock_tp = MagicMock(spec=TokenProvider)
+        svc._token_provider = mock_tp
+
+        call_count = 0
+
+        async def mock_acompletion(**kwargs: Any) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("AuthenticationError: invalid api key")
+            # Second call succeeds with a simple done stream
+            done_chunk = MagicMock()
+            done_chunk.choices = [MagicMock()]
+            done_chunk.choices[0].delta.content = "ok"
+            done_chunk.choices[0].delta.tool_calls = None
+            done_chunk.choices[0].finish_reason = "stop"
+            done_chunk.usage = None
+            return _AsyncChunkIterator([done_chunk])
+
+        mock_litellm = MagicMock()
+        mock_litellm.acompletion = AsyncMock(side_effect=mock_acompletion)
+
+        with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
+            events: list[dict[str, Any]] = []
+            async for event in svc.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        event_types = [e["event"] for e in events]
+        assert "token" in event_types or "done" in event_types
+        mock_tp.refresh.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_auth_retry_guard_prevents_infinite_recursion(self) -> None:
+        """After one refresh, a second 401 should yield error, not recurse."""
+        svc = _make_service()
+        mock_tp = MagicMock(spec=TokenProvider)
+        svc._token_provider = mock_tp
+
+        mock_litellm = MagicMock()
+        mock_litellm.acompletion = AsyncMock(side_effect=Exception("AuthenticationError: invalid api key"))
+
+        with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
+            events: list[dict[str, Any]] = []
+            async for event in svc.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "auth_failed"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestLiteLLMEdgeCases:
+    @pytest.mark.asyncio
+    async def test_validate_connection_no_choices(self) -> None:
+        svc = _make_service()
+        mock_resp = MagicMock()
+        mock_resp.choices = []
+
+        mock_litellm = MagicMock()
+        mock_litellm.acompletion = AsyncMock(return_value=mock_resp)
+
+        with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
+            ok, msg, models = await svc.validate_connection()
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_complete_no_choices(self) -> None:
+        svc = _make_service()
+        mock_resp = MagicMock()
+        mock_resp.choices = []
+
+        mock_litellm = MagicMock()
+        mock_litellm.acompletion = AsyncMock(return_value=mock_resp)
+
+        with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
+            result = await svc.complete([{"role": "user", "content": "hi"}])
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_stream_cancelled_mid_stream(self) -> None:
+        svc = _make_service()
+        cancel_event = asyncio.Event()
+
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta.content = "Hello"
+        chunk.choices[0].delta.tool_calls = None
+        chunk.choices[0].finish_reason = None
+        chunk.usage = None
+
+        # Set cancel after first chunk is yielded
+        async def cancelling_stream(**kwargs: Any) -> Any:
+            return _AsyncChunkIterator([chunk, chunk, chunk])
+
+        mock_litellm = MagicMock()
+        mock_litellm.acompletion = AsyncMock(side_effect=cancelling_stream)
+
+        with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
+            events: list[dict[str, Any]] = []
+            async for event in svc.stream_chat([{"role": "user", "content": "hi"}], cancel_event=cancel_event):
+                events.append(event)
+                if event.get("event") == "token":
+                    cancel_event.set()
+
+        # Should have stopped after cancel, not consumed all chunks
+        token_events = [e for e in events if e["event"] == "token"]
+        assert len(token_events) <= 2  # at most 1-2 before cancel detected
 
 
 # ---------------------------------------------------------------------------
