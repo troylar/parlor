@@ -1,4 +1,4 @@
-"""Tests for _resolve_pack_interactive helper in repl.py."""
+"""Tests for REPL helpers: _resolve_pack_interactive and subcommand completions."""
 
 from __future__ import annotations
 
