@@ -37,6 +37,9 @@ def _make_stream_ctx(**overrides: object) -> MagicMock:
     ctx.request = MagicMock()
     ctx.request.app.state.config.cli.max_consecutive_text_only = 3
     ctx.request.app.state.audit_writer = None
+    ctx.request.app.state.dlp_scanner = None
+    ctx.request.app.state.injection_detector = None
+    ctx.request.app.state.config.safety.output_filter = None
     ctx.last_token_broadcast = 0
     ctx.token_throttle_interval = 999
     ctx.client_id = "client-1"
@@ -66,11 +69,15 @@ class TestStreamChatEventsBugs:
     async def test_pending_usage_persists_across_iterations(self) -> None:
         """Bug 1: usage event followed by assistant_message must trigger
         update_message_usage — proves _pending_usage is not reset per iteration."""
+        import asyncio
+
         from anteroom.routers.chat import _stream_chat_events
 
         mock_storage = MagicMock()
         mock_storage.create_message.return_value = {"id": "msg-1", "position": 1}
         ctx = _make_stream_ctx()
+        ctx.cancel_event = asyncio.Event()
+        ctx.db = MagicMock()
 
         events = [
             _make_event("usage", {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30, "model": "test"}),

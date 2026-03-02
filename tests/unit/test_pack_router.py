@@ -5,11 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from fastapi import FastAPI
+import pytest
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from anteroom.config import PackSourceConfig
-from anteroom.routers.packs import router
+from anteroom.routers.packs import (
+    get_pack_by_id,
+    remove_pack_by_id,
+    router,
+)
 from anteroom.services.pack_refresh import SourceRefreshResult
 from anteroom.services.pack_sources import CachedSource
 
@@ -304,6 +309,181 @@ class TestListPackAttachmentsEndpoint:
             client = TestClient(app)
             resp = client.get("/api/packs/test-ns/test-pack/attachments")
             assert resp.status_code == 404
+
+
+class TestValidatePackPathParams:
+    def test_invalid_namespace_returns_400(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = (None, [])
+            client = TestClient(app)
+            resp = client.get("/api/packs/INVALID-NS/test-pack")
+            assert resp.status_code == 400
+            assert "Invalid namespace" in resp.json()["detail"]
+
+    def test_invalid_name_returns_400(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = (None, [])
+            client = TestClient(app)
+            resp = client.get("/api/packs/valid-ns/INVALID-NAME")
+            assert resp.status_code == 400
+            assert "Invalid pack name" in resp.json()["detail"]
+
+    def test_namespace_with_special_chars_returns_400(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.get("/api/packs/has$pecial/valid-name")
+        assert resp.status_code == 400
+        assert "Invalid namespace" in resp.json()["detail"]
+
+    def test_valid_namespace_and_name_pass_validation(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = (None, [])
+            client = TestClient(app)
+            resp = client.get("/api/packs/valid-ns/valid-name")
+            assert resp.status_code == 404
+
+
+class TestRemovePackEndpointExtended:
+    def test_remove_when_service_returns_false(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            mock_packs.remove_pack_by_id.return_value = False
+            client = TestClient(app)
+            resp = client.delete("/api/packs/test-ns/test-pack")
+            assert resp.status_code == 404
+            assert resp.json()["detail"] == "Pack not found"
+
+
+class TestGetPackEndpointExtended:
+    def test_get_pack_by_id_after_resolve_returns_none(self) -> None:
+        """get_pack_by_id returns None after resolve succeeds."""
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            mock_packs.get_pack_by_id.return_value = None
+            client = TestClient(app)
+            resp = client.get("/api/packs/test-ns/test-pack")
+            assert resp.status_code == 404
+            assert resp.json()["detail"] == "Pack not found"
+
+
+class TestGetPackByIdEndpoint:
+    """Tests for get_pack_by_id handler called directly (route is shadowed by {namespace}/{name})."""
+
+    @pytest.mark.asyncio
+    async def test_get_by_valid_id(self) -> None:
+        request = MagicMock()
+        request.app.state.db = MagicMock()
+        pack_data = {
+            "id": "abcdef01-1234-5678-9abc-def012345678",
+            "namespace": "test-ns",
+            "name": "test-pack",
+            "version": "1.0.0",
+            "source_path": "/secret/internal/path",
+            "artifacts": [
+                {
+                    "fqn": "@test-ns/skill/greet",
+                    "type": "skill",
+                    "content": "secret instructions",
+                }
+            ],
+        }
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.get_pack_by_id.return_value = pack_data
+            result = await get_pack_by_id(request, "abcdef01-1234-5678-9abc-def012345678")
+        assert result["name"] == "test-pack"
+        assert "source_path" not in result
+        assert "content" not in result["artifacts"][0]
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_not_found(self) -> None:
+        request = MagicMock()
+        request.app.state.db = MagicMock()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.get_pack_by_id.return_value = None
+            with pytest.raises(HTTPException) as exc_info:
+                await get_pack_by_id(request, "abcdef01-1234-5678-9abc-def012345678")
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Pack not found"
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_invalid_format_returns_400(self) -> None:
+        request = MagicMock()
+        with pytest.raises(HTTPException) as exc_info:
+            await get_pack_by_id(request, "not-a-valid-uuid!!!")
+        assert exc_info.value.status_code == 400
+        assert "Invalid pack ID format" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_strips_source_path(self) -> None:
+        request = MagicMock()
+        request.app.state.db = MagicMock()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.get_pack_by_id.return_value = {
+                "id": "abcdef01-1234-5678-9abc-def012345678",
+                "namespace": "ns",
+                "name": "p",
+                "source_path": "/hidden/path",
+                "artifacts": [],
+            }
+            result = await get_pack_by_id(request, "abcdef01-1234-5678-9abc-def012345678")
+        assert "source_path" not in result
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_calls_service_with_correct_id(self) -> None:
+        request = MagicMock()
+        request.app.state.db = MagicMock()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.get_pack_by_id.return_value = {"id": "abcd1234-abcd-abcd-abcd-abcd12345678", "artifacts": []}
+            await get_pack_by_id(request, "abcd1234-abcd-abcd-abcd-abcd12345678")
+        mock_packs.get_pack_by_id.assert_called_once_with(request.app.state.db, "abcd1234-abcd-abcd-abcd-abcd12345678")
+
+
+class TestRemovePackByIdEndpoint:
+    """Tests for remove_pack_by_id handler called directly (route is shadowed by {namespace}/{name})."""
+
+    @pytest.mark.asyncio
+    async def test_remove_by_valid_id(self) -> None:
+        request = MagicMock()
+        request.app.state.db = MagicMock()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.remove_pack_by_id.return_value = True
+            result = await remove_pack_by_id(request, "abcdef01-1234-5678-9abc-def012345678")
+        assert result["status"] == "removed"
+
+    @pytest.mark.asyncio
+    async def test_remove_by_id_not_found(self) -> None:
+        request = MagicMock()
+        request.app.state.db = MagicMock()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.remove_pack_by_id.return_value = False
+            with pytest.raises(HTTPException) as exc_info:
+                await remove_pack_by_id(request, "abcdef01-1234-5678-9abc-def012345678")
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Pack not found"
+
+    @pytest.mark.asyncio
+    async def test_remove_by_id_invalid_format_returns_400(self) -> None:
+        request = MagicMock()
+        with pytest.raises(HTTPException) as exc_info:
+            await remove_pack_by_id(request, "not-a-valid-id!!!")
+        assert exc_info.value.status_code == 400
+        assert "Invalid pack ID format" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_remove_by_id_calls_service_with_correct_id(self) -> None:
+        request = MagicMock()
+        request.app.state.db = MagicMock()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.remove_pack_by_id.return_value = True
+            await remove_pack_by_id(request, "abcd1234-abcd-abcd-abcd-abcd12345678")
+        mock_packs.remove_pack_by_id.assert_called_once_with(
+            request.app.state.db, "abcd1234-abcd-abcd-abcd-abcd12345678"
+        )
 
 
 class TestRefreshSourcesEndpoint:
