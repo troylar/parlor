@@ -407,6 +407,7 @@ async def run_exec_mode(
             narration_cadence=0,
             tool_output_max_chars=config.cli.tool_output_max_chars,
             output_filter=_output_filter,
+            max_consecutive_text_only=config.cli.max_consecutive_text_only,
         ):
             if event.kind == "token":
                 if output_total_chars < _MAX_OUTPUT_CHARS:

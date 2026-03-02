@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from ..cli.instructions import load_instructions
-from ..config import build_runtime_context
+from ..config import CliConfig, build_runtime_context
 from ..models import ChatRequest
 from ..services import storage
 from ..services.ai_service import AIService, create_ai_service
@@ -961,6 +961,11 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
             dlp_scanner=_dlp_scanner,
             injection_detector=_injection_detector,
             output_filter=_output_filter,
+            max_consecutive_text_only=getattr(
+                getattr(_app_config, "cli", None),
+                "max_consecutive_text_only",
+                CliConfig.max_consecutive_text_only,
+            ),
         )
         async for agent_event in _with_keepalive(agent_gen):
             if isinstance(agent_event, dict) and "comment" in agent_event:

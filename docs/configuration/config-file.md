@@ -51,6 +51,7 @@ session:
 cli:
   builtin_tools: true              # Enable built-in tools (default: true)
   max_tool_iterations: 50          # Max tool calls per response (default: 50)
+  max_consecutive_text_only: 3     # Stop after N text-only responses with no tool calls; 0 to disable (default: 3)
   context_warn_tokens: 80000       # Token count at which context warning is shown (default: 80000)
   context_auto_compact_tokens: 100000  # Token count at which auto-compaction triggers (default: 100000)
   retry_delay: 5.0                 # Seconds between CLI auto-retry countdown ticks (default: 5.0, clamped 1–60)
@@ -277,6 +278,7 @@ aroom db encrypt --key-from identity  # use identity key as encryption key
 |---|---|---|---|
 | `builtin_tools` | boolean | `true` | Enable the 6 built-in tools |
 | `max_tool_iterations` | integer | `50` | Max agentic loop iterations per turn |
+| `max_consecutive_text_only` | integer | `3` | Stop after N consecutive text-only responses with no tool calls; 0 to disable |
 | `context_warn_tokens` | integer | `80000` | Token count at which a context warning is shown in the CLI |
 | `context_auto_compact_tokens` | integer | `100000` | Token count at which context is automatically compacted |
 | `retry_delay` | float | `5.0` | Seconds between CLI auto-retry countdown ticks (clamped 1–60) |
