@@ -2479,7 +2479,7 @@ def create_source_from_attachment(
     content_hash = None
     try:
         content_hash = hashlib.sha256(full_path.read_bytes()).hexdigest()
-    except FileNotFoundError:
+    except OSError:
         pass
 
     source = create_source(

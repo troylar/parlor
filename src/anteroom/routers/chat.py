@@ -540,8 +540,20 @@ async def _build_chat_system_prompt(
             logger.debug("RAG retrieval failed, continuing without context", exc_info=True)
             meta["rag_status"] = "failed"
             meta["rag_chunks"] = 0
-    elif rag_config and not rag_config.enabled:
-        meta["rag_status"] = "disabled"
+    else:
+        # Capture the reason RAG was skipped so prompt_meta is always consistent
+        if not rag_config:
+            meta["rag_status"] = "no_config"
+        elif not rag_config.enabled:
+            meta["rag_status"] = "disabled"
+        elif plan_mode:
+            meta["rag_status"] = "skipped_plan_mode"
+        elif not vec_enabled:
+            meta["rag_status"] = "no_vec_support"
+        elif not embedding_service:
+            meta["rag_status"] = "no_embedding_service"
+        else:
+            meta["rag_status"] = "skipped"
         meta["rag_chunks"] = 0
 
     # Codebase index

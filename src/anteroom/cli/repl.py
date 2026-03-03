@@ -4765,6 +4765,10 @@ async def _run_repl(
                 try:
                     from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
 
+                    # Always strip stale RAG context before attempting fresh retrieval,
+                    # so we never send outdated context if this turn's retrieval fails.
+                    extra_system_prompt = strip_rag_context(extra_system_prompt)
+
                     _rag_emb = await _get_rag_embedding_service()
                     if _rag_emb:
                         _rag_chunks = await retrieve_context(
@@ -4776,8 +4780,6 @@ async def _run_repl(
                             space_id=conv.get("space_id"),
                             project_id=conv.get("project_id"),
                         )
-                        # Strip any previous RAG context and inject fresh
-                        extra_system_prompt = strip_rag_context(extra_system_prompt)
                         if _rag_chunks:
                             extra_system_prompt += format_rag_context(_rag_chunks)
                             renderer.console.print(

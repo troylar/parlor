@@ -37,6 +37,7 @@ class EmbeddingWorker:
         self._batch_size = batch_size
         self._running = False
         self._disabled = False
+        self._permanently_disabled = False
         self._disabled_reason: str | None = None
         self._consecutive_failures = 0
         self._current_interval = DEFAULT_INTERVAL
@@ -88,12 +89,14 @@ class EmbeddingWorker:
 
     def _disable_permanent(self, reason: str) -> None:
         self._disabled = True
+        self._permanently_disabled = True
         self._disabled_reason = reason
         logger.error("Embedding worker permanently disabled: %s", reason)
 
     def re_enable(self) -> None:
         """Manually re-enable a disabled worker (e.g. after fixing the root cause)."""
         self._disabled = False
+        self._permanently_disabled = False
         self._disabled_reason = None
         self._reset_backoff()
         logger.info("Embedding worker re-enabled")
@@ -337,6 +340,11 @@ class EmbeddingWorker:
         while self._running:
             if self._disabled:
                 logger.debug("Embedding worker is disabled: %s", self._disabled_reason)
+                if self._permanently_disabled:
+                    # Permanent errors (e.g. invalid API key, model not found)
+                    # should not be auto-probed -- use re_enable() explicitly.
+                    await asyncio.sleep(RECOVERY_PROBE_INTERVAL)
+                    continue
                 await asyncio.sleep(RECOVERY_PROBE_INTERVAL)
                 await self._probe_recovery()
                 continue

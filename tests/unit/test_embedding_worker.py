@@ -1180,3 +1180,39 @@ class TestEmbeddingWorkerRecovery:
         mock_logger.warning.assert_called()
         warn_msg = mock_logger.warning.call_args[0][0]
         assert "approaching disable threshold" in warn_msg
+
+    def test_permanent_disable_sets_flag(self) -> None:
+        """Permanently disabled workers must not auto-recover via probe."""
+        worker = self._make_worker()
+        worker._disable_permanent("model not found")
+        assert worker._permanently_disabled is True
+        assert worker._disabled is True
+
+    def test_re_enable_clears_permanent_flag(self) -> None:
+        worker = self._make_worker()
+        worker._disable_permanent("model not found")
+        worker.re_enable()
+        assert worker._permanently_disabled is False
+        assert worker._disabled is False
+
+    @pytest.mark.asyncio
+    async def test_run_forever_skips_probe_for_permanently_disabled(self) -> None:
+        """run_forever should not probe recovery when permanently disabled."""
+        worker = self._make_worker()
+        worker._disable_permanent("model not found")
+
+        call_count = 0
+
+        async def fake_sleep(seconds: float) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                worker._running = False
+
+        with (
+            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch.object(worker, "_probe_recovery", new_callable=AsyncMock) as mock_probe,
+        ):
+            await worker.run_forever()
+
+        mock_probe.assert_not_called()
