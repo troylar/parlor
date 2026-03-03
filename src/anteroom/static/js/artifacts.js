@@ -233,13 +233,14 @@ const Artifacts = (() => {
             const delBtn = document.getElementById('artifact-delete-btn');
             if (delBtn) {
                 delBtn.addEventListener('click', async () => {
-                    if (!confirm('Delete artifact ' + (art.fqn || '') + '?')) return;
+                    if (!confirm('Delete artifact ' + _escapeHtml(art.fqn || '') + '?')) return;
                     try {
                         await App.api('/api/artifacts/' + encodeURIComponent(art.fqn), { method: 'DELETE' });
                         _showListView();
                         await _refreshArtifacts();
                     } catch (e) {
-                        alert('Delete failed: ' + (e.message || e));
+                        console.error('Artifact delete failed:', e);
+                        alert('Delete failed: ' + (e.message || 'unknown error'));
                     }
                 });
             }
@@ -286,13 +287,14 @@ const Artifacts = (() => {
             });
 
             document.getElementById('pack-delete-btn').addEventListener('click', async () => {
-                if (!confirm('Remove pack ' + (namespace || '') + '/' + (name || '') + '?')) return;
+                if (!confirm('Remove pack ' + _escapeHtml(namespace || '') + '/' + _escapeHtml(name || '') + '?')) return;
                 try {
                     await App.api('/api/packs/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(name), { method: 'DELETE' });
                     _showListView();
                     await _refreshPacks();
                 } catch (e) {
-                    alert('Remove failed: ' + (e.message || e));
+                    console.error('Pack remove failed:', e);
+                    alert('Remove failed: ' + (e.message || 'unknown error'));
                 }
             });
         } catch (err) {
