@@ -4770,6 +4770,8 @@ async def _run_repl(
                             embedding_service=_rag_emb,
                             config=config.rag,
                             current_conversation_id=conv["id"],
+                            space_id=conv.get("space_id"),
+                            project_id=conv.get("project_id") or project_id,
                         )
                         # Strip any previous RAG context and inject fresh
                         extra_system_prompt = strip_rag_context(extra_system_prompt)

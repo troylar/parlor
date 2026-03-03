@@ -1485,8 +1485,13 @@ def search_similar_messages(
     limit: int = 20,
     conversation_id: str | None = None,
     conversation_type: str | None = None,
+    space_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Search for semantically similar messages using vec0 cosine similarity."""
+    """Search for semantically similar messages using vec0 cosine similarity.
+
+    When *space_id* is given, results are post-filtered to messages from
+    conversations that belong to the specified space.
+    """
     from ..db import has_vec_support
 
     raw_conn = db._conn if hasattr(db, "_conn") else db
@@ -1499,10 +1504,10 @@ def search_similar_messages(
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     embedding_bytes = _validate_embedding(embedding)
 
-    # When post-filtering by conversation_type, over-fetch from the vector index
-    # to compensate for rows that will be discarded. Without this, the caller
-    # may receive far fewer results than requested.
-    vec_k = limit * 4 if conversation_type else limit
+    # When post-filtering by conversation_type or space_id, over-fetch from the
+    # vector index to compensate for rows that will be discarded.
+    needs_post_filter = bool(conversation_type or space_id)
+    vec_k = limit * 4 if needs_post_filter else limit
     vec_k = min(vec_k, _MAX_SEARCH_LIMIT)
 
     if conversation_id:
@@ -1514,7 +1519,7 @@ def search_similar_messages(
                 WHERE embedding MATCH ? AND k = ? AND conversation_id = ?
             )
             SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role,
-                   c.type AS conversation_type
+                   c.type AS conversation_type, c.space_id AS conversation_space_id
             FROM knn
             LEFT JOIN messages m ON m.id = knn.message_id
             LEFT JOIN conversations c ON c.id = knn.conversation_id
@@ -1530,7 +1535,7 @@ def search_similar_messages(
                 WHERE embedding MATCH ? AND k = ?
             )
             SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role,
-                   c.type AS conversation_type
+                   c.type AS conversation_type, c.space_id AS conversation_space_id
             FROM knn
             LEFT JOIN messages m ON m.id = knn.message_id
             LEFT JOIN conversations c ON c.id = knn.conversation_id
@@ -1542,6 +1547,8 @@ def search_similar_messages(
     for r in rows:
         d = dict(r)
         if conversation_type and d.get("conversation_type") != conversation_type:
+            continue
+        if space_id and d.get("conversation_space_id") != space_id:
             continue
         results.append(
             {
@@ -2494,11 +2501,17 @@ def search_similar_source_chunks(
     limit: int = 20,
     source_id: str | None = None,
     project_id: str | None = None,
+    space_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Search for semantically similar source chunks using vec0 cosine similarity.
 
     When *project_id* is given, results are filtered to sources linked to that
     project (direct, group, or tag-filter linkage via ``project_sources``).
+
+    When *space_id* is given, results are filtered to sources linked to that
+    space (direct, group, or tag-filter linkage via ``space_sources``).
+
+    Both filters are applied independently (intersection).
     """
     from ..db import has_vec_support
 
@@ -2509,9 +2522,9 @@ def search_similar_source_chunks(
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     embedding_bytes = _validate_embedding(embedding)
 
-    # Over-fetch when project filtering so we still return enough results
-    # after post-filter (KNN is computed before the JOIN).
-    fetch_limit = limit * 3 if project_id else limit
+    # Over-fetch when project/space filtering so we still return enough
+    # results after post-filter (KNN is computed before the JOIN).
+    fetch_limit = limit * 3 if (project_id or space_id) else limit
 
     if source_id:
         rows = db.execute_fetchall(
@@ -2556,5 +2569,9 @@ def search_similar_source_chunks(
     if project_id:
         project_source_ids = {s["id"] for s in get_project_sources(db, project_id)}
         results = [r for r in results if r["source_id"] in project_source_ids]
+
+    if space_id:
+        space_source_ids = {s["id"] for s in get_space_sources(db, space_id)}
+        results = [r for r in results if r["source_id"] in space_source_ids]
 
     return results[:limit]

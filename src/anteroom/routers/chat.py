@@ -258,11 +258,31 @@ def _resolve_sources(
     source_tag: str | None,
     source_group_id: str | None,
     limit: int = 50_000,
+    *,
+    space_id: str | None = None,
+    project_id: str | None = None,
 ) -> str:
-    """Resolve source references and return XML-delimited source content string."""
+    """Resolve source references and return XML-delimited source content string.
+
+    When *space_id* or *project_id* is given, only sources linked to that
+    space/project are included.  Sources auto-injected by the space/project
+    resolution layer always pass this check; this guard prevents a client
+    from injecting arbitrary source IDs that don't belong to the current scope.
+    """
+    # Pre-compute allowed source IDs when scoping is active
+    _allowed_ids: set[str] | None = None
+    if space_id or project_id:
+        _allowed_ids = set()
+        if space_id:
+            _allowed_ids.update(s["id"] for s in storage.get_space_sources(db, space_id))
+        if project_id:
+            _allowed_ids.update(s["id"] for s in storage.get_project_sources(db, project_id))
+
     _referenced_sources: list[dict[str, Any]] = []
     if source_ids:
         for sid in source_ids[:20]:
+            if _allowed_ids is not None and sid not in _allowed_ids:
+                continue
             src = storage.get_source(db, sid)
             if src and src.get("content"):
                 _referenced_sources.append(src)
@@ -376,6 +396,8 @@ async def _build_chat_system_prompt(
     injection_detector: Any = None,
     artifact_registry: Any = None,
     skill_registry: Any = None,
+    space_id: str | None = None,
+    project_id: str | None = None,
 ) -> str:
     """Assemble the extra system prompt from all context sources."""
     from ..services.context_trust import sanitize_trust_tags
@@ -471,7 +493,9 @@ async def _build_chat_system_prompt(
         extra += canvas_context
 
     # Source references
-    source_content = _resolve_sources(db, source_ids, source_tag, source_group_id)
+    source_content = _resolve_sources(
+        db, source_ids, source_tag, source_group_id, space_id=space_id, project_id=project_id
+    )
     if source_content:
         extra += source_content
 
@@ -495,6 +519,8 @@ async def _build_chat_system_prompt(
                 embedding_service=embedding_service,
                 config=rag_config,
                 current_conversation_id=conversation_id,
+                space_id=space_id,
+                project_id=project_id,
             )
             if rag_chunks:
                 extra += format_rag_context(rag_chunks)
@@ -1816,6 +1842,8 @@ async def chat(conversation_id: str, request: Request) -> Any:
         injection_detector=getattr(request.app.state, "injection_detector", None),
         artifact_registry=getattr(request.app.state, "artifact_registry", None),
         skill_registry=getattr(request.app.state, "skill_registry", None),
+        space_id=space_id,
+        project_id=project_id,
     )
 
     # Build per-request safety approval context
