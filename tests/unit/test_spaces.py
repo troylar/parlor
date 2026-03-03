@@ -10,7 +10,7 @@ from anteroom.services.spaces import (
     SpaceLocalConfig,
     SpacePackSource,
     SpaceSource,
-    file_hash,
+    compute_file_hash,
     get_spaces_dir,
     is_local_space,
     parse_local_file,
@@ -186,10 +186,10 @@ class TestHelpers:
         assert d.name == "spaces"
         assert d.parent.name == ".anteroom"
 
-    def test_file_hash(self, tmp_path: Path) -> None:
+    def test_compute_file_hash(self, tmp_path: Path) -> None:
         f = tmp_path / "test.txt"
         f.write_text("hello")
-        h = file_hash(f)
+        h = compute_file_hash(f)
         assert isinstance(h, str)
         assert len(h) == 64
 

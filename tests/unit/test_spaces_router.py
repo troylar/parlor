@@ -347,6 +347,7 @@ class TestRefreshSpaceEndpoint:
         space_file = tmp_path / "space.yaml"
         space_file.write_text("name: work\n")
         space = {"id": "sp-1", "name": "work", "source_file": str(space_file)}
+        updated_space = {"id": "sp-1", "name": "work", "source_file": str(space_file), "source_hash": "newhash123"}
 
         mock_cfg = MagicMock()
         mock_cfg.name = "work"
@@ -357,7 +358,7 @@ class TestRefreshSpaceEndpoint:
             patch("anteroom.routers.spaces.get_space", return_value=space),
             patch("anteroom.services.spaces.parse_space_file", return_value=mock_cfg),
             patch("anteroom.services.spaces.compute_file_hash", return_value="newhash123"),
-            patch("anteroom.routers.spaces.update_space") as mock_update,
+            patch("anteroom.routers.spaces.update_space", return_value=updated_space) as mock_update,
         ):
             client = TestClient(app)
             resp = client.post("/api/spaces/sp-1/refresh")

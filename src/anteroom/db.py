@@ -675,9 +675,7 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
     # folders to _folders_old but conversations FK captured the temp name)
     conv_sql = ""
     if conv_table:
-        row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (conv_table,)
-        ).fetchone()
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (conv_table,)).fetchone()
         conv_sql = row[0] if row else ""
 
     has_corrupted_fk = "_folders_old" in conv_sql or "_conversations_old" in conv_sql

@@ -876,6 +876,7 @@ const App = (() => {
 
     // --- Spaces ---
     let _spacesLoaded = false;
+    let _loadedSpaces = [];
 
     async function loadSpaces() {
         const list = document.getElementById('space-list');
@@ -901,6 +902,7 @@ const App = (() => {
             // ignore — spaces feature may not be available
         }
 
+        _loadedSpaces = spaces;
         _renderSpaceList(spaces);
 
         if (!_spacesLoaded) {
@@ -912,6 +914,15 @@ const App = (() => {
                     select.value = '';
                     await loadSpaces();
                     await Sidebar.refresh();
+                });
+            }
+            const editActiveBtn = document.getElementById('btn-space-edit-active');
+            if (editActiveBtn) {
+                editActiveBtn.addEventListener('click', () => {
+                    const active = _loadedSpaces.find(s => s.id === state.currentSpaceId);
+                    if (active && active.origin !== 'local') {
+                        _openSpaceModal(active);
+                    }
                 });
             }
         }
@@ -1017,6 +1028,10 @@ const App = (() => {
             if (active && activeBar && activeName) {
                 activeName.textContent = active.name;
                 activeBar.style.display = 'flex';
+                const editActiveBtn = document.getElementById('btn-space-edit-active');
+                if (editActiveBtn) {
+                    editActiveBtn.style.display = active.origin === 'local' ? 'none' : '';
+                }
             }
             if (active && chatIndicator && chatIndicatorName) {
                 chatIndicatorName.textContent = active.name;

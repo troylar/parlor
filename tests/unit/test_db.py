@@ -831,8 +831,7 @@ class TestMigrationPaths:
 
         now = "2026-01-01T00:00:00Z"
         conn.execute(
-            "INSERT INTO conversations (id, title, type, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO conversations (id, title, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (str(uuid.uuid4()), "test", "chat", now, now),
         )
         conn.commit()

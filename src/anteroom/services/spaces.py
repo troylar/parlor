@@ -17,6 +17,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -73,10 +74,6 @@ def list_space_files() -> list[Path]:
 
 def compute_file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-# Keep old name as alias for backward compat within this release
-file_hash = compute_file_hash
 
 
 def resolve_local_path(space_path: Path) -> Path | None:
@@ -341,7 +338,7 @@ def sync_space_from_file(
         updates: dict[str, Any] = {
             "instructions": config.instructions or "",
             "source_hash": source_hash,
-            "last_loaded_at": space_storage._now(),
+            "last_loaded_at": datetime.now(timezone.utc).isoformat(),
         }
         if track_source:
             updates["source_file"] = source_file

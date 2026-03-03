@@ -146,8 +146,8 @@ async def api_update_space(request: Request, space_id: str, body: SpaceUpdateReq
         updates["name"] = body.name
     if body.instructions is not None:
         updates["instructions"] = body.instructions
-    if body.model is not None:
-        updates["model"] = body.model
+    if "model" in body.model_fields_set:
+        updates["model"] = body.model or ""
 
     if not updates:
         return _enrich_origin(space)
@@ -204,7 +204,11 @@ async def api_refresh_space(request: Request, space_id: str) -> dict[str, Any]:
         updates["model"] = cfg.config["model"]
 
     updated = update_space(db, space_id, **updates)
-    return {"id": space_id, "name": cfg.name, "source_hash": new_hash, "refreshed": True, "space": updated}
+    if not updated:
+        raise HTTPException(status_code=404, detail="Space not found")
+    result = _enrich_origin(updated)
+    result["refreshed"] = True
+    return result
 
 
 @router.post("/spaces/sync")

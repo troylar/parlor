@@ -99,16 +99,17 @@ const Palette = (() => {
         });
 
         try {
-            const projects = await App.api('/api/projects');
-            projects.forEach(p => {
+            const spaces = await App.api('/api/spaces');
+            spaces.forEach(s => {
                 items.push({
-                    type: 'project',
-                    label: p.name,
-                    hint: 'Project',
+                    type: 'space',
+                    label: s.name,
+                    hint: 'Space',
                     action: async () => {
-                        App.state.currentProjectId = p.id;
-                        document.getElementById('project-select').value = p.id;
-                        await App.loadProjects();
+                        App.state.currentSpaceId = s.id;
+                        const sel = document.getElementById('space-select');
+                        if (sel) sel.value = s.id;
+                        if (typeof App.loadSpaces === 'function') await App.loadSpaces();
                         await Sidebar.refresh();
                         App.state.currentConversationId = null;
                         Chat.loadMessages([]);
