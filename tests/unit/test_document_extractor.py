@@ -9,6 +9,8 @@ from anteroom.services.document_extractor import (
     EXTRACTABLE_MIME_TYPES,
     _extract_docx,
     _extract_pdf,
+    _extract_pptx,
+    _extract_xlsx,
     extract_text,
 )
 
@@ -25,6 +27,26 @@ class TestExtractText:
 
     def test_extractable_mime_types_contains_docx(self) -> None:
         assert "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in EXTRACTABLE_MIME_TYPES
+
+    def test_extractable_mime_types_contains_pptx(self) -> None:
+        assert "application/vnd.openxmlformats-officedocument.presentationml.presentation" in EXTRACTABLE_MIME_TYPES
+
+    def test_extractable_mime_types_contains_xlsx(self) -> None:
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in EXTRACTABLE_MIME_TYPES
+
+    def test_dispatches_to_pptx(self) -> None:
+        pptx_mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        with patch("anteroom.services.document_extractor._extract_pptx", return_value="pptx text") as mock:
+            result = extract_text(b"data", pptx_mime)
+            assert result == "pptx text"
+            mock.assert_called_once_with(b"data")
+
+    def test_dispatches_to_xlsx(self) -> None:
+        xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        with patch("anteroom.services.document_extractor._extract_xlsx", return_value="xlsx text") as mock:
+            result = extract_text(b"data", xlsx_mime)
+            assert result == "xlsx text"
+            mock.assert_called_once_with(b"data")
 
     def test_dispatches_to_pdf(self) -> None:
         with patch("anteroom.services.document_extractor._extract_pdf", return_value="pdf text") as mock:
@@ -157,4 +179,183 @@ class TestDocxExtraction:
         mock_mod.Document.side_effect = Exception("Corrupt DOCX")
         with patch.dict(sys.modules, {"docx": mock_mod}):
             result = _extract_docx(b"corrupt-data")
+            assert result is None
+
+
+def _make_pptx_mock(presentation_instance: MagicMock) -> MagicMock:
+    """Create a mock pptx module where Presentation returns the given instance."""
+    mod = MagicMock()
+    mod.Presentation.return_value = presentation_instance
+    return mod
+
+
+def _make_openpyxl_mock(workbook_instance: MagicMock) -> MagicMock:
+    """Create a mock openpyxl module where load_workbook returns the given instance."""
+    mod = MagicMock()
+    mod.load_workbook.return_value = workbook_instance
+    return mod
+
+
+class TestPptxExtraction:
+    def test_extracts_text_from_slide(self) -> None:
+        mock_shape = MagicMock()
+        mock_shape.has_text_frame = True
+        mock_shape.text_frame.text = "Slide title"
+        mock_slide = MagicMock()
+        mock_slide.shapes = [mock_shape]
+        mock_slide.has_notes_slide = False
+        mock_prs = MagicMock()
+        mock_prs.slides = [mock_slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is not None
+            assert "Slide title" in result
+            assert "Slide 1" in result
+
+    def test_extracts_notes(self) -> None:
+        mock_shape = MagicMock()
+        mock_shape.has_text_frame = True
+        mock_shape.text_frame.text = "Content"
+        mock_slide = MagicMock()
+        mock_slide.shapes = [mock_shape]
+        mock_slide.has_notes_slide = True
+        mock_slide.notes_slide.notes_text_frame.text = "Speaker note here"
+        mock_prs = MagicMock()
+        mock_prs.slides = [mock_slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is not None
+            assert "Speaker notes: Speaker note here" in result
+
+    def test_multi_slide(self) -> None:
+        slides = []
+        for text in ["First slide", "Second slide"]:
+            shape = MagicMock()
+            shape.has_text_frame = True
+            shape.text_frame.text = text
+            slide = MagicMock()
+            slide.shapes = [shape]
+            slide.has_notes_slide = False
+            slides.append(slide)
+        mock_prs = MagicMock()
+        mock_prs.slides = slides
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is not None
+            assert "Slide 1" in result
+            assert "Slide 2" in result
+            assert "First slide" in result
+            assert "Second slide" in result
+
+    def test_empty_presentation_returns_none(self) -> None:
+        mock_prs = MagicMock()
+        mock_prs.slides = []
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is None
+
+    def test_shapes_without_text_skipped(self) -> None:
+        mock_shape = MagicMock()
+        mock_shape.has_text_frame = False
+        mock_slide = MagicMock()
+        mock_slide.shapes = [mock_shape]
+        mock_slide.has_notes_slide = False
+        mock_prs = MagicMock()
+        mock_prs.slides = [mock_slide]
+
+        with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is None
+
+    def test_missing_python_pptx_returns_none(self) -> None:
+        with patch.dict(sys.modules, {"pptx": None}):
+            result = _extract_pptx(b"fake-pptx")
+            assert result is None
+
+    def test_corrupt_pptx_returns_none(self) -> None:
+        mock_mod = MagicMock()
+        mock_mod.Presentation.side_effect = Exception("Corrupt PPTX")
+        with patch.dict(sys.modules, {"pptx": mock_mod}):
+            result = _extract_pptx(b"corrupt-data")
+            assert result is None
+
+
+class TestXlsxExtraction:
+    def test_extracts_cell_data(self) -> None:
+        mock_ws = MagicMock()
+        mock_ws.title = "Sheet1"
+        mock_ws.iter_rows.return_value = [("Name", "Age"), ("Alice", 30)]
+        mock_wb = MagicMock()
+        mock_wb.worksheets = [mock_ws]
+
+        with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
+            result = _extract_xlsx(b"fake-xlsx")
+            assert result is not None
+            assert "Sheet1" in result
+            assert "Name" in result
+            assert "Alice" in result
+
+    def test_multi_sheet(self) -> None:
+        ws1 = MagicMock()
+        ws1.title = "Data"
+        ws1.iter_rows.return_value = [("x", "y")]
+        ws2 = MagicMock()
+        ws2.title = "Summary"
+        ws2.iter_rows.return_value = [("total", 100)]
+        mock_wb = MagicMock()
+        mock_wb.worksheets = [ws1, ws2]
+
+        with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
+            result = _extract_xlsx(b"fake-xlsx")
+            assert result is not None
+            assert "Data" in result
+            assert "Summary" in result
+
+    def test_empty_workbook_returns_none(self) -> None:
+        mock_wb = MagicMock()
+        mock_wb.worksheets = []
+
+        with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
+            result = _extract_xlsx(b"fake-xlsx")
+            assert result is None
+
+    def test_none_cells_become_empty_string(self) -> None:
+        mock_ws = MagicMock()
+        mock_ws.title = "Sheet1"
+        mock_ws.iter_rows.return_value = [("val", None, "other")]
+        mock_wb = MagicMock()
+        mock_wb.worksheets = [mock_ws]
+
+        with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
+            result = _extract_xlsx(b"fake-xlsx")
+            assert result is not None
+            assert "val" in result
+            assert "other" in result
+
+    def test_all_none_rows_skipped(self) -> None:
+        mock_ws = MagicMock()
+        mock_ws.title = "Sheet1"
+        mock_ws.iter_rows.return_value = [(None, None), ("data", "here")]
+        mock_wb = MagicMock()
+        mock_wb.worksheets = [mock_ws]
+
+        with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
+            result = _extract_xlsx(b"fake-xlsx")
+            assert result is not None
+            assert "data" in result
+
+    def test_missing_openpyxl_returns_none(self) -> None:
+        with patch.dict(sys.modules, {"openpyxl": None}):
+            result = _extract_xlsx(b"fake-xlsx")
+            assert result is None
+
+    def test_corrupt_xlsx_returns_none(self) -> None:
+        mock_mod = MagicMock()
+        mock_mod.load_workbook.side_effect = Exception("Corrupt XLSX")
+        with patch.dict(sys.modules, {"openpyxl": mock_mod}):
+            result = _extract_xlsx(b"corrupt-data")
             assert result is None
