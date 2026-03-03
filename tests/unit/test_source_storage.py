@@ -593,3 +593,64 @@ class TestProjectScopedSourceSearch:
 
         results = search_similar_source_chunks(db, [0.1] * 384, limit=10, project_id="some-project-id")
         assert results == []
+
+
+class TestSaveSourceFileDedup:
+    def test_duplicate_content_returns_existing(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        data = b"# Hello\n\nWorld content here"
+        source1 = save_source_file(
+            db, title="first", filename="a.md", mime_type="text/markdown", data=data, data_dir=tmp_path
+        )
+        source2 = save_source_file(
+            db, title="second", filename="b.md", mime_type="text/markdown", data=data, data_dir=tmp_path
+        )
+        assert source1["id"] == source2["id"]
+        assert source1["content_hash"] == source2["content_hash"]
+
+    def test_different_content_creates_new(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        source1 = save_source_file(
+            db,
+            title="first",
+            filename="a.md",
+            mime_type="text/markdown",
+            data=b"content A long enough",
+            data_dir=tmp_path,
+        )
+        source2 = save_source_file(
+            db,
+            title="second",
+            filename="b.md",
+            mime_type="text/markdown",
+            data=b"content B long enough",
+            data_dir=tmp_path,
+        )
+        assert source1["id"] != source2["id"]
+
+
+class TestSaveSourceFileAtomicCleanup:
+    def test_file_cleaned_up_on_db_failure(self, tmp_path: Path) -> None:
+        """If DB insert fails, the written file should be cleaned up."""
+        import sqlite3 as _sqlite3
+
+        conn = _sqlite3.connect(":memory:", check_same_thread=False)
+        conn.row_factory = _sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        # Intentionally do NOT create the sources table
+        broken_db = ThreadSafeConnection(conn)
+
+        data = b"test content long enough"
+        with pytest.raises(Exception):
+            save_source_file(
+                broken_db,
+                title="test",
+                filename="test.txt",
+                mime_type="text/plain",
+                data=data,
+                data_dir=tmp_path,
+            )
+
+        # No source directories should remain
+        sources_dir = tmp_path / "sources"
+        if sources_dir.exists():
+            remaining = list(sources_dir.iterdir())
+            assert remaining == []

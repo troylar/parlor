@@ -345,6 +345,18 @@ const Chat = (() => {
                 hideThinking();
                 finalizeAssistant();
                 break;
+            case 'prompt_meta':
+                if (data.sources_truncated) {
+                    showToast('Source content was truncated to fit the 50KB limit.');
+                }
+                if (data.rag_status === 'ok' && data.rag_chunks > 0) {
+                    showToast(`RAG: ${data.rag_chunks} relevant chunk(s) retrieved`);
+                } else if (data.rag_status === 'no_results') {
+                    showToast('RAG: no relevant context found');
+                } else if (data.rag_status === 'failed') {
+                    showToast('RAG: retrieval failed');
+                }
+                break;
             case 'budget_warning':
                 showToast(data.message || 'Token budget warning');
                 break;

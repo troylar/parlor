@@ -4263,6 +4263,13 @@ body {
     margin-top: 4px;
     display: block;
 }
+.source-upload-hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    opacity: 0.7;
+    line-height: 1.4;
+}
 
 /* Sources toggle button (topbar) */
 .btn-sources-toggle {

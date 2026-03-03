@@ -20,7 +20,9 @@ DEFAULT_INTERVAL = 30.0
 MAX_INTERVAL = 300.0
 BACKOFF_MULTIPLIER = 2.0
 MAX_CONSECUTIVE_FAILURES = 10
+WARNING_THRESHOLD = 7  # Warn when approaching disable threshold
 MAX_STORE_RETRIES = 3
+RECOVERY_PROBE_INTERVAL = 600.0  # 10 minutes between recovery probes
 
 
 class EmbeddingWorker:
@@ -35,6 +37,7 @@ class EmbeddingWorker:
         self._batch_size = batch_size
         self._running = False
         self._disabled = False
+        self._permanently_disabled = False
         self._disabled_reason: str | None = None
         self._consecutive_failures = 0
         self._current_interval = DEFAULT_INTERVAL
@@ -77,11 +80,43 @@ class EmbeddingWorker:
             self._disabled = True
             self._disabled_reason = f"Auto-disabled after {self._consecutive_failures} consecutive failures"
             logger.error("Embedding worker auto-disabled: %s", self._disabled_reason)
+        elif self._consecutive_failures >= WARNING_THRESHOLD:
+            logger.warning(
+                "Embedding worker approaching disable threshold: %d/%d failures",
+                self._consecutive_failures,
+                MAX_CONSECUTIVE_FAILURES,
+            )
 
     def _disable_permanent(self, reason: str) -> None:
         self._disabled = True
+        self._permanently_disabled = True
         self._disabled_reason = reason
         logger.error("Embedding worker permanently disabled: %s", reason)
+
+    def re_enable(self) -> None:
+        """Manually re-enable a disabled worker (e.g. after fixing the root cause)."""
+        self._disabled = False
+        self._permanently_disabled = False
+        self._disabled_reason = None
+        self._reset_backoff()
+        logger.info("Embedding worker re-enabled")
+
+    async def _probe_recovery(self) -> bool:
+        """Attempt a single embed call to check if the service has recovered.
+
+        Returns True if the probe succeeded and the worker was re-enabled.
+        """
+        try:
+            result = await self._service.embed("recovery probe")
+            if result is not None:
+                logger.info("Embedding worker recovery probe succeeded, re-enabling")
+                self.re_enable()
+                return True
+        except EmbeddingPermanentError:
+            pass
+        except Exception:
+            pass
+        return False
 
     async def process_pending(self) -> int:
         """Process unembedded messages and source chunks. Returns total count embedded."""
@@ -305,7 +340,13 @@ class EmbeddingWorker:
         while self._running:
             if self._disabled:
                 logger.debug("Embedding worker is disabled: %s", self._disabled_reason)
-                await asyncio.sleep(MAX_INTERVAL)
+                if self._permanently_disabled:
+                    # Permanent errors (e.g. invalid API key, model not found)
+                    # should not be auto-probed -- use re_enable() explicitly.
+                    await asyncio.sleep(RECOVERY_PROBE_INTERVAL)
+                    continue
+                await asyncio.sleep(RECOVERY_PROBE_INTERVAL)
+                await self._probe_recovery()
                 continue
             try:
                 await self.process_pending()

@@ -6,6 +6,7 @@ const Sources = (() => {
     let _currentSource = null;
     let _searchTimeout = null;
     let _selectedFile = null;
+    let _selectedFiles = []; // Multi-file queue for batch upload
     let _createType = 'text';
     let _isEditing = false;
 
@@ -86,14 +87,30 @@ const Sources = (() => {
             fileDrop.addEventListener('drop', (e) => {
                 e.preventDefault();
                 fileDrop.classList.remove('dragover');
-                if (e.dataTransfer.files.length > 0) {
+                if (e.dataTransfer.files.length > 1) {
+                    _selectedFiles = Array.from(e.dataTransfer.files).slice(0, 20);
+                    _selectedFile = null;
+                    const dropLabel = _selectedFiles.length < e.dataTransfer.files.length
+                        ? `${_selectedFiles.length} files selected (max 20)`
+                        : `${_selectedFiles.length} files selected`;
+                    document.getElementById('source-file-name').textContent = dropLabel;
+                } else if (e.dataTransfer.files.length === 1) {
                     _selectedFile = e.dataTransfer.files[0];
+                    _selectedFiles = [];
                     document.getElementById('source-file-name').textContent = _selectedFile.name;
                 }
             });
             fileInput.addEventListener('change', () => {
-                if (fileInput.files.length > 0) {
+                if (fileInput.files.length > 1) {
+                    _selectedFiles = Array.from(fileInput.files).slice(0, 20);
+                    _selectedFile = null;
+                    const inputLabel = _selectedFiles.length < fileInput.files.length
+                        ? `${_selectedFiles.length} files selected (max 20)`
+                        : `${_selectedFiles.length} files selected`;
+                    document.getElementById('source-file-name').textContent = inputLabel;
+                } else if (fileInput.files.length === 1) {
                     _selectedFile = fileInput.files[0];
+                    _selectedFiles = [];
                     document.getElementById('source-file-name').textContent = _selectedFile.name;
                 }
             });
@@ -168,6 +185,7 @@ const Sources = (() => {
     function showCreateView() {
         _currentView = 'create';
         _selectedFile = null;
+        _selectedFiles = [];
         _createType = 'text';
         document.getElementById('sources-list').style.display = 'none';
         document.getElementById('sources-groups-list').style.display = 'none';
@@ -575,17 +593,29 @@ const Sources = (() => {
 
         try {
             if (_createType === 'file') {
-                if (!_selectedFile) {
+                if (_selectedFiles.length > 0) {
+                    // Multi-file batch upload: use filename as title for each
+                    for (const file of _selectedFiles) {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('title', file.name);
+                        await App.api('/api/sources/upload', {
+                            method: 'POST',
+                            body: formData,
+                        });
+                    }
+                } else if (_selectedFile) {
+                    const formData = new FormData();
+                    formData.append('file', _selectedFile);
+                    formData.append('title', title);
+                    await App.api('/api/sources/upload', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                } else {
                     alert('Please select a file.');
                     return;
                 }
-                const formData = new FormData();
-                formData.append('file', _selectedFile);
-                formData.append('title', title);
-                await App.api('/api/sources/upload', {
-                    method: 'POST',
-                    body: formData,
-                });
             } else {
                 const payload = { type: _createType, title };
                 if (_createType === 'text') {

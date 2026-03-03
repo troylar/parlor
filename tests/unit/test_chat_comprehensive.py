@@ -315,6 +315,55 @@ class TestResolveSources:
             _resolve_sources(db, sids, None, None)
         assert call_count <= 20
 
+    def test_tag_sources_scoped_by_space(self) -> None:
+        """Tag-resolved sources outside the space's allowed set are excluded."""
+        db = MagicMock()
+        tag_id = str(uuid.uuid4())
+        space_id = str(uuid.uuid4())
+        allowed_src = str(uuid.uuid4())
+        denied_src = str(uuid.uuid4())
+        with patch("anteroom.routers.chat.storage") as mock_storage:
+            mock_storage.get_space_sources.return_value = [{"id": allowed_src}]
+            mock_storage.list_sources.return_value = [
+                {"id": allowed_src, "content": "ok"},
+                {"id": denied_src, "content": "blocked"},
+            ]
+            mock_storage.get_source.return_value = {
+                "id": allowed_src,
+                "title": "Allowed",
+                "content": "ok",
+            }
+            result = _resolve_sources(db, [], tag_id, None, space_id=space_id)
+        assert "Allowed" in result
+        # get_source should only be called for the allowed source
+        calls = mock_storage.get_source.call_args_list
+        fetched_ids = {c[0][1] for c in calls}
+        assert denied_src not in fetched_ids
+
+    def test_group_sources_scoped_by_project(self) -> None:
+        """Group-resolved sources outside the project's allowed set are excluded."""
+        db = MagicMock()
+        group_id = str(uuid.uuid4())
+        project_id = str(uuid.uuid4())
+        allowed_src = str(uuid.uuid4())
+        denied_src = str(uuid.uuid4())
+        with patch("anteroom.routers.chat.storage") as mock_storage:
+            mock_storage.get_project_sources.return_value = [{"id": allowed_src}]
+            mock_storage.list_sources.return_value = [
+                {"id": allowed_src, "content": "ok"},
+                {"id": denied_src, "content": "nope"},
+            ]
+            mock_storage.get_source.return_value = {
+                "id": allowed_src,
+                "title": "Allowed",
+                "content": "ok",
+            }
+            result = _resolve_sources(db, [], None, group_id, project_id=project_id)
+        assert "Allowed" in result
+        calls = mock_storage.get_source.call_args_list
+        fetched_ids = {c[0][1] for c in calls}
+        assert denied_src not in fetched_ids
+
 
 # ---------------------------------------------------------------------------
 # _build_tool_list
@@ -472,7 +521,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
-            result = await _build_chat_system_prompt(
+            result, meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -489,6 +538,7 @@ class TestBuildChatSystemPrompt:
             )
 
         assert "RUNTIME_CTX" in result
+        assert isinstance(meta, dict)
 
     @pytest.mark.asyncio
     async def test_project_instructions_injected(self) -> None:
@@ -514,7 +564,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -556,7 +606,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -600,7 +650,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -650,7 +700,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = canvas_data
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -701,7 +751,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = canvas_data
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -743,7 +793,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -793,7 +843,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=ai_service,
                 tool_registry=tool_registry,
                 mcp_manager=mcp_manager,
@@ -811,6 +861,193 @@ class TestBuildChatSystemPrompt:
             )
 
         assert "BUILT_IN RULE CONTENT" in result
+
+    @pytest.mark.asyncio
+    async def test_rag_meta_ok_with_chunks(self) -> None:
+        from anteroom.routers.chat import _build_chat_system_prompt
+
+        ai_service = MagicMock()
+        ai_service.config.model = "gpt-4o"
+        tool_registry = MagicMock()
+        tool_registry.list_tools.return_value = []
+        tool_registry._working_dir = None
+        mcp_manager = MagicMock()
+        mcp_manager.get_server_statuses.return_value = []
+        config = MagicMock()
+        config.app.tls = False
+        config.rag.enabled = True
+        config.codebase_index.map_tokens = 1000
+        db = MagicMock()
+
+        fake_chunks = [MagicMock(), MagicMock()]
+
+        with (
+            patch("anteroom.routers.chat.build_runtime_context", return_value="CTX"),
+            patch("anteroom.routers.chat.load_instructions", return_value=None),
+            patch("anteroom.routers.chat.storage") as mock_storage,
+            patch("anteroom.services.codebase_index.create_index_service", return_value=None),
+            patch("anteroom.services.rag.retrieve_context", return_value=fake_chunks),
+            patch("anteroom.services.rag.strip_rag_context", side_effect=lambda x: x),
+            patch("anteroom.services.rag.format_rag_context", return_value="\nRAG CONTEXT"),
+        ):
+            mock_storage.get_canvas_for_conversation.return_value = None
+            _result, meta = await _build_chat_system_prompt(
+                ai_service=ai_service,
+                tool_registry=tool_registry,
+                mcp_manager=mcp_manager,
+                config=config,
+                db=db,
+                conversation_id=str(uuid.uuid4()),
+                project_instructions=None,
+                plan_prompt="",
+                plan_mode=False,
+                message_text="search query",
+                source_ids=[],
+                source_tag=None,
+                source_group_id=None,
+                vec_enabled=True,
+                embedding_service=MagicMock(),
+            )
+
+        assert meta["rag_status"] == "ok"
+        assert meta["rag_chunks"] == 2
+
+    @pytest.mark.asyncio
+    async def test_rag_meta_no_results(self) -> None:
+        from anteroom.routers.chat import _build_chat_system_prompt
+
+        ai_service = MagicMock()
+        ai_service.config.model = "gpt-4o"
+        tool_registry = MagicMock()
+        tool_registry.list_tools.return_value = []
+        tool_registry._working_dir = None
+        mcp_manager = MagicMock()
+        mcp_manager.get_server_statuses.return_value = []
+        config = MagicMock()
+        config.app.tls = False
+        config.rag.enabled = True
+        config.codebase_index.map_tokens = 1000
+        db = MagicMock()
+
+        with (
+            patch("anteroom.routers.chat.build_runtime_context", return_value="CTX"),
+            patch("anteroom.routers.chat.load_instructions", return_value=None),
+            patch("anteroom.routers.chat.storage") as mock_storage,
+            patch("anteroom.services.codebase_index.create_index_service", return_value=None),
+            patch("anteroom.services.rag.retrieve_context", return_value=[]),
+            patch("anteroom.services.rag.strip_rag_context", side_effect=lambda x: x),
+        ):
+            mock_storage.get_canvas_for_conversation.return_value = None
+            _result, meta = await _build_chat_system_prompt(
+                ai_service=ai_service,
+                tool_registry=tool_registry,
+                mcp_manager=mcp_manager,
+                config=config,
+                db=db,
+                conversation_id=str(uuid.uuid4()),
+                project_instructions=None,
+                plan_prompt="",
+                plan_mode=False,
+                message_text="search query",
+                source_ids=[],
+                source_tag=None,
+                source_group_id=None,
+                vec_enabled=True,
+                embedding_service=MagicMock(),
+            )
+
+        assert meta["rag_status"] == "no_results"
+        assert meta["rag_chunks"] == 0
+
+    @pytest.mark.asyncio
+    async def test_rag_meta_failed(self) -> None:
+        from anteroom.routers.chat import _build_chat_system_prompt
+
+        ai_service = MagicMock()
+        ai_service.config.model = "gpt-4o"
+        tool_registry = MagicMock()
+        tool_registry.list_tools.return_value = []
+        tool_registry._working_dir = None
+        mcp_manager = MagicMock()
+        mcp_manager.get_server_statuses.return_value = []
+        config = MagicMock()
+        config.app.tls = False
+        config.rag.enabled = True
+        config.codebase_index.map_tokens = 1000
+        db = MagicMock()
+
+        with (
+            patch("anteroom.routers.chat.build_runtime_context", return_value="CTX"),
+            patch("anteroom.routers.chat.load_instructions", return_value=None),
+            patch("anteroom.routers.chat.storage") as mock_storage,
+            patch("anteroom.services.codebase_index.create_index_service", return_value=None),
+            patch("anteroom.services.rag.retrieve_context", side_effect=RuntimeError("boom")),
+            patch("anteroom.services.rag.strip_rag_context", side_effect=lambda x: x),
+        ):
+            mock_storage.get_canvas_for_conversation.return_value = None
+            _result, meta = await _build_chat_system_prompt(
+                ai_service=ai_service,
+                tool_registry=tool_registry,
+                mcp_manager=mcp_manager,
+                config=config,
+                db=db,
+                conversation_id=str(uuid.uuid4()),
+                project_instructions=None,
+                plan_prompt="",
+                plan_mode=False,
+                message_text="search query",
+                source_ids=[],
+                source_tag=None,
+                source_group_id=None,
+                vec_enabled=True,
+                embedding_service=MagicMock(),
+            )
+
+        assert meta["rag_status"] == "failed"
+        assert meta["rag_chunks"] == 0
+
+    @pytest.mark.asyncio
+    async def test_rag_meta_disabled(self) -> None:
+        from anteroom.routers.chat import _build_chat_system_prompt
+
+        ai_service = MagicMock()
+        ai_service.config.model = "gpt-4o"
+        tool_registry = MagicMock()
+        tool_registry.list_tools.return_value = []
+        tool_registry._working_dir = None
+        mcp_manager = MagicMock()
+        mcp_manager.get_server_statuses.return_value = []
+        config = MagicMock()
+        config.app.tls = False
+        config.rag.enabled = False
+        config.codebase_index.map_tokens = 1000
+        db = MagicMock()
+
+        with (
+            patch("anteroom.routers.chat.build_runtime_context", return_value="CTX"),
+            patch("anteroom.routers.chat.load_instructions", return_value=None),
+            patch("anteroom.routers.chat.storage") as mock_storage,
+            patch("anteroom.services.codebase_index.create_index_service", return_value=None),
+        ):
+            mock_storage.get_canvas_for_conversation.return_value = None
+            _result, meta = await _build_chat_system_prompt(
+                ai_service=ai_service,
+                tool_registry=tool_registry,
+                mcp_manager=mcp_manager,
+                config=config,
+                db=db,
+                conversation_id=str(uuid.uuid4()),
+                project_instructions=None,
+                plan_prompt="",
+                plan_mode=False,
+                message_text="search query",
+                source_ids=[],
+                source_tag=None,
+                source_group_id=None,
+            )
+
+        assert meta["rag_status"] == "disabled"
+        assert meta["rag_chunks"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -967,6 +1204,7 @@ def _make_stream_context(*, conv_id: str | None = None, plan_mode: bool = False)
     ctx.tool_registry = MagicMock()
     ctx.tool_registry.has_tool.return_value = False
     ctx.mcp_manager = MagicMock()
+    ctx.prompt_meta = {}
     ctx.subagent_events = {}
     ctx.is_first_message = False
     ctx.first_user_text = "hello"

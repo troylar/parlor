@@ -258,17 +258,39 @@ def _resolve_sources(
     source_tag: str | None,
     source_group_id: str | None,
     limit: int = 50_000,
+    *,
+    space_id: str | None = None,
+    project_id: str | None = None,
 ) -> str:
-    """Resolve source references and return XML-delimited source content string."""
+    """Resolve source references and return XML-delimited source content string.
+
+    When *space_id* or *project_id* is given, only sources linked to that
+    space/project are included.  Sources auto-injected by the space/project
+    resolution layer always pass this check; this guard prevents a client
+    from injecting arbitrary source IDs that don't belong to the current scope.
+    """
+    # Pre-compute allowed source IDs when scoping is active
+    _allowed_ids: set[str] | None = None
+    if space_id or project_id:
+        _allowed_ids = set()
+        if space_id:
+            _allowed_ids.update(s["id"] for s in storage.get_space_sources(db, space_id))
+        if project_id:
+            _allowed_ids.update(s["id"] for s in storage.get_project_sources(db, project_id))
+
     _referenced_sources: list[dict[str, Any]] = []
     if source_ids:
         for sid in source_ids[:20]:
+            if _allowed_ids is not None and sid not in _allowed_ids:
+                continue
             src = storage.get_source(db, sid)
             if src and src.get("content"):
                 _referenced_sources.append(src)
     if source_tag:
         tagged = storage.list_sources(db, tag_id=source_tag, limit=20)
         for src in tagged:
+            if _allowed_ids is not None and src["id"] not in _allowed_ids:
+                continue
             if src.get("content") and src["id"] not in {s["id"] for s in _referenced_sources}:
                 full = storage.get_source(db, src["id"])
                 if full and full.get("content"):
@@ -276,6 +298,8 @@ def _resolve_sources(
     if source_group_id:
         grouped = storage.list_sources(db, group_id=source_group_id, limit=20)
         for src in grouped:
+            if _allowed_ids is not None and src["id"] not in _allowed_ids:
+                continue
             if src.get("content") and src["id"] not in {s["id"] for s in _referenced_sources}:
                 full = storage.get_source(db, src["id"])
                 if full and full.get("content"):
@@ -376,9 +400,16 @@ async def _build_chat_system_prompt(
     injection_detector: Any = None,
     artifact_registry: Any = None,
     skill_registry: Any = None,
-) -> str:
-    """Assemble the extra system prompt from all context sources."""
+    space_id: str | None = None,
+    project_id: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Assemble the extra system prompt from all context sources.
+
+    Returns (extra_prompt, metadata) where metadata includes RAG/source status.
+    """
     from ..services.context_trust import sanitize_trust_tags
+
+    meta: dict[str, Any] = {}
 
     # Runtime context for self-awareness
     runtime_ctx = build_runtime_context(
@@ -471,9 +502,12 @@ async def _build_chat_system_prompt(
         extra += canvas_context
 
     # Source references
-    source_content = _resolve_sources(db, source_ids, source_tag, source_group_id)
+    source_content = _resolve_sources(
+        db, source_ids, source_tag, source_group_id, space_id=space_id, project_id=project_id
+    )
     if source_content:
         extra += source_content
+        meta["sources_truncated"] = "[...truncated...]" in source_content
 
     # RAG context (skip in plan mode)
     rag_config = getattr(config, "rag", None)
@@ -495,11 +529,32 @@ async def _build_chat_system_prompt(
                 embedding_service=embedding_service,
                 config=rag_config,
                 current_conversation_id=conversation_id,
+                space_id=space_id,
+                project_id=project_id,
             )
+            meta["rag_status"] = "ok" if rag_chunks else "no_results"
+            meta["rag_chunks"] = len(rag_chunks)
             if rag_chunks:
                 extra += format_rag_context(rag_chunks)
         except Exception:
             logger.debug("RAG retrieval failed, continuing without context", exc_info=True)
+            meta["rag_status"] = "failed"
+            meta["rag_chunks"] = 0
+    else:
+        # Capture the reason RAG was skipped so prompt_meta is always consistent
+        if not rag_config:
+            meta["rag_status"] = "no_config"
+        elif not rag_config.enabled:
+            meta["rag_status"] = "disabled"
+        elif plan_mode:
+            meta["rag_status"] = "skipped_plan_mode"
+        elif not vec_enabled:
+            meta["rag_status"] = "no_vec_support"
+        elif not embedding_service:
+            meta["rag_status"] = "no_embedding_service"
+        else:
+            meta["rag_status"] = "skipped"
+        meta["rag_chunks"] = 0
 
     # Codebase index
     try:
@@ -514,7 +569,7 @@ async def _build_chat_system_prompt(
     except Exception:
         logger.debug("Codebase index unavailable, continuing without it", exc_info=True)
 
-    return extra
+    return extra, meta
 
 
 @dataclass
@@ -876,6 +931,7 @@ class StreamContext:
     canvas_needs_approval: bool = False
     token_throttle_interval: float = 0.1
     last_token_broadcast: float = 0.0
+    prompt_meta: dict[str, Any] = field(default_factory=dict)
 
 
 _DISCONNECT_POLL_INTERVAL = 3  # seconds
@@ -961,6 +1017,10 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                 "data": {"conversation_id": ctx.conversation_id, "client_id": ctx.client_id},
             },
         )
+
+    # Emit prompt metadata (RAG status, source info) as an early event
+    if ctx.prompt_meta:
+        yield {"event": "prompt_meta", "data": json.dumps(ctx.prompt_meta)}
 
     try:
         _planning_cfg = ctx.planning_config
@@ -1796,7 +1856,7 @@ async def chat(conversation_id: str, request: Request) -> Any:
     is_first_message = not regenerate and len(history) <= 1
     first_user_text = message_text
 
-    extra_system_prompt = await _build_chat_system_prompt(
+    extra_system_prompt, prompt_meta = await _build_chat_system_prompt(
         ai_service=ai_service,
         tool_registry=tool_registry,
         mcp_manager=mcp_manager,
@@ -1816,6 +1876,8 @@ async def chat(conversation_id: str, request: Request) -> Any:
         injection_detector=getattr(request.app.state, "injection_detector", None),
         artifact_registry=getattr(request.app.state, "artifact_registry", None),
         skill_registry=getattr(request.app.state, "skill_registry", None),
+        space_id=space_id,
+        project_id=project_id,
     )
 
     # Build per-request safety approval context
@@ -1905,6 +1967,7 @@ async def chat(conversation_id: str, request: Request) -> Any:
         budget_config=getattr(request.app.state.config.cli.usage, "budgets", None),
         canvas_needs_approval=_canvas_needs_approval(safety_config, tool_registry),
         request=request,
+        prompt_meta=prompt_meta,
     )
 
     return EventSourceResponse(_stream_chat_events(stream_ctx))

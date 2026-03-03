@@ -557,7 +557,7 @@ class TestWebSystemPromptSeparation:
             patch("anteroom.routers.chat.build_runtime_context", return_value="runtime context"),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=mock_ai,
                 tool_registry=mock_registry,
                 mcp_manager=mock_mcp,
@@ -607,7 +607,7 @@ class TestWebSystemPromptSeparation:
             patch("anteroom.routers.chat.build_runtime_context", return_value="runtime"),
         ):
             mock_storage.get_canvas_for_conversation.return_value = canvas_data
-            result = await _build_chat_system_prompt(
+            result, _meta = await _build_chat_system_prompt(
                 ai_service=mock_ai,
                 tool_registry=mock_registry,
                 mcp_manager=mock_mcp,

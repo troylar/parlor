@@ -494,6 +494,108 @@ class TestFormatRagContextTypeBadges:
         assert "[doc]" not in result
 
 
+class TestRetrieveContextSpaceScoping:
+    """Tests that RAG respects space boundaries for data isolation."""
+
+    @pytest.mark.asyncio
+    async def test_passes_space_id_to_message_search(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config()
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+
+            await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
+
+        mock_storage.search_similar_messages.assert_called_once_with(
+            db, _fake_embedding(), limit=config.max_chunks, space_id="space-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_space_id_to_source_chunk_search(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config()
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+
+            await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
+
+        mock_storage.search_similar_source_chunks.assert_called_once_with(
+            db, _fake_embedding(), limit=config.max_chunks, project_id=None, space_id="space-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_project_id_to_source_chunk_search(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config()
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+
+            await retrieve_context("test query text here", db, embedding_service, config, project_id="proj-1")
+
+        mock_storage.search_similar_source_chunks.assert_called_once_with(
+            db, _fake_embedding(), limit=config.max_chunks, project_id="proj-1", space_id=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_both_space_and_project_ids(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config()
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+
+            await retrieve_context(
+                "test query text here",
+                db,
+                embedding_service,
+                config,
+                space_id="space-1",
+                project_id="proj-1",
+            )
+
+        mock_storage.search_similar_messages.assert_called_once_with(
+            db, _fake_embedding(), limit=config.max_chunks, space_id="space-1"
+        )
+        mock_storage.search_similar_source_chunks.assert_called_once_with(
+            db, _fake_embedding(), limit=config.max_chunks, project_id="proj-1", space_id="space-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_scoping_params_passed_when_none(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config()
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+
+            await retrieve_context("test query text here", db, embedding_service, config)
+
+        mock_storage.search_similar_messages.assert_called_once_with(
+            db, _fake_embedding(), limit=config.max_chunks, space_id=None
+        )
+        mock_storage.search_similar_source_chunks.assert_called_once_with(
+            db, _fake_embedding(), limit=config.max_chunks, project_id=None, space_id=None
+        )
+
+
 class TestRagConfigDefaults:
     def test_default_config(self) -> None:
         config = RagConfig()

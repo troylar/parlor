@@ -1098,3 +1098,121 @@ class TestEmbeddingWorkerLifecycle:
             count = await worker.process_pending()
 
         assert count == 0
+
+
+class TestEmbeddingWorkerRecovery:
+    """Tests for the recovery probe mechanism."""
+
+    def _make_worker(self, db=None, service=None):
+        db = db or MagicMock()
+        service = service or AsyncMock()
+        return EmbeddingWorker(db, service, batch_size=10)
+
+    def test_re_enable_clears_disabled_state(self) -> None:
+        worker = self._make_worker()
+        worker._disabled = True
+        worker._disabled_reason = "test"
+        worker._consecutive_failures = 5
+        worker._current_interval = 120.0
+
+        worker.re_enable()
+
+        assert not worker._disabled
+        assert worker._disabled_reason is None
+        assert worker._consecutive_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_probe_recovery_succeeds(self) -> None:
+        service = AsyncMock()
+        service.embed = AsyncMock(return_value=[0.1, 0.2])
+
+        worker = self._make_worker(service=service)
+        worker._disabled = True
+        worker._disabled_reason = "test failure"
+
+        result = await worker._probe_recovery()
+
+        assert result is True
+        assert not worker._disabled
+        assert worker._disabled_reason is None
+
+    @pytest.mark.asyncio
+    async def test_probe_recovery_fails_stays_disabled(self) -> None:
+        service = AsyncMock()
+        service.embed = AsyncMock(side_effect=RuntimeError("still broken"))
+
+        worker = self._make_worker(service=service)
+        worker._disabled = True
+        worker._disabled_reason = "test failure"
+
+        result = await worker._probe_recovery()
+
+        assert result is False
+        assert worker._disabled
+
+    @pytest.mark.asyncio
+    async def test_probe_recovery_returns_none_stays_disabled(self) -> None:
+        service = AsyncMock()
+        service.embed = AsyncMock(return_value=None)
+
+        worker = self._make_worker(service=service)
+        worker._disabled = True
+        worker._disabled_reason = "test failure"
+
+        result = await worker._probe_recovery()
+
+        assert result is False
+        assert worker._disabled
+
+    def test_warning_emitted_at_threshold(self) -> None:
+        """Verify warning is logged when approaching disable threshold."""
+        from anteroom.services.embedding_worker import WARNING_THRESHOLD
+
+        worker = self._make_worker()
+        worker._consecutive_failures = WARNING_THRESHOLD - 1
+        worker._current_interval = 30.0
+
+        with patch("anteroom.services.embedding_worker.logger") as mock_logger:
+            worker._apply_backoff()
+
+        assert worker._consecutive_failures == WARNING_THRESHOLD
+        assert not worker._disabled
+        mock_logger.warning.assert_called()
+        warn_msg = mock_logger.warning.call_args[0][0]
+        assert "approaching disable threshold" in warn_msg
+
+    def test_permanent_disable_sets_flag(self) -> None:
+        """Permanently disabled workers must not auto-recover via probe."""
+        worker = self._make_worker()
+        worker._disable_permanent("model not found")
+        assert worker._permanently_disabled is True
+        assert worker._disabled is True
+
+    def test_re_enable_clears_permanent_flag(self) -> None:
+        worker = self._make_worker()
+        worker._disable_permanent("model not found")
+        worker.re_enable()
+        assert worker._permanently_disabled is False
+        assert worker._disabled is False
+
+    @pytest.mark.asyncio
+    async def test_run_forever_skips_probe_for_permanently_disabled(self) -> None:
+        """run_forever should not probe recovery when permanently disabled."""
+        worker = self._make_worker()
+        worker._disable_permanent("model not found")
+
+        call_count = 0
+
+        async def fake_sleep(seconds: float) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                worker._running = False
+
+        with (
+            patch("asyncio.sleep", side_effect=fake_sleep),
+            patch.object(worker, "_probe_recovery", new_callable=AsyncMock) as mock_probe,
+        ):
+            await worker.run_forever()
+
+        mock_probe.assert_not_called()

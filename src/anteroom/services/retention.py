@@ -98,6 +98,30 @@ def purge_orphaned_attachments(data_dir: Path, db: ThreadSafeConnection, *, dry_
     return count
 
 
+def purge_orphaned_sources(data_dir: Path, db: ThreadSafeConnection, *, dry_run: bool = False) -> int:
+    """Delete source directories with no corresponding source record in the DB.
+
+    Returns the count of orphaned directories removed.
+    """
+    sources_root = data_dir / "sources"
+    if not sources_root.exists():
+        return 0
+
+    count = 0
+    for entry in sources_root.iterdir():
+        if not entry.is_dir():
+            continue
+        if not _UUID_RE.match(entry.name):
+            continue
+        row = db.execute("SELECT 1 FROM sources WHERE id = ?", (entry.name,)).fetchone()
+        if row is None:
+            if not dry_run:
+                shutil.rmtree(entry)
+            count += 1
+
+    return count
+
+
 class RetentionWorker:
     """Background worker that enforces data retention policies."""
 
@@ -156,11 +180,18 @@ class RetentionWorker:
         if count:
             logger.info("Retention: purged %d conversation(s) older than %d days", count, self._retention_days)
 
-        orphaned = purge_orphaned_attachments(self._data_dir, self._db)
-        if orphaned:
-            logger.info("Retention: removed %d orphaned attachment dir(s)", orphaned)
+        orphaned = 0
+        orphaned_sources = 0
+        if self._purge_attachments:
+            orphaned = purge_orphaned_attachments(self._data_dir, self._db)
+            if orphaned:
+                logger.info("Retention: removed %d orphaned attachment dir(s)", orphaned)
 
-        return count + orphaned
+            orphaned_sources = purge_orphaned_sources(self._data_dir, self._db)
+            if orphaned_sources:
+                logger.info("Retention: removed %d orphaned source dir(s)", orphaned_sources)
+
+        return count + orphaned + orphaned_sources
 
     async def run_forever(self) -> None:
         """Poll at regular intervals, enforcing retention policy."""

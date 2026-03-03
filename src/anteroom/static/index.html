@@ -363,7 +363,7 @@
                     <!-- File previews shown here before sending -->
                 </div>
                 <div class="input-row">
-                    <button class="btn-attach" id="btn-attach" title="Attach file">
+                    <button class="btn-attach" id="btn-attach" title="Attach file (one-time, this message only)">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
                         </svg>
@@ -443,9 +443,10 @@
                     <div class="setting-group" id="source-file-group" style="display:none">
                         <label>File</label>
                         <div class="source-file-drop" id="source-file-drop">
-                            <p>Drop a file here or click to browse</p>
-                            <input type="file" id="source-file-input" style="display:none">
+                            <p>Drop file(s) here or click to browse</p>
+                            <input type="file" id="source-file-input" multiple style="display:none">
                         </div>
+                        <p class="source-upload-hint">Sources are persistent knowledge &mdash; available across conversations. Use the paperclip for one-time file attachments.</p>
                         <span class="source-file-name" id="source-file-name"></span>
                     </div>
                     <div class="sources-create-actions">

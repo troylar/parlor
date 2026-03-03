@@ -949,6 +949,8 @@ def update_message_content(
     now = _now()
     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
     db.commit()
+    # Invalidate stale embedding so the worker will re-embed with new content
+    delete_embedding_for_message(db, message_id)
     updated = db.execute_fetchone("SELECT * FROM messages WHERE id = ?", (message_id,))
     return dict(updated) if updated else None
 
@@ -1485,8 +1487,13 @@ def search_similar_messages(
     limit: int = 20,
     conversation_id: str | None = None,
     conversation_type: str | None = None,
+    space_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Search for semantically similar messages using vec0 cosine similarity."""
+    """Search for semantically similar messages using vec0 cosine similarity.
+
+    When *space_id* is given, results are post-filtered to messages from
+    conversations that belong to the specified space.
+    """
     from ..db import has_vec_support
 
     raw_conn = db._conn if hasattr(db, "_conn") else db
@@ -1499,10 +1506,10 @@ def search_similar_messages(
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     embedding_bytes = _validate_embedding(embedding)
 
-    # When post-filtering by conversation_type, over-fetch from the vector index
-    # to compensate for rows that will be discarded. Without this, the caller
-    # may receive far fewer results than requested.
-    vec_k = limit * 4 if conversation_type else limit
+    # When post-filtering by conversation_type or space_id, over-fetch from the
+    # vector index to compensate for rows that will be discarded.
+    needs_post_filter = bool(conversation_type or space_id)
+    vec_k = limit * 4 if needs_post_filter else limit
     vec_k = min(vec_k, _MAX_SEARCH_LIMIT)
 
     if conversation_id:
@@ -1514,7 +1521,7 @@ def search_similar_messages(
                 WHERE embedding MATCH ? AND k = ? AND conversation_id = ?
             )
             SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role,
-                   c.type AS conversation_type
+                   c.type AS conversation_type, c.space_id AS conversation_space_id
             FROM knn
             LEFT JOIN messages m ON m.id = knn.message_id
             LEFT JOIN conversations c ON c.id = knn.conversation_id
@@ -1530,7 +1537,7 @@ def search_similar_messages(
                 WHERE embedding MATCH ? AND k = ?
             )
             SELECT knn.message_id, knn.conversation_id, knn.distance, m.content, m.role,
-                   c.type AS conversation_type
+                   c.type AS conversation_type, c.space_id AS conversation_space_id
             FROM knn
             LEFT JOIN messages m ON m.id = knn.message_id
             LEFT JOIN conversations c ON c.id = knn.conversation_id
@@ -1542,6 +1549,8 @@ def search_similar_messages(
     for r in rows:
         d = dict(r)
         if conversation_type and d.get("conversation_type") != conversation_type:
+            continue
+        if space_id and d.get("conversation_space_id") != space_id:
             continue
         results.append(
             {
@@ -1598,6 +1607,24 @@ def mark_embedding_skipped(
         (message_id, conversation_id, content_hash, status, now),
     )
     db.commit()
+
+
+def delete_embedding_for_message(db: ThreadSafeConnection, message_id: str) -> None:
+    """Delete the embedding (and any skip/fail sentinel) for a single message.
+
+    Called when message content is edited so the worker will re-embed it.
+    No-op if the embeddings tables don't exist (e.g. vec support disabled).
+    """
+    from ..db import has_vec_support
+
+    try:
+        raw_conn = db._conn if hasattr(db, "_conn") else db
+        with db.transaction() as conn:
+            if has_vec_support(raw_conn):
+                conn.execute("DELETE FROM vec_messages WHERE message_id = ?", (message_id,))
+            conn.execute("DELETE FROM message_embeddings WHERE message_id = ?", (message_id,))
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        logger.warning("Failed to delete embedding for message %s (table may not exist)", message_id)
 
 
 def delete_embeddings_for_conversation(db: ThreadSafeConnection, conversation_id: str) -> None:
@@ -1886,10 +1913,25 @@ def save_source_file(
     user_id: str | None = None,
     user_display_name: str | None = None,
 ) -> dict[str, Any]:
-    """Save a file as a source with MIME validation."""
+    """Save a file as a source with MIME validation.
+
+    Deduplicates by content hash — returns existing source if identical content
+    was already uploaded. File write and DB insert are atomic: if DB insert fails,
+    the file is cleaned up.
+    """
     _validate_upload(mime_type, data, filename)
 
     import hashlib
+
+    content_hash = hashlib.sha256(data).hexdigest()
+
+    # Dedup: return existing source if identical content already uploaded
+    existing = db.execute(
+        "SELECT * FROM sources WHERE content_hash = ? AND type = 'file' LIMIT 1",
+        (content_hash,),
+    ).fetchone()
+    if existing:
+        return dict(existing)
 
     safe_filename = _sanitize_filename(filename)
     sid = _uuid()
@@ -1901,8 +1943,6 @@ def save_source_file(
     if not full_path.is_relative_to(safe_resolve_pathlib(data_dir)):
         raise ValueError("Invalid filename")
     full_path.write_bytes(data)
-
-    content_hash = hashlib.sha256(data).hexdigest()
 
     # Extract text content for text-based files
     content = None
@@ -1925,27 +1965,36 @@ def save_source_file(
         content = extract_text(data, mime_type)
 
     now = _now()
-    db.execute(
-        "INSERT INTO sources (id, type, title, content, mime_type, filename, storage_path,"
-        " size_bytes, content_hash, user_id, user_display_name, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            sid,
-            "file",
-            title,
-            content,
-            mime_type,
-            safe_filename,
-            storage_path,
-            len(data),
-            content_hash,
-            user_id,
-            user_display_name,
-            now,
-            now,
-        ),
-    )
-    db.commit()
+    try:
+        db.execute(
+            "INSERT INTO sources (id, type, title, content, mime_type, filename, storage_path,"
+            " size_bytes, content_hash, user_id, user_display_name, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                sid,
+                "file",
+                title,
+                content,
+                mime_type,
+                safe_filename,
+                storage_path,
+                len(data),
+                content_hash,
+                user_id,
+                user_display_name,
+                now,
+                now,
+            ),
+        )
+        db.commit()
+    except Exception:
+        # Atomic cleanup: remove file if DB insert fails
+        try:
+            full_path.unlink(missing_ok=True)
+            sources_dir.rmdir()
+        except OSError:
+            pass
+        raise
 
     # Auto-chunk text content
     if content:
@@ -2425,11 +2474,13 @@ def create_source_from_attachment(
             except OSError:
                 pass
 
+    # Always hash raw bytes for consistency with save_source_file (enables
+    # cross-path deduplication between uploads and attachment promotion).
     content_hash = None
-    if content:
-        content_hash = hashlib.sha256(content.encode()).hexdigest()
-    elif full_path.exists():
+    try:
         content_hash = hashlib.sha256(full_path.read_bytes()).hexdigest()
+    except OSError:
+        pass
 
     source = create_source(
         db,
@@ -2494,11 +2545,17 @@ def search_similar_source_chunks(
     limit: int = 20,
     source_id: str | None = None,
     project_id: str | None = None,
+    space_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Search for semantically similar source chunks using vec0 cosine similarity.
 
     When *project_id* is given, results are filtered to sources linked to that
     project (direct, group, or tag-filter linkage via ``project_sources``).
+
+    When *space_id* is given, results are filtered to sources linked to that
+    space (direct, group, or tag-filter linkage via ``space_sources``).
+
+    Both filters are applied independently (intersection).
     """
     from ..db import has_vec_support
 
@@ -2509,9 +2566,9 @@ def search_similar_source_chunks(
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     embedding_bytes = _validate_embedding(embedding)
 
-    # Over-fetch when project filtering so we still return enough results
-    # after post-filter (KNN is computed before the JOIN).
-    fetch_limit = limit * 3 if project_id else limit
+    # Over-fetch when project/space filtering so we still return enough
+    # results after post-filter (KNN is computed before the JOIN).
+    fetch_limit = min(limit * 3, _MAX_SEARCH_LIMIT) if (project_id or space_id) else limit
 
     if source_id:
         rows = db.execute_fetchall(
@@ -2556,5 +2613,9 @@ def search_similar_source_chunks(
     if project_id:
         project_source_ids = {s["id"] for s in get_project_sources(db, project_id)}
         results = [r for r in results if r["source_id"] in project_source_ids]
+
+    if space_id:
+        space_source_ids = {s["id"] for s in get_space_sources(db, space_id)}
+        results = [r for r in results if r["source_id"] in space_source_ids]
 
     return results[:limit]

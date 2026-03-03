@@ -3729,6 +3729,7 @@ async def _run_repl(
                             renderer.render_error(f"Space '{target}' not found. Run /spaces to list available spaces.")
                             continue
                         _active_space[0] = sp
+                        conv["space_id"] = sp["id"]
                         _update_conv_space(db, conv["id"], sp["id"])
                         _inject_space_instructions(sp)
                         renderer.console.print(f"[green]Active space: {sp['name']}[/green]\n")
@@ -3788,6 +3789,7 @@ async def _run_repl(
                             continue
                         old_name = _active_space[0]["name"]
                         _active_space[0] = None
+                        conv["space_id"] = None
                         _update_conv_space(db, conv["id"], None)
                         extra_system_prompt = _strip_space_instructions(extra_system_prompt)
                         renderer.console.print(f"[{CHROME}]Cleared space: {old_name}[/{CHROME}]\n")
@@ -3850,6 +3852,7 @@ async def _run_repl(
 
                         # Auto-activate the new space
                         _active_space[0] = sp
+                        conv["space_id"] = sp["id"]
                         _update_conv_space(db, conv["id"], sp["id"])
                         _inject_space_instructions(sp)
 
@@ -4762,6 +4765,10 @@ async def _run_repl(
                 try:
                     from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
 
+                    # Always strip stale RAG context before attempting fresh retrieval,
+                    # so we never send outdated context if this turn's retrieval fails.
+                    extra_system_prompt = strip_rag_context(extra_system_prompt)
+
                     _rag_emb = await _get_rag_embedding_service()
                     if _rag_emb:
                         _rag_chunks = await retrieve_context(
@@ -4770,16 +4777,21 @@ async def _run_repl(
                             embedding_service=_rag_emb,
                             config=config.rag,
                             current_conversation_id=conv["id"],
+                            space_id=conv.get("space_id"),
+                            project_id=conv.get("project_id"),
                         )
-                        # Strip any previous RAG context and inject fresh
-                        extra_system_prompt = strip_rag_context(extra_system_prompt)
                         if _rag_chunks:
                             extra_system_prompt += format_rag_context(_rag_chunks)
                             renderer.console.print(
                                 f"  [{MUTED}][RAG: {len(_rag_chunks)} relevant chunk(s) retrieved][/{MUTED}]"
                             )
+                        else:
+                            renderer.console.print(f"  [{MUTED}][RAG: no relevant context found][/{MUTED}]")
+                    else:
+                        renderer.console.print(f"  [{MUTED}][RAG: embedding service unavailable][/{MUTED}]")
                 except Exception:
                     logger.debug("RAG retrieval failed in CLI", exc_info=True)
+                    renderer.console.print(f"  [{MUTED}][RAG: retrieval failed][/{MUTED}]")
 
             # Build message queue for queued follow-ups during agent loop
             msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
