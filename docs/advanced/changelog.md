@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 3, 2026
 
+### v1.94.5
+
+**Fixed:**
+
+- AI now reads extracted content from attached files directly instead of calling file tools (#731)
+- Attachment filenames sanitized against prompt injection (#731)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.94.5)
+
 ### v1.94.4
 
 **Fixed:**
