@@ -949,6 +949,8 @@ def update_message_content(
     now = _now()
     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
     db.commit()
+    # Invalidate stale embedding so the worker will re-embed with new content
+    delete_embedding_for_message(db, message_id)
     updated = db.execute_fetchone("SELECT * FROM messages WHERE id = ?", (message_id,))
     return dict(updated) if updated else None
 
@@ -1605,6 +1607,28 @@ def mark_embedding_skipped(
         (message_id, conversation_id, content_hash, status, now),
     )
     db.commit()
+
+
+def delete_embedding_for_message(db: ThreadSafeConnection, message_id: str) -> None:
+    """Delete the embedding (and any skip/fail sentinel) for a single message.
+
+    Called when message content is edited so the worker will re-embed it.
+    No-op if the embeddings tables don't exist (e.g. vec support disabled).
+    """
+    from ..db import has_vec_support
+
+    try:
+        raw_conn = db._conn if hasattr(db, "_conn") else db
+        if not has_vec_support(raw_conn):
+            db.execute("DELETE FROM message_embeddings WHERE message_id = ?", (message_id,))
+            db.commit()
+            return
+
+        with db.transaction() as conn:
+            conn.execute("DELETE FROM vec_messages WHERE message_id = ?", (message_id,))
+            conn.execute("DELETE FROM message_embeddings WHERE message_id = ?", (message_id,))
+    except Exception:
+        logger.debug("Failed to delete embedding for message %s (table may not exist)", message_id)
 
 
 def delete_embeddings_for_conversation(db: ThreadSafeConnection, conversation_id: str) -> None:
