@@ -5,6 +5,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## March 3, 2026
+
+### v1.94.0
+
+**New:**
+
+- Background server management: `aroom start`, `aroom stop`, `aroom status` — run the web UI without keeping a terminal open (#718)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.94.0)
+
+---
+
 ## March 2, 2026
 
 ### v1.93.2
