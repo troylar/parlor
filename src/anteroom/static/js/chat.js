@@ -10,6 +10,7 @@ const Chat = (() => {
     let _lastSentText = '';
     let _pendingUserMessages = [];  // FIFO queue of {el, text} for SSE correlation
     let _conversationType = 'chat';
+    const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
     // Remote collaboration state
     let _remoteAssistantEl = null;
@@ -345,7 +346,8 @@ const Chat = (() => {
                 }
                 break;
             case 'user_message':
-                if (_pendingUserMessages.length > 0 && typeof data.id === 'string' && Number.isInteger(data.position)) {
+                if (_pendingUserMessages.length > 0 && typeof data.id === 'string'
+                    && _UUID_RE.test(data.id) && Number.isInteger(data.position)) {
                     const pending = _pendingUserMessages.shift();
                     const userMsgData = { id: data.id, position: data.position, content: pending.text };
                     addMessageActions(pending.el, 'user', pending.text, userMsgData, { isLast: false });
@@ -401,7 +403,8 @@ const Chat = (() => {
         renderMath(contentEl);
         addCodeCopyButtons(contentEl);
         let msgData = null;
-        if (doneData && typeof doneData.assistant_message_id === 'string' && Number.isInteger(doneData.assistant_message_position)) {
+        if (doneData && typeof doneData.assistant_message_id === 'string'
+            && _UUID_RE.test(doneData.assistant_message_id) && Number.isInteger(doneData.assistant_message_position)) {
             msgData = { id: doneData.assistant_message_id, position: doneData.assistant_message_position };
         }
         addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent, msgData, { isLast: true });
