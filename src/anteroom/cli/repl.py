@@ -539,8 +539,32 @@ def _expand_file_references(text: str, working_dir: str, file_max_chars: int = 1
     @file.py      -> includes file contents inline
     @src/          -> includes directory listing
     @"path with spaces/file.py" -> handles quoted paths
+
+    Binary files (PPTX, XLSX, PDF, etc.) are routed through
+    document_extractor for text extraction instead of raw UTF-8 reads.
     """
+    import mimetypes
+
     from ..tools.security import validate_path as _validate_ref_path
+
+    text_mime_prefixes = ("text/",)
+    text_mime_extras = frozenset(
+        {
+            "application/json",
+            "application/javascript",
+            "application/x-yaml",
+            "application/yaml",
+            "application/toml",
+            "application/xml",
+        }
+    )
+
+    def _is_text_mime(mime: str | None) -> bool:
+        if mime is None:
+            return True  # Unknown MIME — try as text
+        if any(mime.startswith(p) for p in text_mime_prefixes):
+            return True
+        return mime in text_mime_extras
 
     def _replace(match: re.Match[str]) -> str:
         raw_path = match.group(1).strip("\"'")
@@ -550,13 +574,34 @@ def _expand_file_references(text: str, working_dir: str, file_max_chars: int = 1
         resolved = Path(validated)
 
         if resolved.is_file():
-            try:
-                content = resolved.read_text(encoding="utf-8", errors="replace")
-                if len(content) > file_max_chars:
-                    content = content[:file_max_chars] + "\n... (truncated)"
-                return f'\n<file path="{raw_path}">\n{content}\n</file>\n'
-            except OSError:
-                return match.group(0)
+            mime, _ = mimetypes.guess_type(str(resolved))
+            if _is_text_mime(mime):
+                try:
+                    content = resolved.read_text(encoding="utf-8", errors="replace")
+                    if len(content) > file_max_chars:
+                        content = content[:file_max_chars] + "\n... (truncated)"
+                    return f'\n<file path="{raw_path}">\n{content}\n</file>\n'
+                except OSError:
+                    return match.group(0)
+            else:
+                try:
+                    from ..services.document_extractor import EXTRACTABLE_MIME_TYPES, extract_text
+
+                    if mime in EXTRACTABLE_MIME_TYPES:
+                        file_data = resolved.read_bytes()
+                        extracted = extract_text(file_data, mime)
+                        if extracted:
+                            if len(extracted) > file_max_chars:
+                                extracted = extracted[:file_max_chars] + "\n... (truncated)"
+                            return f'\n<file path="{raw_path}">\n{extracted}\n</file>\n'
+                    return (
+                        f'\n<file path="{raw_path}">'
+                        f"\n[Binary file: {resolved.name} ({mime})"
+                        f" — use tools to read this file]"
+                        f"\n</file>\n"
+                    )
+                except OSError:
+                    return match.group(0)
         elif resolved.is_dir():
             try:
                 entries = sorted(resolved.iterdir())

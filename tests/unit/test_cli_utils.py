@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from anteroom.cli.instructions import (
     find_project_instructions,
@@ -51,6 +52,61 @@ class TestExpandFileReferences:
             test_file.write_text("spaced content")
             result = _expand_file_references('@"my file.txt"', tmpdir)
             assert "spaced content" in result
+
+    def test_binary_file_uses_extractor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "deck.pptx"
+            test_file.write_bytes(b"PK fake pptx data")
+            with patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value="Extracted slide content",
+            ):
+                result = _expand_file_references("check @deck.pptx", tmpdir)
+                assert "Extracted slide content" in result
+                assert "<file" in result
+
+    def test_binary_file_extraction_returns_none_shows_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "deck.pptx"
+            test_file.write_bytes(b"PK fake pptx data")
+            with patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value=None,
+            ):
+                result = _expand_file_references("check @deck.pptx", tmpdir)
+                assert "Binary file" in result
+                assert "deck.pptx" in result
+
+    def test_unextractable_binary_shows_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "archive.zip"
+            test_file.write_bytes(b"PK\x03\x04 fake zip")
+            result = _expand_file_references("check @archive.zip", tmpdir)
+            assert "Binary file" in result
+            assert "archive.zip" in result
+
+    def test_xlsx_binary_uses_extractor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "data.xlsx"
+            test_file.write_bytes(b"PK fake xlsx data")
+            with patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value="Sheet1 data",
+            ):
+                result = _expand_file_references("check @data.xlsx", tmpdir)
+                assert "Sheet1 data" in result
+                assert "<file" in result
+
+    def test_pdf_binary_uses_extractor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "report.pdf"
+            test_file.write_bytes(b"%PDF-1.4 fake pdf")
+            with patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value="PDF content here",
+            ):
+                result = _expand_file_references("check @report.pdf", tmpdir)
+                assert "PDF content here" in result
 
 
 class TestEstimateTokens:

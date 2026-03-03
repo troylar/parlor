@@ -163,6 +163,7 @@ If `--amend` is passed:
 
 ## Guidelines
 
+- **Worktree venv**: When running in a worktree, use `.venv/bin/python -m pytest` and `.venv/bin/ruff` (or activate the venv first). Editable installs are per-venv — using the system Python will import from the wrong worktree.
 - Never commit without a passing test suite
 - Never commit secrets, `.env` files, or credentials
 - Never use `git add -A` or `git add .`

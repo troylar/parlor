@@ -683,6 +683,7 @@ If the Bug Hunter finds nothing in round 1, report:
 
 ## Guidelines
 
+- **Worktree venv**: When running in a worktree, use `.venv/bin/python -m pytest` and `.venv/bin/ruff` (or activate the venv first). Editable installs are per-venv — using the system Python will import from the wrong worktree.
 - Never create a PR without at least one issue reference
 - Never create a PR with failing tests (unless --skip-checks)
 - Keep the PR title concise — details go in the body

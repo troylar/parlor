@@ -32,6 +32,21 @@ npx promptfoo redteam run --config evals/redteam.yaml  # Red teaming
 cd demos && make demos              # Build demo GIFs (requires VHS)
 ```
 
+### Worktree Development
+
+When working with git worktrees (multiple features in parallel), each worktree **must** have its own virtual environment. Editable installs (`pip install -e .`) are global to the Python interpreter — the last worktree to install wins, causing import errors in all other worktrees.
+
+```bash
+# In each worktree:
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]" -q
+
+# Run tests/lint with the worktree's venv:
+.venv/bin/python -m pytest tests/unit/ -v
+.venv/bin/ruff check src/ tests/
+```
+
 ## Architecture
 
 ### Dual Interface, Shared Core

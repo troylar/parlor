@@ -132,10 +132,12 @@ git branch issue-<N>-<description> origin/main
 git worktree add ../<repo-name>-<N>-<short-description> issue-<N>-<description>
 ```
 
-Install dev dependencies in the worktree:
+Create an isolated virtual environment and install dev dependencies in the worktree:
 ```bash
-cd ../<repo-name>-<N>-<short-description> && pip install -e ".[dev]" -q
+cd ../<repo-name>-<N>-<short-description> && python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]" -q
 ```
+
+**IMPORTANT: Per-worktree venvs are required.** Editable installs (`pip install -e .`) are global to the Python interpreter — the last worktree to run it wins, and all other worktrees import from the wrong source tree. Each worktree MUST have its own `.venv` to prevent cross-contamination. All subsequent commands (`pytest`, `ruff`, etc.) in the worktree must use the worktree's venv (either activate it or use `.venv/bin/python`).
 
 The worktree path follows the pattern: `../<repo-name>-<N>-<short-description>` (sibling to the main repo directory).
 - Example: issue #95 "Add sub-agent orchestration" → `../anteroom-95-subagent-orchestration`

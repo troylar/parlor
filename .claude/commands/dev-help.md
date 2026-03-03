@@ -70,6 +70,7 @@ Print the following formatted guide:
     Worktree is the default — keeps your current branch clean.
     Use --no-worktree for a traditional branch instead.
     Runs 3 parallel agents for deep code exploration.
+    Each worktree gets its own .venv to prevent cross-contamination.
 
   /commit
     Stage, validate, and commit with enforced conventions.

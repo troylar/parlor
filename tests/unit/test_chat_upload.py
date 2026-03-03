@@ -329,3 +329,49 @@ class TestAttachmentContentBuilding:
             )
             if mock_extract.called:
                 assert mock_extract.call_args[0][1] == "application/pdf"
+
+    def test_pptx_file_extraction_called(self) -> None:
+        conv_id = str(uuid.uuid4())
+        msg_id = str(uuid.uuid4())
+        app = _make_app()
+        pptx_mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        with (
+            patch("anteroom.routers.chat.storage") as mock_storage,
+            patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value="slide content here",
+            ) as mock_extract,
+        ):
+            _setup_storage(mock_storage, conv_id, msg_id)
+            mock_storage.save_attachment.return_value = {"id": str(uuid.uuid4()), "mime_type": pptx_mime}
+            client = TestClient(app, raise_server_exceptions=False)
+            client.post(
+                f"/api/conversations/{conv_id}/chat",
+                data={"message": "read pptx"},
+                files=[("files", ("deck.pptx", io.BytesIO(b"PK fake pptx"), pptx_mime))],
+            )
+            assert mock_extract.called
+            assert mock_extract.call_args[0][1] == pptx_mime
+
+    def test_xlsx_file_extraction_called(self) -> None:
+        conv_id = str(uuid.uuid4())
+        msg_id = str(uuid.uuid4())
+        app = _make_app()
+        xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        with (
+            patch("anteroom.routers.chat.storage") as mock_storage,
+            patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value="sheet data here",
+            ) as mock_extract,
+        ):
+            _setup_storage(mock_storage, conv_id, msg_id)
+            mock_storage.save_attachment.return_value = {"id": str(uuid.uuid4()), "mime_type": xlsx_mime}
+            client = TestClient(app, raise_server_exceptions=False)
+            client.post(
+                f"/api/conversations/{conv_id}/chat",
+                data={"message": "read xlsx"},
+                files=[("files", ("data.xlsx", io.BytesIO(b"PK fake xlsx"), xlsx_mime))],
+            )
+            assert mock_extract.called
+            assert mock_extract.call_args[0][1] == xlsx_mime

@@ -56,7 +56,7 @@ Launch 3 parallel Haiku agents:
 
 **Agent B — PR summary:** Run `gh pr view <PR>` and `gh pr diff <PR>`. Return a summary of what changed, which files were modified, and the intent of the change.
 
-**Agent C — Run unit tests:** Run `pytest tests/unit/ -v --tb=short 2>&1 | tail -80` and return the results. Report pass/fail count and any failures.
+**Agent C — Run unit tests:** If in a worktree with `.venv/`, use `.venv/bin/python -m pytest tests/unit/ -v --tb=short 2>&1 | tail -80`. Otherwise run `pytest tests/unit/ -v --tb=short 2>&1 | tail -80`. Return the results. Report pass/fail count and any failures.
 
 ### Step 4: Deep Review (conditional parallel agents)
 

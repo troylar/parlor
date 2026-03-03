@@ -1742,25 +1742,32 @@ async def chat(conversation_id: str, request: Request) -> Any:
                             from ..services.document_extractor import EXTRACTABLE_MIME_TYPES, extract_text
 
                             validated_mime = att.get("mime_type") or f.content_type
+                            extracted = None
                             if validated_mime and validated_mime in EXTRACTABLE_MIME_TYPES:
                                 extracted = extract_text(file_data, validated_mime)
-                                if extracted:
-                                    max_chars = 50_000
-                                    if len(extracted) > max_chars:
-                                        extracted = extracted[:max_chars] + "\n\n[... truncated]"
-                                    attachment_contents.append(
-                                        {
-                                            "type": "text",
-                                            "filename": f.filename,
-                                            "content": extracted,
-                                        }
-                                    )
-                                else:
-                                    logger.warning(
-                                        "Could not extract text from %s (%s)",
-                                        f.filename,
-                                        validated_mime,
-                                    )
+                            if extracted:
+                                max_chars = 50_000
+                                if len(extracted) > max_chars:
+                                    extracted = extracted[:max_chars] + "\n\n[... truncated]"
+                                attachment_contents.append(
+                                    {
+                                        "type": "text",
+                                        "filename": f.filename,
+                                        "content": extracted,
+                                    }
+                                )
+                            else:
+                                attachment_contents.append(
+                                    {
+                                        "type": "text",
+                                        "filename": f.filename,
+                                        "content": (
+                                            f"[Attached file: {f.filename} ({validated_mime})"
+                                            f" — content could not be extracted automatically."
+                                            f" Use the appropriate tool to read this file.]"
+                                        ),
+                                    }
+                                )
                         except Exception:
                             logger.debug("Document extraction failed for %s", f.filename, exc_info=True)
 
