@@ -8,7 +8,7 @@ const Chat = (() => {
     let _rewindPosition = null;
     let _rewindMsgEl = null;
     let _lastSentText = '';
-    let _currentUserEl = null;
+    let _pendingUserMessages = [];  // FIFO queue of {el, text} for SSE correlation
     let _conversationType = 'chat';
 
     // Remote collaboration state
@@ -137,9 +137,8 @@ const Chat = (() => {
         }
 
         _lastSentText = text;
-        _currentUserEl = null;
         const msgEl = appendMessage('user', text);
-        _currentUserEl = msgEl;
+        _pendingUserMessages.push({ el: msgEl, text: text });
         input.value = '';
         input.style.height = 'auto';
 
@@ -280,6 +279,7 @@ const Chat = (() => {
         } finally {
             hideThinking();
             setStreaming(false);
+            _pendingUserMessages = [];
         }
     }
 
@@ -345,10 +345,10 @@ const Chat = (() => {
                 }
                 break;
             case 'user_message':
-                if (_currentUserEl && typeof data.id === 'string' && Number.isInteger(data.position)) {
-                    const userMsgData = { id: data.id, position: data.position, content: _lastSentText };
-                    addMessageActions(_currentUserEl, 'user', _lastSentText, userMsgData, { isLast: false });
-                    _currentUserEl = null;
+                if (_pendingUserMessages.length > 0 && typeof data.id === 'string' && Number.isInteger(data.position)) {
+                    const pending = _pendingUserMessages.shift();
+                    const userMsgData = { id: data.id, position: data.position, content: pending.text };
+                    addMessageActions(pending.el, 'user', pending.text, userMsgData, { isLast: false });
                 }
                 break;
             case 'done':
