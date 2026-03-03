@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -54,8 +55,11 @@ class SpaceCreateRequest(BaseModel):
     @field_validator("source_file")
     @classmethod
     def validate_source_file(cls, v: str) -> str:
-        if v and ".." in v.split("/"):
-            raise ValueError("Path traversal not allowed")
+        if v:
+            # Check for traversal in both Unix and Windows path separators
+            parts = re.split(r"[/\\]", v)
+            if ".." in parts:
+                raise ValueError("Path traversal not allowed")
         return v
 
 
@@ -84,6 +88,13 @@ class SpaceSourceLinkRequest(BaseModel):
 
 def _get_db(request: Request) -> Any:
     return request.app.state.db
+
+
+def _validate_uuid(value: str, label: str = "ID") -> None:
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail=f"Invalid {label} format")
 
 
 def _enrich_origin(space: dict[str, Any]) -> dict[str, Any]:
@@ -124,6 +135,7 @@ async def api_get_space(request: Request, space_id: str) -> dict[str, Any]:
 
 @router.patch("/spaces/{space_id}")
 async def api_update_space(request: Request, space_id: str, body: SpaceUpdateRequest) -> dict[str, Any]:
+    _validate_uuid(space_id, "space_id")
     db = _get_db(request)
     space = get_space(db, space_id)
     if not space:
@@ -198,11 +210,14 @@ async def api_refresh_space(request: Request, space_id: str) -> dict[str, Any]:
 @router.post("/spaces/sync")
 async def api_sync_space(request: Request) -> dict[str, Any]:
     """Sync a space from a YAML file path into the database."""
+    content_type = request.headers.get("content-type", "")
+    if "application/json" not in content_type:
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
     body = await request.json()
     file_path = body.get("file_path", "")
     if not file_path:
         raise HTTPException(status_code=400, detail="file_path is required")
-    if ".." in file_path.split("/"):
+    if ".." in re.split(r"[/\\]", file_path):
         raise HTTPException(status_code=400, detail="Path traversal not allowed")
 
     path = Path(file_path)
@@ -223,6 +238,7 @@ async def api_sync_space(request: Request) -> dict[str, Any]:
 @router.get("/spaces/{space_id}/export")
 async def api_export_space(request: Request, space_id: str) -> dict[str, Any]:
     """Export a space as a YAML-compatible dict."""
+    _validate_uuid(space_id, "space_id")
     db = _get_db(request)
     space = get_space(db, space_id)
     if not space:
