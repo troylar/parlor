@@ -2477,12 +2477,23 @@ async def _run_repl(
 
     _use_fullscreen = sys.stdout.isatty() and sys.stdin.isatty()
 
+    # Mouse support toggle: ON by default for scroll wheel, Ctrl-S to disable
+    # for native text selection (like Gemini CLI). When off, the terminal handles
+    # selection/copy natively but scroll wheel falls through to terminal scrollback.
+    _mouse_enabled: list[bool] = [True]
+
+    from prompt_toolkit.filters import Condition
+
+    @Condition
+    def _mouse_filter() -> bool:
+        return _mouse_enabled[0]
+
     _fs_app: Application[None] = Application(
         layout=_anteroom_layout.layout,
         key_bindings=kb,
         style=create_anteroom_style(),
         full_screen=_use_fullscreen,
-        mouse_support=True,  # captures scroll wheel for output pane scrolling
+        mouse_support=_mouse_filter,
     )
 
     # Set approval mode for prompt coloring
@@ -2796,6 +2807,13 @@ async def _run_repl(
     @kb.add("end")
     def _scroll_to_bottom(event: Any) -> None:
         _anteroom_layout.scroll_output_to_bottom()
+        _fs_app.invalidate()
+
+    @kb.add("c-s")
+    def _toggle_mouse(event: Any) -> None:
+        """Toggle mouse capture on/off. Off = native terminal text selection."""
+        _mouse_enabled[0] = not _mouse_enabled[0]
+        _anteroom_layout.set_mouse_mode(_mouse_enabled[0])
         _fs_app.invalidate()
 
     @kb.add("tab")
