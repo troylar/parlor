@@ -88,6 +88,7 @@ Anteroom threads the needle:
 pip install anteroom
 aroom init          # interactive setup wizard
 aroom               # web UI at http://127.0.0.1:8080
+aroom start         # or run in the background — no terminal needed
 ```
 
 That's it. No Docker. No database server. No config files required.
@@ -97,6 +98,7 @@ Or use the CLI directly:
 ```bash
 aroom chat                              # interactive REPL
 aroom exec "summarize this PR" --json   # one-shot for scripts
+aroom status                            # check if the server is running
 ```
 
 <br>

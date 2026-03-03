@@ -430,6 +430,10 @@ prompt: |
   | aroom space    | clone NAME_OR_ID        | Clone repos and install packs from space       |
   | aroom space    | map NAME_OR_ID          | Show mapped directories for a space            |
   | aroom space    | move-root NAME_OR_ID    | Move space repos to a new root directory       |
+  | aroom start    |                         | Start the web server in the background         |
+  | aroom start    | --no-browser            | Start without opening the browser              |
+  | aroom stop     |                         | Stop the background web server                 |
+  | aroom status   |                         | Show server status (PID, port, uptime)         |
 
   ### Built-in Tools
 

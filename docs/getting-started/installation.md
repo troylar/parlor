@@ -76,7 +76,15 @@ All checks passed.
     $ aroom
     ```
 
-    Your browser opens to `http://127.0.0.1:8080`.
+    Your browser opens to `http://127.0.0.1:8080`. The server runs in the foreground — closing the terminal stops it.
+
+=== "Web UI (background)"
+
+    ```bash
+    $ aroom start
+    ```
+
+    Starts the web server in the background. You can close the terminal and the server keeps running. Use `aroom status` to check and `aroom stop` to shut down.
 
 === "CLI"
 

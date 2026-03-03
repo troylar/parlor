@@ -345,6 +345,42 @@ Filter values for `--source`: `built_in`, `global`, `team`, `project`, `local`, 
 
 See [Pack Commands](../packs/pack-commands.md) for detailed examples and output.
 
+## Server Management
+
+### aroom start
+
+Start the web UI server in the background. The server detaches from the terminal so you can close the console without stopping it. A PID file is written to `~/.anteroom/anteroom-{port}.pid` and server output is logged to `~/.anteroom/aroom.log`.
+
+```bash
+aroom start                 # start on default port (8080), opens browser
+aroom start --no-browser    # start without opening browser
+aroom start --port 9090     # start on a custom port
+```
+
+If a server is already running on the same port, the command exits with an error.
+
+### aroom stop
+
+Stop a background web UI server. Reads the PID file, sends a graceful shutdown signal, and cleans up.
+
+```bash
+aroom stop                  # stop server on default port
+aroom stop --port 9090      # stop server on a custom port
+```
+
+Handles stale PID files (process already exited) gracefully.
+
+### aroom status
+
+Show whether the web UI server is running, its PID, port, uptime, and log file location.
+
+```bash
+aroom status                # check default port
+aroom status --port 9090    # check a custom port
+```
+
+Cross-platform: works on macOS, Linux, and Windows.
+
 ## Tab Completion
 
 Tab completion works for four categories:

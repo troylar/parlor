@@ -103,3 +103,15 @@ aroom exec "task" --no-conversation # Skip database persistence
 ```
 
 See [Commands](commands.md) for CLI flags that work in both modes (`--approval-mode`, `--allowed-tools`, `--model`).
+
+## Server Management
+
+Run the web UI in the background without keeping a terminal open:
+
+```bash
+aroom start          # start in background, opens browser
+aroom status         # check if the server is running
+aroom stop           # stop the background server
+```
+
+Works on macOS, Linux, and Windows. PID files support multiple instances on different ports (`aroom start --port 9090`). See [Commands](commands.md#server-management) for details.
