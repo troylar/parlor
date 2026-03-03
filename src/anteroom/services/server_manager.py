@@ -167,7 +167,6 @@ class ServerManager:
 
     def start_background(
         self,
-        config_path: Path,
         *,
         debug: bool = False,
         extra_args: list[str] | None = None,
@@ -222,7 +221,12 @@ class ServerManager:
             log_file.close()
             raise
         log_file.close()
-        self.write_pid(proc.pid)
+
+        try:
+            self.write_pid(proc.pid)
+        except Exception:
+            proc.kill()
+            raise
         return proc.pid
 
     def stop(self, timeout: float = 10.0) -> bool:

@@ -621,11 +621,14 @@ def _run_start(config: AppConfig, config_path: Path, args: argparse.Namespace) -
     if config.app.tls:
         extra_args.append("--tls")
 
-    pid = mgr.start_background(
-        config_path,
-        debug=getattr(args, "debug", False),
-        extra_args=extra_args or None,
-    )
+    try:
+        pid = mgr.start_background(
+            debug=getattr(args, "debug", False),
+            extra_args=extra_args or None,
+        )
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
 
     scheme = "https" if config.app.tls else "http"
     probe_host = "127.0.0.1" if config.app.host in ("0.0.0.0", "::") else config.app.host
@@ -667,8 +670,11 @@ def _run_stop(config: AppConfig) -> None:
     if stopped:
         print("Server stopped.")
     else:
-        print("Could not stop the server.", file=sys.stderr)
-        sys.exit(1)
+        if not mgr.is_process_alive(status.pid):
+            print("Server stopped (exited during shutdown).")
+        else:
+            print("Could not stop the server.", file=sys.stderr)
+            sys.exit(1)
 
 
 def _run_status(config: AppConfig) -> None:
@@ -690,14 +696,15 @@ def _run_status(config: AppConfig) -> None:
         uptime_str = ""
         if status.start_time is not None:
             elapsed = time.time() - status.start_time
-            hours, remainder = divmod(int(elapsed), 3600)
-            minutes, seconds = divmod(remainder, 60)
-            if hours > 0:
-                uptime_str = f" (uptime: {hours}h {minutes}m)"
-            elif minutes > 0:
-                uptime_str = f" (uptime: {minutes}m {seconds}s)"
-            else:
-                uptime_str = f" (uptime: {seconds}s)"
+            if elapsed >= 0:
+                hours, remainder = divmod(int(elapsed), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                if hours > 0:
+                    uptime_str = f" (uptime: {hours}h {minutes}m)"
+                elif minutes > 0:
+                    uptime_str = f" (uptime: {minutes}m {seconds}s)"
+                else:
+                    uptime_str = f" (uptime: {seconds}s)"
 
         pid_str = f"PID {status.pid}" if status.pid else "PID unknown"
         print(f"Server is running at {url} ({pid_str}){uptime_str}")

@@ -309,7 +309,7 @@ class TestStartBackground:
             patch.object(ServerManager, "is_process_alive", return_value=False),
             patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
-            pid = mgr.start_background(Path("/fake/config.yaml"))
+            pid = mgr.start_background()
         assert pid == 42
         assert mgr.read_pid() == 42
         call_args = mock_popen.call_args
@@ -326,7 +326,7 @@ class TestStartBackground:
         mgr.write_pid(999)
         with patch.object(ServerManager, "is_process_alive", return_value=True):
             with pytest.raises(RuntimeError, match="already running"):
-                mgr.start_background(Path("/fake/config.yaml"))
+                mgr.start_background()
 
     def test_clears_stale_pid_and_starts(self, tmp_path: Path) -> None:
         mgr = ServerManager(data_dir=tmp_path)
@@ -340,7 +340,7 @@ class TestStartBackground:
             patch.object(ServerManager, "is_process_alive", side_effect=alive_calls),
             patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc),
         ):
-            pid = mgr.start_background(Path("/fake/config.yaml"))
+            pid = mgr.start_background()
         assert pid == 42
 
     def test_debug_flag_passed(self, tmp_path: Path) -> None:
@@ -351,7 +351,7 @@ class TestStartBackground:
             patch.object(ServerManager, "is_process_alive", return_value=False),
             patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
-            mgr.start_background(Path("/fake/config.yaml"), debug=True)
+            mgr.start_background(debug=True)
         cmd = mock_popen.call_args[0][0]
         assert "--debug" in cmd
 
@@ -363,7 +363,7 @@ class TestStartBackground:
             patch.object(ServerManager, "is_process_alive", return_value=False),
             patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
-            mgr.start_background(Path("/fake/config.yaml"), extra_args=["--tls"])
+            mgr.start_background(extra_args=["--tls"])
         cmd = mock_popen.call_args[0][0]
         assert "--tls" in cmd
 
@@ -376,7 +376,7 @@ class TestStartBackground:
             patch.object(ServerManager, "is_process_alive", return_value=False),
             patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
-            mgr.start_background(Path("/fake/config.yaml"))
+            mgr.start_background()
         kwargs = mock_popen.call_args[1]
         assert "creationflags" in kwargs
         assert kwargs["creationflags"] == _CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS
@@ -390,7 +390,7 @@ class TestStartBackground:
             patch.object(ServerManager, "is_process_alive", return_value=False),
             patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
-            mgr.start_background(Path("/fake/config.yaml"))
+            mgr.start_background()
         kwargs = mock_popen.call_args[1]
         assert kwargs.get("start_new_session") is True
 
@@ -403,7 +403,7 @@ class TestStartBackground:
             patch("builtins.open", return_value=mock_log),
         ):
             with pytest.raises(OSError, match="exec failed"):
-                mgr.start_background(Path("/fake/config.yaml"))
+                mgr.start_background()
         mock_log.close.assert_called_once()
 
     def test_log_file_closed_on_success(self, tmp_path: Path) -> None:
@@ -416,8 +416,21 @@ class TestStartBackground:
             patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc),
             patch("builtins.open", return_value=mock_log),
         ):
-            mgr.start_background(Path("/fake/config.yaml"))
+            mgr.start_background()
         mock_log.close.assert_called_once()
+
+    def test_write_pid_failure_kills_orphan(self, tmp_path: Path) -> None:
+        mgr = ServerManager(data_dir=tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.pid = 42
+        with (
+            patch.object(ServerManager, "is_process_alive", return_value=False),
+            patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc),
+            patch.object(ServerManager, "write_pid", side_effect=OSError("disk full")),
+        ):
+            with pytest.raises(OSError, match="disk full"):
+                mgr.start_background()
+        mock_proc.kill.assert_called_once()
 
 
 class TestStop:
