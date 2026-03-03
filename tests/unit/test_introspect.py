@@ -451,15 +451,15 @@ class TestGatherSpaces:
 
     def test_active_space_without_db(self) -> None:
         """Lines 271-275: active_space info is set even when db is None."""
-        space = {"name": "my-space", "id": "abc-123", "file_path": "/path/space.yaml"}
+        space = {"name": "my-space", "id": "abc-123", "source_file": "/path/space.yaml"}
         result = _gather_spaces(active_space=space, db=None)
         assert result["active"]["name"] == "my-space"
         assert result["active"]["id"] == "abc-123"
-        assert result["active"]["file_path"] == "/path/space.yaml"
+        assert result["active"]["source_file"] == "/path/space.yaml"
 
     def test_active_space_with_db_enriches_repo_paths(self) -> None:
         """Lines 277-284: repo_paths populated via get_space_paths."""
-        space = {"name": "ws", "id": "id-1", "file_path": "/f.yaml"}
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml"}
         db = MagicMock()
 
         with (
@@ -486,7 +486,7 @@ class TestGatherSpaces:
 
     def test_active_space_with_db_repo_paths_exception_fallback(self) -> None:
         """Lines 283-284: repo_paths falls back to [] when get_space_paths raises."""
-        space = {"name": "ws", "id": "id-1", "file_path": "/f.yaml"}
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml"}
         db = MagicMock()
 
         import anteroom.services.space_storage as ss_mod
@@ -505,7 +505,7 @@ class TestGatherSpaces:
 
     def test_active_space_with_db_enriches_pack_count(self) -> None:
         """Lines 285-291: pack_count populated via get_active_pack_ids_for_space."""
-        space = {"name": "ws", "id": "id-1", "file_path": "/f.yaml"}
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml"}
         db = MagicMock()
 
         import anteroom.services.pack_attachments as pa_mod
@@ -524,7 +524,7 @@ class TestGatherSpaces:
 
     def test_active_space_with_db_pack_count_exception_fallback(self) -> None:
         """Lines 290-291: pack_count falls back to 0 when the call raises."""
-        space = {"name": "ws", "id": "id-1", "file_path": "/f.yaml"}
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml"}
         db = MagicMock()
 
         import anteroom.services.pack_attachments as pa_mod
@@ -543,7 +543,7 @@ class TestGatherSpaces:
 
     def test_active_space_with_db_enriches_source_count(self) -> None:
         """Lines 292-298: source_count populated via get_space_sources."""
-        space = {"name": "ws", "id": "id-1", "file_path": "/f.yaml"}
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml"}
         db = MagicMock()
 
         import anteroom.services.storage as storage_mod
@@ -562,7 +562,7 @@ class TestGatherSpaces:
 
     def test_active_space_with_db_source_count_exception_fallback(self) -> None:
         """Lines 296-298: source_count falls back to 0 when the call raises."""
-        space = {"name": "ws", "id": "id-1", "file_path": "/f.yaml"}
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml"}
         db = MagicMock()
 
         import anteroom.services.storage as storage_mod
@@ -579,99 +579,43 @@ class TestGatherSpaces:
 
         assert result["active"]["source_count"] == 0
 
-    def test_active_space_with_db_instructions_preview(self, tmp_path: Any) -> None:
-        """Lines 300-312: instructions_preview set when parse_space_file succeeds."""
-        space_file = tmp_path / "space.yaml"
-        space_file.write_text("name: ws\n")
-
-        space = {"name": "ws", "id": "id-1", "file_path": str(space_file)}
+    def test_active_space_with_db_instructions_preview(self) -> None:
+        """instructions_preview set when space dict has instructions."""
+        space = {
+            "name": "ws",
+            "id": "id-1",
+            "source_file": "/f.yaml",
+            "instructions": "Follow these project conventions carefully.",
+        }
         db = MagicMock()
-
-        fake_cfg = MagicMock()
-        fake_cfg.instructions = "Follow these project conventions carefully."
-
-        import anteroom.services.spaces as spaces_mod
-
-        orig = getattr(spaces_mod, "parse_space_file", None)
-        spaces_mod.parse_space_file = lambda _p: fake_cfg  # type: ignore[attr-defined]
-        try:
-            result = _gather_spaces(active_space=space, db=db)
-        finally:
-            if orig is None:
-                del spaces_mod.parse_space_file  # type: ignore[attr-defined]
-            else:
-                spaces_mod.parse_space_file = orig  # type: ignore[attr-defined]
-
+        result = _gather_spaces(active_space=space, db=db)
         assert result["active"]["instructions_preview"] == "Follow these project conventions carefully."
 
-    def test_active_space_instructions_preview_truncated(self, tmp_path: Any) -> None:
-        """Lines 308-310: long instructions are truncated to 200 chars + suffix."""
-        space_file = tmp_path / "space.yaml"
-        space_file.write_text("name: ws\n")
-
-        space = {"name": "ws", "id": "id-1", "file_path": str(space_file)}
+    def test_active_space_instructions_preview_truncated(self) -> None:
+        """Long instructions are truncated to 200 chars + suffix."""
+        space = {
+            "name": "ws",
+            "id": "id-1",
+            "source_file": "/f.yaml",
+            "instructions": "A" * 300,
+        }
         db = MagicMock()
-
-        fake_cfg = MagicMock()
-        fake_cfg.instructions = "A" * 300
-
-        import anteroom.services.spaces as spaces_mod
-
-        orig = getattr(spaces_mod, "parse_space_file", None)
-        spaces_mod.parse_space_file = lambda _p: fake_cfg  # type: ignore[attr-defined]
-        try:
-            result = _gather_spaces(active_space=space, db=db)
-        finally:
-            if orig is None:
-                del spaces_mod.parse_space_file  # type: ignore[attr-defined]
-            else:
-                spaces_mod.parse_space_file = orig  # type: ignore[attr-defined]
-
+        result = _gather_spaces(active_space=space, db=db)
         assert result["active"]["instructions_preview"].endswith("... (truncated)")
         assert len(result["active"]["instructions_preview"]) < 300
 
-    def test_active_space_no_instructions_when_empty(self, tmp_path: Any) -> None:
-        """instructions_preview is absent when cfg.instructions is falsy."""
-        space_file = tmp_path / "space.yaml"
-        space_file.write_text("name: ws\n")
-
-        space = {"name": "ws", "id": "id-1", "file_path": str(space_file)}
+    def test_active_space_no_instructions_when_empty(self) -> None:
+        """instructions_preview is absent when instructions is falsy."""
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml", "instructions": ""}
         db = MagicMock()
-
-        fake_cfg = MagicMock()
-        fake_cfg.instructions = ""
-
-        import anteroom.services.spaces as spaces_mod
-
-        orig = getattr(spaces_mod, "parse_space_file", None)
-        spaces_mod.parse_space_file = lambda _p: fake_cfg  # type: ignore[attr-defined]
-        try:
-            result = _gather_spaces(active_space=space, db=db)
-        finally:
-            if orig is None:
-                del spaces_mod.parse_space_file  # type: ignore[attr-defined]
-            else:
-                spaces_mod.parse_space_file = orig  # type: ignore[attr-defined]
-
+        result = _gather_spaces(active_space=space, db=db)
         assert "instructions_preview" not in result["active"]
 
-    def test_active_space_instructions_parse_exception_ignored(self, tmp_path: Any) -> None:
-        """Lines 311-312: exception in parse_space_file is silently swallowed."""
-        space = {"name": "ws", "id": "id-1", "file_path": "/nonexistent/space.yaml"}
+    def test_active_space_no_instructions_when_missing(self) -> None:
+        """instructions_preview is absent when instructions key is missing."""
+        space = {"name": "ws", "id": "id-1", "source_file": "/f.yaml"}
         db = MagicMock()
-
-        import anteroom.services.spaces as spaces_mod
-
-        orig = getattr(spaces_mod, "parse_space_file", None)
-        spaces_mod.parse_space_file = lambda _p: (_ for _ in ()).throw(FileNotFoundError("missing"))  # type: ignore[attr-defined]
-        try:
-            result = _gather_spaces(active_space=space, db=db)
-        finally:
-            if orig is None:
-                del spaces_mod.parse_space_file  # type: ignore[attr-defined]
-            else:
-                spaces_mod.parse_space_file = orig  # type: ignore[attr-defined]
-
+        result = _gather_spaces(active_space=space, db=db)
         assert "instructions_preview" not in result["active"]
 
     def test_list_spaces_with_db(self) -> None:
@@ -723,7 +667,7 @@ class TestGatherSpaces:
     @pytest.mark.asyncio
     async def test_handle_spaces_section_with_db(self) -> None:
         """handle() passes _active_space and _db through to _gather_spaces."""
-        space = {"name": "test-space", "id": "sp-1", "file_path": "/f.yaml"}
+        space = {"name": "test-space", "id": "sp-1", "source_file": "/f.yaml"}
         db = MagicMock()
 
         import anteroom.services.space_storage as ss_mod

@@ -84,7 +84,7 @@ def _build_system_prompt(
     instructions: str | None,
     builtin_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
-    project_instructions: str | None = None,
+    space_instructions: str | None = None,
 ) -> str:
     runtime_ctx = build_runtime_context(
         model=config.ai.model,
@@ -95,8 +95,8 @@ def _build_system_prompt(
     )
     parts = [runtime_ctx]
     parts.append(f"\n<project_context>\nWorking directory: {working_dir}\n</project_context>")
-    if project_instructions:
-        parts.append(f"\n{project_instructions}")
+    if space_instructions:
+        parts.append(f"\n{space_instructions}")
     if instructions:
         parts.append(f"\n{instructions}")
     return "\n".join(parts)

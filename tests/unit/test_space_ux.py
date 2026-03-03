@@ -290,10 +290,9 @@ class TestFormatHeaderSpaceName:
         styles = [s for s, _ in parts]
         assert "class:header.sep" in styles
 
-    def test_space_name_with_project_name(self) -> None:
-        parts = format_header(project_name="myproject", space_name="dev")
+    def test_space_name_only(self) -> None:
+        parts = format_header(space_name="dev")
         text = "".join(t for _, t in parts)
-        assert "myproject" in text
         assert "Space: dev" in text
 
     def test_space_name_with_plan_mode(self) -> None:

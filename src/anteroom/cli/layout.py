@@ -149,12 +149,11 @@ def format_header(
     model: str = "",
     working_dir: str = "",
     git_branch: str = "",
-    project_name: str = "",
     space_name: str = "",
     conv_title: str = "",
     plan_mode: bool = False,
 ) -> list[tuple[str, str]]:
-    """Build header fragments: model, dir, branch, project, space, title, mode."""
+    """Build header fragments: model, dir, branch, space, title, mode."""
     parts: list[tuple[str, str]] = [("class:header", " ")]
 
     if model:
@@ -174,9 +173,6 @@ def format_header(
 
     if git_branch:
         _sep_append("class:header.branch", git_branch)
-
-    if project_name:
-        _sep_append("class:header.project", project_name)
 
     if space_name:
         _sep_append("class:header.space", f"Space: {space_name}")

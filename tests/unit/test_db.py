@@ -12,6 +12,7 @@ from anteroom.db import (
     _SCHEMA,
     _VEC_METADATA_SCHEMA,
     _create_indexes,
+    _eradicate_projects,
     _make_vec_schema,
     _run_migrations,
     has_vec_support,
@@ -686,6 +687,9 @@ class TestMigrationPaths:
     def _run_full_init(self, conn: sqlite3.Connection) -> None:
         """Run migrations + index creation (mirrors init_db minus file I/O)."""
         _run_migrations(conn)
+        _create_indexes(conn)
+        conn.commit()
+        _eradicate_projects(conn)
         _create_indexes(conn)
         conn.commit()
 

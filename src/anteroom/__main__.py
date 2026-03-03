@@ -1474,7 +1474,11 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
         space = _resolve(args.name)
         if not space:
             return
-        path = Path(space["file_path"])
+        _sf = space.get("source_file", "")
+        if not _sf:
+            console.print("[red]Error:[/red] Space has no source file to clone from.")
+            return
+        path = Path(_sf)
         if not path.is_file():
             console.print(f"[red]Error:[/red] Space file not found: {path}")
             return
@@ -1555,7 +1559,11 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
             return
         from .services.spaces import SpaceLocalConfig, parse_local_file, resolve_local_path, write_local_file
 
-        path = Path(space["file_path"])
+        _sf = space.get("source_file", "")
+        if not _sf:
+            console.print("[red]Error:[/red] Space has no source file.")
+            return
+        path = Path(_sf)
         local_path = resolve_local_path(path)
         local_cfg = parse_local_file(local_path) if local_path else SpaceLocalConfig()
         local_cfg.repos_root = str(new_root)

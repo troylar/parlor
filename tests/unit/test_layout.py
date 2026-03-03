@@ -269,10 +269,6 @@ class TestFormatHeader:
         h = format_header(model="m", git_branch="issue-257-fullscreen")
         assert any(f[1] == "issue-257-fullscreen" for f in h)
 
-    def test_project_name(self):
-        h = format_header(project_name="my-project")
-        assert any(f[1] == "my-project" for f in h)
-
     def test_space_name(self):
         h = format_header(space_name="my-space")
         assert any(f[1] == "Space: my-space" for f in h)
@@ -293,7 +289,6 @@ class TestFormatHeader:
             model="gpt-4",
             working_dir="/tmp/test",
             git_branch="main",
-            project_name="proj",
             space_name="space",
             conv_title="My Chat",
             plan_mode=True,
@@ -302,7 +297,6 @@ class TestFormatHeader:
         assert "gpt-4" in texts
         assert "/tmp/test" in texts
         assert "main" in texts
-        assert "proj" in texts
         assert "Space: space" in texts
         assert "My Chat" in texts
         assert "PLAN" in texts

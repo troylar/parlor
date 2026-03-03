@@ -271,7 +271,7 @@ def _gather_spaces(
         active_info: dict[str, Any] = {
             "name": active_space.get("name", ""),
             "id": active_space.get("id", ""),
-            "file_path": active_space.get("file_path", ""),
+            "source_file": active_space.get("source_file", ""),
         }
         # Enrich with repo paths, pack count, source count
         if db:
@@ -296,20 +296,12 @@ def _gather_spaces(
                 active_info["source_count"] = len(sources)
             except Exception:
                 active_info["source_count"] = 0
-            # Include instructions if available
-            try:
-                from pathlib import Path
-
-                from ..services.spaces import parse_space_file
-
-                cfg = parse_space_file(Path(active_space["file_path"]))
-                if cfg.instructions:
-                    instr = cfg.instructions
-                    if len(instr) > 200:
-                        instr = instr[:200] + "... (truncated)"
-                    active_info["instructions_preview"] = instr
-            except Exception:
-                pass
+            # Include instructions from the DB record
+            instr = active_space.get("instructions", "")
+            if instr:
+                if len(instr) > 200:
+                    instr = instr[:200] + "... (truncated)"
+                active_info["instructions_preview"] = instr
         result["active"] = active_info
     else:
         result["active"] = None

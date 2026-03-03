@@ -588,6 +588,17 @@ def init_db(
 
     conn.commit()
 
+    # Eradicate projects tables/columns — must run OUTSIDE a transaction
+    # because PRAGMA foreign_keys=OFF is silently ignored inside transactions.
+    # Table rebuilds drop indexes/triggers, so recreate them afterwards.
+    _eradicate_projects(conn)
+    _create_indexes(conn)
+    try:
+        conn.executescript(_FTS_TRIGGERS)
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+
     # Also restrict WAL/SHM sidecar files
     for suffix in ("-wal", "-shm"):
         sidecar = db_path.parent / (db_path.name + suffix)
@@ -595,6 +606,102 @@ def init_db(
             _restrict_file_permissions(sidecar)
 
     return ThreadSafeConnection(conn)
+
+
+def _rebuild_table_without_column(
+    conn: sqlite3.Connection,
+    table: str,
+    drop_col: str,
+    new_create_sql: str,
+) -> None:
+    """Rebuild a table without a specific column (SQLite 12-step ALTER).
+
+    Used when ALTER TABLE DROP COLUMN fails (e.g. broken FK references).
+    """
+    cols_info = conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608
+    keep_cols = [row[1] for row in cols_info if row[1] != drop_col]
+    cols_csv = ", ".join(keep_cols)
+
+    conn.execute(f"ALTER TABLE {table} RENAME TO _{table}_old")  # noqa: S608
+    conn.execute(new_create_sql)
+    conn.execute(f"INSERT INTO {table} ({cols_csv}) SELECT {cols_csv} FROM _{table}_old")  # noqa: S608
+    conn.execute(f"DROP TABLE _{table}_old")  # noqa: S608
+
+
+def _eradicate_projects(conn: sqlite3.Connection) -> None:
+    """Remove all projects tables and FK columns (v1.95.0 — #716).
+
+    This MUST run outside any transaction because PRAGMA foreign_keys=OFF
+    is silently ignored inside transactions.  If a previous partial migration
+    already dropped the ``projects`` table but left the ``project_id`` FK
+    column on ``conversations`` or ``folders``, any DML on those columns
+    triggers ``OperationalError: no such table: main.projects`` with
+    foreign_keys=ON.
+    """
+    all_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+    folder_cols = {row[1] for row in conn.execute("PRAGMA table_info(folders)").fetchall()}
+
+    need_work = (
+        "project_id" in conv_cols
+        or "project_id" in folder_cols
+        or "project_sources" in all_tables
+        or "projects" in all_tables
+    )
+    if not need_work:
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        if "project_id" in conv_cols:
+            _rebuild_table_without_column(
+                conn,
+                "conversations",
+                "project_id",
+                """CREATE TABLE conversations (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    slug TEXT UNIQUE DEFAULT NULL,
+                    type TEXT NOT NULL DEFAULT 'chat'
+                        CHECK(type IN ('chat', 'note', 'document')),
+                    model TEXT DEFAULT NULL,
+                    space_id TEXT DEFAULT NULL,
+                    folder_id TEXT DEFAULT NULL,
+                    user_id TEXT DEFAULT NULL,
+                    user_display_name TEXT DEFAULT NULL,
+                    working_dir TEXT DEFAULT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
+                    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE SET NULL
+                )""",
+            )
+        if "project_id" in folder_cols:
+            _rebuild_table_without_column(
+                conn,
+                "folders",
+                "project_id",
+                """CREATE TABLE folders (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    parent_id TEXT DEFAULT NULL,
+                    space_id TEXT DEFAULT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    collapsed INTEGER NOT NULL DEFAULT 0,
+                    user_id TEXT DEFAULT NULL,
+                    user_display_name TEXT DEFAULT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
+                )""",
+            )
+        if "project_sources" in all_tables:
+            conn.execute("DROP TABLE IF EXISTS project_sources")
+        if "projects" in all_tables:
+            conn.execute("DROP TABLE IF EXISTS projects")
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None:
@@ -1051,21 +1158,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         conn.execute("ALTER TABLE conversations ADD COLUMN space_id TEXT DEFAULT NULL")
     if "space_id" not in folder_cols:
         conn.execute("ALTER TABLE folders ADD COLUMN space_id TEXT DEFAULT NULL")
-
-    # Eradicate projects tables and columns (v1.95.0 — #716)
-    # Must drop FK columns BEFORE dropping referenced tables, otherwise
-    # foreign_keys=ON causes "no such table" errors on INSERT.
-    all_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    if "project_id" in cols:
-        conn.execute("UPDATE conversations SET project_id = NULL WHERE project_id IS NOT NULL")
-        try:
-            conn.execute("ALTER TABLE conversations DROP COLUMN project_id")
-        except sqlite3.OperationalError:
-            logger.warning("Could not drop project_id column (SQLite < 3.35); column left orphaned")
-    if "project_sources" in all_tables:
-        conn.execute("DROP TABLE project_sources")
-    if "projects" in all_tables:
-        conn.execute("DROP TABLE projects")
 
     # Drop UNIQUE constraint on space names (v1.79.0)
     try:
