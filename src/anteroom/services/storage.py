@@ -1917,10 +1917,25 @@ def save_source_file(
     user_id: str | None = None,
     user_display_name: str | None = None,
 ) -> dict[str, Any]:
-    """Save a file as a source with MIME validation."""
+    """Save a file as a source with MIME validation.
+
+    Deduplicates by content hash — returns existing source if identical content
+    was already uploaded. File write and DB insert are atomic: if DB insert fails,
+    the file is cleaned up.
+    """
     _validate_upload(mime_type, data, filename)
 
     import hashlib
+
+    content_hash = hashlib.sha256(data).hexdigest()
+
+    # Dedup: return existing source if identical content already uploaded
+    existing = db.execute(
+        "SELECT * FROM sources WHERE content_hash = ? AND type = 'file' LIMIT 1",
+        (content_hash,),
+    ).fetchone()
+    if existing:
+        return dict(existing)
 
     safe_filename = _sanitize_filename(filename)
     sid = _uuid()
@@ -1932,8 +1947,6 @@ def save_source_file(
     if not full_path.is_relative_to(safe_resolve_pathlib(data_dir)):
         raise ValueError("Invalid filename")
     full_path.write_bytes(data)
-
-    content_hash = hashlib.sha256(data).hexdigest()
 
     # Extract text content for text-based files
     content = None
@@ -1956,27 +1969,36 @@ def save_source_file(
         content = extract_text(data, mime_type)
 
     now = _now()
-    db.execute(
-        "INSERT INTO sources (id, type, title, content, mime_type, filename, storage_path,"
-        " size_bytes, content_hash, user_id, user_display_name, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            sid,
-            "file",
-            title,
-            content,
-            mime_type,
-            safe_filename,
-            storage_path,
-            len(data),
-            content_hash,
-            user_id,
-            user_display_name,
-            now,
-            now,
-        ),
-    )
-    db.commit()
+    try:
+        db.execute(
+            "INSERT INTO sources (id, type, title, content, mime_type, filename, storage_path,"
+            " size_bytes, content_hash, user_id, user_display_name, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                sid,
+                "file",
+                title,
+                content,
+                mime_type,
+                safe_filename,
+                storage_path,
+                len(data),
+                content_hash,
+                user_id,
+                user_display_name,
+                now,
+                now,
+            ),
+        )
+        db.commit()
+    except Exception:
+        # Atomic cleanup: remove file if DB insert fails
+        try:
+            full_path.unlink(missing_ok=True)
+            sources_dir.rmdir()
+        except OSError:
+            pass
+        raise
 
     # Auto-chunk text content
     if content:
@@ -2459,8 +2481,11 @@ def create_source_from_attachment(
     content_hash = None
     if content:
         content_hash = hashlib.sha256(content.encode()).hexdigest()
-    elif full_path.exists():
-        content_hash = hashlib.sha256(full_path.read_bytes()).hexdigest()
+    else:
+        try:
+            content_hash = hashlib.sha256(full_path.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            pass
 
     source = create_source(
         db,

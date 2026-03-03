@@ -14,6 +14,7 @@ from anteroom.services.retention import (
     RetentionWorker,
     purge_conversations_before,
     purge_orphaned_attachments,
+    purge_orphaned_sources,
 )
 
 
@@ -357,3 +358,51 @@ class TestPurgeOrphanedSkipsFiles:
         count = purge_orphaned_attachments(tmp_path, conn)
         assert count == 0
         assert (att_root / "stray-file.txt").exists()
+
+
+def _create_test_db_with_sources(tmp_path: Path) -> sqlite3.Connection:
+    conn = _create_test_db(tmp_path)
+    conn.execute("CREATE TABLE sources (id TEXT PRIMARY KEY, type TEXT, title TEXT)")
+    conn.commit()
+    return conn
+
+
+class TestPurgeOrphanedSources:
+    def test_removes_orphaned_source_dirs(self, tmp_path: Path) -> None:
+        conn = _create_test_db_with_sources(tmp_path)
+        orphan_id = str(uuid.uuid4())
+        src_dir = tmp_path / "sources" / orphan_id
+        src_dir.mkdir(parents=True)
+        (src_dir / "file.txt").write_text("test")
+
+        count = purge_orphaned_sources(tmp_path, conn)
+        assert count == 1
+        assert not src_dir.exists()
+
+    def test_keeps_source_dirs_with_db_record(self, tmp_path: Path) -> None:
+        conn = _create_test_db_with_sources(tmp_path)
+        source_id = str(uuid.uuid4())
+        conn.execute("INSERT INTO sources (id, type, title) VALUES (?, 'file', 'test')", (source_id,))
+        conn.commit()
+        src_dir = tmp_path / "sources" / source_id
+        src_dir.mkdir(parents=True)
+        (src_dir / "file.txt").write_text("test")
+
+        count = purge_orphaned_sources(tmp_path, conn)
+        assert count == 0
+        assert src_dir.exists()
+
+    def test_noop_when_sources_dir_missing(self, tmp_path: Path) -> None:
+        conn = _create_test_db_with_sources(tmp_path)
+        count = purge_orphaned_sources(tmp_path, conn)
+        assert count == 0
+
+    def test_dry_run_does_not_delete(self, tmp_path: Path) -> None:
+        conn = _create_test_db_with_sources(tmp_path)
+        orphan_id = str(uuid.uuid4())
+        src_dir = tmp_path / "sources" / orphan_id
+        src_dir.mkdir(parents=True)
+
+        count = purge_orphaned_sources(tmp_path, conn, dry_run=True)
+        assert count == 1
+        assert src_dir.exists()
