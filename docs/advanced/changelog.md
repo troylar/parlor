@@ -7,6 +7,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 2, 2026
 
+### v1.93.2
+
+**Fixed:**
+
+- RAG vector search now respects space and project boundaries — no more cross-tenant context leakage (#709)
+- Embedding worker recovers from transient failures; edited messages properly re-embedded (#710)
+- Source file creation is atomic with consistent content-hash dedup and orphan cleanup (#711)
+- RAG status feedback in both web UI (toasts) and CLI (inline status) (#712)
+- Multi-file source upload capped at 20 with user feedback (#712)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.93.2)
+
 ### v1.93.1
 
 **Fixed:**
