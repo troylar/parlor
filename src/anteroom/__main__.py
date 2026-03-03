@@ -606,7 +606,7 @@ def _resolve_project_id(config: AppConfig, project_name: str) -> str:
     from .db import get_db
     from .services import storage
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     project = storage.get_project_by_name(db, project_name)
     if not project:
         print(f"Error: Project '{project_name}' not found.", file=sys.stderr)
@@ -620,7 +620,7 @@ def _resolve_space_id(config: AppConfig, space_name: str) -> str:
     from .db import get_db
     from .services.space_storage import resolve_space
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     match, candidates = resolve_space(db, space_name)
     if match:
         return str(match["id"])
@@ -643,7 +643,7 @@ def _run_projects(config: AppConfig) -> None:
     from .db import get_db
     from .services import storage
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     projects = storage.list_projects(db)
     if not projects:
         print("No projects found. Create one in the web UI.")
@@ -683,16 +683,20 @@ def _run_artifact(config: AppConfig, args: argparse.Namespace) -> None:
         print("Usage: aroom artifact {list,show,check,import,create}")
         return
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     console = Console()
 
     if action == "list":
-        arts = artifact_storage.list_artifacts(
-            db,
-            artifact_type=getattr(args, "type", None),
-            namespace=getattr(args, "namespace", None),
-            source=getattr(args, "source", None),
-        )
+        try:
+            arts = artifact_storage.list_artifacts(
+                db,
+                artifact_type=getattr(args, "type", None),
+                namespace=getattr(args, "namespace", None),
+                source=getattr(args, "source", None),
+            )
+        except ValueError as e:
+            console.print(f"[red]Invalid filter: {e}[/red]")
+            sys.exit(1)
         if not arts:
             console.print("[dim]No artifacts found.[/dim]")
             return
@@ -806,6 +810,9 @@ def _run_artifact(config: AppConfig, args: argparse.Namespace) -> None:
         if not art:
             console.print(f"[red]Artifact not found:[/red] {escape(fqn)}")
             sys.exit(1)
+        if art.get("source") == "built_in":
+            console.print("[red]Cannot delete built-in artifacts.[/red]")
+            sys.exit(1)
         artifact_storage.delete_artifact(db, art["id"])
         console.print(f"[green]Deleted[/green] {escape(fqn)}")
 
@@ -890,10 +897,10 @@ def _validate_pack_ref(ref: str) -> tuple[str, str]:
     import re
 
     parts = ref.split("/", 1)
-    if len(parts) != 2:
-        print(f"Invalid pack reference: {ref!r}. Use namespace/name format.", file=sys.stderr)
-        sys.exit(1)
-    namespace, name = parts
+    if len(parts) == 1:
+        namespace, name = "default", parts[0]
+    else:
+        namespace, name = parts
     safe_re = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
     if not safe_re.match(namespace):
         print(f"Invalid namespace: {namespace!r}. Must match [a-zA-Z0-9][a-zA-Z0-9._-]{{0,63}}", file=sys.stderr)
@@ -966,7 +973,7 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
         console.print("Run [bold]aroom pack refresh[/bold] to clone and install packs.")
         return
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     console = Console()
 
     if action == "list":
@@ -1027,7 +1034,11 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
                 "pack",
                 lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
             )
-        pack_info = match
+        if not match:
+            console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
+            sys.exit(1)
+
+        pack_info = packs.get_pack(db, match["namespace"], match["name"])
         if not pack_info:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
             sys.exit(1)
@@ -1213,6 +1224,7 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
         count_space_conversations,
         create_space,
         delete_space,
+        get_space_by_name,
         list_spaces,
         resolve_space,
         sync_space_paths,
@@ -1233,7 +1245,7 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
         console.print("Usage: aroom space {list,create,init,load,show,delete,refresh,clone,map,move-root}")
         return
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
 
     def _resolve(name_or_id: str) -> dict | None:
         match, candidates = resolve_space(db, name_or_id)
@@ -1300,6 +1312,12 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
             console.print("  Use [bold]aroom space load[/bold] to register it, or edit it directly.")
             return
 
+        existing = get_space_by_name(db, name)
+        if existing:
+            console.print(f"[yellow]Space '{escape(name)}' already exists.[/yellow]")
+            console.print(f"  Use [bold]aroom space show {escape(name)}[/bold] to view it.")
+            return
+
         write_space_template(target, name)
         s = create_space(db, name, str(target), file_hash(target))
         # Map cwd so resolve_space_by_cwd() finds this space
@@ -1321,6 +1339,11 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
             console.print("[red]Validation errors:[/red]")
             for e in errors:
                 console.print(f"  - {e}")
+            return
+        existing = get_space_by_name(db, space_cfg.name)
+        if existing:
+            console.print(f"[yellow]Space '{escape(space_cfg.name)}' already exists.[/yellow]")
+            console.print(f"  Use [bold]aroom space show {escape(space_cfg.name)}[/bold] to view it.")
             return
         s = create_space(db, space_cfg.name, str(path), file_hash(path))
         console.print(f"[green]Loaded space:[/green] {escape(s['name'])} (id: {s['id'][:8]}...)")

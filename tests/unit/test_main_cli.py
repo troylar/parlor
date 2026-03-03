@@ -1116,13 +1116,12 @@ class TestValidatePackRef:
         assert ns == "myns"
         assert name == "mypack"
 
-    def test_missing_slash_exits(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_missing_slash_defaults_namespace(self) -> None:
         from anteroom.__main__ import _validate_pack_ref
 
-        with pytest.raises(SystemExit) as exc_info:
-            _validate_pack_ref("noSlash")
-
-        assert exc_info.value.code == 1
+        ns, name = _validate_pack_ref("noSlash")
+        assert ns == "default"
+        assert name == "noSlash"
 
     def test_invalid_namespace_exits(self, capsys: pytest.CaptureFixture[str]) -> None:
         from anteroom.__main__ import _validate_pack_ref

@@ -165,6 +165,9 @@ async def remove_pack(request: Request, namespace: str, name: str) -> dict[str, 
     removed = packs.remove_pack_by_id(db, pack["id"])
     if not removed:
         raise HTTPException(status_code=404, detail="Pack not found")
+    registry = getattr(request.app.state, "artifact_registry", None)
+    if registry is not None:
+        registry.load_from_db(db)
     return {"status": "removed"}
 
 
@@ -207,4 +210,7 @@ async def remove_pack_by_id(request: Request, pack_id: str) -> dict[str, str]:
     removed = packs.remove_pack_by_id(db, pack_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Pack not found")
+    registry = getattr(request.app.state, "artifact_registry", None)
+    if registry is not None:
+        registry.load_from_db(db)
     return {"status": "removed"}

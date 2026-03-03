@@ -3826,6 +3826,16 @@ async def _run_repl(
                             )
                             continue
 
+                        from ..services.space_storage import get_space_by_name as _gspbn
+
+                        _existing = _gspbn(db, name)
+                        if _existing:
+                            renderer.console.print(
+                                f"[yellow]Space '{name}' already exists.[/yellow]"
+                                f" Use [bold]/space show {name}[/bold] to view it.\n"
+                            )
+                            continue
+
                         spath = _cwd / ".anteroom" / "space.yaml"
                         if spath.exists():
                             renderer.console.print(f"[yellow]Space file already exists:[/yellow] {spath}")
@@ -3871,6 +3881,16 @@ async def _run_repl(
                             for err in errors:
                                 renderer.render_error(err)
                             continue
+
+                        from ..services.space_storage import get_space_by_name as _gspbn2
+
+                        _existing_sp = _gspbn2(db, scfg.name)
+                        if _existing_sp:
+                            renderer.console.print(
+                                f"[yellow]Space '{scfg.name}' already exists.[/yellow]"
+                                f" Use [bold]/space show {scfg.name}[/bold] to view it.\n"
+                            )
+                            continue
                         sp = _cs(db, scfg.name, str(spath), _fh2(spath))
                         renderer.console.print(
                             f"[green]Loaded space: {sp['name']}[/green] [{MUTED}]{sp['id'][:8]}...[/{MUTED}]\n"
@@ -3881,14 +3901,8 @@ async def _run_repl(
                         if not _clone_name:
                             renderer.console.print(f"[{CHROME}]Usage: /space clone <name>[/{CHROME}]\n")
                             continue
-                        from ..services.space_storage import (
-                            get_space_paths as _get_sp_paths,
-                        )
-                        from ..services.space_storage import (
-                            resolve_space as _resolve_sp,
-                        )
 
-                        _sp_match, _sp_cands = _resolve_sp(db, _clone_name)
+                        _sp_match = await _resolve_space(_clone_name)
                         if not _sp_match:
                             renderer.console.print(f"[{CHROME}]Space not found: {_clone_name}[/{CHROME}]\n")
                             continue
@@ -3945,7 +3959,7 @@ async def _run_repl(
                         if _active_space[0]:
                             renderer.console.print(f"[{CHROME}]Active space: {_active_space[0]['name']}[/{CHROME}]")
                         renderer.console.print(
-                            f"[{CHROME}]Usage: /space [list|show|switch|create|load|refresh|clear|"
+                            f"[{CHROME}]Usage: /space [list|show|switch|create|init|load|refresh|clear|"
                             f"clone|map][/{CHROME}]\n"
                         )
                     continue
@@ -3981,7 +3995,11 @@ async def _run_repl(
                         ns, _, name = ref.rpartition("/")
                         if not ns:
                             ns = "default"
-                        pack_info = await _resolve_pack_interactive(db, ns, name)
+                        pack_match = await _resolve_pack_interactive(db, ns, name)
+                        if not pack_match:
+                            renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
+                            continue
+                        pack_info = packs_service.get_pack(db, pack_match["namespace"], pack_match["name"])
                         if not pack_info:
                             renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
                             continue
@@ -4017,6 +4035,9 @@ async def _run_repl(
                                 f"[green]Installed[/green] @{manifest.namespace}/{manifest.name}"
                                 f" v{manifest.version} ({result.get('artifact_count', 0)} artifacts)"
                             )
+                            if _artifact_registry is not None:  # noqa: F821
+                                _artifact_registry.load_from_db(db)  # noqa: F821
+                                skill_registry.load_from_artifacts(_artifact_registry)  # noqa: F821
                         except ValueError as exc:
                             renderer.console.print(f"[red]{exc}[/red]")
                         renderer.console.print()
@@ -4115,7 +4136,9 @@ async def _run_repl(
                         renderer.console.print(f"[{MUTED}]Run /pack refresh to clone and install packs.[/{MUTED}]\n")
 
                     elif sub == "attach":
-                        ref = parts[2].strip() if len(parts) >= 3 else ""
+                        _attach_rest = parts[2].strip() if len(parts) >= 3 else ""
+                        _attach_project = "--project" in _attach_rest
+                        ref = _attach_rest.replace("--project", "").strip()
                         if not ref:
                             renderer.console.print(
                                 f"[{CHROME}]Usage: /pack attach <namespace/name> [--project][/{CHROME}]\n"
@@ -4135,7 +4158,7 @@ async def _run_repl(
                                 f"[{CHROME}]Pack @{rich_escape(ns)}/{rich_escape(name)} not found.[/{CHROME}]\n"
                             )
                             continue
-                        project_path = str(Path(working_dir)) if "--project" in user_input else None
+                        project_path = str(Path(working_dir)) if _attach_project else None
                         try:
                             attach_pack(db, _pm["id"], project_path=project_path)
                         except ValueError as exc:
@@ -4147,7 +4170,9 @@ async def _run_repl(
                         )
 
                     elif sub == "detach":
-                        ref = parts[2].strip() if len(parts) >= 3 else ""
+                        _detach_rest = parts[2].strip() if len(parts) >= 3 else ""
+                        _detach_project = "--project" in _detach_rest
+                        ref = _detach_rest.replace("--project", "").strip()
                         if not ref:
                             renderer.console.print(
                                 f"[{CHROME}]Usage: /pack detach <namespace/name> [--project][/{CHROME}]\n"
@@ -4167,7 +4192,7 @@ async def _run_repl(
                                 f"[{CHROME}]Pack @{rich_escape(ns)}/{rich_escape(name)} not found.[/{CHROME}]\n"
                             )
                             continue
-                        project_path = str(Path(working_dir)) if "--project" in user_input else None
+                        project_path = str(Path(working_dir)) if _detach_project else None
                         removed = detach_pack(db, _pm["id"], project_path=project_path)
                         if removed:
                             scope = "project" if project_path else "global"
@@ -4223,13 +4248,21 @@ async def _run_repl(
                     if sub == "list" or not sub:
                         _atype = None
                         _asource = None
-                        _rest = parts[2] if len(parts) >= 3 else ""
+                        # For /artifacts --type=X, flags are in parts[1]; for /artifact list --type=X, in parts[2]
+                        if cmd == "/artifacts":
+                            _rest = " ".join(parts[1:]) if len(parts) >= 2 else ""
+                        else:
+                            _rest = parts[2] if len(parts) >= 3 else ""
                         for _tok in _rest.split():
                             if _tok.startswith("--type="):
                                 _atype = _tok.split("=", 1)[1]
                             elif _tok.startswith("--source="):
                                 _asource = _tok.split("=", 1)[1]
-                        arts = _art_store.list_artifacts(db, artifact_type=_atype, source=_asource)
+                        try:
+                            arts = _art_store.list_artifacts(db, artifact_type=_atype, source=_asource)
+                        except ValueError as _ve:
+                            renderer.console.print(f"[red]Invalid filter: {_ve}[/red]\n")
+                            continue
                         if not arts:
                             renderer.console.print(f"[{CHROME}]No artifacts found.[/{CHROME}]\n")
                             continue
@@ -4294,7 +4327,7 @@ async def _run_repl(
                     continue
 
                 elif cmd == "/artifact-check":
-                    from .services import artifact_health
+                    from ..services import artifact_health
 
                     _ahc_report = artifact_health.run_health_check(db, project_dir=working_dir)
                     renderer.console.print()
