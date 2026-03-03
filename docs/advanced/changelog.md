@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 2, 2026
 
+### v1.93.1
+
+**Fixed:**
+
+- 18 artifact ecosystem bugs across CLI, API, and web UI — wrong DB references, missing imports, unprotected endpoints, N+1 queries (#708)
+- CLI `artifact delete` now blocks built-in artifacts; invalid filters return clean errors (#708)
+- Pack delete via API refreshes artifact registry; space create/init rejects duplicates (#708)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.93.1)
+
 ### v1.93.0
 
 **New:**
