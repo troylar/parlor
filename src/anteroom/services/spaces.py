@@ -342,8 +342,8 @@ def sync_space_from_file(
         }
         if track_source:
             updates["source_file"] = source_file
-        if config.config.get("model"):
-            updates["model"] = config.config["model"]
+        # Always sync the model: set from YAML or clear if removed
+        updates["model"] = config.config.get("model") or None
         return space_storage.update_space(db, existing["id"], **updates) or existing
     else:
         model = config.config.get("model") if config.config else None

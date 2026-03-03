@@ -199,9 +199,8 @@ async def api_refresh_space(request: Request, space_id: str) -> dict[str, Any]:
     updates: dict[str, Any] = {
         "source_hash": new_hash,
         "instructions": cfg.instructions or "",
+        "model": cfg.config.get("model") or None,
     }
-    if cfg.config.get("model"):
-        updates["model"] = cfg.config["model"]
 
     updated = update_space(db, space_id, **updates)
     if not updated:

@@ -665,12 +665,16 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
     if not folder_table and "_folders_old" in all_tables:
         folder_table = "_folders_old"
 
-    conv_cols: set[str] = set()
-    folder_cols: set[str] = set()
+    # Use lists to preserve column order from PRAGMA table_info (important
+    # for matching SELECT column order with INSERT column order).
+    conv_cols_ordered: list[str] = []
+    folder_cols_ordered: list[str] = []
     if conv_table:
-        conv_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({conv_table})").fetchall()}  # noqa: S608
+        conv_cols_ordered = [row[1] for row in conn.execute(f"PRAGMA table_info({conv_table})").fetchall()]  # noqa: S608
     if folder_table:
-        folder_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({folder_table})").fetchall()}  # noqa: S608
+        folder_cols_ordered = [row[1] for row in conn.execute(f"PRAGMA table_info({folder_table})").fetchall()]  # noqa: S608
+    conv_cols = set(conv_cols_ordered)
+    folder_cols = set(folder_cols_ordered)
 
     # Check for corrupted FK references (previous partial migration renamed
     # folders to _folders_old but conversations FK captured the temp name)
@@ -703,8 +707,10 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
             "project_id" in conv_cols or has_corrupted_fk or (conv_table and conv_table == "_conversations_old")
         )
         conv_data: list[tuple[str, ...]] = []
+        conv_keep: list[str] = []
         if conv_table and conv_needs_rebuild:
-            keep = [c for c in conv_cols if c != "project_id"]
+            conv_keep = [c for c in conv_cols_ordered if c != "project_id"]
+            keep = conv_keep
             cols_csv = ", ".join(keep)
             conv_data = conn.execute(f"SELECT {cols_csv} FROM {conv_table}").fetchall()  # noqa: S608
             conn.execute(f"DROP TABLE {conv_table}")  # noqa: S608
@@ -714,7 +720,7 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
 
         # Step 2: Rebuild folders without project_id
         if folder_table and "project_id" in folder_cols:
-            keep = [c for c in folder_cols if c != "project_id"]
+            keep = [c for c in folder_cols_ordered if c != "project_id"]
             cols_csv = ", ".join(keep)
             folder_data = conn.execute(f"SELECT {cols_csv} FROM {folder_table}").fetchall()  # noqa: S608
             conn.execute(f"DROP TABLE {folder_table}")  # noqa: S608
@@ -724,7 +730,7 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
                 conn.executemany(f"INSERT INTO folders ({cols_csv}) VALUES ({placeholders})", folder_data)  # noqa: S608
         elif "_folders_old" in all_tables and folder_table == "_folders_old":
             # Recovery: _folders_old exists but folders doesn't
-            keep = [c for c in folder_cols if c != "project_id"]
+            keep = [c for c in folder_cols_ordered if c != "project_id"]
             cols_csv = ", ".join(keep)
             folder_data = conn.execute(f"SELECT {cols_csv} FROM _folders_old").fetchall()
             conn.execute("DROP TABLE _folders_old")
@@ -737,9 +743,8 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
         if conv_needs_rebuild:
             conn.execute(_CONVERSATIONS_CREATE)
             if conv_data:
-                keep = [c for c in conv_cols if c != "project_id"]
-                placeholders = ", ".join("?" * len(keep))
-                cols_csv = ", ".join(keep)
+                placeholders = ", ".join("?" * len(conv_keep))
+                cols_csv = ", ".join(conv_keep)
                 conn.executemany(f"INSERT INTO conversations ({cols_csv}) VALUES ({placeholders})", conv_data)  # noqa: S608
 
         # Step 4: Drop project tables

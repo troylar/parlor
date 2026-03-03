@@ -369,7 +369,72 @@ class TestRefreshSpaceEndpoint:
         assert data["name"] == "work"
         assert data["source_hash"] == "newhash123"
         assert data["refreshed"] is True
-        mock_update.assert_called_once_with(app.state.db, "sp-1", source_hash="newhash123", instructions="")
+        mock_update.assert_called_once_with(app.state.db, "sp-1", source_hash="newhash123", instructions="", model=None)
+
+    def test_refresh_clears_model_when_removed_from_yaml(self, tmp_path) -> None:
+        """Regression: removing model from YAML should clear it in the DB."""
+        app = _make_app()
+        space_file = tmp_path / "space.yaml"
+        space_file.write_text("name: work\n")
+        space = {"id": "sp-1", "name": "work", "source_file": str(space_file), "model": "gpt-4o"}
+        updated_space = {
+            "id": "sp-1",
+            "name": "work",
+            "source_file": str(space_file),
+            "source_hash": "newhash",
+            "model": None,
+        }
+
+        mock_cfg = MagicMock()
+        mock_cfg.name = "work"
+        mock_cfg.instructions = ""
+        mock_cfg.config = {}  # No model in YAML
+
+        with (
+            patch("anteroom.routers.spaces.get_space", return_value=space),
+            patch("anteroom.services.spaces.parse_space_file", return_value=mock_cfg),
+            patch("anteroom.services.spaces.compute_file_hash", return_value="newhash"),
+            patch("anteroom.routers.spaces.update_space", return_value=updated_space) as mock_update,
+        ):
+            client = TestClient(app)
+            resp = client.post("/api/spaces/sp-1/refresh")
+
+        assert resp.status_code == 200
+        # Model should be explicitly set to None (cleared), not omitted
+        mock_update.assert_called_once_with(app.state.db, "sp-1", source_hash="newhash", instructions="", model=None)
+
+    def test_refresh_sets_model_from_yaml(self, tmp_path) -> None:
+        """Refresh should set model when present in YAML config."""
+        app = _make_app()
+        space_file = tmp_path / "space.yaml"
+        space_file.write_text("name: work\nconfig:\n  model: gpt-4o\n")
+        space = {"id": "sp-1", "name": "work", "source_file": str(space_file), "model": None}
+        updated_space = {
+            "id": "sp-1",
+            "name": "work",
+            "source_file": str(space_file),
+            "source_hash": "newhash",
+            "model": "gpt-4o",
+        }
+
+        mock_cfg = MagicMock()
+        mock_cfg.name = "work"
+        mock_cfg.instructions = ""
+        mock_cfg.config = {"model": "gpt-4o"}
+
+        with (
+            patch("anteroom.routers.spaces.get_space", return_value=space),
+            patch("anteroom.services.spaces.parse_space_file", return_value=mock_cfg),
+            patch("anteroom.services.spaces.compute_file_hash", return_value="newhash"),
+            patch("anteroom.routers.spaces.update_space", return_value=updated_space) as mock_update,
+        ):
+            client = TestClient(app)
+            resp = client.post("/api/spaces/sp-1/refresh")
+
+        assert resp.status_code == 200
+        mock_update.assert_called_once_with(
+            app.state.db, "sp-1", source_hash="newhash", instructions="", model="gpt-4o"
+        )
 
 
 class TestGetSpaceSourcesEndpoint:

@@ -469,6 +469,20 @@ class TestSyncSpaceFromFile:
         assert result["name"] == "model-space"
         assert result["model"] == "gpt-4o"
 
+    def test_sync_clears_model_when_removed_from_yaml(self, tmp_path: Path) -> None:
+        """Regression: removing model from YAML should clear it in the DB."""
+        space_file = tmp_path / "space.yaml"
+        space_file.write_text(yaml.dump({"name": "model-clear", "version": "1", "config": {"model": "gpt-4o"}}))
+
+        db = _make_db()
+        result = sync_space_from_file(db, space_file)
+        assert result["model"] == "gpt-4o"
+
+        # Remove model from YAML and resync
+        space_file.write_text(yaml.dump({"name": "model-clear", "version": "1"}))
+        result = sync_space_from_file(db, space_file)
+        assert result["model"] is None, "Model should be cleared when removed from YAML"
+
 
 class TestExportSpaceToYaml:
     """Tests for export_space_to_yaml()."""

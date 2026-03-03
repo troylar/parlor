@@ -3527,9 +3527,8 @@ async def _run_repl(
                             _updates: dict[str, Any] = {
                                 "source_hash": new_hash,
                                 "instructions": cfg.instructions or "",
+                                "model": cfg.config.get("model") or None,
                             }
-                            if cfg.config.get("model"):
-                                _updates["model"] = cfg.config["model"]
                             _update_sp(db, sp["id"], **_updates)
                             from ..services.space_storage import get_space as _get_sp_ref
 
@@ -3538,9 +3537,10 @@ async def _run_repl(
                                 _active_space[0] = sp_refreshed
                             if cfg.instructions:
                                 _inject_space_instructions(sp_refreshed or sp, cfg.instructions)
+                            renderer.console.print(f"[green]Refreshed: {sp['name']}[/green]\n")
                         except Exception:
-                            pass
-                        renderer.console.print(f"[green]Refreshed: {sp['name']}[/green]\n")
+                            renderer.render_error(f"Failed to refresh space from {fpath}")
+                        continue
 
                     elif sub == "clear":
                         if not _active_space[0]:
