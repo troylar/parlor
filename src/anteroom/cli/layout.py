@@ -60,6 +60,11 @@ class OutputControl(FormattedTextControl):
             self.scroll_up(3)
         elif mouse_event.event_type == MouseEventType.SCROLL_DOWN:
             self.scroll_down(3)
+        else:
+            return
+        from prompt_toolkit.application import get_app
+
+        get_app().invalidate()
 
     def _get_output_fragments(self) -> list[tuple[str, str]]:
         return self._output_fragments

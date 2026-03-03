@@ -2482,7 +2482,7 @@ async def _run_repl(
         key_bindings=kb,
         style=create_anteroom_style(),
         full_screen=_use_fullscreen,
-        mouse_support=False,  # disabled so terminal handles text selection + copy
+        mouse_support=True,  # captures scroll wheel for output pane scrolling
     )
 
     # Set approval mode for prompt coloring
