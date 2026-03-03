@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 3, 2026
 
+### v1.94.3
+
+**Fixed:**
+
+- Binary file attachments (PPTX, XLSX, PDF, DOCX) no longer silently drop from AI context (#727)
+- Added PPTX and XLSX text extraction for file uploads and CLI `@file` references (#727)
+- Unextractable binary files now show a fallback note instead of being silently ignored (#727)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.94.3)
+
 ### v1.94.2
 
 **Fixed:**
