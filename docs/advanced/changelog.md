@@ -7,6 +7,17 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 3, 2026
 
+### v1.94.4
+
+**Fixed:**
+
+- Message action buttons (edit, fork, retry, copy, delete) now appear on sent and streamed messages in the web UI (#725)
+- Race condition in rapid message sending that could misattach action buttons to wrong messages (#725)
+- Attachment filename sanitization and untrusted zone storage to prevent path traversal (#731)
+- AI ignoring extracted attachment content and calling tools instead (#731)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.94.4)
+
 ### v1.94.3
 
 **Fixed:**
