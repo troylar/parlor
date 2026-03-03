@@ -1,4 +1,4 @@
-"""API endpoints for knowledge sources, source groups, and project source linking."""
+"""API endpoints for knowledge sources, source groups, and source linking."""
 
 from __future__ import annotations
 

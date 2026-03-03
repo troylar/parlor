@@ -147,7 +147,7 @@ async def api_update_space(request: Request, space_id: str, body: SpaceUpdateReq
     if body.instructions is not None:
         updates["instructions"] = body.instructions
     if "model" in body.model_fields_set:
-        updates["model"] = body.model or ""
+        updates["model"] = body.model if body.model else None
 
     if not updates:
         return _enrich_origin(space)
@@ -224,7 +224,19 @@ async def api_sync_space(request: Request) -> dict[str, Any]:
     if ".." in re.split(r"[/\\]", file_path):
         raise HTTPException(status_code=400, detail="Path traversal not allowed")
 
-    path = Path(file_path)
+    path = Path(file_path).resolve()
+
+    # Restrict to known base directories: global spaces dir or .anteroom/ dirs
+    from ..services.spaces import get_spaces_dir
+
+    global_dir = get_spaces_dir().resolve()
+    anteroom_dir_name = ".anteroom"
+    if not (str(path).startswith(str(global_dir)) or anteroom_dir_name in path.parts):
+        raise HTTPException(
+            status_code=400,
+            detail="Path must be inside ~/.anteroom/ or a project .anteroom/ directory",
+        )
+
     if not path.is_file():
         raise HTTPException(status_code=400, detail="File not found")
 

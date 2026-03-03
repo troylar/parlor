@@ -636,7 +636,8 @@ _FOLDERS_CREATE = """CREATE TABLE folders (
     user_display_name TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
+    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE SET NULL
 )"""
 
 
@@ -696,8 +697,13 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
     try:
         # Step 1: Drop conversations (or its leftover) so folders can be
         #         rebuilt without anything referencing it.
+        #         Only rebuild if conversations actually has project_id,
+        #         has corrupted FKs, or is a recovery leftover.
+        conv_needs_rebuild = (
+            "project_id" in conv_cols or has_corrupted_fk or (conv_table and conv_table == "_conversations_old")
+        )
         conv_data: list[tuple[str, ...]] = []
-        if conv_table:
+        if conv_table and conv_needs_rebuild:
             keep = [c for c in conv_cols if c != "project_id"]
             cols_csv = ", ".join(keep)
             conv_data = conn.execute(f"SELECT {cols_csv} FROM {conv_table}").fetchall()  # noqa: S608
@@ -727,13 +733,14 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
                 placeholders = ", ".join("?" * len(keep))
                 conn.executemany(f"INSERT INTO folders ({cols_csv}) VALUES ({placeholders})", folder_data)  # noqa: S608
 
-        # Step 3: Recreate conversations with clean FKs
-        conn.execute(_CONVERSATIONS_CREATE)
-        if conv_data:
-            keep = [c for c in conv_cols if c != "project_id"]
-            placeholders = ", ".join("?" * len(keep))
-            cols_csv = ", ".join(keep)
-            conn.executemany(f"INSERT INTO conversations ({cols_csv}) VALUES ({placeholders})", conv_data)  # noqa: S608
+        # Step 3: Recreate conversations with clean FKs (only if we dropped it)
+        if conv_needs_rebuild:
+            conn.execute(_CONVERSATIONS_CREATE)
+            if conv_data:
+                keep = [c for c in conv_cols if c != "project_id"]
+                placeholders = ", ".join("?" * len(keep))
+                cols_csv = ", ".join(keep)
+                conn.executemany(f"INSERT INTO conversations ({cols_csv}) VALUES ({placeholders})", conv_data)  # noqa: S608
 
         # Step 4: Drop project tables
         if "project_sources" in all_tables:

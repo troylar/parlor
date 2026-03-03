@@ -757,13 +757,14 @@ class TestUpdateSpaceEndpoint:
 class TestSyncSpaceEndpoint:
     def test_sync_success(self) -> None:
         app = _make_app()
-        synced = {"id": "sp-1", "name": "myspace", "source_file": "/tmp/space.yaml", "source_hash": "abc"}
+        file_path = "/projects/myapp/.anteroom/space.yaml"
+        synced = {"id": "sp-1", "name": "myspace", "source_file": file_path, "source_hash": "abc"}
         with patch("anteroom.services.spaces.sync_space_from_file", return_value=synced):
             with patch("pathlib.Path.is_file", return_value=True):
                 client = TestClient(app)
                 resp = client.post(
                     "/api/spaces/sync",
-                    json={"file_path": "/tmp/space.yaml"},
+                    json={"file_path": file_path},
                     headers={"Content-Type": "application/json"},
                 )
         assert resp.status_code == 200
@@ -801,6 +802,17 @@ class TestSyncSpaceEndpoint:
         )
         assert resp.status_code == 400
 
+    def test_sync_arbitrary_path_rejected(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.post(
+            "/api/spaces/sync",
+            json={"file_path": "/etc/passwd"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+        assert ".anteroom" in resp.json()["detail"]
+
     def test_sync_wrong_content_type(self) -> None:
         app = _make_app()
         client = TestClient(app)
@@ -817,7 +829,7 @@ class TestSyncSpaceEndpoint:
             client = TestClient(app)
             resp = client.post(
                 "/api/spaces/sync",
-                json={"file_path": "/nonexistent/space.yaml"},
+                json={"file_path": "/nonexistent/.anteroom/space.yaml"},
                 headers={"Content-Type": "application/json"},
             )
         assert resp.status_code == 400

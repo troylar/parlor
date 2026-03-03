@@ -995,17 +995,24 @@ const App = (() => {
                 e.stopPropagation();
                 if (!confirm(`Delete space "${s.name}"?`)) return;
                 try {
-                    await fetch(`/api/spaces/${encodeURIComponent(s.id)}`, {
+                    const resp = await fetch(`/api/spaces/${encodeURIComponent(s.id)}`, {
                         method: 'DELETE',
                         credentials: 'same-origin',
                         headers: { 'X-CSRF-Token': _getCsrfToken() },
                     });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({}));
+                        alert(err.detail || `Failed to delete space (${resp.status})`);
+                        return;
+                    }
                     if (state.currentSpaceId === s.id) {
                         state.currentSpaceId = null;
                     }
                     await loadSpaces();
                     await Sidebar.refresh();
-                } catch { /* ignore */ }
+                } catch (e) {
+                    alert('Failed to delete space: ' + (e.message || 'network error'));
+                }
             });
             actions.appendChild(deleteBtn);
 
@@ -1099,8 +1106,9 @@ const App = (() => {
             }
 
             try {
+                let resp;
                 if (id) {
-                    await fetch(`/api/spaces/${encodeURIComponent(id)}`, {
+                    resp = await fetch(`/api/spaces/${encodeURIComponent(id)}`, {
                         method: 'PATCH',
                         credentials: 'same-origin',
                         headers: {
@@ -1110,7 +1118,7 @@ const App = (() => {
                         body: JSON.stringify({ name, instructions, model: model || null }),
                     });
                 } else {
-                    await fetch('/api/spaces', {
+                    resp = await fetch('/api/spaces', {
                         method: 'POST',
                         credentials: 'same-origin',
                         headers: {
@@ -1119,6 +1127,11 @@ const App = (() => {
                         },
                         body: JSON.stringify({ name, instructions, model: model || null }),
                     });
+                }
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    alert(err.detail || `Failed to save space (${resp.status})`);
+                    return;
                 }
                 modal.style.display = 'none';
                 await loadSpaces();
