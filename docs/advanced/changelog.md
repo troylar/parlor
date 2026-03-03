@@ -7,6 +7,16 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 3, 2026
 
+### v1.94.6
+
+**Fixed:**
+
+- Database migration crash on startup for users upgrading from older versions (#734)
+- Auto-repair for corrupted FK references caused by v1.94.4 migration (#734)
+- Mouse scroll wheel in CLI now scrolls conversation output instead of terminal scrollback (#735)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.94.6)
+
 ### v1.94.5
 
 **Fixed:**
