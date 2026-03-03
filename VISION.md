@@ -78,7 +78,7 @@ Every behavior that can vary must be exposed as a configuration knob. This is no
 - **Cost governance**: token budgets (per-request, per-conversation, per-day, per-user), model selection, context window limits, max iterations per turn
 - **Agent behavior**: sub-agent concurrency, depth limits, iteration caps, output limits, timeout policies, retry strategies, planning mode defaults
 - **Team enforcement**: lock any config field org-wide so no individual can override it. Security settings, tool access, approval modes, token budgets — all lockable.
-- **Precedence layers**: built-in → global → space → project → conversation → runtime. Six layers of config resolution so departments can customize without weakening security.
+- **Precedence layers**: built-in → global → team → space → conversation → runtime. Six layers of config resolution so departments can customize without weakening security.
 
 Zero configuration must always work — a fresh `pip install` with no config file should be fully functional and secure. But a team that needs 50 knobs tuned to their exact policy should find all 50 knobs waiting. If a behavior isn't configurable, that's a bug.
 

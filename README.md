@@ -115,7 +115,7 @@ Everything is shared &mdash; conversations, tools, storage, security controls, a
 
 ### Web UI
 
-A full-featured chat interface with projects, folders, tags, file attachments, canvas panels, inline tool approvals, and four built-in themes. Product owners, executives, compliance officers, and marketing teams use this.
+A full-featured chat interface with spaces, folders, tags, file attachments, canvas panels, inline tool approvals, and four built-in themes. Product owners, executives, compliance officers, and marketing teams use this.
 
 <p align="center">
   <img src="docs/screenshots/theme-midnight.png" alt="Midnight" width="390">&nbsp;&nbsp;
@@ -198,7 +198,7 @@ aroom pack install https://github.com/example/compliance-pack
 aroom pack list
 ```
 
-Packs use a 6-layer precedence system (built-in &rarr; global &rarr; space &rarr; project &rarr; conversation &rarr; runtime) so departments can customize without weakening security controls.
+Packs use a 6-layer precedence system (built-in &rarr; global &rarr; team &rarr; space &rarr; conversation &rarr; runtime) so departments can customize without weakening security controls.
 
 ---
 
@@ -207,8 +207,8 @@ Packs use a 6-layer precedence system (built-in &rarr; global &rarr; space &rarr
 Spaces bundle repositories, tools, configs, and packs into named workspaces. Different teams, different projects, different configurations &mdash; centrally governed.
 
 ```bash
-aroom space create my-project --repo ./frontend --repo ./backend
-aroom space switch my-project
+aroom space create my-space --repo ./frontend --repo ./backend
+aroom chat --space my-space
 ```
 
 ---
@@ -297,7 +297,7 @@ pip install anteroom[embeddings]  # adds local vector search
 
 | | |
 |---|---|
-| **Web UI** | Conversations, projects, folders, tags, attachments, canvas, themes, keyboard shortcuts |
+| **Web UI** | Conversations, spaces, folders, tags, attachments, canvas, themes, keyboard shortcuts |
 | **CLI** | REPL, one-shot, exec mode, planning, skills, @file references, Rich rendering |
 | **Tools** | 12 built-in + 3 optional office tools + unlimited MCP tools, parallel execution, sub-agents |
 | **Packs** | 7 artifact types, 6-layer precedence, git distribution, lock files, health checks |

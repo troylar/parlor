@@ -27,13 +27,13 @@ prompt: |
   |------------------|---------------------------------------------|------------------------------------------|
   | Defaults         | Built into code                             | Sensible defaults, zero config works     |
   | Team config      | `.anteroom/team.yaml` (walk-up discovery)   | Shared team settings, enforced values    |
-  | Project config   | `.anteroom/config.yaml` (walk-up, planned)  | Per-project MCP servers, tools, rules    |
+  | Space config     | `.anteroom/config.yaml` (walk-up)           | Per-space MCP servers, tools, rules      |
   | Personal config  | `~/.anteroom/config.yaml`                   | User-specific settings                   |
   | Env vars         | `AI_CHAT_*` prefix                          | Override any non-enforced setting        |
   | CLI flags        | `--port`, `--approval-mode`, etc.           | Session-level overrides                  |
 
   **Walk-up discovery**: Anteroom searches from the current working directory upward through
-  parent directories until it finds a matching file. This is how team config, project
+  parent directories until it finds a matching file. This is how team config, space
   instructions (ANTEROOM.md), and skills directories are discovered.
 
   **Deep merge**: nested config sections merge recursively — a project config that sets
@@ -370,7 +370,6 @@ prompt: |
   | aroom          | --top-p TOP_P           | Override model top_p (0.0-1.0)                 |
   | aroom          | --seed SEED             | Set random seed for deterministic output       |
   | aroom          | --team-config PATH      | Explicit path to team config YAML              |
-  | aroom          | --project NAME          | Load a named project (instructions, model override, source context) |
   | aroom          | --debug                 | Enable debug logging to stderr                 |
   | aroom init     |                         | Interactive setup wizard                       |
   | aroom init     | --force                 | Overwrite existing config without asking        |
@@ -416,10 +415,9 @@ prompt: |
   | aroom pack     | update PATH             | Update a pack from local directory             |
   | aroom pack     | sources                 | List configured pack sources and cache status  |
   | aroom pack     | refresh                 | Pull all configured pack sources and update    |
-  | aroom pack     | attach NAMESPACE/NAME   | Attach a pack to global/project scope (--project) |
-  | aroom pack     | detach NAMESPACE/NAME   | Detach a pack from global/project scope (--project) |
+  | aroom pack     | attach NAMESPACE/NAME   | Attach a pack to global/space scope (--project) |
+  | aroom pack     | detach NAMESPACE/NAME   | Detach a pack from global/space scope (--project) |
   | aroom pack     | add-source URL          | Add a git pack source to personal config       |
-  | aroom projects |                         | List named projects with metadata              |
   | aroom space    | list                    | List spaces with origin (local/global) and conversation count |
   | aroom space    | create NAME             | Create a new global space in ~/.anteroom/spaces/ |
   | aroom space    | init                    | Create a local space in current project (.anteroom/space.yaml) |
@@ -483,13 +481,13 @@ prompt: |
     Instructions for the AI. Use {args} for user arguments.
   ```
   Directories (highest priority first):
-  1. `.anteroom/skills/` or `.claude/skills/` (project-level, walk-up discovery)
+  1. `.anteroom/skills/` or `.claude/skills/` (space-level, walk-up discovery)
   2. `~/.anteroom/skills/` or `~/.claude/skills/` (user-level)
   3. Built-in default skills (create-eval, new-pack, new-skill, new-space, pack-lint, pack-publish, pack-doctor, pack-update, space-doctor, space-edit, space-lint, a-help)
 
-  ### Project Instructions (ANTEROOM.md)
+  ### Space Instructions (ANTEROOM.md)
 
-  Project-level instructions loaded automatically via walk-up discovery from cwd.
+  Space-level instructions loaded automatically via walk-up discovery from cwd.
 
   **Search filenames** (first match wins at each directory level):
   `.anteroom.md` > `ANTEROOM.md` > `.claude.md` > `CLAUDE.md`
@@ -521,12 +519,10 @@ prompt: |
   | /compact       | Compact conversation to reduce token usage       |
   | /usage         | Show token usage and cost statistics             |
   | /tools         | Show available tools with tier assignments       |
-  | /project       | Manage projects (list/create/select/edit/delete) |
-  | /projects      | List all projects (shortcut for /project list)   |
   | /pack          | Manage packs (list/show/install/update/remove/attach/detach/sources/refresh/add-source) |
   | /packs         | List installed packs (shortcut for /pack list)   |
   | /mcp           | Show MCP server status and tools                 |
-  | /conventions   | Display project conventions (ANTEROOM.md)        |
+  | /conventions   | Display space conventions (ANTEROOM.md)          |
   | /plan          | Enter/exit planning mode                         |
   | /verbose       | Toggle verbosity level                           |
   | /detail        | Toggle tool call detail display                  |
@@ -575,7 +571,7 @@ prompt: |
   - Instructions: `.anteroom.md` / `ANTEROOM.md` / `.claude.md` / `CLAUDE.md`
   - Skills: `.anteroom/skills/` / `.claude/skills/`
   - Team config: `.anteroom/team.yaml` / `.claude/team.yaml`
-  - Project config: `.anteroom/config.yaml` / `.claude/config.yaml`
+  - Space config: `.anteroom/config.yaml` / `.claude/config.yaml`
   - Rules: `.anteroom/rules/` / `.claude/rules/`
 
   ---
@@ -598,7 +594,7 @@ prompt: |
   Regex: `^@[a-z0-9_-]+/[a-z_]+/[a-z0-9_][a-z0-9_.-]*$`
 
   ### 6-Layer Precedence (highest → lowest)
-  inline (5) > local (4) > project (3) > team (2) > global (1) > built_in (0)
+  inline (5) > local (4) > space (3) > team (2) > global (1) > built_in (0)
 
   ### Pack Commands
   - `aroom pack list` — list installed packs
@@ -664,7 +660,7 @@ prompt: |
 
   ### Web UI
   - `docs/web-ui/conversations.md` — conversation management, types (chat/note/document)
-  - `docs/web-ui/projects.md` — project organization
+  - `docs/web-ui/spaces.md` — space organization
   - `docs/web-ui/attachments.md` — file attachments
   - `docs/web-ui/keyboard-shortcuts.md` — keyboard shortcuts
   - `docs/web-ui/streaming.md` — streaming, SSE, real-time updates
@@ -677,7 +673,7 @@ prompt: |
   - `docs/configuration/environment-variables.md` — all AI_CHAT_* env vars
   - `docs/configuration/mcp-servers.md` — MCP server setup and configuration
   - `docs/configuration/team-config.md` — shared team config with enforced settings
-  - `docs/configuration/project-config.md` — project-scoped config with trust verification
+  - `docs/configuration/space-config.md` — space-scoped config with trust verification
   - `docs/configuration/tls.md` — TLS/HTTPS, self-signed certs
   - `docs/configuration/index.md` — configuration docs overview
 
@@ -726,7 +722,7 @@ prompt: |
   ### API
   - `docs/api/conversations.md` — conversations API endpoints
   - `docs/api/messages.md` — messages API endpoints
-  - `docs/api/projects.md` — projects API endpoints
+  - `docs/api/spaces.md` — spaces API endpoints
   - `docs/api/config.md` — config API endpoints
   - `docs/api/usage.md` — token usage statistics endpoint
   - `docs/api/index.md` — API docs overview
