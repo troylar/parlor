@@ -12,7 +12,7 @@ import pytest
 
 from anteroom.services.server_manager import (
     _CREATE_NEW_PROCESS_GROUP,
-    _DETACHED_PROCESS,
+    _CREATE_NO_WINDOW,
     _MAX_LOG_BYTES,
     ServerManager,
     ServerStatus,
@@ -379,7 +379,7 @@ class TestStartBackground:
             mgr.start_background()
         kwargs = mock_popen.call_args[1]
         assert "creationflags" in kwargs
-        assert kwargs["creationflags"] == _CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS
+        assert kwargs["creationflags"] == _CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW
 
     @patch(f"{_MODULE}.IS_WINDOWS", False)
     def test_unix_start_new_session(self, tmp_path: Path) -> None:

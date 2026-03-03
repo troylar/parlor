@@ -20,8 +20,12 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+_IS_WINDOWS = sys.platform == "win32"
+_WINDOWS_FLAGS: dict = {"creationflags": 0x08000000} if _IS_WINDOWS else {}
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +158,7 @@ def check_git_available() -> bool:
             capture_output=True,
             text=True,
             timeout=10,
+            **_WINDOWS_FLAGS,
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
@@ -190,6 +195,7 @@ def clone_source(
             capture_output=True,
             text=True,
             timeout=timeout,
+            **_WINDOWS_FLAGS,
         )
     except FileNotFoundError:
         return PackSourceResult(success=False, error="git binary not found")
@@ -246,6 +252,7 @@ def pull_source(
             capture_output=True,
             text=True,
             timeout=timeout,
+            **_WINDOWS_FLAGS,
         )
     except FileNotFoundError:
         return PackSourceResult(success=False, error="git binary not found")
@@ -283,6 +290,7 @@ def get_source_ref(cache_path: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            **_WINDOWS_FLAGS,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None

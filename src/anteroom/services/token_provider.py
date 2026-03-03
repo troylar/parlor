@@ -5,6 +5,10 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import sys
+
+_IS_WINDOWS = sys.platform == "win32"
+_WINDOWS_FLAGS: dict = {"creationflags": 0x08000000} if _IS_WINDOWS else {}
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +51,7 @@ class TokenProvider:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                **_WINDOWS_FLAGS,
             )
         except FileNotFoundError as e:
             raise TokenProviderError(f"api_key_command not found: {e}") from e

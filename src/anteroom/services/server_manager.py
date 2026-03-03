@@ -25,7 +25,7 @@ _MAX_LOG_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # Windows process creation flags
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
-_DETACHED_PROCESS = 0x00000008
+_CREATE_NO_WINDOW = 0x08000000
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _PROCESS_TERMINATE = 0x0001
 
@@ -211,7 +211,7 @@ class ServerManager:
         }
 
         if IS_WINDOWS:
-            kwargs["creationflags"] = _CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS
+            kwargs["creationflags"] = _CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW
         else:
             kwargs["start_new_session"] = True
 

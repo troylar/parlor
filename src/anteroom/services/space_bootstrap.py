@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .pack_sources import _sanitize_git_stderr, _validate_url_scheme
+
+_IS_WINDOWS = sys.platform == "win32"
+_WINDOWS_FLAGS: dict = {"creationflags": 0x08000000} if _IS_WINDOWS else {}
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,7 @@ def clone_repos(repos: list[str], repos_root: Path) -> list[CloneResult]:
                 text=True,
                 timeout=120,
                 check=True,
+                **_WINDOWS_FLAGS,
             )
             results.append(CloneResult(url=url, local_path=str(dest), success=True))
             logger.info("Cloned %s to %s", url, dest)
