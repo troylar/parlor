@@ -773,6 +773,16 @@ const App = (() => {
         };
     }
 
+    // Close SSE connection on page unload to free the HTTP connection slot.
+    // Without this, Windows browsers (strict 6 connections per origin on HTTP/1.1)
+    // can hang on page refresh because the old SSE connection lingers.
+    window.addEventListener('beforeunload', () => {
+        if (_eventSource) {
+            _eventSource.close();
+            _eventSource = null;
+        }
+    });
+
     function formatTimestamp(iso) {
         const d = new Date(iso);
         const now = new Date();
