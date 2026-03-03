@@ -608,43 +608,74 @@ def init_db(
     return ThreadSafeConnection(conn)
 
 
-def _rebuild_table_without_column(
-    conn: sqlite3.Connection,
-    table: str,
-    drop_col: str,
-    new_create_sql: str,
-) -> None:
-    """Rebuild a table without a specific column (SQLite 12-step ALTER).
+_CONVERSATIONS_CREATE = """CREATE TABLE conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    slug TEXT UNIQUE DEFAULT NULL,
+    type TEXT NOT NULL DEFAULT 'chat' CHECK(type IN ('chat', 'note', 'document')),
+    model TEXT DEFAULT NULL,
+    space_id TEXT DEFAULT NULL,
+    folder_id TEXT DEFAULT NULL,
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
+    working_dir TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE SET NULL
+)"""
 
-    Used when ALTER TABLE DROP COLUMN fails (e.g. broken FK references).
-    """
-    cols_info = conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608
-    keep_cols = [row[1] for row in cols_info if row[1] != drop_col]
-    cols_csv = ", ".join(keep_cols)
-
-    conn.execute(f"ALTER TABLE {table} RENAME TO _{table}_old")  # noqa: S608
-    conn.execute(new_create_sql)
-    conn.execute(f"INSERT INTO {table} ({cols_csv}) SELECT {cols_csv} FROM _{table}_old")  # noqa: S608
-    conn.execute(f"DROP TABLE _{table}_old")  # noqa: S608
+_FOLDERS_CREATE = """CREATE TABLE folders (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id TEXT DEFAULT NULL,
+    space_id TEXT DEFAULT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    collapsed INTEGER NOT NULL DEFAULT 0,
+    user_id TEXT DEFAULT NULL,
+    user_display_name TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
+)"""
 
 
 def _eradicate_projects(conn: sqlite3.Connection) -> None:
     """Remove all projects tables and FK columns (v1.95.0 — #716).
 
     This MUST run outside any transaction because PRAGMA foreign_keys=OFF
-    is silently ignored inside transactions.  If a previous partial migration
-    already dropped the ``projects`` table but left the ``project_id`` FK
-    column on ``conversations`` or ``folders``, any DML on those columns
-    triggers ``OperationalError: no such table: main.projects`` with
-    foreign_keys=ON.
+    is silently ignored inside transactions.  Uses the SQLite 12-step table
+    rebuild to drop ``project_id`` columns that have broken FK references.
+
+    Order matters: conversations references folders, so we must rebuild
+    conversations first (dropping it), then folders, then recreate
+    conversations with clean FKs.  Also recovers from partial previous
+    runs that left ``_xxx_old`` tables.
     """
     all_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
-    folder_cols = {row[1] for row in conn.execute("PRAGMA table_info(folders)").fetchall()}
+
+    # Detect actual table names (recover from partial previous runs)
+    conv_table = "conversations" if "conversations" in all_tables else None
+    folder_table = "folders" if "folders" in all_tables else None
+
+    # Recovery: if a previous run left _xxx_old tables, use those as source
+    if not conv_table and "_conversations_old" in all_tables:
+        conv_table = "_conversations_old"
+    if not folder_table and "_folders_old" in all_tables:
+        folder_table = "_folders_old"
+
+    conv_cols: set[str] = set()
+    folder_cols: set[str] = set()
+    if conv_table:
+        conv_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({conv_table})").fetchall()}  # noqa: S608
+    if folder_table:
+        folder_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({folder_table})").fetchall()}  # noqa: S608
 
     need_work = (
         "project_id" in conv_cols
         or "project_id" in folder_cols
+        or "_conversations_old" in all_tables
+        or "_folders_old" in all_tables
         or "project_sources" in all_tables
         or "projects" in all_tables
     )
@@ -653,52 +684,53 @@ def _eradicate_projects(conn: sqlite3.Connection) -> None:
 
     conn.execute("PRAGMA foreign_keys=OFF")
     try:
-        if "project_id" in conv_cols:
-            _rebuild_table_without_column(
-                conn,
-                "conversations",
-                "project_id",
-                """CREATE TABLE conversations (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    slug TEXT UNIQUE DEFAULT NULL,
-                    type TEXT NOT NULL DEFAULT 'chat'
-                        CHECK(type IN ('chat', 'note', 'document')),
-                    model TEXT DEFAULT NULL,
-                    space_id TEXT DEFAULT NULL,
-                    folder_id TEXT DEFAULT NULL,
-                    user_id TEXT DEFAULT NULL,
-                    user_display_name TEXT DEFAULT NULL,
-                    working_dir TEXT DEFAULT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
-                    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE SET NULL
-                )""",
-            )
-        if "project_id" in folder_cols:
-            _rebuild_table_without_column(
-                conn,
-                "folders",
-                "project_id",
-                """CREATE TABLE folders (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    parent_id TEXT DEFAULT NULL,
-                    space_id TEXT DEFAULT NULL,
-                    position INTEGER NOT NULL DEFAULT 0,
-                    collapsed INTEGER NOT NULL DEFAULT 0,
-                    user_id TEXT DEFAULT NULL,
-                    user_display_name TEXT DEFAULT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
-                )""",
-            )
+        # Step 1: Drop conversations (or its leftover) so folders can be
+        #         rebuilt without anything referencing it.
+        conv_data: list[tuple[str, ...]] = []
+        if conv_table:
+            keep = [c for c in conv_cols if c != "project_id"]
+            cols_csv = ", ".join(keep)
+            conv_data = conn.execute(f"SELECT {cols_csv} FROM {conv_table}").fetchall()  # noqa: S608
+            conn.execute(f"DROP TABLE {conv_table}")  # noqa: S608
+        # Clean up any leftover from a prior partial run
+        if "_conversations_old" in all_tables and conv_table != "_conversations_old":
+            conn.execute("DROP TABLE IF EXISTS _conversations_old")
+
+        # Step 2: Rebuild folders without project_id
+        if folder_table and "project_id" in folder_cols:
+            keep = [c for c in folder_cols if c != "project_id"]
+            cols_csv = ", ".join(keep)
+            folder_data = conn.execute(f"SELECT {cols_csv} FROM {folder_table}").fetchall()  # noqa: S608
+            conn.execute(f"DROP TABLE {folder_table}")  # noqa: S608
+            conn.execute(_FOLDERS_CREATE)
+            if folder_data:
+                placeholders = ", ".join("?" * len(keep))
+                conn.executemany(f"INSERT INTO folders ({cols_csv}) VALUES ({placeholders})", folder_data)  # noqa: S608
+        elif "_folders_old" in all_tables and folder_table == "_folders_old":
+            # Recovery: _folders_old exists but folders doesn't
+            keep = [c for c in folder_cols if c != "project_id"]
+            cols_csv = ", ".join(keep)
+            folder_data = conn.execute(f"SELECT {cols_csv} FROM _folders_old").fetchall()
+            conn.execute("DROP TABLE _folders_old")
+            conn.execute(_FOLDERS_CREATE)
+            if folder_data:
+                placeholders = ", ".join("?" * len(keep))
+                conn.executemany(f"INSERT INTO folders ({cols_csv}) VALUES ({placeholders})", folder_data)  # noqa: S608
+
+        # Step 3: Recreate conversations with clean FKs
+        conn.execute(_CONVERSATIONS_CREATE)
+        if conv_data:
+            keep = [c for c in conv_cols if c != "project_id"]
+            placeholders = ", ".join("?" * len(keep))
+            cols_csv = ", ".join(keep)
+            conn.executemany(f"INSERT INTO conversations ({cols_csv}) VALUES ({placeholders})", conv_data)  # noqa: S608
+
+        # Step 4: Drop project tables
         if "project_sources" in all_tables:
             conn.execute("DROP TABLE IF EXISTS project_sources")
         if "projects" in all_tables:
             conn.execute("DROP TABLE IF EXISTS projects")
+
         conn.commit()
     finally:
         conn.execute("PRAGMA foreign_keys=ON")
