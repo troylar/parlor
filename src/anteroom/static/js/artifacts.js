@@ -144,7 +144,7 @@ const Artifacts = (() => {
                     '<div class="artifact-item-main">' +
                         '<div class="artifact-item-title">' + _escapeHtml(art.fqn || art.name) + '</div>' +
                         '<div class="artifact-item-meta">' +
-                            _typeBadge(art.artifact_type || art.type) +
+                            _typeBadge(art.type) +
                             _sourceBadge(art.source) +
                             (art.version ? '<span class="artifact-version">v' + _escapeHtml(String(art.version)) + '</span>' : '') +
                         '</div>' +
@@ -202,7 +202,7 @@ const Artifacts = (() => {
                 '</div>' +
                 '<div class="artifact-detail-body">' +
                     '<div class="artifact-detail-meta">' +
-                        '<div>' + _typeBadge(art.artifact_type || art.type) + ' ' + _sourceBadge(art.source) + '</div>' +
+                        '<div>' + _typeBadge(art.type) + ' ' + _sourceBadge(art.source) + '</div>' +
                         '<div class="artifact-detail-fqn">' + _escapeHtml(art.fqn) + '</div>' +
                         (art.version ? '<div class="artifact-version">Version ' + _escapeHtml(String(art.version)) + '</div>' : '') +
                     '</div>' +
@@ -233,7 +233,7 @@ const Artifacts = (() => {
             const delBtn = document.getElementById('artifact-delete-btn');
             if (delBtn) {
                 delBtn.addEventListener('click', async () => {
-                    if (!confirm('Delete artifact ' + _escapeHtml(art.fqn) + '?')) return;
+                    if (!confirm('Delete artifact ' + (art.fqn || '') + '?')) return;
                     try {
                         await App.api('/api/artifacts/' + encodeURIComponent(art.fqn), { method: 'DELETE' });
                         _showListView();
@@ -268,7 +268,7 @@ const Artifacts = (() => {
             if (pack.artifacts && pack.artifacts.length > 0) {
                 html += '<div class="artifact-detail-content"><strong>Artifacts (' + pack.artifacts.length + ')</strong><ul>';
                 pack.artifacts.forEach(a => {
-                    html += '<li>' + _typeBadge(a.artifact_type || a.type) + ' ' + _escapeHtml(a.name) + '</li>';
+                    html += '<li>' + _typeBadge(a.type) + ' ' + _escapeHtml(a.name) + '</li>';
                 });
                 html += '</ul></div>';
             }
@@ -286,7 +286,7 @@ const Artifacts = (() => {
             });
 
             document.getElementById('pack-delete-btn').addEventListener('click', async () => {
-                if (!confirm('Remove pack ' + _escapeHtml(namespace) + '/' + _escapeHtml(name) + '?')) return;
+                if (!confirm('Remove pack ' + (namespace || '') + '/' + (name || '') + '?')) return;
                 try {
                     await App.api('/api/packs/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(name), { method: 'DELETE' });
                     _showListView();

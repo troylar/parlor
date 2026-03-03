@@ -3945,7 +3945,7 @@ async def _run_repl(
                         if _active_space[0]:
                             renderer.console.print(f"[{CHROME}]Active space: {_active_space[0]['name']}[/{CHROME}]")
                         renderer.console.print(
-                            f"[{CHROME}]Usage: /space [list|show|switch|create|load|refresh|clear|"
+                            f"[{CHROME}]Usage: /space [list|show|switch|create|init|load|refresh|clear|"
                             f"clone|map][/{CHROME}]\n"
                         )
                     continue
@@ -3981,7 +3981,11 @@ async def _run_repl(
                         ns, _, name = ref.rpartition("/")
                         if not ns:
                             ns = "default"
-                        pack_info = await _resolve_pack_interactive(db, ns, name)
+                        pack_match = await _resolve_pack_interactive(db, ns, name)
+                        if not pack_match:
+                            renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
+                            continue
+                        pack_info = packs_service.get_pack(db, pack_match["namespace"], pack_match["name"])
                         if not pack_info:
                             renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
                             continue
@@ -4017,6 +4021,9 @@ async def _run_repl(
                                 f"[green]Installed[/green] @{manifest.namespace}/{manifest.name}"
                                 f" v{manifest.version} ({result.get('artifact_count', 0)} artifacts)"
                             )
+                            if _artifact_registry is not None:  # noqa: F821
+                                _artifact_registry.load_from_db(db)  # noqa: F821
+                                skill_registry.load_from_artifacts(_artifact_registry)  # noqa: F821
                         except ValueError as exc:
                             renderer.console.print(f"[red]{exc}[/red]")
                         renderer.console.print()
@@ -4294,7 +4301,7 @@ async def _run_repl(
                     continue
 
                 elif cmd == "/artifact-check":
-                    from .services import artifact_health
+                    from ..services import artifact_health
 
                     _ahc_report = artifact_health.run_health_check(db, project_dir=working_dir)
                     renderer.console.print()

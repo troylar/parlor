@@ -230,11 +230,12 @@ class TestValidatePackRef:
         assert ns == "team"
         assert name == "my-pack"
 
-    def test_missing_slash(self) -> None:
+    def test_missing_slash_defaults_namespace(self) -> None:
         from anteroom.__main__ import _validate_pack_ref
 
-        with pytest.raises(SystemExit):
-            _validate_pack_ref("nonamespace")
+        ns, name = _validate_pack_ref("nonamespace")
+        assert ns == "default"
+        assert name == "nonamespace"
 
     def test_invalid_namespace(self) -> None:
         from anteroom.__main__ import _validate_pack_ref

@@ -606,7 +606,7 @@ def _resolve_project_id(config: AppConfig, project_name: str) -> str:
     from .db import get_db
     from .services import storage
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     project = storage.get_project_by_name(db, project_name)
     if not project:
         print(f"Error: Project '{project_name}' not found.", file=sys.stderr)
@@ -620,7 +620,7 @@ def _resolve_space_id(config: AppConfig, space_name: str) -> str:
     from .db import get_db
     from .services.space_storage import resolve_space
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     match, candidates = resolve_space(db, space_name)
     if match:
         return str(match["id"])
@@ -643,7 +643,7 @@ def _run_projects(config: AppConfig) -> None:
     from .db import get_db
     from .services import storage
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     projects = storage.list_projects(db)
     if not projects:
         print("No projects found. Create one in the web UI.")
@@ -683,7 +683,7 @@ def _run_artifact(config: AppConfig, args: argparse.Namespace) -> None:
         print("Usage: aroom artifact {list,show,check,import,create}")
         return
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     console = Console()
 
     if action == "list":
@@ -890,10 +890,10 @@ def _validate_pack_ref(ref: str) -> tuple[str, str]:
     import re
 
     parts = ref.split("/", 1)
-    if len(parts) != 2:
-        print(f"Invalid pack reference: {ref!r}. Use namespace/name format.", file=sys.stderr)
-        sys.exit(1)
-    namespace, name = parts
+    if len(parts) == 1:
+        namespace, name = "default", parts[0]
+    else:
+        namespace, name = parts
     safe_re = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
     if not safe_re.match(namespace):
         print(f"Invalid namespace: {namespace!r}. Must match [a-zA-Z0-9][a-zA-Z0-9._-]{{0,63}}", file=sys.stderr)
@@ -966,7 +966,7 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
         console.print("Run [bold]aroom pack refresh[/bold] to clone and install packs.")
         return
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
     console = Console()
 
     if action == "list":
@@ -1027,7 +1027,11 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
                 "pack",
                 lambda c: f"{c['id'][:8]}  {c.get('namespace', '')}/{c.get('name', '')} v{c.get('version', '')}",
             )
-        pack_info = match
+        if not match:
+            console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
+            sys.exit(1)
+
+        pack_info = packs.get_pack(db, match["namespace"], match["name"])
         if not pack_info:
             console.print(f"[red]Pack not found:[/red] {escape(args.ref)}")
             sys.exit(1)
@@ -1233,7 +1237,7 @@ def _run_space(config: AppConfig, args: argparse.Namespace) -> None:
         console.print("Usage: aroom space {list,create,init,load,show,delete,refresh,clone,map,move-root}")
         return
 
-    db = get_db(config.app.data_dir / "anteroom.db")
+    db = get_db(config.app.data_dir / "chat.db")
 
     def _resolve(name_or_id: str) -> dict | None:
         match, candidates = resolve_space(db, name_or_id)

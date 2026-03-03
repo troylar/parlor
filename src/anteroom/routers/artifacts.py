@@ -24,6 +24,8 @@ async def list_artifacts(
     results = artifact_storage.list_artifacts(db, artifact_type=type, namespace=namespace, source=source)
     for r in results:
         r.pop("content", None)
+        versions = artifact_storage.list_artifact_versions(db, r["id"])
+        r["version"] = versions[0]["version"] if versions else None
     return results
 
 
@@ -43,6 +45,7 @@ async def get_artifact(
 
     versions = artifact_storage.list_artifact_versions(db, art["id"])
     art["versions"] = versions
+    art["version"] = versions[0]["version"] if versions else None
     return art
 
 
@@ -59,6 +62,9 @@ async def delete_artifact(
     art = artifact_storage.get_artifact_by_fqn(db, fqn)
     if not art:
         raise HTTPException(status_code=404, detail="Artifact not found")
+
+    if art.get("source") == "built_in":
+        raise HTTPException(status_code=403, detail="Cannot delete built-in artifacts")
 
     artifact_storage.delete_artifact(db, art["id"])
 
