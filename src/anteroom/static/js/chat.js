@@ -346,7 +346,8 @@ const Chat = (() => {
                 break;
             case 'user_message':
                 if (_currentUserEl && typeof data.id === 'string' && Number.isInteger(data.position)) {
-                    addMessageActions(_currentUserEl, 'user', _lastSentText, data, { isLast: false });
+                    const userMsgData = { id: data.id, position: data.position, content: _lastSentText };
+                    addMessageActions(_currentUserEl, 'user', _lastSentText, userMsgData, { isLast: false });
                     _currentUserEl = null;
                 }
                 break;
