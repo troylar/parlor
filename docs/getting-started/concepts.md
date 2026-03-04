@@ -57,7 +57,7 @@ Use `/tools` in the CLI to see all available tools from both sources.
 
 ## Storage
 
-Everything is stored in SQLite with WAL journaling and FTS5 full-text search. The database schema includes tables for conversations, messages, attachments, tool calls, projects, folders, and tags. All IDs are UUIDs. File permissions are locked down to owner-only (`0600` for files, `0700` for directories).
+Everything is stored in SQLite with WAL journaling and FTS5 full-text search. The database schema includes tables for conversations, messages, attachments, tool calls, spaces, folders, and tags. All IDs are UUIDs. File permissions are locked down to owner-only (`0600` for files, `0700` for directories).
 
 ## Configuration Hierarchy
 

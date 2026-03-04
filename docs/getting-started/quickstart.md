@@ -14,7 +14,7 @@ Your browser opens to `http://127.0.0.1:8080`.
 
 **2. Start chatting.** Type a message and press Enter. The AI responds with token-by-token streaming.
 
-**3. Organize.** Create a project from the sidebar to group related conversations with a custom system prompt. Add folders and color-coded tags to keep things tidy.
+**3. Organize.** Create a space from the sidebar to group related conversations with custom instructions. Add folders and color-coded tags to keep things tidy.
 
 **4. Use the command palette.** Press `Cmd+K` (or `Ctrl+K`) to open the Raycast-style command palette. Switch themes, models, or jump to recent conversations instantly.
 

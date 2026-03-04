@@ -27,7 +27,7 @@ Query parameters:
 | Parameter | Type | Description |
 |---|---|---|
 | `search` | string | Full-text search across messages and titles |
-| `project_id` | UUID | Filter by project |
+| `space_id` | UUID | Filter by space |
 | `db` | string | Database name (default: `personal`) |
 
 ## Stream Chat

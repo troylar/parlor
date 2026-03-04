@@ -19,7 +19,7 @@ Press **`Cmd+K`** (macOS) or **`Ctrl+K`** (Windows/Linux) to open a Raycast-styl
 | **New Chat** | Create a fresh conversation |
 | **Theme: Midnight / Dawn / Aurora / Ember** | Switch themes instantly |
 | **Model names** | Switch the current model (all available models listed) |
-| **Project names** | Jump to a project |
+| **Space names** | Jump to a space |
 | **Recent conversations** | Quick-jump to your 10 most recent chats |
 
 Navigate with arrow keys, select with `Enter`, dismiss with `Escape`.

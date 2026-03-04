@@ -107,7 +107,7 @@ Skill names must:
 - Start with a lowercase letter or digit
 - Contain only lowercase letters, digits, hyphens, and underscores
 - Match the pattern `[a-z0-9][a-z0-9_-]*`
-- **Not shadow built-in commands**: skill names cannot be `quit`, `exit`, `new`, `append`, `tools`, `conventions`, `upload`, `usage`, `help`, `compact`, `last`, `list`, `delete`, `rename`, `slug`, `search`, `skills`, `reload-skills`, `projects`, `project`, `mcp`, `model`, `plan`, `verbose`, `detail`, `resume`, or `rewind`
+- **Not shadow built-in commands**: skill names cannot be `quit`, `exit`, `new`, `append`, `tools`, `conventions`, `upload`, `usage`, `help`, `compact`, `last`, `list`, `delete`, `rename`, `slug`, `search`, `skills`, `reload-skills`, `spaces`, `space`, `mcp`, `model`, `plan`, `verbose`, `detail`, `resume`, or `rewind`
 
 Invalid names are rejected with a warning. If a skill name matches a built-in command, it is skipped with a warning to prevent `/invocation` from behaving inconsistently. If `name` is omitted or empty, the filename stem is used (e.g., `deploy.yaml` becomes `/deploy`).
 

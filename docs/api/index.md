@@ -21,7 +21,7 @@ http://127.0.0.1:8080/api
 |---|---|
 | [Conversations](conversations.md) | CRUD, streaming chat, fork, rewind, export, copy |
 | [Messages](messages.md) | Edit, delete, attachments |
-| [Projects](projects.md) | Projects, folders, tags |
+| [Spaces](projects.md) | Spaces, folders, tags |
 | [Config](config.md) | Configuration, models, databases, MCP tools |
 | [Usage](usage.md) | Token usage statistics and cost estimation |
 | Canvas | Create, read, update, and delete canvas panels |

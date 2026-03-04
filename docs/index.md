@@ -18,7 +18,7 @@ Anteroom gives you two ways to interact with your AI --- a polished **web UI** a
 
     ---
 
-    Full-featured chat interface with conversations, projects, folders, tags, file attachments, themes, and a command palette. Launch with `aroom`.
+    Full-featured chat interface with conversations, spaces, folders, tags, file attachments, themes, and a command palette. Launch with `aroom`.
 
     [:octicons-arrow-right-24: Web UI docs](web-ui/index.md)
 
@@ -42,7 +42,7 @@ Anteroom gives you two ways to interact with your AI --- a polished **web UI** a
 | **Prompt queuing** | Type while the AI is working --- messages queue and process in FIFO order |
 | **MCP integration** | Connect stdio or SSE-based MCP servers for external tool access |
 | **Full-text search** | FTS5-powered search across all messages and conversation titles |
-| **Projects & folders** | Organize conversations with project-scoped system prompts, folders, and color-coded tags |
+| **Spaces & folders** | Organize conversations with space-scoped instructions, folders, and color-coded tags |
 | **4 themes** | Midnight, Dawn, Aurora, Ember --- switch instantly via command palette |
 | **Security-first** | OWASP ASVS L1 compliant: CSP, CSRF, SRI, rate limiting, HSTS |
 | **Packs & artifacts** | Package skills, rules, instructions, and config overlays into installable packs. Distribute via git, auto-refresh in background |

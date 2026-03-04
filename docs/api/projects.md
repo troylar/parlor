@@ -1,20 +1,21 @@
-# Projects, Folders, and Tags API
+# Spaces, Folders, and Tags API
 
-## Projects
+## Spaces
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/projects` | List all projects |
-| `POST` | `/api/projects` | Create project (name, instructions, model) |
-| `PATCH` | `/api/projects/:id` | Update name, instructions, or model |
-| `DELETE` | `/api/projects/:id` | Delete project (conversations preserved) |
+| `GET` | `/api/spaces` | List all spaces |
+| `POST` | `/api/spaces` | Create space (name, instructions, model) |
+| `GET` | `/api/spaces/:id` | Get space details |
+| `DELETE` | `/api/spaces/:id` | Delete space (conversations preserved) |
+| `POST` | `/api/spaces/:id/refresh` | Re-parse YAML for file-backed spaces |
 
 ## Folders
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/folders` | List folders (use `?project_id=` to filter) |
-| `POST` | `/api/folders` | Create folder (name, parent_id, project_id) |
+| `GET` | `/api/folders` | List folders (use `?space_id=` to filter) |
+| `POST` | `/api/folders` | Create folder (name, parent_id, space_id) |
 | `PATCH` | `/api/folders/:id` | Update name, parent, collapsed state, position |
 | `DELETE` | `/api/folders/:id` | Delete folder + subfolders (conversations preserved) |
 

@@ -20,14 +20,14 @@ All slash commands available in the CLI REPL.
 | `/tools` | List all available tools (built-in + MCP), sorted alphabetically |
 | `/skills` | List available skills with descriptions and source (auto-reloads from disk) |
 | `/reload-skills` | Reload skill files from disk |
-| `/project list` | List all projects |
-| `/project create <name>` | Create a new project |
-| `/project select <name\|id>` | Set active project for new conversations |
-| `/project edit <name\|id>` | Edit project instructions or model |
-| `/project delete <name\|id>` | Delete a project (with confirmation) |
-| `/project clear` | Deactivate the current project |
-| `/project sources` | List sources linked to the active project |
-| `/projects` | Shortcut for `/project list` |
+| `/space list` | List all spaces |
+| `/space create <name>` | Create a new space |
+| `/space select <name\|id>` | Set active space for new conversations |
+| `/space edit <name\|id>` | Edit space instructions or model |
+| `/space delete <name\|id>` | Delete a space (with confirmation) |
+| `/space clear` | Deactivate the current space |
+| `/space sources` | List sources linked to the active space |
+| `/spaces` | Shortcut for `/space list` |
 | `/mcp` | Show MCP server status |
 | `/mcp status <name>` | Detailed diagnostics for one server |
 | `/usage` | Show token usage statistics (today, this week, this month, all time) |
@@ -320,14 +320,14 @@ Manage installed packs.
 | Subcommand | Action |
 |---|---|
 | `aroom pack list` | List all installed packs |
-| `aroom pack install PATH [--project]` | Install a pack from a local directory |
+| `aroom pack install PATH [--space]` | Install a pack from a local directory |
 | `aroom pack show NAMESPACE/NAME` | Show pack details and artifacts |
 | `aroom pack remove NAMESPACE/NAME` | Remove a pack and its orphaned artifacts |
-| `aroom pack update PATH [--project]` | Update an existing pack |
+| `aroom pack update PATH [--space]` | Update an existing pack |
 | `aroom pack sources` | List configured pack sources with cache status |
 | `aroom pack refresh` | Manually refresh all pack sources |
 
-The `--project` flag copies the pack into `.anteroom/packs/` for version control.
+The `--space` flag scopes the pack attachment to the current space.
 
 ### aroom artifact
 

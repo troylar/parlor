@@ -72,7 +72,7 @@ SQLite with WAL journaling, FTS5 for search, and foreign keys enforced.
 - **Parameterized queries**: All values are bound, never concatenated
 - **UUID-based IDs**: All entities use UUID primary keys
 
-Tables: `users`, `conversations`, `messages`, `attachments`, `tool_calls`, `projects`, `folders`, `tags`, `conversation_tags`, `change_log`, `canvases`, `message_embeddings`.
+Tables: `users`, `conversations`, `messages`, `attachments`, `tool_calls`, `spaces`, `space_paths`, `space_sources`, `folders`, `tags`, `conversation_tags`, `change_log`, `canvases`, `message_embeddings`.
 
 ## Tool Registry
 
