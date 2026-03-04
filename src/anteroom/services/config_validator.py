@@ -85,6 +85,7 @@ _KNOWN_TOP_LEVEL = {
     "rag",
     "codebase_index",
     "session",
+    "rate_limit",
     "audit",
     "compliance",
     "pack_sources",

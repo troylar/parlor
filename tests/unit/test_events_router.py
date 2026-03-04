@@ -10,12 +10,14 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from anteroom.config import RateLimitConfig
 from anteroom.routers.events import router
 
 
-def _make_app(with_event_bus: bool = True) -> FastAPI:
+def _make_app(with_event_bus: bool = True, sse_retry_ms: int = 5000) -> FastAPI:
     app = FastAPI()
     app.include_router(router, prefix="/api")
+    app.state.rate_limit_config = RateLimitConfig(sse_retry_ms=sse_retry_ms)
 
     if with_event_bus:
         event_bus = MagicMock()
@@ -162,3 +164,49 @@ class TestEventStreamDelivery:
         channels = [call.args[0] for call in event_bus.subscribe.call_args_list]
         assert "global:personal" in channels
         assert f"conversation:{conv_id}" in channels
+
+
+class TestSSERetryField:
+    """Verify the retry: field is sent to control browser reconnection interval."""
+
+    def test_error_event_includes_retry_field(self) -> None:
+        """When event_bus is absent, the error SSE event should include retry:."""
+        app = _make_app(with_event_bus=False, sse_retry_ms=5000)
+        client = TestClient(app)
+        with client.stream("GET", "/api/events") as resp:
+            assert resp.status_code == 200
+            lines = list(resp.iter_lines())
+        retry_lines = [ln for ln in lines if ln.startswith("retry:")]
+        assert len(retry_lines) >= 1
+        assert "retry: 5000" in retry_lines[0] or "retry:5000" in retry_lines[0]
+
+    def test_connected_event_includes_retry_field(self) -> None:
+        """When event_bus is present, the initial connected event should
+        carry the retry: field unconditionally."""
+        app = _make_app(with_event_bus=True, sse_retry_ms=3000)
+        event_bus = app.state.event_bus
+        mock_queue = MagicMock()
+        mock_queue.get_nowait.side_effect = asyncio.QueueEmpty()
+        event_bus.subscribe.return_value = mock_queue
+
+        async def mock_disconnect(self: object) -> bool:
+            return True
+
+        client = TestClient(app)
+        with patch("starlette.requests.Request.is_disconnected", mock_disconnect):
+            with client.stream("GET", "/api/events") as resp:
+                assert resp.status_code == 200
+                lines = list(resp.iter_lines())
+
+        retry_lines = [ln for ln in lines if ln.startswith("retry:")]
+        assert len(retry_lines) >= 1
+        assert "3000" in retry_lines[0]
+
+    def test_custom_retry_ms_from_config(self) -> None:
+        """Verify the retry field uses the configured value."""
+        app = _make_app(with_event_bus=False, sse_retry_ms=10000)
+        client = TestClient(app)
+        with client.stream("GET", "/api/events") as resp:
+            lines = list(resp.iter_lines())
+        retry_lines = [ln for ln in lines if ln.startswith("retry:")]
+        assert any("10000" in ln for ln in retry_lines)

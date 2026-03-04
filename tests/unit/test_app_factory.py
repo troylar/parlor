@@ -20,7 +20,7 @@ from anteroom.app import (
     SecurityHeadersMiddleware,
     session_id_from_token,
 )
-from anteroom.config import SessionConfig
+from anteroom.config import RateLimitConfig, SessionConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,6 +45,7 @@ def _make_config(
     config.proxy.enabled = proxy_enabled
     config.proxy.allowed_origins = []
     config.session = SessionConfig()
+    config.rate_limit = RateLimitConfig()
     config.shared_databases = []
     config.pack_sources = []
     config.safety.dlp = None
@@ -295,6 +296,92 @@ class TestRateLimitMiddleware:
 
     def test_max_tracked_ips_constant(self) -> None:
         assert RateLimitMiddleware.MAX_TRACKED_IPS == 10000
+
+    def test_exempt_path_not_rate_limited(self) -> None:
+        app = FastAPI()
+        app.add_middleware(RateLimitMiddleware, max_requests=2, window_seconds=60, exempt_paths={"/api/events"})
+
+        @app.get("/api/events")
+        async def _events() -> dict[str, bool]:
+            return {"ok": True}
+
+        @app.get("/api/test")
+        async def _test() -> dict[str, bool]:
+            return {"ok": True}
+
+        client = TestClient(app)
+        # Exhaust limit on non-exempt path
+        client.get("/api/test")
+        client.get("/api/test")
+        assert client.get("/api/test").status_code == 429
+
+        # Exempt path should still work despite rate limit exhaustion
+        for _ in range(5):
+            resp = client.get("/api/events")
+            assert resp.status_code == 200
+
+    def test_non_exempt_path_still_rate_limited(self) -> None:
+        app = FastAPI()
+        app.add_middleware(RateLimitMiddleware, max_requests=2, window_seconds=60, exempt_paths={"/api/events"})
+
+        @app.get("/api/test")
+        async def _test() -> dict[str, bool]:
+            return {"ok": True}
+
+        client = TestClient(app)
+        client.get("/api/test")
+        client.get("/api/test")
+        assert client.get("/api/test").status_code == 429
+
+    def test_exempt_path_exact_match_only(self) -> None:
+        app = FastAPI()
+        app.add_middleware(RateLimitMiddleware, max_requests=2, window_seconds=60, exempt_paths={"/api/events"})
+
+        @app.get("/api/events_extra")
+        async def _events_extra() -> dict[str, bool]:
+            return {"ok": True}
+
+        client = TestClient(app)
+        client.get("/api/events_extra")
+        client.get("/api/events_extra")
+        assert client.get("/api/events_extra").status_code == 429
+
+    def test_exempt_paths_do_not_count_against_limit(self) -> None:
+        """Requests to exempt paths should not consume rate limit budget."""
+        app = FastAPI()
+        app.add_middleware(RateLimitMiddleware, max_requests=2, window_seconds=60, exempt_paths={"/api/events"})
+
+        @app.get("/api/events")
+        async def _events() -> dict[str, bool]:
+            return {"ok": True}
+
+        @app.get("/api/test")
+        async def _test() -> dict[str, bool]:
+            return {"ok": True}
+
+        client = TestClient(app)
+        # Hit exempt path many times
+        for _ in range(10):
+            client.get("/api/events")
+        # Non-exempt path should still have full budget
+        assert client.get("/api/test").status_code == 200
+        assert client.get("/api/test").status_code == 200
+        assert client.get("/api/test").status_code == 429
+
+    def test_429_includes_retry_after_header(self) -> None:
+        """429 response must include Retry-After header per RFC 6585."""
+        app = FastAPI()
+        app.add_middleware(RateLimitMiddleware, max_requests=1, window_seconds=60)
+
+        @app.get("/api/test")
+        async def _test() -> dict[str, bool]:
+            return {"ok": True}
+
+        client = TestClient(app)
+        client.get("/api/test")
+        resp = client.get("/api/test")
+        assert resp.status_code == 429
+        assert resp.headers.get("retry-after") == "60"
 
 
 # ---------------------------------------------------------------------------

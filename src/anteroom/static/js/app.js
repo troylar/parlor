@@ -197,6 +197,10 @@ const App = (() => {
             _handle401();
             throw new Error('Session expired');
         }
+        if (response.status === 429) {
+            Chat.showToast('Rate limited — please wait a moment before retrying.');
+            throw new Error('Rate limited');
+        }
         if (!response.ok) {
             const err = await response.json().catch(() => ({ detail: response.statusText }));
             throw new Error(err.detail || `HTTP ${response.status}`);
@@ -300,20 +304,22 @@ const App = (() => {
         // Load conversations
         await Sidebar.refresh();
 
-        // Load conversation from URL param, or most recent
+        // Load conversation from URL param, or most recent.
+        // Sidebar.refresh() above already fetched conversations — reuse via getConversations()
+        // to avoid a redundant /api/conversations request.
         if (urlParams.conversationId) {
             try {
                 await loadConversation(urlParams.conversationId);
             } catch {
-                const conversations = await api('/api/conversations');
-                if (conversations && conversations.length > 0) {
-                    await loadConversation(conversations[0].id);
+                const cached = Sidebar.getConversations();
+                if (cached && cached.length > 0) {
+                    await loadConversation(cached[0].id);
                 }
             }
         } else {
-            const conversations = await api('/api/conversations');
-            if (conversations && conversations.length > 0) {
-                await loadConversation(conversations[0].id);
+            const cached = Sidebar.getConversations();
+            if (cached && cached.length > 0) {
+                await loadConversation(cached[0].id);
             } else {
                 _connectEventSource();
             }
@@ -779,9 +785,8 @@ const App = (() => {
 
             // Rapid failure (< 3s after connect) likely means 401.
             // After 5 consecutive rapid failures, trigger auth recovery.
-            // Higher threshold avoids false positives — the server-side
-            // cookie refresh (since v1.89.4) means transient 401s
-            // self-heal within 1-2 reconnects.
+            // The server sends retry: to control reconnect interval for
+            // rate-limit scenarios; this guard is strictly for broken auth.
             if (elapsed < 3000 && _esFailCount >= 5) {
                 if (_eventSource) {
                     _eventSource.close();
@@ -791,8 +796,8 @@ const App = (() => {
                 return;
             }
 
-            // Normal reconnect with backoff (3s base, max 30s)
-            const delay = Math.min(3000 * _esFailCount, 30000);
+            // Normal reconnect with backoff (5s base, max 30s)
+            const delay = Math.min(5000 * _esFailCount, 30000);
             setTimeout(() => {
                 if (_eventSource && _eventSource.readyState === EventSource.CLOSED) {
                     _connectEventSource();

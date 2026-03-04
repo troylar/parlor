@@ -651,6 +651,16 @@ class ReferencesConfig:
 
 
 @dataclass
+class RateLimitConfig:
+    """HTTP rate limiting settings."""
+
+    max_requests: int = 120  # max requests per window per IP
+    window_seconds: int = 60  # sliding window size
+    exempt_paths: list[str] = field(default_factory=lambda: ["/api/events"])
+    sse_retry_ms: int = 5000  # retry: field sent to EventSource clients (ms)
+
+
+@dataclass
 class SessionConfig:
     """Session management and network access control settings."""
 
@@ -782,6 +792,7 @@ class AppConfig:
     codebase_index: CodebaseIndexConfig = field(default_factory=CodebaseIndexConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     audit: AuditConfig = field(default_factory=AuditConfig)
     compliance: ComplianceConfig = field(default_factory=ComplianceConfig)
     pack_sources: list[PackSourceConfig] = field(default_factory=list)
@@ -1814,6 +1825,62 @@ def load_config(
         allowed_ips=session_allowed_ips,
     )
 
+    # Rate limit config
+    rl_raw = raw.get("rate_limit", {})
+    if not isinstance(rl_raw, dict):
+        rl_raw = {}
+    try:
+        rl_max_requests = max(
+            1,
+            int(
+                rl_raw.get(
+                    "max_requests",
+                    os.environ.get("AI_CHAT_RATE_LIMIT_MAX_REQUESTS", 120),
+                )
+            ),
+        )
+    except (ValueError, TypeError):
+        rl_max_requests = 120
+    try:
+        rl_window_seconds = max(
+            1,
+            int(
+                rl_raw.get(
+                    "window_seconds",
+                    os.environ.get("AI_CHAT_RATE_LIMIT_WINDOW_SECONDS", 60),
+                )
+            ),
+        )
+    except (ValueError, TypeError):
+        rl_window_seconds = 60
+    rl_exempt_paths_raw = rl_raw.get("exempt_paths", [])
+    if not isinstance(rl_exempt_paths_raw, list):
+        rl_exempt_paths_raw = []
+    rl_exempt_paths = [str(p) for p in rl_exempt_paths_raw if p]
+    env_exempt = os.environ.get("AI_CHAT_RATE_LIMIT_EXEMPT_PATHS", "")
+    if env_exempt and not rl_exempt_paths:
+        rl_exempt_paths = [p.strip() for p in env_exempt.split(",") if p.strip()]
+    if not rl_exempt_paths:
+        rl_exempt_paths = ["/api/events"]
+    try:
+        rl_sse_retry_ms = max(
+            100,
+            int(
+                rl_raw.get(
+                    "sse_retry_ms",
+                    os.environ.get("AI_CHAT_RATE_LIMIT_SSE_RETRY_MS", 5000),
+                )
+            ),
+        )
+    except (ValueError, TypeError):
+        rl_sse_retry_ms = 5000
+    rate_limit_config = RateLimitConfig(
+        max_requests=rl_max_requests,
+        window_seconds=rl_window_seconds,
+        exempt_paths=rl_exempt_paths,
+        sse_retry_ms=rl_sse_retry_ms,
+    )
+
     # Audit config
     audit_raw = raw.get("audit", {})
     if not isinstance(audit_raw, dict):
@@ -1948,6 +2015,7 @@ def load_config(
             codebase_index=ci_config,
             storage=storage_config,
             session=session_config,
+            rate_limit=rate_limit_config,
             audit=audit_config,
             compliance=compliance_config,
             pack_sources=pack_sources_list,

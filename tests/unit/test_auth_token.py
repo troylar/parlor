@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from anteroom.app import BearerTokenMiddleware, _derive_auth_token, session_id_from_token
-from anteroom.config import SessionConfig
+from anteroom.config import RateLimitConfig, SessionConfig
 
 
 def _make_config(private_key: str | None = None) -> MagicMock:
@@ -360,6 +360,7 @@ class TestPartialIdentityEdgeCase:
         config.proxy.enabled = False
         config.proxy.allowed_origins = []
         config.session = SessionConfig()
+        config.rate_limit = RateLimitConfig()
 
         # Partial identity: has user_id but empty private_key
         partial_identity = MagicMock(spec=UserIdentity)

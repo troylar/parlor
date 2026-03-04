@@ -34,6 +34,13 @@ app:
   data_dir: "~/.anteroom"   # Where DB + attachments live
   tls: false              # Set true for HTTPS with self-signed cert
 
+rate_limit:
+  max_requests: 120       # Max requests per window per IP (default: 120)
+  window_seconds: 60      # Sliding window size in seconds (default: 60)
+  exempt_paths:           # Paths exempt from rate limiting
+    - /api/events         # SSE endpoint for real-time updates
+  sse_retry_ms: 5000      # EventSource retry interval in milliseconds (default: 5000)
+
 storage:
   retention_days: 0                    # Days to retain conversations; 0 = disabled (default: 0)
   retention_check_interval: 3600       # Seconds between retention policy checks (default: 3600 = 1 hour, clamped 300–86400)
@@ -220,6 +227,31 @@ required:
 | `port` | integer | `8080` | Port for the web server; env: `AI_CHAT_PORT` |
 | `data_dir` | string | `~/.anteroom` | Directory for database, attachments, config |
 | `tls` | boolean | `false` | Enable HTTPS with self-signed certificate |
+
+### rate_limit
+
+HTTP request rate limiting to prevent abuse and SSE storms. Protects against EventSource reconnection floods.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_requests` | integer | `120` | Maximum requests per IP address per time window (sliding window); env: `AI_CHAT_RATE_LIMIT_MAX_REQUESTS` |
+| `window_seconds` | integer | `60` | Sliding window size in seconds; env: `AI_CHAT_RATE_LIMIT_WINDOW_SECONDS` |
+| `exempt_paths` | list[string] | `["/api/events"]` | URL paths exempt from rate limiting (e.g., SSE endpoints); env: `AI_CHAT_RATE_LIMIT_EXEMPT_PATHS` (comma-separated) |
+| `sse_retry_ms` | integer | `5000` | EventSource `retry:` field sent to browser clients (milliseconds). Controls reconnection backoff on 429 responses; env: `AI_CHAT_RATE_LIMIT_SSE_RETRY_MS` |
+
+Example:
+
+```yaml
+rate_limit:
+  max_requests: 120
+  window_seconds: 60
+  exempt_paths:
+    - /api/events
+    - /health
+  sse_retry_ms: 5000
+```
+
+When a client exceeds the rate limit, the server returns HTTP 429 (Too Many Requests) with the `Retry-After` header. For SSE connections, the server sends a `retry:` field directing the EventSource to wait before reconnecting. Paths in `exempt_paths` are not rate-limited, allowing critical endpoints like `/api/events` to handle high-frequency client reconnections.
 
 ### storage
 

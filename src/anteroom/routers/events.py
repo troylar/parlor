@@ -11,6 +11,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from anteroom.config import RateLimitConfig
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["events"])
@@ -48,10 +50,13 @@ async def event_stream(
     if conversation_id:
         _validate_uuid(conversation_id)
 
+    rl_config: RateLimitConfig = getattr(request.app.state, "rate_limit_config", RateLimitConfig())
+    sse_retry_ms: int = rl_config.sse_retry_ms
+
     if not hasattr(request.app.state, "event_bus"):
 
         async def empty() -> Any:
-            yield {"event": "error", "data": json.dumps({"message": "Event bus not available"})}
+            yield {"event": "error", "data": json.dumps({"message": "Event bus not available"}), "retry": sse_retry_ms}
 
         return EventSourceResponse(empty())
 
@@ -66,6 +71,9 @@ async def event_stream(
         conv_queue = event_bus.subscribe(conv_channel)
 
     async def generate() -> Any:
+        # Send retry: hint and connected event immediately so the browser
+        # knows the backoff interval regardless of queue state.
+        yield {"event": "connected", "data": "{}", "retry": sse_retry_ms}
         try:
             while True:
                 if await request.is_disconnected():
@@ -87,10 +95,12 @@ async def event_stream(
                 if event is None:
                     # Wait briefly before checking again
                     await asyncio.sleep(0.05)
-                    # Send keepalive every ~15s (300 * 0.05s)
                     continue
 
-                yield {"event": event.get("type", "message"), "data": json.dumps(event.get("data", {}))}
+                yield {
+                    "event": event.get("type", "message"),
+                    "data": json.dumps(event.get("data", {})),
+                }
         finally:
             event_bus.unsubscribe(global_channel, global_queue)
             if conv_channel and conv_queue:

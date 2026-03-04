@@ -907,6 +907,7 @@ class TestConfigApiEnforcement:
         from unittest.mock import MagicMock
 
         from anteroom.app import create_app
+        from anteroom.config import RateLimitConfig
 
         config = MagicMock()
         config.identity = MagicMock()
@@ -918,6 +919,7 @@ class TestConfigApiEnforcement:
         config.proxy.enabled = False
         config.proxy.allowed_origins = []
         config.mcp_servers = []
+        config.rate_limit = RateLimitConfig()
 
         app = create_app(config, enforced_fields=["ai.model"])
         assert app.state.enforced_fields == ["ai.model"]

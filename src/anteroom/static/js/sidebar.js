@@ -670,5 +670,9 @@ const Sidebar = (() => {
         } catch { /* ignore */ }
     }
 
-    return { init, refresh, render, select, setActive, updateTitle, rename, remove, exportConv };
+    function getConversations() {
+        return conversations;
+    }
+
+    return { init, refresh, render, select, setActive, updateTitle, rename, remove, exportConv, getConversations };
 })();

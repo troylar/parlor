@@ -2213,3 +2213,73 @@ class TestApiKeyCommand:
         cfg = _write_config(tmp_path, {"ai": {"base_url": "https://api.example.com"}})
         config, _ = load_config(cfg)
         assert config.ai.api_key_command == "vault read secret/key"
+
+
+class TestRateLimitConfig:
+    def test_rate_limit_defaults(self, tmp_path: Path) -> None:
+        cfg = _minimal(tmp_path)
+        config, _ = load_config(cfg)
+        assert config.rate_limit.max_requests == 120
+        assert config.rate_limit.window_seconds == 60
+        assert config.rate_limit.exempt_paths == ["/api/events"]
+        assert config.rate_limit.sse_retry_ms == 5000
+
+    def test_rate_limit_from_yaml(self, tmp_path: Path) -> None:
+        cfg = _minimal(
+            tmp_path,
+            extra={
+                "rate_limit": {
+                    "max_requests": 60,
+                    "window_seconds": 30,
+                    "exempt_paths": ["/api/events", "/health"],
+                    "sse_retry_ms": 10000,
+                }
+            },
+        )
+        config, _ = load_config(cfg)
+        assert config.rate_limit.max_requests == 60
+        assert config.rate_limit.window_seconds == 30
+        assert config.rate_limit.exempt_paths == ["/api/events", "/health"]
+        assert config.rate_limit.sse_retry_ms == 10000
+
+    def test_rate_limit_env_vars(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_RATE_LIMIT_MAX_REQUESTS", "200")
+        monkeypatch.setenv("AI_CHAT_RATE_LIMIT_WINDOW_SECONDS", "120")
+        monkeypatch.setenv("AI_CHAT_RATE_LIMIT_SSE_RETRY_MS", "8000")
+        cfg = _minimal(tmp_path)
+        config, _ = load_config(cfg)
+        assert config.rate_limit.max_requests == 200
+        assert config.rate_limit.window_seconds == 120
+        assert config.rate_limit.sse_retry_ms == 8000
+
+    def test_rate_limit_exempt_paths_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_RATE_LIMIT_EXEMPT_PATHS", "/api/events,/health")
+        cfg = _minimal(tmp_path)
+        config, _ = load_config(cfg)
+        assert config.rate_limit.exempt_paths == ["/api/events", "/health"]
+
+    def test_rate_limit_invalid_values_fall_back(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_RATE_LIMIT_MAX_REQUESTS", "bad")
+        monkeypatch.setenv("AI_CHAT_RATE_LIMIT_WINDOW_SECONDS", "bad")
+        monkeypatch.setenv("AI_CHAT_RATE_LIMIT_SSE_RETRY_MS", "bad")
+        cfg = _minimal(tmp_path)
+        config, _ = load_config(cfg)
+        assert config.rate_limit.max_requests == 120
+        assert config.rate_limit.window_seconds == 60
+        assert config.rate_limit.sse_retry_ms == 5000
+
+    def test_rate_limit_clamped_to_minimum(self, tmp_path: Path) -> None:
+        cfg = _minimal(
+            tmp_path,
+            extra={
+                "rate_limit": {
+                    "max_requests": 0,
+                    "window_seconds": -5,
+                    "sse_retry_ms": 10,
+                }
+            },
+        )
+        config, _ = load_config(cfg)
+        assert config.rate_limit.max_requests >= 1
+        assert config.rate_limit.window_seconds >= 1
+        assert config.rate_limit.sse_retry_ms >= 100

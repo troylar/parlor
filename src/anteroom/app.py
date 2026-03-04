@@ -332,13 +332,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     MAX_TRACKED_IPS = 10000
 
-    def __init__(self, app: FastAPI, max_requests: int = 60, window_seconds: int = 60) -> None:
+    def __init__(
+        self,
+        app: FastAPI,
+        max_requests: int = 60,
+        window_seconds: int = 60,
+        exempt_paths: set[str] | None = None,
+    ) -> None:
         super().__init__(app)
         self.max_requests = max_requests
         self.window = window_seconds
+        self.exempt_paths: set[str] = exempt_paths or set()
         self._hits: OrderedDict[str, list[float]] = OrderedDict()
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if request.url.path in self.exempt_paths:
+            return await call_next(request)
+
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
@@ -359,7 +369,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if len(hits) >= self.max_requests:
             security_logger.warning("Rate limit exceeded for IP %s", client_ip)
-            return JSONResponse(status_code=429, content={"detail": "Too many requests"})
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests"},
+                headers={"Retry-After": str(self.window)},
+            )
         hits.append(now)
         return await call_next(request)
 
@@ -633,6 +647,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
         openapi_url=None,
     )
     app.state.config = config
+    app.state.rate_limit_config = config.rate_limit
     app.state.enforced_fields = enforced_fields
 
     # Construct DLP scanner once at startup (compiled regexes reused across requests)
@@ -677,7 +692,13 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
 
     app.add_middleware(SecurityHeadersMiddleware, tls_enabled=config.app.tls)  # type: ignore[arg-type]
     app.add_middleware(MaxBodySizeMiddleware)  # type: ignore[arg-type]
-    app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)  # type: ignore[arg-type]
+    rl = config.rate_limit
+    app.add_middleware(
+        RateLimitMiddleware,  # type: ignore[arg-type]
+        max_requests=rl.max_requests,
+        window_seconds=rl.window_seconds,
+        exempt_paths=set(rl.exempt_paths),
+    )
 
     auth_token = _derive_auth_token(config)
     token_hash = hashlib.sha256(auth_token.encode()).hexdigest()
