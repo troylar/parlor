@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, AsyncGenerator
 
 from ..config import AIConfig
@@ -174,6 +175,7 @@ class AnthropicService:
         tools: list[dict[str, Any]] | None = None,
         cancel_event: asyncio.Event | None = None,
         extra_system_prompt: str | None = None,
+        _token_refreshed: bool = False,
     ) -> AsyncGenerator[dict[str, Any], None]:
         system_content = self.config.system_prompt
         if extra_system_prompt:
@@ -196,26 +198,132 @@ class AnthropicService:
             kwargs["top_p"] = self.config.top_p
 
         max_attempts = max(1, self.config.retry_max_attempts + 1)
+        # Timeouts — reuse the same config fields as the OpenAI provider
+        connect_timeout = float(self.config.request_timeout)
+        chunk_stall_timeout = float(getattr(self.config, "chunk_stall_timeout", 45))
 
         for attempt in range(max_attempts):
             if cancel_event and cancel_event.is_set():
                 return
 
             try:
+                _attempt_start = time.monotonic()
                 yield {"event": "phase", "data": {"phase": "connecting"}}
 
-                stream = self.client.messages.stream(**kwargs)
-                async with stream as response:
+                # --- Cancel-aware stream creation with hard timeout ---
+                stream_mgr = self.client.messages.stream(**kwargs)
+                enter_coro = stream_mgr.__aenter__()
+                enter_task = asyncio.ensure_future(enter_coro)
+                wait_tasks: list[asyncio.Future[Any]] = [enter_task]
+
+                if cancel_event:
+                    cancel_wait = asyncio.ensure_future(cancel_event.wait())
+                    wait_tasks.append(cancel_wait)
+                else:
+                    cancel_wait = None
+
+                try:
+                    done, _ = await asyncio.wait(
+                        wait_tasks,
+                        timeout=connect_timeout,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                except Exception:
+                    enter_task.cancel()
+                    if cancel_wait:
+                        cancel_wait.cancel()
+                    raise
+
+                if not done:
+                    enter_task.cancel()
+                    if cancel_wait:
+                        cancel_wait.cancel()
+                    logger.warning(
+                        "Anthropic stream() timed out after %ds (attempt %d/%d)",
+                        connect_timeout,
+                        attempt + 1,
+                        max_attempts,
+                    )
+                    raise AnthropicTimeoutError.__new__(AnthropicTimeoutError)
+
+                if cancel_wait and cancel_wait in done:
+                    enter_task.cancel()
+                    logger.info("Cancelled during Anthropic connecting phase")
+                    return
+
+                if cancel_wait:
+                    cancel_wait.cancel()
+
+                response = enter_task.result()
+                logger.debug(
+                    "anthropic_provider connected attempt=%d elapsed=%.2fs",
+                    attempt + 1,
+                    time.monotonic() - _attempt_start,
+                )
+
+                try:
                     yield {"event": "phase", "data": {"phase": "waiting"}}
 
                     current_tool_calls: dict[int, dict[str, Any]] = {}
                     tool_index = 0
                     usage_data: dict[str, Any] | None = None
+                    _last_chunk_time = time.monotonic()
 
-                    async for event in response:
-                        if cancel_event and cancel_event.is_set():
+                    # --- Cancel-aware iteration with chunk stall detection ---
+                    response_iter = response.__aiter__()
+                    while True:
+                        next_task = asyncio.ensure_future(response_iter.__anext__())
+                        iter_wait: list[asyncio.Future[Any]] = [next_task]
+
+                        if cancel_event:
+                            iter_cancel = asyncio.ensure_future(cancel_event.wait())
+                            iter_wait.append(iter_cancel)
+                        else:
+                            iter_cancel = None
+
+                        try:
+                            iter_done, _ = await asyncio.wait(
+                                iter_wait,
+                                timeout=chunk_stall_timeout,
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                        except Exception:
+                            next_task.cancel()
+                            if iter_cancel:
+                                iter_cancel.cancel()
+                            raise
+
+                        if not iter_done:
+                            # Chunk stall timeout
+                            next_task.cancel()
+                            if iter_cancel:
+                                iter_cancel.cancel()
+                            logger.warning(
+                                "Anthropic stream stalled — no chunk for %ds", chunk_stall_timeout
+                            )
+                            yield {
+                                "event": "error",
+                                "data": {
+                                    "message": "Stream stalled — no data received",
+                                    "code": "stream_stall",
+                                    "retryable": True,
+                                },
+                            }
                             return
 
+                        if iter_cancel and iter_cancel in iter_done:
+                            next_task.cancel()
+                            return
+
+                        if iter_cancel:
+                            iter_cancel.cancel()
+
+                        try:
+                            event = next_task.result()
+                        except StopAsyncIteration:
+                            break
+
+                        _last_chunk_time = time.monotonic()
                         event_type = event.type
 
                         if event_type == "message_start":
@@ -288,15 +396,23 @@ class AnthropicService:
                                 yield {"event": "done", "data": {}}
                                 return
 
-                # Stream ended without explicit stop
-                if usage_data:
-                    yield {"event": "usage", "data": usage_data}
-                yield {"event": "done", "data": {}}
-                return
+                    # Stream ended without explicit stop
+                    if usage_data:
+                        yield {"event": "usage", "data": usage_data}
+                    yield {"event": "done", "data": {}}
+                    return
+                finally:
+                    # Always close the stream context manager to release the HTTP connection
+                    try:
+                        await stream_mgr.__aexit__(None, None, None)
+                    except Exception:
+                        pass
 
             except AnthropicAuthError:
-                if self._try_refresh_token():
-                    async for event in self.stream_chat(messages, tools, cancel_event, extra_system_prompt):
+                if not _token_refreshed and self._try_refresh_token():
+                    async for event in self.stream_chat(
+                        messages, tools, cancel_event, extra_system_prompt, _token_refreshed=True
+                    ):
                         yield event
                 else:
                     yield {
@@ -435,7 +551,7 @@ class AnthropicService:
             logger.exception("Failed to generate title")
             return "New Conversation"
 
-    async def validate_connection(self) -> tuple[bool, str, list[str]]:
+    async def validate_connection(self, _token_refreshed: bool = False) -> tuple[bool, str, list[str]]:
         try:
             await self.client.messages.create(
                 model=self.config.model,
@@ -444,8 +560,8 @@ class AnthropicService:
             )
             return True, "Connected successfully", [self.config.model]
         except AnthropicAuthError:
-            if self._try_refresh_token():
-                return await self.validate_connection()
+            if not _token_refreshed and self._try_refresh_token():
+                return await self.validate_connection(_token_refreshed=True)
             return False, "Authentication failed. Check your API key.", []
         except AnthropicTimeoutError:
             self._build_client()
@@ -461,6 +577,7 @@ class AnthropicService:
         self,
         messages: list[dict[str, Any]],
         max_completion_tokens: int = 1000,
+        _token_refreshed: bool = False,
     ) -> str | None:
         try:
             _, anthropic_messages = _convert_messages(messages)
@@ -471,8 +588,8 @@ class AnthropicService:
             )
             return response.content[0].text if response.content else None
         except AnthropicAuthError:
-            if self._try_refresh_token():
-                return await self.complete(messages, max_completion_tokens)
+            if not _token_refreshed and self._try_refresh_token():
+                return await self.complete(messages, max_completion_tokens, _token_refreshed=True)
             return None
         except Exception:
             logger.exception("Failed to generate completion")

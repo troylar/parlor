@@ -580,6 +580,7 @@ const App = (() => {
             state.currentConversationId = conv.id;
             state.currentConversationType = convType;
             Chat.setConversationType(convType);
+            Chat.abortStream();
             Chat.setStreaming(false);
             Chat.loadMessages([]);
             Canvas.resetCanvas();
@@ -600,6 +601,7 @@ const App = (() => {
 
     async function loadConversation(id) {
         try {
+            Chat.abortStream();
             Chat.setStreaming(false);
             state.currentConversationId = id;
             const detail = await api(`/api/conversations/${id}`);
@@ -704,8 +706,13 @@ const App = (() => {
 
         _eventSource.addEventListener('stream_done', (e) => {
             const data = JSON.parse(e.data);
-            if (data.client_id === state.clientId) return;
             if (data.conversation_id === state.currentConversationId) {
+                // Always clear streaming state for the current conversation,
+                // regardless of client_id. This recovers from scenarios where
+                // _checkStreamStatus set isStreaming=true but no SSE reader
+                // is running (e.g., page reload during active stream).
+                Chat.setStreaming(false);
+                if (data.client_id === state.clientId) return;
                 Chat.finalizeRemoteStream();
             }
         });
@@ -802,10 +809,23 @@ const App = (() => {
         };
     }
 
-    // Close SSE connection on page unload to free the HTTP connection slot.
-    // Without this, Windows browsers (strict 6 connections per origin on HTTP/1.1)
-    // can hang on page refresh because the old SSE connection lingers.
+    // Close SSE connection and abort in-flight streams on page unload to free
+    // HTTP connection slots.  Without this, Windows browsers (strict 6 connections
+    // per origin on HTTP/1.1) can hang on page refresh because the old SSE
+    // connection lingers.  Aborting the chat stream also lets the server-side
+    // _poll_disconnect detect the closure quickly instead of waiting for a timeout.
     window.addEventListener('beforeunload', () => {
+        Chat.abortStream();
+        if (_eventSource) {
+            _eventSource.close();
+            _eventSource = null;
+        }
+    });
+
+    // pagehide fires more reliably than beforeunload on mobile and some desktop
+    // browsers (e.g. bfcache-based navigation).  Belt-and-suspenders with above.
+    window.addEventListener('pagehide', () => {
+        Chat.abortStream();
         if (_eventSource) {
             _eventSource.close();
             _eventSource = null;

@@ -74,33 +74,49 @@ async def event_stream(
         # Send retry: hint and connected event immediately so the browser
         # knows the backoff interval regardless of queue state.
         yield {"event": "connected", "data": "{}", "retry": sse_retry_ms}
+
+        # Build a set of queue-get tasks to await concurrently instead of
+        # busy-polling with sleep(0.05).  This eliminates ~20 wakeups/sec
+        # per connected client and lets the event loop stay idle.
+        queues = [global_queue]
+        if conv_queue is not None:
+            queues.append(conv_queue)
+
         try:
             while True:
-                if await request.is_disconnected():
-                    break
+                # Create a get task for each queue we're subscribed to
+                get_tasks = {asyncio.create_task(q.get()): q for q in queues}
+                disconnect_task = asyncio.create_task(asyncio.sleep(5.0))
+                all_tasks = set(get_tasks.keys()) | {disconnect_task}
 
-                # Check both queues with a short timeout
-                event = None
-                try:
-                    event = global_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
+                done, pending = await asyncio.wait(all_tasks, return_when=asyncio.FIRST_COMPLETED)
 
-                if event is None and conv_queue is not None:
+                # Cancel pending tasks
+                for p in pending:
+                    p.cancel()
                     try:
-                        event = conv_queue.get_nowait()
-                    except asyncio.QueueEmpty:
+                        await p
+                    except (asyncio.CancelledError, Exception):
                         pass
 
-                if event is None:
-                    # Wait briefly before checking again
-                    await asyncio.sleep(0.05)
+                # If only the sleep completed, check disconnect and loop
+                if disconnect_task in done and not (done - {disconnect_task}):
+                    if await request.is_disconnected():
+                        break
                     continue
 
-                yield {
-                    "event": event.get("type", "message"),
-                    "data": json.dumps(event.get("data", {})),
-                }
+                # Yield all events that arrived
+                for task in done:
+                    if task is disconnect_task:
+                        continue
+                    try:
+                        event = task.result()
+                    except (asyncio.CancelledError, Exception):
+                        continue
+                    yield {
+                        "event": event.get("type", "message"),
+                        "data": json.dumps(event.get("data", {})),
+                    }
         finally:
             event_bus.unsubscribe(global_channel, global_queue)
             if conv_channel and conv_queue:

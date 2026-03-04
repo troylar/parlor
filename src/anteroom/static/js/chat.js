@@ -9,6 +9,7 @@ const Chat = (() => {
     let _rewindMsgEl = null;
     let _lastSentText = '';
     let _pendingUserMessages = [];  // FIFO queue of {el, text} for SSE correlation
+    let _streamAbortController = null;  // AbortController for current SSE fetch
     let _conversationType = 'chat';
     const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -203,9 +204,16 @@ const Chat = (() => {
                         const err = await response.json();
                         if (err.detail) detail = err.detail;
                     } catch (_) { /* ignore parse errors */ }
+                    // Queue failed — the server stream is likely dead.
+                    // Reset streaming state so the user can send messages normally.
+                    setStreaming(false);
+                    _pendingUserMessages = [];
                     showToast(detail);
                 }
             } catch (e) {
+                // Queue request itself failed — reset streaming state
+                setStreaming(false);
+                _pendingUserMessages = [];
                 showToast('Failed to queue message');
             }
             return;
@@ -214,10 +222,21 @@ const Chat = (() => {
         await streamChatResponse(App.state.currentConversationId, body, headers);
     }
 
+    function abortStream() {
+        if (_streamAbortController) {
+            _streamAbortController.abort();
+            _streamAbortController = null;
+        }
+    }
+
     async function streamChatResponse(conversationId, body, headers) {
         if (typeof App._debugLog === 'function') {
             App._debugLog('stream', 'Starting chat stream for ' + conversationId);
         }
+        // Abort any in-flight stream before starting a new one
+        abortStream();
+        _streamAbortController = new AbortController();
+
         setStreaming(true);
         showThinking();
 
@@ -235,6 +254,7 @@ const Chat = (() => {
                 headers,
                 body,
                 credentials: 'same-origin',
+                signal: _streamAbortController.signal,
             });
 
             if (response.status === 401) {
@@ -278,6 +298,8 @@ const Chat = (() => {
                 }
             }
         } catch (err) {
+            // Silently ignore aborted fetches (navigation, stop, new chat)
+            if (err.name === 'AbortError') return;
             hideThinking();
             if (currentAssistantEl) {
                 showError(currentAssistantEl, err.message);
@@ -285,7 +307,9 @@ const Chat = (() => {
                 showError(null, err.message);
             }
         } finally {
+            _streamAbortController = null;
             hideThinking();
+            _clearAllToolTimers();
             setStreaming(false);
             _pendingUserMessages = [];
         }
@@ -1308,8 +1332,10 @@ const Chat = (() => {
             if (typeof App._debugLog === 'function') {
                 App._debugLog('watchdog', 'Stream watchdog fired after ' + elapsed + 's — no server response');
             }
+            abortStream();
             hideThinking();
             setStreaming(false);
+            _pendingUserMessages = [];
             showToast('No response from server after ' + elapsed + 's. Check your connection and try again.');
         }, _WATCHDOG_TIMEOUT_MS);
     }
@@ -1611,6 +1637,15 @@ const Chat = (() => {
         scrollToBottom();
     }
 
+    function _clearAllToolTimers() {
+        document.querySelectorAll('details[id^="tool-"]').forEach(details => {
+            if (details._toolTimer) {
+                clearInterval(details._toolTimer);
+                details._toolTimer = null;
+            }
+        });
+    }
+
     function renderToolCallEnd(data) {
         const details = document.getElementById(`tool-${_sanitizeId(data.id)}`);
         if (!details) return;
@@ -1742,8 +1777,11 @@ const Chat = (() => {
     async function stopGeneration() {
         if (!App.state.currentConversationId) return;
         // Immediately reset client state so UI is responsive
+        abortStream();
         hideThinking();
+        _clearAllToolTimers();
         setStreaming(false);
+        _pendingUserMessages = [];
         try {
             await App.api(`/api/conversations/${App.state.currentConversationId}/stop`, { method: 'POST' });
         } catch (e) {
@@ -2166,7 +2204,7 @@ const Chat = (() => {
     }
 
     return {
-        init, sendMessage, loadMessages, stopGeneration, setStreaming, escapeHtml,
+        init, sendMessage, loadMessages, stopGeneration, abortStream, setStreaming, escapeHtml,
         streamChatResponse, isRawMode, setRawMode, setConversationType,
         appendRemoteMessage, startRemoteStream, handleRemoteToken, finalizeRemoteStream,
         showApprovalPrompt, resolveApprovalCard, showAskUserPrompt, showThinkingFromEvent: showThinking,

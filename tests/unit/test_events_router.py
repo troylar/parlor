@@ -126,9 +126,9 @@ class TestEventStreamDelivery:
         """Verify unsubscribe is called for global channel on cleanup."""
         app = _make_app(with_event_bus=True)
         event_bus = app.state.event_bus
-        mock_queue = MagicMock()
-        mock_queue.get_nowait.side_effect = asyncio.QueueEmpty()
-        event_bus.subscribe.return_value = mock_queue
+        # Use a real asyncio.Queue so that create_task(q.get()) works
+        real_queue: asyncio.Queue[dict] = asyncio.Queue()
+        event_bus.subscribe.return_value = real_queue
 
         async def mock_disconnect(self):
             return True
@@ -146,9 +146,9 @@ class TestEventStreamDelivery:
         conv_id = str(uuid.uuid4())
         app = _make_app(with_event_bus=True)
         event_bus = app.state.event_bus
-        mock_queue = MagicMock()
-        mock_queue.get_nowait.side_effect = asyncio.QueueEmpty()
-        event_bus.subscribe.return_value = mock_queue
+        # Use a real asyncio.Queue so that create_task(q.get()) works
+        real_queue: asyncio.Queue[dict] = asyncio.Queue()
+        event_bus.subscribe.return_value = real_queue
 
         async def mock_disconnect(self):
             return True
@@ -185,9 +185,8 @@ class TestSSERetryField:
         carry the retry: field unconditionally."""
         app = _make_app(with_event_bus=True, sse_retry_ms=3000)
         event_bus = app.state.event_bus
-        mock_queue = MagicMock()
-        mock_queue.get_nowait.side_effect = asyncio.QueueEmpty()
-        event_bus.subscribe.return_value = mock_queue
+        real_queue: asyncio.Queue[dict] = asyncio.Queue()
+        event_bus.subscribe.return_value = real_queue
 
         async def mock_disconnect(self: object) -> bool:
             return True

@@ -227,6 +227,7 @@ class AIService:
         tools: list[dict[str, Any]] | None = None,
         cancel_event: asyncio.Event | None = None,
         extra_system_prompt: str | None = None,
+        _token_refreshed: bool = False,
     ) -> AsyncGenerator[dict[str, Any], None]:
         system_content = self.config.system_prompt
         if extra_system_prompt:
@@ -496,9 +497,11 @@ class AIService:
                 return
 
             except AuthenticationError:
-                if self._try_refresh_token():
+                if not _token_refreshed and self._try_refresh_token():
                     logger.info("Retrying request with refreshed token")
-                    async for event in self.stream_chat(messages, tools, cancel_event, extra_system_prompt):
+                    async for event in self.stream_chat(
+                        messages, tools, cancel_event, extra_system_prompt, _token_refreshed=True
+                    ):
                         yield event
                 else:
                     logger.error("Authentication failed and token refresh unavailable")
@@ -690,7 +693,7 @@ class AIService:
                 },
             }
 
-    async def generate_title(self, user_message: str) -> str:
+    async def generate_title(self, user_message: str, _token_refreshed: bool = False) -> str:
         try:
             response = await self.client.chat.completions.create(
                 model=self.config.model,
@@ -709,8 +712,8 @@ class AIService:
             title = response.choices[0].message.content or "New Conversation"
             return title.strip().strip('"').strip("'")
         except AuthenticationError:
-            if self._try_refresh_token():
-                return await self.generate_title(user_message)
+            if not _token_refreshed and self._try_refresh_token():
+                return await self.generate_title(user_message, _token_refreshed=True)
             logger.error("Authentication failed during title generation")
             return "New Conversation"
         except APITimeoutError:
@@ -729,6 +732,7 @@ class AIService:
         self,
         messages: list[dict[str, Any]],
         max_completion_tokens: int = 1000,
+        _token_refreshed: bool = False,
     ) -> str | None:
         """Non-streaming completion for internal use (e.g. context compaction)."""
         try:
@@ -739,21 +743,21 @@ class AIService:
             )
             return response.choices[0].message.content if response.choices else None
         except AuthenticationError:
-            if self._try_refresh_token():
-                return await self.complete(messages, max_completion_tokens)
+            if not _token_refreshed and self._try_refresh_token():
+                return await self.complete(messages, max_completion_tokens, _token_refreshed=True)
             return None
         except Exception:
             logger.exception("Failed to generate completion")
             return None
 
-    async def validate_connection(self) -> tuple[bool, str, list[str]]:
+    async def validate_connection(self, _token_refreshed: bool = False) -> tuple[bool, str, list[str]]:
         try:
             models = await self.client.models.list()
             model_ids = [m.id for m in models.data]
             return True, "Connected successfully", model_ids
         except AuthenticationError:
-            if self._try_refresh_token():
-                return await self.validate_connection()
+            if not _token_refreshed and self._try_refresh_token():
+                return await self.validate_connection(_token_refreshed=True)
             logger.error("Authentication failed during connection validation")
             return False, "Authentication failed. Check your API key or api_key_command.", []
         except APITimeoutError:

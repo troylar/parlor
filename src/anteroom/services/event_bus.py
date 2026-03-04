@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 1.5
 CLEANUP_INTERVAL_SECONDS = 300  # 5 minutes
 CLEANUP_MAX_AGE_SECONDS = 600  # keep rows for 10 minutes
+SUBSCRIBER_QUEUE_MAXSIZE = 1000  # cap per-subscriber queue to prevent unbounded memory growth
 
 
 class EventBus:
@@ -54,7 +55,7 @@ class EventBus:
         return self._process_id
 
     def subscribe(self, channel: str) -> asyncio.Queue[dict[str, Any]]:
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_MAXSIZE)
         if channel not in self._subscribers:
             self._subscribers[channel] = set()
         self._subscribers[channel].add(queue)
@@ -131,18 +132,31 @@ class EventBus:
             self._poll_task = None
 
     async def _poll_loop(self) -> None:
+        consecutive_errors = 0
+        max_backoff = 30.0  # cap backoff at 30 seconds
         try:
             while True:
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
-                await self._poll_all_databases()
+                try:
+                    await self._poll_all_databases()
+                    consecutive_errors = 0  # reset on success
+                except Exception:
+                    consecutive_errors += 1
+                    backoff = min(POLL_INTERVAL_SECONDS * (2 ** consecutive_errors), max_backoff)
+                    logger.warning(
+                        "Event bus poll error (%d consecutive). Retrying in %.1fs",
+                        consecutive_errors,
+                        backoff,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
                 self._cleanup_counter += 1
                 if self._cleanup_counter >= int(CLEANUP_INTERVAL_SECONDS / POLL_INTERVAL_SECONDS):
                     self._cleanup_counter = 0
                     self._cleanup_old_events()
         except asyncio.CancelledError:
             pass
-        except Exception:
-            logger.exception("Event bus poll loop crashed")
 
     async def _poll_all_databases(self) -> None:
         if not self._db_manager:

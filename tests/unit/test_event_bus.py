@@ -404,8 +404,8 @@ async def test_poll_loop_triggers_cleanup_after_threshold():
 
 
 @pytest.mark.asyncio
-async def test_poll_loop_exception_is_logged():
-    """An unexpected exception in _poll_loop is caught and logged (lines 144-145)."""
+async def test_poll_loop_exception_retries_with_backoff():
+    """An unexpected exception in _poll_loop is caught, logged, and retried."""
     from unittest.mock import AsyncMock, patch
 
     bus = EventBus()
@@ -415,24 +415,26 @@ async def test_poll_loop_exception_is_logged():
     async def exploding_poll():
         nonlocal call_count
         call_count += 1
+        if call_count >= 3:
+            # Stop after 3 retries by cancelling from inside
+            raise asyncio.CancelledError
         raise RuntimeError("unexpected crash")
 
     with (
         patch.object(bus, "_poll_all_databases", side_effect=exploding_poll),
-        patch("asyncio.sleep", new_callable=AsyncMock),
+        patch("anteroom.services.event_bus.asyncio.sleep", new_callable=AsyncMock),
     ):
-        # _poll_loop should catch Exception and not propagate
         task = asyncio.ensure_future(bus._poll_loop())
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        # give it a moment to process
-        await asyncio.sleep(0)
-        # The task should complete (not hang) after exception branch
         try:
-            await asyncio.wait_for(task, timeout=1.0)
-        except asyncio.TimeoutError:
+            await asyncio.wait_for(task, timeout=2.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
             task.cancel()
-            await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        # Should have retried multiple times instead of crashing permanently
+        assert call_count >= 2
 
     assert call_count >= 1
 

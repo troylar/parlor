@@ -23,6 +23,8 @@ class AgentEvent:
 
 
 _DEFAULT_TOOL_OUTPUT_MAX_CHARS = 2000
+_DEFAULT_TOOL_TIMEOUT = 300  # 5 minutes hard cap per tool execution
+_PROACTIVE_COMPACTION_THRESHOLD = 80  # compact when messages exceed this count
 
 
 def _truncate_large_tool_outputs(
@@ -170,13 +172,21 @@ async def _execute_tool(
     tc: dict[str, Any],
     tool_executor: Any,
     cancel_event: asyncio.Event | None,
+    timeout: float = _DEFAULT_TOOL_TIMEOUT,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
-    """Execute a single tool call, returning (tool_call, result, status)."""
+    """Execute a single tool call, returning (tool_call, result, status).
+
+    A hard timeout prevents any single tool (including MCP tools) from
+    hanging the entire agent loop indefinitely.
+    """
     try:
         if cancel_event:
             cancel_task = asyncio.create_task(cancel_event.wait())
             exec_task = asyncio.create_task(tool_executor(tc["function_name"], tc["arguments"]))
-            done, pending = await asyncio.wait({cancel_task, exec_task}, return_when=asyncio.FIRST_COMPLETED)
+            timeout_task = asyncio.create_task(asyncio.sleep(timeout))
+            done, pending = await asyncio.wait(
+                {cancel_task, exec_task, timeout_task}, return_when=asyncio.FIRST_COMPLETED
+            )
             for p in pending:
                 p.cancel()
                 try:
@@ -185,10 +195,20 @@ async def _execute_tool(
                     pass
             if exec_task in done:
                 return tc, exec_task.result(), "success"
+            if timeout_task in done:
+                tool_name = tc["function_name"]
+                logger.warning("Tool '%s' timed out after %ds", tool_name, timeout)
+                return tc, {"error": f"Tool execution timed out after {int(timeout)}s"}, "timeout"
             return tc, {"error": "Cancelled by user"}, "cancelled"
         else:
-            result = await tool_executor(tc["function_name"], tc["arguments"])
+            result = await asyncio.wait_for(
+                tool_executor(tc["function_name"], tc["arguments"]), timeout=timeout
+            )
             return tc, result, "success"
+    except asyncio.TimeoutError:
+        tool_name = tc["function_name"]
+        logger.warning("Tool '%s' timed out after %ds", tool_name, timeout)
+        return tc, {"error": f"Tool execution timed out after {int(timeout)}s"}, "timeout"
     except Exception as e:
         return tc, {"error": str(e)}, "error"
 
@@ -312,6 +332,20 @@ async def run_agent_loop(
                             "percent": status.percent,
                         },
                     )
+
+        # Proactive compaction: compact before hitting the API context limit
+        if len(messages) >= _PROACTIVE_COMPACTION_THRESHOLD:
+            logger.info(
+                "Proactive compaction triggered: %d messages (threshold %d)",
+                len(messages),
+                _PROACTIVE_COMPACTION_THRESHOLD,
+            )
+            yield AgentEvent(
+                kind="token",
+                data={"content": "\n\n*Compacting conversation history to stay within context limits...*\n\n"},
+            )
+            if await _compact_messages(ai_service, messages):
+                yield AgentEvent(kind="compaction", data={"new_message_count": len(messages)})
 
         yield AgentEvent(kind="thinking", data={})
 

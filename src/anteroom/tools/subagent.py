@@ -333,6 +333,12 @@ async def _run_subagent(
     except Exception:
         logger.exception("Sub-agent execution failed")
         error_message = "Sub-agent execution failed"
+    finally:
+        # Close the child AI service's HTTP client to prevent connection leaks
+        try:
+            await asyncio.wait_for(child_ai.client.close(), timeout=2.0)
+        except Exception:
+            pass
 
     elapsed = round(time.monotonic() - start_time, 1)
     output = "".join(output_parts)

@@ -186,6 +186,7 @@ class ChatRequestContext:
 _cancel_events: dict[str, set[asyncio.Event]] = defaultdict(set)
 _message_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _active_streams: dict[str, dict[str, Any]] = {}
+_stream_locks: dict[str, asyncio.Lock] = {}  # per-conversation lock for stream registration
 
 
 def _validate_uuid(value: str) -> str:
@@ -960,6 +961,37 @@ async def _poll_disconnect(
         pass
 
 
+def _fallback_stream_cleanup(gen: Any) -> None:
+    """Emergency cleanup when the inner SSE generator's finally block failed to run.
+
+    Extracts the StreamContext from the generator's locals and cleans up
+    _active_streams, _message_queues, _cancel_events, and _stream_locks.
+    """
+    try:
+        # _stream_chat_events generators expose their locals via gi_frame
+        frame = getattr(gen, "ag_frame", None) or getattr(gen, "gi_frame", None)
+        if frame is None:
+            return
+        ctx = frame.f_locals.get("ctx")
+        if ctx is None:
+            return
+        cid = ctx.conversation_id
+        _active_streams.pop(cid, None)
+        queue = _message_queues.get(cid)
+        if queue and queue.empty():
+            _message_queues.pop(cid, None)
+        ce_set = _cancel_events.get(cid)
+        if ce_set is not None:
+            ce_set.discard(ctx.cancel_event)
+            if not ce_set and _cancel_events.get(cid) is ce_set:
+                _cancel_events.pop(cid, None)
+        if cid not in _active_streams:
+            _stream_locks.pop(cid, None)
+        logger.info("Fallback cleanup completed for conversation %s", cid)
+    except Exception:
+        logger.debug("Fallback cleanup failed", exc_info=True)
+
+
 _KEEPALIVE_INTERVAL = 15  # seconds between SSE keepalive pings
 
 
@@ -994,6 +1026,16 @@ async def _with_keepalive(gen: Any, interval: float = _KEEPALIVE_INTERVAL) -> An
                 await pending_next
             except (asyncio.CancelledError, StopAsyncIteration):
                 pass
+        # Ensure the inner generator's finally block runs (cleans up
+        # _active_streams, _message_queues, _cancel_events, and the
+        # disconnect poller task).
+        try:
+            await aiter.aclose()
+        except Exception:
+            # If aclose() fails, the inner generator's finally block never ran.
+            # Do manual fallback cleanup to prevent permanent resource leaks.
+            logger.warning("Inner generator aclose() failed; running fallback cleanup", exc_info=True)
+            _fallback_stream_cleanup(gen)
 
 
 async def _stream_chat_events(ctx: StreamContext) -> Any:
@@ -1488,9 +1530,17 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
         queue = _message_queues.get(ctx.conversation_id)
         if queue and queue.empty():
             _message_queues.pop(ctx.conversation_id, None)
-        _cancel_events.get(ctx.conversation_id, set()).discard(ctx.cancel_event)
-        if not _cancel_events.get(ctx.conversation_id):
-            _cancel_events.pop(ctx.conversation_id, None)
+        # Atomic cancel event cleanup: discard + conditional pop in one block
+        # to prevent a race where a new stream adds to the set between operations
+        ce_set = _cancel_events.get(ctx.conversation_id)
+        if ce_set is not None:
+            ce_set.discard(ctx.cancel_event)
+            # Only remove the set if it's still the same object and is empty
+            if not ce_set and _cancel_events.get(ctx.conversation_id) is ce_set:
+                _cancel_events.pop(ctx.conversation_id, None)
+        # Clean up per-conversation lock if no other stream is active
+        if ctx.conversation_id not in _active_streams:
+            _stream_locks.pop(ctx.conversation_id, None)
 
 
 async def _parse_chat_request(request: Request) -> ChatRequestContext:
@@ -1621,41 +1671,45 @@ async def chat(conversation_id: str, request: Request) -> Any:
 
     uid, uname = _get_identity(request)
 
-    # Queue message if a stream is already active for this conversation
-    if not regenerate and _active_streams.get(conversation_id):
-        stream_info = _active_streams[conversation_id]
-        stale_request = stream_info.get("request")
-        stream_age = time_mod.monotonic() - stream_info.get("started_at", 0)
+    # Acquire per-conversation lock to prevent TOCTOU race between
+    # stale stream eviction and new stream registration.
+    if conversation_id not in _stream_locks:
+        _stream_locks[conversation_id] = asyncio.Lock()
+    _conv_stream_lock = _stream_locks[conversation_id]
 
-        # Detect stale streams: client disconnected or stream exceeded timeout
-        is_stale = False
-        if stale_request:
-            try:
-                is_stale = await stale_request.is_disconnected()
-            except Exception:
+    # Queue message if a stream is already active for this conversation.
+    # The lock prevents a TOCTOU race where two concurrent requests both
+    # see the slot as empty after stale eviction and create duplicate streams.
+    async with _conv_stream_lock:
+        if not regenerate and _active_streams.get(conversation_id):
+            stream_info = _active_streams[conversation_id]
+            stream_age = time_mod.monotonic() - stream_info.get("started_at", 0)
+
+            # Detect stale streams: cancel_event already set (client disconnected
+            # via _poll_disconnect) or stream exceeded timeout
+            is_stale = stream_info.get("cancel_event", asyncio.Event()).is_set()
+            _safety_cfg = getattr(request.app.state.config, "safety", None)
+            stale_timeout = (_safety_cfg.approval_timeout if _safety_cfg else 120) + 30
+            if not is_stale and stream_age > stale_timeout:
                 is_stale = True
-        _safety_cfg = getattr(request.app.state.config, "safety", None)
-        stale_timeout = (_safety_cfg.approval_timeout if _safety_cfg else 120) + 30
-        if not is_stale and stream_age > stale_timeout:
-            is_stale = True
 
-        if is_stale:
-            logger.info("Cleaning up stale stream for conversation %s (age=%.0fs)", conversation_id, stream_age)
-            old_cancel = stream_info.get("cancel_event")
-            if old_cancel:
-                old_cancel.set()
-            _active_streams.pop(conversation_id, None)
-            # Fall through to create a new stream
-        else:
-            queue = _message_queues.get(conversation_id)
-            if queue and queue.qsize() >= MAX_QUEUED_MESSAGES:
-                raise HTTPException(status_code=429, detail="Message queue full (max 10)")
-            storage.create_message(db, conversation_id, "user", message_text, user_id=uid, user_display_name=uname)
-            if queue is None:
-                queue = asyncio.Queue()
-                _message_queues[conversation_id] = queue
-            await queue.put({"role": "user", "content": message_text})
-            return JSONResponse({"status": "queued", "position": queue.qsize()})
+            if is_stale:
+                logger.info("Cleaning up stale stream for conversation %s (age=%.0fs)", conversation_id, stream_age)
+                old_cancel = stream_info.get("cancel_event")
+                if old_cancel:
+                    old_cancel.set()
+                _active_streams.pop(conversation_id, None)
+                # Fall through to create a new stream
+            else:
+                queue = _message_queues.get(conversation_id)
+                if queue and queue.qsize() >= MAX_QUEUED_MESSAGES:
+                    raise HTTPException(status_code=429, detail="Message queue full (max 10)")
+                storage.create_message(db, conversation_id, "user", message_text, user_id=uid, user_display_name=uname)
+                if queue is None:
+                    queue = asyncio.Queue()
+                    _message_queues[conversation_id] = queue
+                await queue.put({"role": "user", "content": message_text})
+                return JSONResponse({"status": "queued", "position": queue.qsize()})
 
     if regenerate:
         existing = storage.list_messages(db, conversation_id)
@@ -1786,14 +1840,14 @@ async def chat(conversation_id: str, request: Request) -> Any:
                             logger.debug("Document extraction failed for %s", f.filename, exc_info=True)
 
     cancel_event = asyncio.Event()
-    _cancel_events[conversation_id].add(cancel_event)
-    _active_streams[conversation_id] = {
-        "started_at": time_mod.monotonic(),
-        "request": request,
-        "cancel_event": cancel_event,
-    }
-    if conversation_id not in _message_queues:
-        _message_queues[conversation_id] = asyncio.Queue()
+    async with _conv_stream_lock:
+        _cancel_events[conversation_id].add(cancel_event)
+        _active_streams[conversation_id] = {
+            "started_at": time_mod.monotonic(),
+            "cancel_event": cancel_event,
+        }
+        if conversation_id not in _message_queues:
+            _message_queues[conversation_id] = asyncio.Queue()
 
     # Resolve model override: conversation model > space model > global default
     model_override = conv.get("model") or None
