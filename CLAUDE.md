@@ -160,7 +160,7 @@ CLI (cli/)         ──┘         │
 - **`tools/security.py`** — Security utilities: hard-block patterns, path validation, `check_network_command()`, `check_package_install()`, `check_blocked_path()`, `check_custom_patterns()` for sandbox enforcement. Cross-platform: Unix tools, PowerShell, Windows package managers
 - **`tools/sandbox_win32.py`** — Win32 Job Object sandbox via ctypes (no dependencies). `create_job_object()`, `assign_process()`, `terminate_job()`, `close_job()`, `setup_job_for_process()`. Enforces memory, process count, and CPU time limits. No-op on non-Windows. All functions return success/failure, never raise
 - **`tools/safety.py`** — Pure detection: `check_bash_command()` (regex patterns), `check_write_path()` (sensitive paths). Returns `SafetyVerdict` with `is_hard_blocked`
-- **`tools/canvas.py`** — Canvas create/update/patch with SSE streaming support
+- **`tools/canvas.py`** — Canvas create/update/patch with SSE streaming support. Excalidraw diagram language generates JSON scene data rendered in web UI via iframe viewer
 - **`tools/subagent.py`** — `run_agent` tool: isolated child AI sessions, same safety gates. Guarded by `SubagentLimiter`. Configurable via `safety.subagent`
 - **`tools/introspect.py`** — Lets AI examine its own runtime context. READ tier (auto-allowed)
 - **`tools/office_com.py`** — Shared COM lifecycle manager for Windows. Optional: requires pywin32

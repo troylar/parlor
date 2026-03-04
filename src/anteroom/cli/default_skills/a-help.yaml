@@ -483,7 +483,7 @@ prompt: |
   Directories (highest priority first):
   1. `.anteroom/skills/` or `.claude/skills/` (space-level, walk-up discovery)
   2. `~/.anteroom/skills/` or `~/.claude/skills/` (user-level)
-  3. Built-in default skills (create-eval, new-pack, new-skill, new-space, pack-lint, pack-publish, pack-doctor, pack-update, space-doctor, space-edit, space-lint, a-help)
+  3. Built-in default skills (a-help, create-eval, excalidraw, new-pack, new-skill, new-space, pack-lint, pack-publish, pack-doctor, pack-update, space-doctor, space-edit, space-lint)
 
   ### Space Instructions (ANTEROOM.md)
 

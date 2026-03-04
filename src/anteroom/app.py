@@ -902,7 +902,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
             "var timer=setTimeout(function(){"
             "document.getElementById('root').innerHTML="
             "'<div id=\"error\">Timed out loading Excalidraw from CDN.</div>';"
-            "window.parent.postMessage({type:'excalidraw-error',message:'timeout'},'*');"
+            "window.parent.postMessage({type:'excalidraw-error',message:'timeout'},window.location.origin);"
             "},20000);"
             "try{"
             # Load only the Excalidraw utils — exportToSvg needs React
@@ -917,17 +917,18 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
             "svg.style.width='100%';svg.style.height='100%';"
             "document.getElementById('root').innerHTML='';"
             "document.getElementById('root').appendChild(svg);"
-            "window.parent.postMessage({type:'excalidraw-ready'},'*');"
+            "window.parent.postMessage({type:'excalidraw-ready'},window.location.origin);"
             "}catch(err){clearTimeout(timer);"
             "document.getElementById('root').innerHTML="
             "'<div id=\"error\">Failed to render diagram: '+err.message+'</div>';"
-            "window.parent.postMessage({type:'excalidraw-error',message:err.message},'*');"
+            "window.parent.postMessage({type:'excalidraw-error',message:err.message},window.location.origin);"
             "}"
             "});"
             "</script></body></html>"
         )
         response = HTMLResponse(html)
         # Permissive CSP for this viewer only — allows esm.sh CDN resources
+        # SECURITY-REVIEW: unsafe-inline required for inline script in viewer iframe; server-controlled, no user input
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' https://esm.sh; "

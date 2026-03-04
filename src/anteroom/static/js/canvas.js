@@ -115,7 +115,7 @@ const Canvas = (() => {
         // Send scene data once the iframe is ready to receive messages
         iframe.addEventListener('load', () => {
             iframe.contentWindow.postMessage(
-                { type: 'excalidraw-scene', scene: sceneData }, '*'
+                { type: 'excalidraw-scene', scene: sceneData }, window.location.origin
             );
         });
 
