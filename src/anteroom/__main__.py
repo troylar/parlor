@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import errno
+import json
 import logging
 import os
 import socket
@@ -601,6 +602,37 @@ def _run_web(
         raise
 
 
+_STEP_LABELS: dict[str, str] = {
+    "database": "Initializing database",
+    "mcp_servers": "Connecting to MCP servers",
+    "tools": "Registering tools",
+    "embeddings": "Probing embeddings",
+    "packs": "Loading packs",
+    "artifacts": "Loading artifacts and skills",
+    "ready": "Ready",
+}
+
+
+def _read_last_progress(path: Path) -> dict[str, str] | None:
+    """Read the progress file and return the last parseable JSON event."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    last: dict[str, str] | None = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                last = obj
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return last
+
+
 def _run_start(config: AppConfig, config_path: Path, args: argparse.Namespace) -> None:
     """Start the web UI server in the background."""
     from .services.server_manager import ServerManager
@@ -634,13 +666,35 @@ def _run_start(config: AppConfig, config_path: Path, args: argparse.Namespace) -
     probe_host = "127.0.0.1" if config.app.host in ("0.0.0.0", "::") else config.app.host
     url = f"{scheme}://{probe_host}:{config.app.port}"
 
-    for _ in range(50):
-        if mgr.is_port_responding(probe_host, config.app.port, timeout=0.5):
-            break
-        time.sleep(0.1)
+    from rich.console import Console
+    from rich.status import Status
 
-    if mgr.is_port_responding(probe_host, config.app.port, timeout=1.0):
-        print(f"Anteroom started at {url} (PID {pid})")
+    console = Console()
+    status_text = "Starting Anteroom..."
+    started = False
+
+    with Status(status_text, console=console, spinner="dots") as spinner:
+        for _ in range(100):
+            if mgr.is_port_responding(probe_host, config.app.port, timeout=0.5):
+                started = True
+                break
+            progress = _read_last_progress(mgr.progress_path)
+            if progress:
+                step = progress.get("step", "")
+                step_status = progress.get("status", "")
+                detail = progress.get("detail", "")
+                if step == "error":
+                    console.print(f"[red]Server failed to start: {detail}[/red]")
+                    sys.exit(1)
+                if step_status == "running":
+                    label = _STEP_LABELS.get(step, step)
+                    if detail:
+                        label = f"{label} ({detail})"
+                    spinner.update(f"{label}...")
+            time.sleep(0.1)
+
+    if started:
+        console.print(f"[green]Anteroom started at {url} (PID {pid})[/green]")
         if not getattr(args, "no_browser", False):
             webbrowser.open(url)
     else:

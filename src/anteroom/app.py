@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import ipaddress
+import json
 import logging
 import os
 import secrets
@@ -38,9 +39,25 @@ security_logger = logging.getLogger("anteroom.security")
 MAX_REQUEST_BODY_BYTES = 15 * 1024 * 1024  # 15 MB
 
 
+def _write_progress(path: Path | None, step: str, status: str, detail: str = "") -> None:
+    """Append one NDJSON progress event. Never raises."""
+    if path is None:
+        return
+    try:
+        event: dict[str, str] = {"step": step, "status": status}
+        if detail:
+            event["detail"] = detail
+        with open(path, "a") as f:
+            f.write(json.dumps(event) + "\n")
+            f.flush()
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     config: AppConfig = app.state.config
+    _progress_path = config.app.data_dir / f"anteroom-{config.app.port}.progress"
 
     # Identity is normally ensured in create_app() before token derivation.
     # This is a safety net for cases where create_app() was called with a
@@ -51,6 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.warning("Failed to auto-generate user identity")
 
+    _write_progress(_progress_path, "database", "running")
     db_path = config.app.data_dir / "chat.db"
     vec_dims = get_effective_dimensions(config)
 
@@ -116,6 +134,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"Failed to load shared DB '{sdb.name}': {e}")
     app.state.db_manager = db_manager
+    _write_progress(_progress_path, "database", "done")
 
     event_bus = EventBus()
     app.state.event_bus = event_bus
@@ -123,6 +142,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     mcp_manager = None
     if config.mcp_servers:
+        _write_progress(
+            _progress_path, "mcp_servers", "running", detail=f"{len(config.mcp_servers)} servers"
+        )
         mcp_manager = McpManager(config.mcp_servers, tool_warning_threshold=config.mcp_tool_warning_threshold)
         try:
             await mcp_manager.startup()
@@ -130,8 +152,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info(f"MCP: {len(tools)} tools available from {len(config.mcp_servers)} server(s)")
         except Exception as e:
             logger.warning(f"MCP startup error: {e}")
+        _write_progress(_progress_path, "mcp_servers", "done")
     app.state.mcp_manager = mcp_manager
 
+    _write_progress(_progress_path, "tools", "running")
     tool_registry = ToolRegistry()
     working_dir = os.getcwd()
     register_default_tools(tool_registry, working_dir=working_dir)
@@ -139,11 +163,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.tool_registry = tool_registry
     app.state.pending_approvals = {}
     logger.info(f"Built-in tools: {len(tool_registry.list_tools())} registered (cwd: {working_dir})")
+    _write_progress(_progress_path, "tools", "done")
 
     # Expose vec support flag
     raw_conn = app.state.db._conn if hasattr(app.state.db, "_conn") else None
     app.state.vec_enabled = has_vec_support(raw_conn) if raw_conn else False
 
+    _write_progress(_progress_path, "embeddings", "running")
     # Start embedding service and background worker
     app.state.embedding_service = None
     app.state.embedding_worker = None
@@ -169,6 +195,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Embeddings disabled in config; vector search disabled")
         else:
             logger.info("Embedding service not configured; vector search disabled")
+    _write_progress(_progress_path, "embeddings", "done")
 
     # Initialize audit writer
     from .services.audit import create_audit_writer
@@ -194,6 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.retention_worker = retention_worker
         logger.info("Retention worker started (retention_days=%d)", config.storage.retention_days)
 
+    _write_progress(_progress_path, "packs", "running")
     # Install/update built-in starter packs
     try:
         from .services.starter_packs import install_starter_packs
@@ -224,6 +252,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.pack_refresh_worker = pack_refresh_worker
         logger.info("Pack refresh worker started (%d sources)", len(config.pack_sources))
 
+    _write_progress(_progress_path, "packs", "done")
+
+    _write_progress(_progress_path, "artifacts", "running")
     # Initialize artifact registry
     from .services.artifact_registry import ArtifactRegistry
 
@@ -255,23 +286,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         app.state.proxy_ai_service = create_ai_service(config.ai)
         logger.info("Proxy AIService created")
+    _write_progress(_progress_path, "artifacts", "done")
 
-    yield
-
-    if hasattr(app.state, "pack_refresh_worker") and app.state.pack_refresh_worker:
-        app.state.pack_refresh_worker.stop()
-    if hasattr(app.state, "retention_worker") and app.state.retention_worker:
-        app.state.retention_worker.stop()
-    if hasattr(app.state, "embedding_worker") and app.state.embedding_worker:
-        app.state.embedding_worker.stop()
-    if hasattr(app.state, "event_bus"):
-        app.state.event_bus.stop_polling()
-    if app.state.db:
-        app.state.db.close()
-    if hasattr(app.state, "db_manager"):
-        app.state.db_manager.close_all()
-    if app.state.mcp_manager:
-        await app.state.mcp_manager.shutdown()
+    _write_progress(_progress_path, "ready", "done")
+    try:
+        yield
+    finally:
+        try:
+            _progress_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if hasattr(app.state, "pack_refresh_worker") and app.state.pack_refresh_worker:
+            app.state.pack_refresh_worker.stop()
+        if hasattr(app.state, "retention_worker") and app.state.retention_worker:
+            app.state.retention_worker.stop()
+        if hasattr(app.state, "embedding_worker") and app.state.embedding_worker:
+            app.state.embedding_worker.stop()
+        if hasattr(app.state, "event_bus"):
+            app.state.event_bus.stop_polling()
+        if app.state.db:
+            app.state.db.close()
+        if hasattr(app.state, "db_manager"):
+            app.state.db_manager.close_all()
+        if app.state.mcp_manager:
+            await app.state.mcp_manager.shutdown()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

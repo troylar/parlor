@@ -553,6 +553,46 @@ class TestTerminateWindows:
         assert result is False
 
 
+class TestProgressFile:
+    def test_progress_path_naming(self, tmp_path: Path) -> None:
+        mgr = ServerManager(data_dir=tmp_path, port=9090)
+        assert mgr.progress_path == tmp_path / "anteroom-9090.progress"
+
+    def test_clear_progress_removes_file(self, tmp_path: Path) -> None:
+        mgr = ServerManager(data_dir=tmp_path)
+        mgr.progress_path.write_text("data")
+        mgr.clear_progress()
+        assert not mgr.progress_path.exists()
+
+    def test_clear_progress_missing_file(self, tmp_path: Path) -> None:
+        mgr = ServerManager(data_dir=tmp_path)
+        mgr.clear_progress()  # should not raise
+
+    def test_start_background_clears_stale_progress(self, tmp_path: Path) -> None:
+        mgr = ServerManager(data_dir=tmp_path)
+        mgr.progress_path.write_text("stale data")
+        mock_proc = MagicMock()
+        mock_proc.pid = 42
+        with (
+            patch.object(ServerManager, "is_process_alive", return_value=False),
+            patch(f"{_MODULE}.subprocess.Popen", return_value=mock_proc),
+        ):
+            mgr.start_background()
+        assert not mgr.progress_path.exists()
+
+    def test_stop_clears_progress(self, tmp_path: Path) -> None:
+        mgr = ServerManager(data_dir=tmp_path)
+        mgr.write_pid(999)
+        mgr.progress_path.write_text("progress data")
+        term_fn = f"{_MODULE}._terminate_unix" if sys.platform != "win32" else f"{_MODULE}._terminate_windows"
+        with (
+            patch.object(ServerManager, "is_process_alive", return_value=True),
+            patch(term_fn, return_value=True),
+        ):
+            mgr.stop()
+        assert not mgr.progress_path.exists()
+
+
 class TestLogRotation:
     def test_truncates_large_log(self, tmp_path: Path) -> None:
         mgr = ServerManager(data_dir=tmp_path)
