@@ -82,12 +82,14 @@ async def event_stream(
         if conv_queue is not None:
             queues.append(conv_queue)
 
+        active_tasks: set[asyncio.Task[Any]] = set()
         try:
             while True:
                 # Create a get task for each queue we're subscribed to
                 get_tasks = {asyncio.create_task(q.get()): q for q in queues}
                 disconnect_task = asyncio.create_task(asyncio.sleep(5.0))
                 all_tasks = set(get_tasks.keys()) | {disconnect_task}
+                active_tasks = all_tasks
 
                 done, pending = await asyncio.wait(all_tasks, return_when=asyncio.FIRST_COMPLETED)
 
@@ -98,6 +100,7 @@ async def event_stream(
                         await p
                     except (asyncio.CancelledError, Exception):
                         pass
+                active_tasks = set()
 
                 # If only the sleep completed, check disconnect and loop
                 if disconnect_task in done and not (done - {disconnect_task}):
@@ -118,6 +121,8 @@ async def event_stream(
                         "data": json.dumps(event.get("data", {})),
                     }
         finally:
+            for t in active_tasks:
+                t.cancel()
             event_bus.unsubscribe(global_channel, global_queue)
             if conv_channel and conv_queue:
                 event_bus.unsubscribe(conv_channel, conv_queue)
