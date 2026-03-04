@@ -38,28 +38,20 @@ class TestReadLastProgress:
     def test_partial_line_skipped(self, tmp_path: Path) -> None:
         f = tmp_path / "progress"
         f.write_text(
-            json.dumps({"step": "database", "status": "done"}) + "\n"
-            + '{"step": "mcp_servers", "sta'  # truncated
+            json.dumps({"step": "database", "status": "done"}) + "\n" + '{"step": "mcp_servers", "sta'  # truncated
         )
         result = _read_last_progress(f)
         assert result == {"step": "database", "status": "done"}
 
     def test_non_dict_json_skipped(self, tmp_path: Path) -> None:
         f = tmp_path / "progress"
-        f.write_text(
-            json.dumps({"step": "database", "status": "done"}) + "\n"
-            + json.dumps([1, 2, 3]) + "\n"
-        )
+        f.write_text(json.dumps({"step": "database", "status": "done"}) + "\n" + json.dumps([1, 2, 3]) + "\n")
         result = _read_last_progress(f)
         assert result == {"step": "database", "status": "done"}
 
     def test_blank_lines_skipped(self, tmp_path: Path) -> None:
         f = tmp_path / "progress"
-        f.write_text(
-            "\n\n"
-            + json.dumps({"step": "tools", "status": "running"}) + "\n"
-            + "\n"
-        )
+        f.write_text("\n\n" + json.dumps({"step": "tools", "status": "running"}) + "\n" + "\n")
         result = _read_last_progress(f)
         assert result == {"step": "tools", "status": "running"}
 

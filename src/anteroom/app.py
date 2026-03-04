@@ -142,9 +142,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     mcp_manager = None
     if config.mcp_servers:
-        _write_progress(
-            _progress_path, "mcp_servers", "running", detail=f"{len(config.mcp_servers)} servers"
-        )
+        _write_progress(_progress_path, "mcp_servers", "running", detail=f"{len(config.mcp_servers)} servers")
         mcp_manager = McpManager(config.mcp_servers, tool_warning_threshold=config.mcp_tool_warning_threshold)
         try:
             await mcp_manager.startup()
