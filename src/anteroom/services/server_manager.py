@@ -50,6 +50,7 @@ class ServerManager:
         self.host = host
         self.port = port
         self.pid_path = data_dir / f"anteroom-{port}.pid"
+        self.progress_path = data_dir / f"anteroom-{port}.progress"
         self.log_path = data_dir / "aroom.log"
 
     # ------------------------------------------------------------------
@@ -96,6 +97,13 @@ class ServerManager:
         """Remove the PID file if it exists."""
         try:
             self.pid_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def clear_progress(self) -> None:
+        """Remove the progress file if it exists."""
+        try:
+            self.progress_path.unlink(missing_ok=True)
         except OSError:
             pass
 
@@ -186,6 +194,7 @@ class ServerManager:
         if existing is not None:
             self.clear_pid()
 
+        self.clear_progress()
         self._rotate_log()
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -246,6 +255,7 @@ class ServerManager:
             stopped = _terminate_unix(pid, timeout)
 
         self.clear_pid()
+        self.clear_progress()
         return stopped
 
     # ------------------------------------------------------------------
