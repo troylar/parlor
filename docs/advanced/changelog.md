@@ -7,6 +7,20 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 3, 2026
 
+### v1.95.0
+
+**New:**
+
+- Streaming watchdog with auto-recovery — web UI no longer hangs on infinite spinner when server stops responding (#737)
+- Debug diagnostic mode for both interfaces: `?debug=1` for web UI, `--debug` for CLI (#737)
+
+**Fixed:**
+
+- Role labels in web UI: assistant messages now show "ANTEROOM" instead of "SYSTEM" (#737)
+- "New Chat" button failing silently when server is unavailable (#737)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.95.0)
+
 ### v1.94.7
 
 **New:**
