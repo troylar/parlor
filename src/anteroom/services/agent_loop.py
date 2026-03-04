@@ -201,9 +201,7 @@ async def _execute_tool(
                 return tc, {"error": f"Tool execution timed out after {int(timeout)}s"}, "timeout"
             return tc, {"error": "Cancelled by user"}, "cancelled"
         else:
-            result = await asyncio.wait_for(
-                tool_executor(tc["function_name"], tc["arguments"]), timeout=timeout
-            )
+            result = await asyncio.wait_for(tool_executor(tc["function_name"], tc["arguments"]), timeout=timeout)
             return tc, result, "success"
     except asyncio.TimeoutError:
         tool_name = tc["function_name"]

@@ -142,7 +142,7 @@ class EventBus:
                     consecutive_errors = 0  # reset on success
                 except Exception:
                     consecutive_errors += 1
-                    backoff = min(POLL_INTERVAL_SECONDS * (2 ** consecutive_errors), max_backoff)
+                    backoff = min(POLL_INTERVAL_SECONDS * (2**consecutive_errors), max_backoff)
                     logger.warning(
                         "Event bus poll error (%d consecutive). Retrying in %.1fs",
                         consecutive_errors,

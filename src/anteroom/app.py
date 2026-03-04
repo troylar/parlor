@@ -889,7 +889,7 @@ def create_app(config: AppConfig | None = None, enforced_fields: list[str] | Non
             '"react":"https://esm.sh/react@19",'
             '"react-dom":"https://esm.sh/react-dom@19",'
             '"react/jsx-runtime":"https://esm.sh/react@19/jsx-runtime"'
-            '}}</script>'
+            "}}</script>"
             "</head><body>"
             '<div id="root"><div id="loading">Waiting for diagram data...</div></div>'
             '<script type="module">'

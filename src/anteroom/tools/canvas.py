@@ -106,8 +106,13 @@ async def handle_create_canvas(
     _user_id: str | None = None,
     _user_display_name: str | None = None,
 ) -> dict[str, Any]:
-    logger.debug("create_canvas called: title=%r, language=%r, content_len=%d, conv=%s",
-                 title, language, len(content), _conversation_id)
+    logger.debug(
+        "create_canvas called: title=%r, language=%r, content_len=%d, conv=%s",
+        title,
+        language,
+        len(content),
+        _conversation_id,
+    )
     if not _conversation_id or not _db:
         logger.warning("create_canvas: missing conversation context")
         return {"error": "Canvas tools require conversation context"}

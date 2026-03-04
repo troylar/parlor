@@ -298,9 +298,7 @@ class AnthropicService:
                             next_task.cancel()
                             if iter_cancel:
                                 iter_cancel.cancel()
-                            logger.warning(
-                                "Anthropic stream stalled — no chunk for %ds", chunk_stall_timeout
-                            )
+                            logger.warning("Anthropic stream stalled — no chunk for %ds", chunk_stall_timeout)
                             yield {
                                 "event": "error",
                                 "data": {
