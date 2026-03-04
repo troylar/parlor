@@ -975,3 +975,135 @@ class TestExecConfirmCallback:
         )
         result = await captured_cb[0](verdict)
         assert result is False
+
+
+class TestExecModeSpaceId:
+    """Tests for space_id parameter in run_exec_mode."""
+
+    @pytest.mark.asyncio
+    async def test_space_instructions_injected(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        events = [FakeEvent("token", {"content": "ok"}), FakeEvent("done", {})]
+
+        captured_system: list[str] = []
+
+        async def _fake_loop(**kw: Any) -> Any:
+            captured_system.append(kw.get("extra_system_prompt", ""))
+            for e in events:
+                yield e
+
+        fake_space = {
+            "id": "s1",
+            "name": "test-space",
+            "instructions": "Always be helpful",
+            "model": None,
+        }
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="base-system"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+            patch("anteroom.services.space_storage.get_space", return_value=fake_space),
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = io.StringIO()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = []
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
+
+            await run_exec_mode(config, prompt="test", space_id="s1")
+
+        assert len(captured_system) == 1
+        assert "<space_instructions>" in captured_system[0]
+        assert "Always be helpful" in captured_system[0]
+
+    @pytest.mark.asyncio
+    async def test_space_model_override(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        events = [FakeEvent("token", {"content": "ok"}), FakeEvent("done", {})]
+
+        async def _fake_loop(**kw: Any) -> Any:
+            for e in events:
+                yield e
+
+        fake_space = {"id": "s1", "name": "test-space", "instructions": "", "model": "gpt-4o-mini"}
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="sys"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+            patch("anteroom.services.space_storage.get_space", return_value=fake_space),
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = io.StringIO()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = []
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
+
+            await run_exec_mode(config, prompt="test", space_id="s1")
+
+        assert config.ai.model == "gpt-4o-mini"
+
+    @pytest.mark.asyncio
+    async def test_space_id_passed_to_create_conversation(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        events = [FakeEvent("token", {"content": "ok"}), FakeEvent("done", {})]
+
+        async def _fake_loop(**kw: Any) -> Any:
+            for e in events:
+                yield e
+
+        fake_space = {"id": "s1", "name": "test", "instructions": "", "model": None}
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="sys"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+            patch("anteroom.services.space_storage.get_space", return_value=fake_space),
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = io.StringIO()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = []
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
+
+            await run_exec_mode(config, prompt="test", space_id="s1")
+
+        mock_storage.create_conversation.assert_called_once()
+        assert mock_storage.create_conversation.call_args.kwargs.get("space_id") == "s1"

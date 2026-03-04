@@ -1503,3 +1503,70 @@ class TestTagEndpoints:
         client = TestClient(app)
         resp = client.post("/api/conversations/bad/tags/also-bad")
         assert resp.status_code == 400
+
+
+class TestListConversationsSpaceFilter:
+    """GET /conversations?space_id= — space filtering."""
+
+    def test_space_id_passed_to_storage(self) -> None:
+        app = _make_app()
+        sid = str(uuid.uuid4())
+        with patch("anteroom.routers.conversations.storage") as mock_storage:
+            mock_storage.list_conversations.return_value = []
+            client = TestClient(app)
+            resp = client.get(f"/api/conversations?space_id={sid}")
+            assert resp.status_code == 200
+            mock_storage.list_conversations.assert_called_once()
+            call_kwargs = mock_storage.list_conversations.call_args
+            assert call_kwargs.kwargs.get("space_id") == sid or call_kwargs[1].get("space_id") == sid
+
+    def test_space_id_omitted_passes_none(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.conversations.storage") as mock_storage:
+            mock_storage.list_conversations.return_value = []
+            client = TestClient(app)
+            resp = client.get("/api/conversations")
+            assert resp.status_code == 200
+            call_kwargs = mock_storage.list_conversations.call_args
+            assert call_kwargs.kwargs.get("space_id") is None or call_kwargs[1].get("space_id") is None
+
+
+class TestCreateConversationSpaceId:
+    """POST /conversations — space_id handling."""
+
+    def test_create_with_valid_space_id(self) -> None:
+        app = _make_app()
+        sid = str(uuid.uuid4())
+        with (
+            patch("anteroom.routers.conversations.storage") as mock_storage,
+            patch("anteroom.services.space_storage.get_space") as mock_get_space,
+        ):
+            mock_get_space.return_value = {"id": sid, "name": "test-space"}
+            mock_storage.create_conversation.return_value = {
+                "id": str(uuid.uuid4()),
+                "title": "Test",
+                "type": "chat",
+                "space_id": sid,
+                "created_at": "2024-01-01",
+                "updated_at": "2024-01-01",
+            }
+            client = TestClient(app)
+            resp = client.post("/api/conversations", json={"type": "chat", "space_id": sid})
+            assert resp.status_code == 201
+            mock_storage.create_conversation.assert_called_once()
+            assert mock_storage.create_conversation.call_args.kwargs.get("space_id") == sid
+
+    def test_create_with_invalid_space_id_format(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.post("/api/conversations", json={"type": "chat", "space_id": "not-a-uuid"})
+        assert resp.status_code == 400
+
+    def test_create_with_nonexistent_space_id(self) -> None:
+        app = _make_app()
+        sid = str(uuid.uuid4())
+        with patch("anteroom.services.space_storage.get_space") as mock_get_space:
+            mock_get_space.return_value = None
+            client = TestClient(app)
+            resp = client.post("/api/conversations", json={"type": "chat", "space_id": sid})
+            assert resp.status_code == 404

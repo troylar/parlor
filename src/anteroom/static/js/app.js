@@ -912,6 +912,8 @@ const App = (() => {
                 clearBtn.addEventListener('click', async () => {
                     state.currentSpaceId = null;
                     select.value = '';
+                    state.currentConversationId = null;
+                    Chat.loadMessages([]);
                     await loadSpaces();
                     await Sidebar.refresh();
                 });
@@ -942,6 +944,8 @@ const App = (() => {
         allItem.addEventListener('click', async () => {
             state.currentSpaceId = null;
             document.getElementById('space-select').value = '';
+            state.currentConversationId = null;
+            Chat.loadMessages([]);
             await loadSpaces();
             await Sidebar.refresh();
         });
@@ -1020,6 +1024,8 @@ const App = (() => {
             item.addEventListener('click', async () => {
                 state.currentSpaceId = s.id;
                 document.getElementById('space-select').value = s.id;
+                state.currentConversationId = null;
+                Chat.loadMessages([]);
                 await loadSpaces();
                 await Sidebar.refresh();
             });

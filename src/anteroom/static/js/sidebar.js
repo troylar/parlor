@@ -54,6 +54,7 @@ const Sidebar = (() => {
             const params = [];
             if (q) params.push(`search=${encodeURIComponent(q)}`);
             if (typeFilter) params.push(`type=${encodeURIComponent(typeFilter)}`);
+            if (App.state.currentSpaceId) params.push(`space_id=${encodeURIComponent(App.state.currentSpaceId)}`);
             const qs = params.length ? `?${params.join('&')}` : '';
             conversations = await App.api(`/api/conversations${qs}`);
             render();

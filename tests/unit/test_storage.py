@@ -143,6 +143,38 @@ class TestConversations:
         assert len(notes) == 1
         assert notes[0]["type"] == "note"
 
+    def test_list_conversations_filter_by_space_id(self, db: sqlite3.Connection) -> None:
+        from anteroom.services.space_storage import create_space
+
+        s1 = create_space(db, "space-one")
+        s2 = create_space(db, "space-two")
+        create_conversation(db, title="In S1", space_id=s1["id"])
+        create_conversation(db, title="In S2", space_id=s2["id"])
+        create_conversation(db, title="No space")
+        result = list_conversations(db, space_id=s1["id"])
+        assert len(result) == 1
+        assert result[0]["title"] == "In S1"
+
+    def test_list_conversations_no_space_filter_returns_all(self, db: sqlite3.Connection) -> None:
+        from anteroom.services.space_storage import create_space
+
+        s = create_space(db, "space-filter-test")
+        create_conversation(db, title="In space", space_id=s["id"])
+        create_conversation(db, title="No space")
+        result = list_conversations(db)
+        assert len(result) == 2
+
+    def test_list_conversations_space_and_type_filter(self, db: sqlite3.Connection) -> None:
+        from anteroom.services.space_storage import create_space
+
+        s = create_space(db, "space-combo")
+        create_conversation(db, title="Chat in space", conversation_type="chat", space_id=s["id"])
+        create_conversation(db, title="Note in space", conversation_type="note", space_id=s["id"])
+        create_conversation(db, title="Chat no space", conversation_type="chat")
+        result = list_conversations(db, space_id=s["id"], conversation_type="note")
+        assert len(result) == 1
+        assert result[0]["title"] == "Note in space"
+
     def test_update_conversation_type(self, db: sqlite3.Connection) -> None:
         conv = create_conversation(db, title="Will Change")
         updated = update_conversation_type(db, conv["id"], "note")
