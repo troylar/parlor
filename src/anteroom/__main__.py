@@ -1656,6 +1656,7 @@ def _run_exec(
     verbose: bool = False,
     no_project_context: bool = False,
     trust_project: bool = False,
+    space_id: str | None = None,
 ) -> None:
     """Launch non-interactive exec mode."""
     if model:
@@ -1678,6 +1679,7 @@ def _run_exec(
                 verbose=verbose,
                 no_project_context=no_project_context,
                 trust_project=trust_project,
+                space_id=space_id,
             )
         )
         sys.exit(exit_code)
@@ -1974,7 +1976,7 @@ def main() -> None:
     space_parser = subparsers.add_parser("space", help="Manage spaces")
     space_subparsers = space_parser.add_subparsers(dest="space_action")
     space_subparsers.add_parser("list", help="List all spaces")
-    space_create_parser = space_subparsers.add_parser("create", help="Create a local space in the current directory")
+    space_create_parser = space_subparsers.add_parser("create", help="Create a new global space")
     space_create_parser.add_argument("name", help="Space name")
     space_subparsers.add_parser("init", help="Create a local space, deriving the name from the directory")
     space_load_parser = space_subparsers.add_parser("load", help="Load an existing space YAML file")
@@ -2203,6 +2205,7 @@ def main() -> None:
             verbose=args.verbose,
             no_project_context=args.no_project_context,
             trust_project=args.trust_project,
+            space_id=_space_id,
         )
     else:
         _run_web(config, config_path, debug=args.debug, enforced_fields=enforced_fields)

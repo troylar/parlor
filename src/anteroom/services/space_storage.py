@@ -214,7 +214,7 @@ def get_space_local_dirs(db: ThreadSafeConnection, space_id: str) -> list[str]:
 
 
 def discover_space_file(cwd: str) -> Path | None:
-    """Walk up from *cwd* looking for a space YAML file in a project directory.
+    """Walk up from *cwd* looking for a space YAML file in parent directories.
 
     Checks ``.anteroom/``, ``.claude/``, and ``.parlor/`` at each level.
     Prefers ``space.yaml`` over other ``*.yaml`` files.  Skips ``.local.yaml``

@@ -29,6 +29,7 @@ const Sidebar = (() => {
             const typeFilter = typeEl ? typeEl.value : '';
             const params = [];
             if (typeFilter) params.push(`type=${encodeURIComponent(typeFilter)}`);
+            if (App.state.currentSpaceId) params.push(`space_id=${encodeURIComponent(App.state.currentSpaceId)}`);
             const qs = params.length ? `?${params.join('&')}` : '';
             const convUrl = `/api/conversations${qs}`;
             [conversations, folders, allTags] = await Promise.all([

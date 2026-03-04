@@ -233,7 +233,7 @@ async def api_sync_space(request: Request) -> dict[str, Any]:
     if not (str(path).startswith(str(global_dir)) or anteroom_dir_name in path.parts):
         raise HTTPException(
             status_code=400,
-            detail="Path must be inside ~/.anteroom/ or a project .anteroom/ directory",
+            detail="Path must be inside ~/.anteroom/ or a local .anteroom/ directory",
         )
 
     if not path.is_file():

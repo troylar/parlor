@@ -107,10 +107,12 @@ const Chat = (() => {
 
         const conversationId = App.state.currentConversationId;
         if (!conversationId) {
+            const payload = { type: _conversationType };
+            if (App.state.currentSpaceId) payload.space_id = App.state.currentSpaceId;
             const conv = await App.api('/api/conversations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: _conversationType }),
+                body: JSON.stringify(payload),
             });
             App.state.currentConversationId = conv.id;
             App.state.currentConversationType = conv.type || 'chat';

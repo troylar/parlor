@@ -178,7 +178,7 @@ const Palette = (() => {
             const icon = document.createElement('span');
             icon.className = 'palette-icon';
             if (item.type === 'model') icon.textContent = '\u2699';
-            else if (item.type === 'project') icon.textContent = '\uD83D\uDCC1';
+            else if (item.type === 'space') icon.textContent = '\uD83C\uDF10';
             else if (item.type === 'conversation') icon.textContent = '\uD83D\uDCAC';
             else if (item.type === 'theme') icon.textContent = '\uD83C\uDFA8';
             else icon.textContent = '\u26A1';

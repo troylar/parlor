@@ -371,6 +371,7 @@ def list_conversations(
     limit: int = DEFAULT_PAGE_LIMIT,
     offset: int = 0,
     conversation_type: str | None = None,
+    space_id: str | None = None,
 ) -> list[dict[str, Any]]:
     conditions: list[str] = []
     params: list[Any] = []
@@ -385,6 +386,10 @@ def list_conversations(
     if conversation_type and conversation_type in VALID_CONVERSATION_TYPES:
         conditions.append("c.type = ?")
         params.append(conversation_type)
+
+    if space_id:
+        conditions.append("c.space_id = ?")
+        params.append(space_id)
 
     # SECURITY-REVIEW: conditions list contains only static literal strings (never user input);
     # all user values are in params as bind parameters. Safe query-builder pattern.

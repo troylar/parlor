@@ -151,6 +151,7 @@ async def run_exec_mode(
     verbose: bool = False,
     no_project_context: bool = False,
     trust_project: bool = False,
+    space_id: str | None = None,
 ) -> int:
     """Run a prompt non-interactively and return an exit code."""
     working_dir = os.getcwd()
@@ -335,6 +336,16 @@ async def run_exec_mode(
         mcp_servers=mcp_statuses,
     )
 
+    # Inject space instructions if a space is active
+    if space_id:
+        from ..services.space_storage import get_space
+
+        space = get_space(db, space_id)
+        if space and space.get("instructions"):
+            extra_system_prompt += f"\n\n<space_instructions>\n{space['instructions']}\n</space_instructions>"
+        if space and space.get("model"):
+            config.ai.model = space["model"]
+
     ai_service = create_ai_service(config.ai)
 
     # Create conversation for persistence
@@ -345,6 +356,7 @@ async def run_exec_mode(
         db,
         title=f"exec: {prompt[:80]}" if persist_messages else f"exec-audit: {prompt[:40]}",
         working_dir=working_dir,
+        space_id=space_id,
         **id_kw,
     )
     if persist_messages:

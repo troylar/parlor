@@ -2651,7 +2651,7 @@ body {
 
 
 /* ============================================================
-   SIDEBAR SECTIONS & PROJECTS
+   SIDEBAR SECTIONS & SPACES
    ============================================================ */
 
 .sidebar-section-header {
@@ -4430,11 +4430,6 @@ body {
     border: 1px solid var(--accent) !important;
 }
 .source-edit-btn {
-    background: var(--bg-input) !important;
-    color: var(--text-primary) !important;
-    border: 1px solid var(--border-color) !important;
-}
-.source-link-project-btn {
     background: var(--bg-input) !important;
     color: var(--text-primary) !important;
     border: 1px solid var(--border-color) !important;

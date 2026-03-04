@@ -95,9 +95,10 @@ async def list_conversations(
     request: Request,
     search: str | None = None,
     type: str | None = Query(default=None, pattern=r"^(chat|note|document)$"),
+    space_id: str | None = None,
 ) -> Any:
     db = _get_db(request)
-    return storage.list_conversations(db, search=search, conversation_type=type)
+    return storage.list_conversations(db, search=search, conversation_type=type, space_id=space_id)
 
 
 @router.post("/conversations", status_code=201)

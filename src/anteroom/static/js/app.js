@@ -1043,7 +1043,7 @@ const App = (() => {
             if (active && chatIndicator && chatIndicatorName) {
                 chatIndicatorName.textContent = active.name;
                 if (chatIndicatorOrigin) {
-                    chatIndicatorOrigin.textContent = active.origin || '';
+                    chatIndicatorOrigin.textContent = active.origin === 'local' ? 'synced' : (active.origin === 'global' ? 'global' : '');
                 }
                 chatIndicator.style.display = 'flex';
             }

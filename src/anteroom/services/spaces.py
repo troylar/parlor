@@ -2,13 +2,13 @@
 
 Spaces are YAML-based workspace definitions that can live in two locations:
 
-- **Local (project)**: ``.anteroom/space.yaml`` inside a project directory.
-  Auto-discovered when you ``cd`` into the project and run ``aroom chat``.
+- **Local**: ``.anteroom/space.yaml`` inside a directory.
+  Auto-discovered when you ``cd`` into the directory and run ``aroom chat``.
 - **Global**: ``~/.anteroom/spaces/<name>.yaml``. Available from any directory.
 
-``space create`` and ``space init`` default to creating a local space file in
-the current directory.  ``space list`` shows origin (local/global) and which
-space is active.
+``space init`` creates a local space file in the current directory.
+``space create`` creates a global space.  ``space list`` shows origin
+(local/global) and which space is active.
 """
 
 from __future__ import annotations
@@ -210,7 +210,7 @@ def slugify_dir_name(name: str) -> str:
 
 _SPACE_TEMPLATE = """\
 # Anteroom Space: {name}
-# This file configures an AI workspace for this project.
+# This file configures an AI workspace for this directory.
 #
 # When you run `aroom chat` from this directory, this space activates
 # automatically — your tools, instructions, and config apply instantly.
