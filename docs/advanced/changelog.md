@@ -7,6 +7,17 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 5, 2026
 
+### v1.99.0
+
+**New:**
+
+- Install packs from git URLs: `aroom pack install https://github.com/org/repo --attach` (#762)
+- Zero-config onboarding: pack config overlays provide required settings, skipping the init wizard (#762)
+- Priority-based conflict resolution for pack config overlays with `--priority` flag (#762)
+- `aroom config view --with-sources` shows which layer set each config key (#759)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.99.0)
+
 ### v1.98.2
 
 **Improved:**
