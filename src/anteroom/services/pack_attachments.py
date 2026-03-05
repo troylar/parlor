@@ -62,6 +62,20 @@ def attach_pack(
         raise ValueError(msg)
 
     # --- Config overlay conflict detection -----------------------------------
+    # "Forbid overlaps" policy: two packs may not set the same config key
+    # (dot-path).  We check BEFORE inserting the attachment row.
+    #
+    # Sequence:
+    #   1. Collect overlays from the NEW pack (may be empty if pack has
+    #      no config_overlay artifacts — skip check in that case).
+    #   2. Collect overlays from ALL currently-attached packs at this scope.
+    #   3. For each new overlay, compare dot-paths against existing ones.
+    #   4. If any overlap is found, raise ValueError — the user must detach
+    #      the conflicting pack first, or use check_overlay_conflicts=False.
+    #
+    # TOCTOU note: another process could attach a conflicting pack between
+    # our check and the INSERT below.  This is acceptable for single-user
+    # SQLite; a multi-user backend would need a serializable transaction.
     if check_overlay_conflicts:
         from .config_overlays import collect_pack_overlays, detect_overlay_conflicts
 
@@ -215,6 +229,9 @@ def attach_pack_to_space(
         raise ValueError(msg)
 
     # --- Config overlay conflict detection -----------------------------------
+    # Same "forbid overlaps" policy as attach_pack(), but scoped to space.
+    # Uses get_active_pack_ids_for_space() which includes global + space packs.
+    # See attach_pack() for detailed documentation on the conflict detection flow.
     if check_overlay_conflicts:
         from .config_overlays import collect_pack_overlays, detect_overlay_conflicts
 

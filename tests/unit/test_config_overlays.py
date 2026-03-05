@@ -470,3 +470,80 @@ class TestAttachPackConflictDetection:
 
         result = attach_pack(db, pid2, check_overlay_conflicts=False)
         assert result["pack_id"] == pid2
+
+
+# ---------------------------------------------------------------------------
+# Integration: attach_pack_to_space conflict detection
+# ---------------------------------------------------------------------------
+
+
+def _insert_space(db: ThreadSafeConnection, space_id: str = "space-1", name: str = "test-space") -> str:
+    """Insert a minimal space row for testing."""
+    db.execute(
+        "INSERT INTO spaces (id, name, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))",
+        (space_id, name),
+    )
+    db.commit()
+    return space_id
+
+
+class TestAttachPackToSpaceConflictDetection:
+    """Tests for config overlay conflict detection in attach_pack_to_space.
+
+    These mirror TestAttachPackConflictDetection but use the space-scoped
+    attachment path (attach_pack_to_space) which queries a different set
+    of active pack IDs (global + space-scoped).
+    """
+
+    def test_attach_to_space_no_overlay_succeeds(self, db: ThreadSafeConnection) -> None:
+        from anteroom.services.pack_attachments import attach_pack_to_space
+
+        pid = _insert_pack(db)
+        sid = _insert_space(db)
+        result = attach_pack_to_space(db, pid, sid)
+        assert result["pack_id"] == pid
+        assert result["scope"] == "space"
+
+    def test_attach_to_space_with_overlay_no_conflict(self, db: ThreadSafeConnection) -> None:
+        from anteroom.services.pack_attachments import attach_pack_to_space
+
+        sid = _insert_space(db)
+
+        pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
+        _insert_config_overlay(db, pid1, "@ns1/config_overlay/x", {"ai": {"model": "gpt-4o"}})
+        attach_pack_to_space(db, pid1, sid)
+
+        pid2 = _insert_pack(db, namespace="ns2", name="pack-b")
+        _insert_config_overlay(db, pid2, "@ns2/config_overlay/y", {"safety": {"approval_mode": "ask"}})
+        result = attach_pack_to_space(db, pid2, sid)
+        assert result["pack_id"] == pid2
+
+    def test_attach_to_space_with_overlay_conflict_raises(self, db: ThreadSafeConnection) -> None:
+        from anteroom.services.pack_attachments import attach_pack_to_space
+
+        sid = _insert_space(db)
+
+        pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
+        _insert_config_overlay(db, pid1, "@ns1/config_overlay/x", {"ai": {"model": "gpt-4o"}})
+        attach_pack_to_space(db, pid1, sid)
+
+        pid2 = _insert_pack(db, namespace="ns2", name="pack-b")
+        _insert_config_overlay(db, pid2, "@ns2/config_overlay/y", {"ai": {"model": "claude-3"}})
+
+        with pytest.raises(ValueError, match="Config overlay conflict"):
+            attach_pack_to_space(db, pid2, sid)
+
+    def test_attach_to_space_skip_conflict_check(self, db: ThreadSafeConnection) -> None:
+        from anteroom.services.pack_attachments import attach_pack_to_space
+
+        sid = _insert_space(db)
+
+        pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
+        _insert_config_overlay(db, pid1, "@ns1/config_overlay/x", {"ai": {"model": "gpt-4o"}})
+        attach_pack_to_space(db, pid1, sid)
+
+        pid2 = _insert_pack(db, namespace="ns2", name="pack-b")
+        _insert_config_overlay(db, pid2, "@ns2/config_overlay/y", {"ai": {"model": "claude-3"}})
+
+        result = attach_pack_to_space(db, pid2, sid, check_overlay_conflicts=False)
+        assert result["pack_id"] == pid2
