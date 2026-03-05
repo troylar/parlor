@@ -50,14 +50,12 @@ def _create_pack_dir(tmp_path: Path) -> Path:
 
 class TestRunPackNoAction:
     def test_no_action_prints_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = None
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_dispatch
 
-        with patch("anteroom.db.get_db"):
-            _run_pack(config, args)
+        _run_pack_dispatch(args)
 
         captured = capsys.readouterr()
         assert "Usage" in captured.out
@@ -65,14 +63,12 @@ class TestRunPackNoAction:
 
 class TestRunPackList:
     def test_list_empty(self, db: ThreadSafeConnection, capsys: pytest.CaptureFixture[str]) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "list"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(Path("/tmp"), db, args)
 
         captured = capsys.readouterr()
         assert "No packs installed" in captured.out
@@ -84,18 +80,71 @@ class TestRunPackList:
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "list"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "test-ns" in captured.out
         assert "test-pack" in captured.out
+
+    def test_list_shows_attachment_status(
+        self, tmp_path: Path, db: ThreadSafeConnection, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from anteroom.__main__ import _run_pack
+        from anteroom.services.pack_attachments import attach_pack
+
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        attach_pack(db, result["id"], priority=10)
+
+        args = MagicMock()
+        args.pack_action = "list"
+        _run_pack(tmp_path, db, args)
+
+        captured = capsys.readouterr()
+        assert "global" in captured.out
+        assert "p10" in captured.out
+
+    def test_list_shows_not_attached(
+        self, tmp_path: Path, db: ThreadSafeConnection, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from anteroom.__main__ import _run_pack
+
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+
+        args = MagicMock()
+        args.pack_action = "list"
+        _run_pack(tmp_path, db, args)
+
+        captured = capsys.readouterr()
+        assert "no" in captured.out
+
+    def test_list_hides_default_priority(
+        self, tmp_path: Path, db: ThreadSafeConnection, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from anteroom.__main__ import _run_pack
+        from anteroom.services.pack_attachments import attach_pack
+
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        attach_pack(db, result["id"])  # default priority 50
+
+        args = MagicMock()
+        args.pack_action = "list"
+        _run_pack(tmp_path, db, args)
+
+        captured = capsys.readouterr()
+        assert "global" in captured.out
+        # Default priority (50) should not show "p50"
+        assert "p50" not in captured.out
 
 
 class TestRunPackInstall:
@@ -104,16 +153,17 @@ class TestRunPackInstall:
     ) -> None:
         pack_dir = _create_pack_dir(tmp_path)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "install"
-        args.path = str(pack_dir)
+        args.source = str(pack_dir)
         args.project = False
+        args.attach = False
+        args.branch = "main"
+        args.subpath = None
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "Installed" in captured.out
@@ -124,16 +174,18 @@ class TestRunPackInstall:
         pack_dir.mkdir()
         (pack_dir / "pack.yaml").write_text("not_valid: true\n")
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "install"
-        args.path = str(pack_dir)
+        args.source = str(pack_dir)
         args.project = False
+        args.attach = False
+        args.branch = "main"
+        args.subpath = None
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=MagicMock()), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(tmp_path, MagicMock(), args)
 
     def test_install_missing_artifact_file(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         pack_dir = tmp_path / "pack"
@@ -147,16 +199,18 @@ class TestRunPackInstall:
         with open(pack_dir / "pack.yaml", "w", encoding="utf-8") as f:
             yaml.dump(manifest_data, f)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "install"
-        args.path = str(pack_dir)
+        args.source = str(pack_dir)
         args.project = False
+        args.attach = False
+        args.branch = "main"
+        args.subpath = None
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=MagicMock()), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(tmp_path, MagicMock(), args)
 
 
 class TestRunPackShow:
@@ -165,41 +219,37 @@ class TestRunPackShow:
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "show"
         args.ref = "test-ns/test-pack"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "test-ns/test-pack" in captured.out
         assert "1.0.0" in captured.out
 
     def test_show_not_found(self, db: ThreadSafeConnection) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "show"
         args.ref = "no/such-pack"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(Path("/tmp"), db, args)
 
     def test_show_invalid_ref(self) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "show"
         args.ref = "no-slash"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=MagicMock()), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(Path("/tmp"), MagicMock(), args)
 
 
 class TestRunPackRemove:
@@ -210,40 +260,36 @@ class TestRunPackRemove:
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "remove"
         args.ref = "test-ns/test-pack"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "Removed" in captured.out
 
     def test_remove_not_found(self, db: ThreadSafeConnection) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "remove"
         args.ref = "no/such-pack"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(Path("/tmp"), db, args)
 
     def test_remove_invalid_ref(self) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "remove"
         args.ref = "noslash"
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=MagicMock()), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(Path("/tmp"), MagicMock(), args)
 
 
 class TestRunPackUpdate:
@@ -252,7 +298,6 @@ class TestRunPackUpdate:
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "update"
         args.path = str(pack_dir)
@@ -260,8 +305,7 @@ class TestRunPackUpdate:
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "Updated" in captured.out
@@ -272,7 +316,6 @@ class TestRunPackUpdate:
         pack_dir.mkdir()
         (pack_dir / "pack.yaml").write_text("not_valid: true\n")
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "update"
         args.path = str(pack_dir)
@@ -280,8 +323,8 @@ class TestRunPackUpdate:
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=MagicMock()), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(tmp_path, MagicMock(), args)
 
 
 class TestRunPackSources:
@@ -291,10 +334,10 @@ class TestRunPackSources:
         args = MagicMock()
         args.pack_action = "sources"
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_with_config
 
         with patch("anteroom.db.get_db", return_value=MagicMock()):
-            _run_pack(config, args)
+            _run_pack_with_config(config, args)
 
         captured = capsys.readouterr()
         assert "No pack sources configured" in captured.out
@@ -308,7 +351,7 @@ class TestRunPackSources:
         args = MagicMock()
         args.pack_action = "sources"
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_with_config
 
         with (
             patch("anteroom.db.get_db", return_value=MagicMock()),
@@ -324,7 +367,7 @@ class TestRunPackSources:
                 ],
             ),
         ):
-            _run_pack(config, args)
+            _run_pack_with_config(config, args)
 
         captured = capsys.readouterr()
         assert "example.com" in captured.out
@@ -337,44 +380,65 @@ class TestRunPackAttach:
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "attach"
         args.ref = "test-ns/test-pack"
         args.project = False
+        args.priority = 50
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "Attached" in captured.out
         assert "global" in captured.out
+        # Default priority (50) should NOT appear in output — it's noise
+        assert "priority" not in captured.out
+
+    def test_attach_with_custom_priority(
+        self, tmp_path: Path, db: ThreadSafeConnection, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+
+        args = MagicMock()
+        args.pack_action = "attach"
+        args.ref = "test-ns/test-pack"
+        args.project = False
+        args.priority = 10
+
+        from anteroom.__main__ import _run_pack
+
+        _run_pack(tmp_path, db, args)
+
+        captured = capsys.readouterr()
+        assert "priority 10" in captured.out
 
     def test_attach_not_found(self, db: ThreadSafeConnection) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "attach"
         args.ref = "no/such-pack"
         args.project = False
+        args.priority = 50
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(Path("/tmp"), db, args)
 
     def test_attach_invalid_ref(self) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "attach"
         args.ref = "noslash"
         args.project = False
+        args.priority = 50
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=MagicMock()), pytest.raises(SystemExit):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack(Path("/tmp"), MagicMock(), args)
 
 
 class TestRunPackDetach:
@@ -387,7 +451,6 @@ class TestRunPackDetach:
         pack_id = resolve_pack_id(db, "test-ns", "test-pack")
         attach_pack(db, pack_id)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "detach"
         args.ref = "test-ns/test-pack"
@@ -395,8 +458,7 @@ class TestRunPackDetach:
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "Detached" in captured.out
@@ -408,7 +470,6 @@ class TestRunPackDetach:
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
 
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "detach"
         args.ref = "test-ns/test-pack"
@@ -416,8 +477,7 @@ class TestRunPackDetach:
 
         from anteroom.__main__ import _run_pack
 
-        with patch("anteroom.db.get_db", return_value=db):
-            _run_pack(config, args)
+        _run_pack(tmp_path, db, args)
 
         captured = capsys.readouterr()
         assert "Not attached" in captured.out
@@ -430,10 +490,10 @@ class TestRunPackRefresh:
         args = MagicMock()
         args.pack_action = "refresh"
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_with_config
 
         with patch("anteroom.db.get_db", return_value=MagicMock()):
-            _run_pack(config, args)
+            _run_pack_with_config(config, args)
 
         captured = capsys.readouterr()
         assert "No pack sources configured" in captured.out
@@ -447,7 +507,7 @@ class TestRunPackRefresh:
         args = MagicMock()
         args.pack_action = "refresh"
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_with_config
 
         mock_worker = MagicMock()
         mock_worker.refresh_all.return_value = [
@@ -458,7 +518,7 @@ class TestRunPackRefresh:
             patch("anteroom.db.get_db", return_value=MagicMock()),
             patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker),
         ):
-            _run_pack(config, args)
+            _run_pack_with_config(config, args)
 
         captured = capsys.readouterr()
         assert "OK" in captured.out
@@ -473,7 +533,7 @@ class TestRunPackRefresh:
         args = MagicMock()
         args.pack_action = "refresh"
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_with_config
 
         mock_worker = MagicMock()
         mock_worker.refresh_all.return_value = [
@@ -484,7 +544,7 @@ class TestRunPackRefresh:
             patch("anteroom.db.get_db", return_value=MagicMock()),
             patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker),
         ):
-            _run_pack(config, args)
+            _run_pack_with_config(config, args)
 
         captured = capsys.readouterr()
         assert "FAIL" in captured.out
@@ -498,21 +558,17 @@ class TestRunPackRefresh:
 
 class TestRunPackAddSource:
     def test_adds_source_to_config(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        config = _make_config()
-        config.pack_sources = []
         args = MagicMock()
         args.pack_action = "add-source"
         args.url = "https://github.com/acme/packs.git"
+        args.team_config = None
 
         config_path = tmp_path / "config.yaml"
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_dispatch
 
-        with (
-            patch("anteroom.db.get_db", return_value=MagicMock()),
-            patch("anteroom.config._get_config_path", return_value=config_path),
-        ):
-            _run_pack(config, args)
+        with patch("anteroom.config._get_config_path", return_value=config_path):
+            _run_pack_dispatch(args)
 
         captured = capsys.readouterr()
         assert "Added pack source" in captured.out
@@ -522,57 +578,48 @@ class TestRunPackAddSource:
         assert data["pack_sources"][0]["url"] == "https://github.com/acme/packs.git"
 
     def test_rejects_http(self, capsys: pytest.CaptureFixture[str]) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "add-source"
         args.url = "http://example.com/packs.git"
+        args.team_config = None
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_dispatch
 
-        with (
-            patch("anteroom.db.get_db", return_value=MagicMock()),
-            pytest.raises(SystemExit),
-        ):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack_dispatch(args)
 
         captured = capsys.readouterr()
         assert "Plaintext HTTP" in captured.out
 
     def test_rejects_ext_scheme(self, capsys: pytest.CaptureFixture[str]) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "add-source"
         args.url = "ext::sh -c exploit"
+        args.team_config = None
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_dispatch
 
-        with (
-            patch("anteroom.db.get_db", return_value=MagicMock()),
-            pytest.raises(SystemExit),
-        ):
-            _run_pack(config, args)
+        with pytest.raises(SystemExit):
+            _run_pack_dispatch(args)
 
         captured = capsys.readouterr()
         assert "not allowed" in captured.out
 
     def test_duplicate_source_skipped(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        config = _make_config()
         args = MagicMock()
         args.pack_action = "add-source"
         args.url = "https://github.com/acme/packs.git"
+        args.team_config = None
 
         config_path = tmp_path / "config.yaml"
         config_path.write_text(
             yaml.dump({"pack_sources": [{"url": "https://github.com/acme/packs.git", "branch": "main"}]})
         )
 
-        from anteroom.__main__ import _run_pack
+        from anteroom.__main__ import _run_pack_dispatch
 
-        with (
-            patch("anteroom.db.get_db", return_value=MagicMock()),
-            patch("anteroom.config._get_config_path", return_value=config_path),
-        ):
-            _run_pack(config, args)
+        with patch("anteroom.config._get_config_path", return_value=config_path):
+            _run_pack_dispatch(args)
 
         captured = capsys.readouterr()
         assert "already configured" in captured.out

@@ -14,9 +14,14 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+    from .db import ThreadSafeConnection
 
 from . import __version__
 from .config import AppConfig, _get_config_path, load_config
@@ -29,25 +34,75 @@ def _run_init(force: bool = False, team_config: str | None = None) -> None:
     run_init_wizard(force=force, team_config_path=team_config)
 
 
+def _collect_pack_overlay() -> dict[str, Any] | None:
+    """Collect merged config overlays from attached packs.
+
+    Opens the DB at the default data_dir (without requiring config.yaml)
+    and queries for globally-attached packs with ``config_overlay``
+    artifacts.  Returns the merged overlay dict, or ``None`` if no
+    overlays are active.
+
+    This is Phase 1 of the two-phase config load: we need the DB to
+    discover pack overlays, then feed those overlays into
+    :func:`load_config` (Phase 2) so they participate in the merge chain.
+    """
+    from .config import _resolve_data_dir
+    from .db import get_db
+
+    data_dir = _resolve_data_dir()
+    db_path = data_dir / "chat.db"
+    if not db_path.exists():
+        return None
+
+    try:
+        db = get_db(db_path)
+        from .services.config_overlays import collect_pack_overlays, merge_pack_overlays
+        from .services.pack_attachments import get_active_pack_ids, get_attachment_priorities
+
+        active_ids = get_active_pack_ids(db)
+        if not active_ids:
+            return None
+
+        overlays = collect_pack_overlays(db, active_ids)
+        if not overlays:
+            return None
+
+        priorities = get_attachment_priorities(db, active_ids)
+        return merge_pack_overlays(overlays, priorities)
+    except Exception:
+        logging.getLogger(__name__).debug("Failed to collect pack overlays", exc_info=True)
+        return None
+
+
 def _load_config_or_exit(
     team_config_path: Path | None = None,
     *,
     interactive: bool = False,
 ) -> tuple[Path, AppConfig, list[str]]:
     config_path = _get_config_path()
-    if not config_path.exists():
+
+    # Phase 1: collect pack config overlays from the DB (if any).
+    # This runs before the init wizard so that pack overlays can provide
+    # required fields like ai.base_url and ai.api_key, enabling
+    # zero-config onboarding via `aroom pack install <url> --attach`.
+    pack_config = _collect_pack_overlay()
+
+    if not config_path.exists() and not pack_config:
+        # No config file AND no pack overlays — run the init wizard.
         print(f"No configuration file found at {config_path}", file=sys.stderr)
         from .cli.setup import run_init_wizard
 
         if not run_init_wizard():
             sys.exit(1)
-        # Re-check after wizard
         if not config_path.exists():
             sys.exit(1)
+
+    # Phase 2: load config with pack overlays in the merge chain.
     try:
         config, enforced_fields = load_config(
             team_config_path=team_config_path,
             interactive=interactive,
+            pack_config=pack_config,
         )
     except ValueError as e:
         print(f"Configuration error: {e}", file=sys.stderr)
@@ -64,6 +119,32 @@ def _load_config_or_exit(
         sys.exit(1)
 
     return config_path, config, enforced_fields
+
+
+def _ensure_db_for_pack_ops() -> tuple[Path, "ThreadSafeConnection"]:
+    """Return (data_dir, db) without requiring config.yaml.
+
+    For pack commands that need a database but not a full config (e.g.
+    ``aroom pack install <url>``), this creates ``~/.anteroom/`` and
+    initializes the DB with default settings.  If a config file exists,
+    it is loaded normally to honour the user's ``data_dir`` setting.
+    """
+    from .config import _resolve_data_dir
+    from .db import get_db
+
+    config_path = _get_config_path()
+    if config_path.exists():
+        try:
+            config, _ = load_config()
+            data_dir = config.app.data_dir
+        except ValueError:
+            data_dir = _resolve_data_dir()
+    else:
+        data_dir = _resolve_data_dir()
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    db = get_db(data_dir / "chat.db")
+    return data_dir, db
 
 
 def _run_config_validate(team_config_path: Path | None = None) -> None:
@@ -1189,23 +1270,194 @@ def _pick_from_candidates(
     return None
 
 
-def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
-    """Handle `aroom pack` subcommands."""
-    from pathlib import Path
+def _run_pack_install(
+    data_dir: Path,
+    db: "ThreadSafeConnection",
+    args: argparse.Namespace,
+    console: "Console",
+) -> None:
+    """Install a pack from a local path or a git URL.
 
-    from rich.console import Console
+    When *source* is a git URL (``https://``, ``ssh://``, ``git@host:path``),
+    the repo is shallow-cloned into the pack source cache and ``pack.yaml``
+    manifests are discovered automatically.  If ``--path`` is given it
+    narrows discovery to that subdirectory.  When ``--attach`` is given
+    the pack is attached to global scope after installation.
+    """
+    from .services.pack_sources import is_git_url
+
+    source: str = args.source
+
+    if is_git_url(source):
+        _install_from_url(data_dir, db, args, console, source)
+    else:
+        _install_from_path(db, args, console, Path(source).resolve())
+
+
+def _install_from_url(
+    data_dir: Path,
+    db: "ThreadSafeConnection",
+    args: argparse.Namespace,
+    console: "Console",
+    url: str,
+) -> None:
+    """Clone a git repo and install all discovered packs."""
     from rich.markup import escape
-    from rich.table import Table
 
-    from .db import get_db
+    from .services import packs
+    from .services.pack_sources import check_git_available, clone_source
+
+    if not check_git_available():
+        console.print("[red]git is not installed or not on PATH.[/red]")
+        sys.exit(1)
+
+    branch = getattr(args, "branch", "main") or "main"
+    console.print(f"Cloning [bold]{escape(url)}[/bold] (branch: {escape(branch)})...")
+
+    result = clone_source(url, branch, data_dir)
+    if not result.success:
+        console.print(f"[red]Clone failed:[/red] {escape(result.error)}")
+        sys.exit(1)
+
+    cache_path = result.path
+    assert cache_path is not None
+
+    # Discover pack.yaml manifests in the cloned repo
+    subpath = getattr(args, "subpath", None)
+    search_root = cache_path / subpath if subpath else cache_path
+    if not search_root.is_dir():
+        console.print(f"[red]Subdirectory not found:[/red] {escape(subpath or '')}")
+        sys.exit(1)
+
+    manifests = sorted(search_root.rglob("pack.yaml"))
+    if not manifests:
+        console.print(f"[red]No pack.yaml found in {escape(str(search_root))}[/red]")
+        sys.exit(1)
+
+    installed_packs: list[dict[str, Any]] = []
+    project_dir = Path.cwd() if getattr(args, "project", False) else None
+
+    for manifest_path in manifests:
+        pack_dir = manifest_path.parent
+        try:
+            manifest = packs.parse_manifest(manifest_path)
+        except ValueError as e:
+            console.print(f"[yellow]Skipping {escape(str(manifest_path))}:[/yellow] {e}")
+            continue
+
+        errors = packs.validate_manifest(manifest, pack_dir)
+        if errors:
+            console.print(f"[yellow]Skipping {escape(manifest.namespace)}/{escape(manifest.name)}:[/yellow]")
+            for err in errors:
+                console.print(f"  - {err}")
+            continue
+
+        try:
+            install_result: dict[str, Any] = packs.install_pack(
+                db, manifest, pack_dir, project_dir=project_dir,
+            )
+        except ValueError as e:
+            console.print(f"[yellow]Skipping {escape(manifest.namespace)}/{escape(manifest.name)}:[/yellow] {e}")
+            continue
+
+        console.print(
+            f"[green]Installed[/green] {escape(install_result['namespace'])}/{escape(install_result['name'])} "
+            f"v{escape(install_result['version'])} ({install_result['artifact_count']} artifacts)"
+        )
+        installed_packs.append(install_result)
+
+    if not installed_packs:
+        console.print("[red]No packs were installed.[/red]")
+        sys.exit(1)
+
+    # Auto-attach if requested
+    if getattr(args, "attach", False):
+        from .services.pack_attachments import attach_pack
+
+        priority = getattr(args, "priority", 50) or 50
+        for p in installed_packs:
+            try:
+                attach_pack(db, p["id"], priority=priority)
+                pri_note = f", priority {priority}" if priority != 50 else ""
+                console.print(
+                    f"[green]Attached[/green] {escape(p['namespace'])}/{escape(p['name'])}"
+                    f" (global{pri_note})"
+                )
+            except ValueError as e:
+                console.print(f"[yellow]Attach warning:[/yellow] {e}")
+
+
+def _install_from_path(
+    db: "ThreadSafeConnection",
+    args: argparse.Namespace,
+    console: "Console",
+    pack_path: Path,
+) -> None:
+    """Install a pack from a local directory."""
+    from rich.markup import escape
+
     from .services import packs
 
+    manifest_path = pack_path / "pack.yaml"
+    try:
+        manifest = packs.parse_manifest(manifest_path)
+    except ValueError as e:
+        console.print(f"[red]Invalid manifest:[/red] {e}")
+        sys.exit(1)
+
+    errors = packs.validate_manifest(manifest, pack_path)
+    if errors:
+        console.print("[red]Manifest validation errors:[/red]")
+        for err in errors:
+            console.print(f"  - {err}")
+        sys.exit(1)
+
+    project_dir = Path.cwd() if getattr(args, "project", False) else None
+    try:
+        install_result: dict[str, Any] = packs.install_pack(db, manifest, pack_path, project_dir=project_dir)
+    except ValueError as e:
+        console.print(f"[red]Install failed:[/red] {e}")
+        sys.exit(1)
+
+    console.print(
+        f"[green]Installed[/green] {escape(install_result['namespace'])}/{escape(install_result['name'])} "
+        f"v{escape(install_result['version'])} ({install_result['artifact_count']} artifacts)"
+    )
+
+    # Auto-attach if requested
+    if getattr(args, "attach", False):
+        from .services.pack_attachments import attach_pack
+
+        priority = getattr(args, "priority", 50) or 50
+        try:
+            attach_pack(db, install_result["id"], priority=priority)
+            ns = escape(install_result["namespace"])
+            nm = escape(install_result["name"])
+            pri_note = f", priority {priority}" if priority != 50 else ""
+            console.print(f"[green]Attached[/green] {ns}/{nm} (global{pri_note})")
+        except ValueError as e:
+            console.print(f"[yellow]Attach warning:[/yellow] {e}")
+
+
+def _run_pack_dispatch(args: argparse.Namespace) -> None:
+    """Route ``aroom pack`` subcommands without requiring a full config.
+
+    This wrapper exists so that ``aroom pack install <url>`` works even
+    before ``aroom init`` has been run.  It calls
+    :func:`_ensure_db_for_pack_ops` (which only needs ``~/.anteroom/``)
+    instead of :func:`_load_config_or_exit` (which triggers the init
+    wizard).
+    """
     action = getattr(args, "pack_action", None)
     if not action:
         print("Usage: aroom pack {list,install,show,remove,update,sources,refresh,attach,detach,add-source}")
         return
 
+    # add-source doesn't need a DB — it writes config.yaml directly
     if action == "add-source":
+        from rich.console import Console
+        from rich.markup import escape
+
         from .services.pack_sources import add_pack_source
 
         url = args.url.strip()
@@ -1221,7 +1473,94 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
         console.print("Run [bold]aroom pack refresh[/bold] to clone and install packs.")
         return
 
+    # sources/refresh need full config for pack_sources list
+    if action in ("sources", "refresh"):
+        _team_config_arg = getattr(args, "team_config", None)
+        _team_config_path = Path(_team_config_arg) if _team_config_arg else None
+        _config_path, config, _enforced = _load_config_or_exit(team_config_path=_team_config_path)
+        _run_pack_with_config(config, args)
+        return
+
+    data_dir, db = _ensure_db_for_pack_ops()
+    _run_pack(data_dir, db, args)
+
+
+def _run_pack_with_config(config: AppConfig, args: argparse.Namespace) -> None:
+    """Handle pack subcommands that require the full config (sources, refresh)."""
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
+    from .db import get_db
+
     db = get_db(config.app.data_dir / "chat.db")
+    console = Console()
+    action = getattr(args, "pack_action", None)
+
+    if action == "sources":
+        from .services.pack_sources import list_cached_sources
+
+        sources = getattr(config, "pack_sources", [])
+        if not sources:
+            console.print("[dim]No pack sources configured in config.yaml.[/dim]")
+            return
+
+        table = Table(title="Pack Sources")
+        table.add_column("URL", style="bold")
+        table.add_column("Branch")
+        table.add_column("Refresh")
+        table.add_column("Cached", justify="center")
+        table.add_column("Ref", max_width=12)
+
+        cached = list_cached_sources(config.app.data_dir)
+        cached_urls = {c.url: c for c in cached}
+
+        for src in sources:
+            cached_src = cached_urls.get(src.url)
+            is_cached = cached_src is not None
+            ref = cached_src.ref[:12] if cached_src and cached_src.ref else "-"
+            interval = f"{src.refresh_interval}m" if src.refresh_interval > 0 else "manual"
+            table.add_row(
+                src.url,
+                src.branch,
+                interval,
+                "[green]yes[/green]" if is_cached else "[dim]no[/dim]",
+                ref,
+            )
+        console.print(table)
+
+    elif action == "refresh":
+        from .services.pack_refresh import PackRefreshWorker
+
+        sources = getattr(config, "pack_sources", [])
+        if not sources:
+            console.print("[dim]No pack sources configured in config.yaml.[/dim]")
+            return
+
+        worker = PackRefreshWorker(db=db, data_dir=config.app.data_dir, sources=sources)
+        results = worker.refresh_all()
+        for r in results:
+            if r.success:
+                parts = []
+                if r.packs_installed:
+                    parts.append(f"{r.packs_installed} installed")
+                if r.packs_updated:
+                    parts.append(f"{r.packs_updated} updated")
+                status = ", ".join(parts) if parts else "up to date"
+                console.print(f"[green]OK[/green] {escape(r.url)} — {status}")
+            else:
+                console.print(f"[red]FAIL[/red] {escape(r.url)} — {escape(r.error)}")
+
+
+def _run_pack(data_dir: Path, db: "ThreadSafeConnection", args: argparse.Namespace) -> None:
+    """Handle ``aroom pack`` subcommands that only need a database."""
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
+    from .services import packs
+
+    action = getattr(args, "pack_action", None)
     console = Console()
 
     if action == "list":
@@ -1229,49 +1568,40 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
         if not pack_list:
             console.print("[dim]No packs installed.[/dim]")
             return
+
+        from .services.pack_attachments import list_attachments_for_pack
+
         table = Table(title="Installed Packs")
         table.add_column("Namespace", style="bold")
         table.add_column("Name", style="bold")
         table.add_column("Version")
         table.add_column("Artifacts", justify="right")
+        table.add_column("Attached", style="green")
         table.add_column("Installed")
         for p in pack_list:
+            attachments = list_attachments_for_pack(db, p["id"])
+            if attachments:
+                att_parts = []
+                for att in attachments:
+                    scope = att.get("scope", "global")
+                    pri = att.get("priority", 50)
+                    pri_note = f" p{pri}" if pri != 50 else ""
+                    att_parts.append(f"{scope}{pri_note}")
+                att_str = ", ".join(att_parts)
+            else:
+                att_str = "[dim]no[/dim]"
             table.add_row(
                 p["namespace"],
                 p["name"],
                 p["version"],
                 str(p.get("artifact_count", 0)),
+                att_str,
                 p.get("installed_at", "")[:10],
             )
         console.print(table)
 
     elif action == "install":
-        pack_path = Path(args.path).resolve()
-        manifest_path = pack_path / "pack.yaml"
-        try:
-            manifest = packs.parse_manifest(manifest_path)
-        except ValueError as e:
-            console.print(f"[red]Invalid manifest:[/red] {e}")
-            sys.exit(1)
-
-        errors = packs.validate_manifest(manifest, pack_path)
-        if errors:
-            console.print("[red]Manifest validation errors:[/red]")
-            for err in errors:
-                console.print(f"  - {err}")
-            sys.exit(1)
-
-        project_dir = Path.cwd() if getattr(args, "project", False) else None
-        try:
-            install_result: dict[str, Any] = packs.install_pack(db, manifest, pack_path, project_dir=project_dir)
-        except ValueError as e:
-            console.print(f"[red]Install failed:[/red] {e}")
-            sys.exit(1)
-
-        console.print(
-            f"[green]Installed[/green] {escape(install_result['namespace'])}/{escape(install_result['name'])} "
-            f"v{escape(install_result['version'])} ({install_result['artifact_count']} artifacts)"
-        )
+        _run_pack_install(data_dir, db, args, console)
 
     elif action == "show":
         namespace, name = _validate_pack_ref(args.ref)
@@ -1356,60 +1686,6 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
             f"v{escape(update_result['version'])} ({update_result['artifact_count']} artifacts)"
         )
 
-    elif action == "sources":
-        from .services.pack_sources import list_cached_sources
-
-        sources = getattr(config, "pack_sources", [])
-        if not sources:
-            console.print("[dim]No pack sources configured in config.yaml.[/dim]")
-            return
-
-        table = Table(title="Pack Sources")
-        table.add_column("URL", style="bold")
-        table.add_column("Branch")
-        table.add_column("Refresh")
-        table.add_column("Cached", justify="center")
-        table.add_column("Ref", max_width=12)
-
-        cached = list_cached_sources(config.app.data_dir)
-        cached_urls = {c.url: c for c in cached}
-
-        for src in sources:
-            cached_src = cached_urls.get(src.url)
-            is_cached = cached_src is not None
-            ref = cached_src.ref[:12] if cached_src and cached_src.ref else "-"
-            interval = f"{src.refresh_interval}m" if src.refresh_interval > 0 else "manual"
-            table.add_row(
-                src.url,
-                src.branch,
-                interval,
-                "[green]yes[/green]" if is_cached else "[dim]no[/dim]",
-                ref,
-            )
-        console.print(table)
-
-    elif action == "refresh":
-        from .services.pack_refresh import PackRefreshWorker
-
-        sources = getattr(config, "pack_sources", [])
-        if not sources:
-            console.print("[dim]No pack sources configured in config.yaml.[/dim]")
-            return
-
-        worker = PackRefreshWorker(db=db, data_dir=config.app.data_dir, sources=sources)
-        results = worker.refresh_all()
-        for r in results:
-            if r.success:
-                parts = []
-                if r.packs_installed:
-                    parts.append(f"{r.packs_installed} installed")
-                if r.packs_updated:
-                    parts.append(f"{r.packs_updated} updated")
-                status = ", ".join(parts) if parts else "up to date"
-                console.print(f"[green]OK[/green] {escape(r.url)} — {status}")
-            else:
-                console.print(f"[red]FAIL[/red] {escape(r.url)} — {escape(r.error)}")
-
     elif action == "attach":
         from .services.pack_attachments import attach_pack
 
@@ -1426,14 +1702,16 @@ def _run_pack(config: AppConfig, args: argparse.Namespace) -> None:
             sys.exit(1)
 
         project_path = str(Path.cwd()) if getattr(args, "project", False) else None
+        priority = getattr(args, "priority", 50) or 50
         try:
-            attach_pack(db, match["id"], project_path=project_path)
+            attach_pack(db, match["id"], project_path=project_path, priority=priority)
         except ValueError as e:
             console.print(f"[red]Attach failed:[/red] {e}")
             sys.exit(1)
 
         scope = "project" if project_path else "global"
-        console.print(f"[green]Attached[/green] {escape(args.ref)} ({scope})")
+        pri_note = f", priority {priority}" if priority != 50 else ""
+        console.print(f"[green]Attached[/green] {escape(args.ref)} ({scope}{pri_note})")
 
     elif action == "detach":
         from .services.pack_attachments import detach_pack
@@ -2125,12 +2403,34 @@ def main() -> None:
     pack_parser = subparsers.add_parser("pack", help="Manage artifact packs")
     pack_subparsers = pack_parser.add_subparsers(dest="pack_action")
     pack_subparsers.add_parser("list", help="List installed packs")
-    pack_install_parser = pack_subparsers.add_parser("install", help="Install a pack from a local directory")
-    pack_install_parser.add_argument("path", help="Path to pack directory containing pack.yaml")
+    pack_install_parser = pack_subparsers.add_parser("install", help="Install a pack from a local path or git URL")
+    pack_install_parser.add_argument(
+        "source", help="Path to pack directory or git URL (https://, ssh://, git@host:path)",
+    )
     pack_install_parser.add_argument(
         "--project",
         action="store_true",
         help="Copy pack into .anteroom/packs/",
+    )
+    pack_install_parser.add_argument(
+        "--attach",
+        action="store_true",
+        help="Attach the pack to global scope after install",
+    )
+    pack_install_parser.add_argument(
+        "--branch",
+        default="main",
+        help="Git branch to clone (default: main)",
+    )
+    pack_install_parser.add_argument(
+        "--path",
+        dest="subpath",
+        default=None,
+        help="Subdirectory within the repo containing pack.yaml",
+    )
+    pack_install_parser.add_argument(
+        "--priority", type=int, default=50,
+        help="Precedence for --attach when packs conflict (1=highest, 100=lowest). Default: 50.",
     )
     pack_show_parser = pack_subparsers.add_parser("show", help="Show pack details")
     pack_show_parser.add_argument("ref", help="Pack reference as namespace/name")
@@ -2148,6 +2448,10 @@ def main() -> None:
     pack_attach_parser = pack_subparsers.add_parser("attach", help="Attach a pack to global or project scope")
     pack_attach_parser.add_argument("ref", help="Pack reference as namespace/name")
     pack_attach_parser.add_argument("--project", action="store_true", help="Attach to current project only")
+    pack_attach_parser.add_argument(
+        "--priority", type=int, default=50,
+        help="Precedence when packs conflict (1=highest, 100=lowest). Default: 50.",
+    )
     pack_detach_parser = pack_subparsers.add_parser("detach", help="Detach a pack from global or project scope")
     pack_detach_parser.add_argument("ref", help="Pack reference as namespace/name")
     pack_detach_parser.add_argument("--project", action="store_true", help="Detach from current project only")
@@ -2253,6 +2557,13 @@ def main() -> None:
         _run_audit(args)
         return
 
+    # Pack commands work without config.yaml for zero-config onboarding.
+    # We route them before _load_config_or_exit() so `aroom pack install <url>`
+    # works even before `aroom init`.
+    if args.command == "pack":
+        _run_pack_dispatch(args)
+        return
+
     _team_config_arg = getattr(args, "team_config", None)
     _team_config_path = Path(_team_config_arg) if _team_config_arg else None
     _is_interactive = args.command in ("chat", None)  # chat or web UI (default)
@@ -2335,9 +2646,6 @@ def main() -> None:
         _run_artifact(config, args)
         return
 
-    if args.command == "pack":
-        _run_pack(config, args)
-        return
 
     if args.command == "space":
         _run_space(config, args)

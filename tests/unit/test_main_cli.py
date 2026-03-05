@@ -1820,14 +1820,11 @@ class TestRunPackDispatch:
         from anteroom.__main__ import main
 
         with (
-            patch("anteroom.__main__._load_config_or_exit") as mock_load,
-            patch("anteroom.__main__._run_pack") as mock_run,
+            patch("anteroom.__main__._run_pack_dispatch") as mock_dispatch,
         ):
-            config = _make_config()
-            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
             with patch("sys.argv", ["aroom", "pack", "install", "/tmp/pack"]):
                 main()
 
-        mock_run.assert_called_once()
-        args_passed = mock_run.call_args[0][1]
+        mock_dispatch.assert_called_once()
+        args_passed = mock_dispatch.call_args[0][0]
         assert args_passed.pack_action == "install"

@@ -70,6 +70,21 @@ def _sanitize_url(url: str) -> str:
     return _CREDENTIAL_PATTERN.sub(r"\1***@", url)
 
 
+def is_git_url(arg: str) -> bool:
+    """Return ``True`` if *arg* looks like a git URL rather than a local path.
+
+    Matches ``https://``, ``http://``, ``ssh://``, ``git://`` schemes
+    and ``git@host:path`` SSH shorthand.  ``http://`` will be matched
+    (so URL-path routing works) but rejected later by
+    :func:`_validate_url_scheme`.
+    """
+    if any(arg.startswith(s) for s in ("https://", "http://", "ssh://", "git://")):
+        return True
+    if _GIT_AT_PATTERN.match(arg):
+        return True
+    return False
+
+
 @dataclass
 class AddSourceResult:
     """Result of adding a pack source URL to config."""
