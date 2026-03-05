@@ -891,6 +891,14 @@ async def _run_mcp_startup_live(
         renderer.console.print(f"  [{MUTED}]MCP: {', '.join(parts)}[/{MUTED}]\n")
 
 
+_SUB_PROMPT_TIMEOUT: float = 300.0  # 5 min timeout for interactive sub-prompts
+
+
+async def _timed_input(prompt_text: str, timeout: float = _SUB_PROMPT_TIMEOUT) -> str:
+    """Read a line of input with a timeout. Raises TimeoutError on expiry."""
+    return await asyncio.wait_for(asyncio.to_thread(input, prompt_text), timeout=timeout)
+
+
 async def _resolve_pack_interactive(
     db: Any,
     ns: str,
@@ -918,11 +926,11 @@ async def _resolve_pack_interactive(
                 f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} v{_c.get('version', '')} [{_c['id'][:8]}...]"
             )
         try:
-            _ch = (await asyncio.to_thread(input, f"Select (1-{len(_pc)}): ")).strip()
+            _ch = (await _timed_input(f"Select (1-{len(_pc)}): ")).strip()
             _idx = int(_ch) - 1
             if 0 <= _idx < len(_pc):
                 _pm = _pc[_idx]
-        except (ValueError, EOFError, KeyboardInterrupt):
+        except (ValueError, EOFError, KeyboardInterrupt, TimeoutError):
             pass
     return _pm
 
@@ -2130,10 +2138,22 @@ async def _run_repl(
     _toolbar_dirty: list[bool] = [True]
 
     _cached_git_branch: list[str] = [_detect_git_branch() or ""]
+    _git_branch_last_check: list[float] = [0.0]
+    _git_branch_throttle: float = 10.0  # seconds between re-checks
+
+    def _refresh_git_branch() -> None:
+        """Re-detect git branch if enough time has elapsed."""
+        import time as _time
+
+        now = _time.monotonic()
+        if now - _git_branch_last_check[0] >= _git_branch_throttle:
+            _git_branch_last_check[0] = now
+            _cached_git_branch[0] = _detect_git_branch() or ""
 
     def _toolbar_refresh() -> None:
         """Recompute the cached toolbar content."""
         _toolbar_dirty[0] = False
+        _refresh_git_branch()
         # _active_space and _plan_active are defined later in _run_repl but
         # _toolbar_refresh is only ever called during prompt rendering, which
         # happens after those variables exist.  Guard with try/except for safety.
@@ -2578,11 +2598,11 @@ async def _run_repl(
                 for i, c in enumerate(candidates, 1):
                     renderer.console.print(f"  {i}. {c['name']} [{c['id'][:8]}...]")
                 try:
-                    choice = (await asyncio.to_thread(input, f"Select (1-{len(candidates)}): ")).strip()
+                    choice = (await _timed_input(f"Select (1-{len(candidates)}): ")).strip()
                     idx = int(choice) - 1
                     if 0 <= idx < len(candidates):
                         return candidates[idx]
-                except (ValueError, EOFError, KeyboardInterrupt):
+                except (ValueError, EOFError, KeyboardInterrupt, TimeoutError):
                     pass
             return None
 
@@ -2799,8 +2819,8 @@ async def _run_repl(
                         continue
                     title = to_delete.get("title", "Untitled")
                     try:
-                        answer = (await asyncio.to_thread(input, f'  Delete "{title}"? [y/N] ')).strip().lower()
-                    except (EOFError, KeyboardInterrupt):
+                        answer = (await _timed_input(f'  Delete "{title}"? [y/N] ')).strip().lower()
+                    except (EOFError, KeyboardInterrupt, TimeoutError):
                         renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                         continue
                     if answer not in ("y", "yes"):
@@ -4051,8 +4071,8 @@ async def _run_repl(
                         f"\n[{CHROME}]Enter position to rewind to (keep that message, delete after):[/{CHROME}]"
                     )
                     try:
-                        pos_input = (await asyncio.to_thread(input, "  Position: ")).strip()
-                    except (EOFError, KeyboardInterrupt):
+                        pos_input = (await _timed_input("  Position: ")).strip()
+                    except (EOFError, KeyboardInterrupt, TimeoutError):
                         renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                         continue
 
@@ -4078,9 +4098,9 @@ async def _run_repl(
                         for fp in sorted(file_paths):
                             renderer.console.print(f"  - {fp}")
                         try:
-                            answer = (await asyncio.to_thread(input, "  Undo file changes? [y/N] ")).strip().lower()
+                            answer = (await _timed_input("  Undo file changes? [y/N] ")).strip().lower()
                             undo_files = answer in ("y", "yes")
-                        except (EOFError, KeyboardInterrupt):
+                        except (EOFError, KeyboardInterrupt, TimeoutError):
                             renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
                             continue
 

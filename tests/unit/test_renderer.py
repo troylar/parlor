@@ -3302,6 +3302,58 @@ class TestFormatStatusToolbar:
         result = format_status_toolbar(model="gpt-4o", tool_count=5)
         assert result[-1][0] != "class:bottom-toolbar.sep"
 
+    def test_shows_working_dir(self):
+        result = format_status_toolbar(working_dir="/home/user/project")
+        text = "".join(t[1] for t in result)
+        assert "project" in text
+
+    def test_shows_git_branch(self):
+        result = format_status_toolbar(working_dir="/home/user/project", git_branch="feat-x")
+        text = "".join(t[1] for t in result)
+        assert "feat-x" in text
+
+    def test_git_branch_without_working_dir_hidden(self):
+        result = format_status_toolbar(git_branch="feat-x")
+        text = "".join(t[1] for t in result)
+        assert "feat-x" not in text
+
+    def test_shows_space_name(self):
+        result = format_status_toolbar(space_name="my-space")
+        text = "".join(t[1] for t in result)
+        assert "my-space" in text
+
+    def test_shows_plan_mode(self):
+        result = format_status_toolbar(plan_mode=True)
+        text = "".join(t[1] for t in result)
+        assert "PLAN" in text
+
+    def test_hides_plan_mode_when_false(self):
+        result = format_status_toolbar(plan_mode=False)
+        text = "".join(t[1] for t in result)
+        assert "PLAN" not in text
+
+    def test_shows_conversation_name(self):
+        result = format_status_toolbar(conversation_name="swift-fox")
+        text = "".join(t[1] for t in result)
+        assert "swift-fox" in text
+
+    def test_full_toolbar_with_new_fields(self):
+        result = format_status_toolbar(
+            model="gpt-4o",
+            working_dir="/home/user/project",
+            git_branch="main",
+            space_name="dev",
+            plan_mode=True,
+            conversation_name="swift-fox",
+            tool_count=5,
+        )
+        text = "".join(t[1] for t in result)
+        assert "gpt-4o" in text
+        assert "main" in text
+        assert "dev" in text
+        assert "PLAN" in text
+        assert "swift-fox" in text
+
 
 # ---------------------------------------------------------------------------
 # Regression tests for #617 bug fixes
