@@ -372,8 +372,7 @@ def detect_overlay_conflicts(
         for path in sorted(overlap):
             if use_priorities:
                 conflicts.append(
-                    f"'{path}' is set by both {existing_label} and {new_label}"
-                    f" (both at priority {new_priority})"
+                    f"'{path}' is set by both {existing_label} and {new_label} (both at priority {new_priority})"
                 )
             else:
                 conflicts.append(f"'{path}' is set by both {existing_label} and {new_label}")

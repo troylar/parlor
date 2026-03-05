@@ -1354,7 +1354,10 @@ def _install_from_url(
 
         try:
             install_result: dict[str, Any] = packs.install_pack(
-                db, manifest, pack_dir, project_dir=project_dir,
+                db,
+                manifest,
+                pack_dir,
+                project_dir=project_dir,
             )
         except ValueError as e:
             console.print(f"[yellow]Skipping {escape(manifest.namespace)}/{escape(manifest.name)}:[/yellow] {e}")
@@ -1380,8 +1383,7 @@ def _install_from_url(
                 attach_pack(db, p["id"], priority=priority)
                 pri_note = f", priority {priority}" if priority != 50 else ""
                 console.print(
-                    f"[green]Attached[/green] {escape(p['namespace'])}/{escape(p['name'])}"
-                    f" (global{pri_note})"
+                    f"[green]Attached[/green] {escape(p['namespace'])}/{escape(p['name'])} (global{pri_note})"
                 )
             except ValueError as e:
                 console.print(f"[yellow]Attach warning:[/yellow] {e}")
@@ -2405,7 +2407,8 @@ def main() -> None:
     pack_subparsers.add_parser("list", help="List installed packs")
     pack_install_parser = pack_subparsers.add_parser("install", help="Install a pack from a local path or git URL")
     pack_install_parser.add_argument(
-        "source", help="Path to pack directory or git URL (https://, ssh://, git@host:path)",
+        "source",
+        help="Path to pack directory or git URL (https://, ssh://, git@host:path)",
     )
     pack_install_parser.add_argument(
         "--project",
@@ -2429,7 +2432,9 @@ def main() -> None:
         help="Subdirectory within the repo containing pack.yaml",
     )
     pack_install_parser.add_argument(
-        "--priority", type=int, default=50,
+        "--priority",
+        type=int,
+        default=50,
         help="Precedence for --attach when packs conflict (1=highest, 100=lowest). Default: 50.",
     )
     pack_show_parser = pack_subparsers.add_parser("show", help="Show pack details")
@@ -2449,7 +2454,9 @@ def main() -> None:
     pack_attach_parser.add_argument("ref", help="Pack reference as namespace/name")
     pack_attach_parser.add_argument("--project", action="store_true", help="Attach to current project only")
     pack_attach_parser.add_argument(
-        "--priority", type=int, default=50,
+        "--priority",
+        type=int,
+        default=50,
         help="Precedence when packs conflict (1=highest, 100=lowest). Default: 50.",
     )
     pack_detach_parser = pack_subparsers.add_parser("detach", help="Detach a pack from global or project scope")
@@ -2645,7 +2652,6 @@ def main() -> None:
     if args.command == "artifact":
         _run_artifact(config, args)
         return
-
 
     if args.command == "space":
         _run_space(config, args)

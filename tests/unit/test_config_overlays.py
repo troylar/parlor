@@ -662,7 +662,8 @@ class TestDetectOverlayConflictsWithPriority:
         existing = [("ns1/pack-a", {"ai": {"model": "gpt-4o"}})]
         new = ("ns2/pack-b", {"ai": {"model": "claude-3"}})
         conflicts = detect_overlay_conflicts(
-            existing, new,
+            existing,
+            new,
             new_priority=50,
             existing_priorities={"ns1/pack-a": 50},
         )
@@ -674,7 +675,8 @@ class TestDetectOverlayConflictsWithPriority:
         existing = [("ns1/pack-a", {"ai": {"model": "gpt-4o"}})]
         new = ("ns2/pack-b", {"ai": {"model": "claude-3"}})
         conflicts = detect_overlay_conflicts(
-            existing, new,
+            existing,
+            new,
             new_priority=10,
             existing_priorities={"ns1/pack-a": 50},
         )
@@ -693,7 +695,9 @@ class TestDetectOverlayConflictsWithPriority:
         existing = [("ns1/pack-a", {"ai": {"model": "gpt-4o"}})]
         new = ("ns2/pack-b", {"ai": {"model": "claude-3"}})
         conflicts = detect_overlay_conflicts(
-            existing, new, new_priority=10,
+            existing,
+            new,
+            new_priority=10,
         )
         assert len(conflicts) == 1
 
@@ -705,7 +709,8 @@ class TestDetectOverlayConflictsWithPriority:
         ]
         new = ("ns2/pack-b", {"ai": {"model": "claude-3"}})
         conflicts = detect_overlay_conflicts(
-            existing, new,
+            existing,
+            new,
             new_priority=50,
             existing_priorities={"ns1/pack-a": 10, "ns3/pack-c": 50},
         )
@@ -718,7 +723,8 @@ class TestDetectOverlayConflictsWithPriority:
         existing = [("ns1/pack-a", {"ai": {"model": "gpt-4o"}})]
         new = ("ns2/pack-b", {"safety": {"approval_mode": "ask"}})
         conflicts = detect_overlay_conflicts(
-            existing, new,
+            existing,
+            new,
             new_priority=50,
             existing_priorities={"ns1/pack-a": 50},
         )
@@ -978,7 +984,9 @@ class TestDetectArtifactConflicts:
         priorities = get_attachment_priorities(db, [pid1])
         # Even with different priorities, skills still conflict
         conflicts = detect_artifact_conflicts(
-            db, pid2, [pid1],
+            db,
+            pid2,
+            [pid1],
             new_priority=10,
             existing_priorities=priorities,
         )
