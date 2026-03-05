@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import sys
 import time
@@ -56,112 +55,6 @@ def use_stdout_console() -> None:
     _stdout_console = Console(file=_real_stderr, force_terminal=True)
     _stdout = _real_stderr
     _repl_mode = True
-
-
-_fullscreen_mode: bool = False
-_fullscreen_layout: Any = None  # AnteroomLayout instance (avoid circular import)
-_fullscreen_invalidate: Any = None  # Callable[[], None]
-
-
-def get_fullscreen_layout() -> Any:
-    """Return the current fullscreen layout, or ``None`` if not in fullscreen mode."""
-    return _fullscreen_layout
-
-
-def use_fullscreen_output(layout: Any, invalidate_fn: Any) -> None:
-    """Switch renderer to full-screen mode.
-
-    All Rich output is captured as ANSI and redirected to the layout's
-    output pane.  The thinking spinner becomes a status-line update
-    instead of raw ANSI cursor manipulation.
-
-    Parameters
-    ----------
-    layout:
-        An ``AnteroomLayout`` instance whose ``output`` control receives
-        rendered fragments.
-    invalidate_fn:
-        Callable (typically ``app.invalidate``) that triggers a repaint
-        after new content is appended.
-    """
-    global console, _stdout_console, _stdout, _repl_mode
-    global _fullscreen_mode, _fullscreen_layout, _fullscreen_invalidate
-
-    from .layout import OutputPaneWriter
-
-    _fullscreen_mode = True
-    _fullscreen_layout = layout
-    _fullscreen_invalidate = invalidate_fn
-    _repl_mode = True
-
-    writer = OutputPaneWriter(layout.output, invalidate_fn)
-    console = Console(file=writer, force_terminal=True)  # type: ignore[arg-type]
-    _stdout_console = Console(file=writer, force_terminal=True)  # type: ignore[arg-type]
-    _stdout = writer  # type: ignore[assignment]
-
-
-def is_fullscreen() -> bool:
-    """Return whether the renderer is in full-screen layout mode."""
-    return _fullscreen_mode
-
-
-# ---------------------------------------------------------------------------
-# Fullscreen-safe logging handler
-# ---------------------------------------------------------------------------
-
-_original_log_handlers: list[logging.Handler] | None = None
-
-
-class FullscreenLogHandler(logging.Handler):
-    """Route log records through the renderer's console instead of raw stderr.
-
-    When fullscreen mode is active, the module-level ``console`` writes through
-    ``OutputPaneWriter`` into the layout's output pane.  This handler formats
-    log records and writes them via that console, preventing raw stderr writes
-    from corrupting the prompt_toolkit fullscreen layout.
-    """
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = self.format(record)
-            level = record.levelno
-            if level >= logging.ERROR:
-                console.print(f"[{ERROR_RED}]{escape(msg)}[/{ERROR_RED}]")
-            elif level >= logging.WARNING:
-                console.print(f"[{MUTED}]{escape(msg)}[/{MUTED}]")
-        except Exception:
-            self.handleError(record)
-
-
-def install_fullscreen_log_handler() -> None:
-    """Replace root logger's stderr handlers with a fullscreen-safe handler.
-
-    Saves original handlers so they can be restored on fullscreen exit.
-    """
-    global _original_log_handlers
-    root = logging.getLogger()
-    _original_log_handlers = list(root.handlers)
-    for h in list(root.handlers):
-        if isinstance(h, logging.StreamHandler) and not isinstance(h, FullscreenLogHandler):
-            root.removeHandler(h)
-    handler = FullscreenLogHandler()
-    handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
-    root.addHandler(handler)
-
-
-def restore_log_handlers() -> None:
-    """Restore original log handlers after fullscreen exits."""
-    global _original_log_handlers
-    if _original_log_handlers is None:
-        return
-    root = logging.getLogger()
-    for h in list(root.handlers):
-        if isinstance(h, FullscreenLogHandler):
-            root.removeHandler(h)
-    for h in _original_log_handlers:
-        if h not in root.handlers:
-            root.addHandler(h)
-    _original_log_handlers = None
 
 
 def configure_thresholds(
@@ -223,60 +116,6 @@ _tool_batch_active: bool = False
 _plan_steps: list[dict[str, str]] = []  # [{"text": "...", "status": "pending|in_progress|complete"}]
 _plan_visible: bool = False
 _plan_written_lines: int = 0  # lines currently on screen (for cursor-up on redraw)
-_plan_checkpoint: int = 0  # OutputControl fragment index for plan block (fullscreen)
-
-
-def _render_plan_to_pane() -> None:
-    """Render the plan checklist into the fullscreen output pane.
-
-    Truncates back to ``_plan_checkpoint`` and re-appends all steps,
-    allowing in-place updates without ANSI cursor codes.
-
-    Safe to call while streaming is active — saves and restores the
-    streaming cursor state so both plan updates and token streaming
-    remain consistent.
-    """
-    global _streaming_checkpoint, _streaming_cursor_active
-    if not _fullscreen_layout or not _plan_steps:
-        return
-
-    output = _fullscreen_layout.output
-
-    # If the streaming cursor is active, stop it first so its fragments
-    # are removed cleanly before we truncate back to the plan checkpoint.
-    was_streaming = _streaming_cursor_active
-    if was_streaming:
-        _stop_streaming_cursor()
-
-    output.truncate_to(_plan_checkpoint)
-
-    # Plan header
-    output.append([("class:plan.header", "  Plan\n")])
-
-    # Steps
-    _step_icons = {
-        "pending": ("\u25cb", "class:plan.pending"),  # ○
-        "in_progress": ("\u25b8", "class:plan.active"),  # ▸
-        "complete": ("\u2713", "class:plan.complete"),  # ✓
-        "failed": ("\u2717", "class:plan.failed"),  # ✗
-    }
-    for step in _plan_steps:
-        status = step["status"]
-        icon, style = _step_icons.get(status, ("\u25cb", "class:plan.pending"))
-        output.append([(style, f"    {icon} {step['text']}\n")])
-
-    output.append_newline()
-
-    # Update streaming checkpoint to be after the plan block
-    _streaming_checkpoint = output.checkpoint()
-
-    # Restore streaming cursor if it was active — re-render buffer + cursor
-    if was_streaming:
-        _streaming_cursor_active = True
-        _update_streaming_cursor()
-
-    if _fullscreen_invalidate:
-        _fullscreen_invalidate()
 
 
 # ---------------------------------------------------------------------------
@@ -290,14 +129,10 @@ def start_plan(steps: list[str]) -> None:
     Call this when a plan is approved and execution begins.
     The checklist is rendered above the thinking line during agentic runs.
     """
-    global _plan_steps, _plan_visible, _plan_written_lines, _plan_checkpoint, _streaming_checkpoint
+    global _plan_steps, _plan_visible, _plan_written_lines
     _plan_steps = [{"text": s, "status": "pending"} for s in steps]
     _plan_visible = True
     _plan_written_lines = 0
-
-    if _fullscreen_mode and _fullscreen_layout:
-        _plan_checkpoint = _fullscreen_layout.output.checkpoint()
-        _render_plan_to_pane()
 
 
 def update_plan_step(index: int, status: str) -> None:
@@ -309,10 +144,6 @@ def update_plan_step(index: int, status: str) -> None:
         return
     _plan_steps[index]["status"] = status
 
-    if _fullscreen_mode and _fullscreen_layout:
-        _render_plan_to_pane()
-        return
-
     # Redraw if thinking block is on screen
     if _repl_mode and _thinking_start and _stdout and _plan_written_lines > 0:
         elapsed = time.monotonic() - _thinking_start
@@ -321,15 +152,10 @@ def update_plan_step(index: int, status: str) -> None:
 
 def clear_plan() -> None:
     """Clear plan state entirely (e.g. on /plan off or new conversation)."""
-    global _plan_steps, _plan_visible, _plan_written_lines, _plan_checkpoint, _streaming_checkpoint
-    # Remove plan fragments from the fullscreen output pane before resetting checkpoint
-    if _fullscreen_mode and _fullscreen_layout and _plan_checkpoint > 0:
-        _fullscreen_layout.output.truncate_to(_plan_checkpoint)
-        _streaming_checkpoint = _fullscreen_layout.output.checkpoint()
+    global _plan_steps, _plan_visible, _plan_written_lines
     _plan_steps = []
     _plan_visible = False
     _plan_written_lines = 0
-    _plan_checkpoint = 0
 
 
 def _plan_block_height() -> int:
@@ -353,17 +179,7 @@ def _collapse_plan() -> None:
     completed = sum(1 for s in _plan_steps if s["status"] == "complete")
     total = len(_plan_steps)
 
-    if _fullscreen_mode and _fullscreen_layout:
-        # In fullscreen, render as styled fragments to the output pane
-        summary = f"  \u2713 Plan: {completed}/{total} steps complete\n"
-        if completed == total:
-            _fullscreen_layout.append_output_fragments([("class:status", summary)])
-        else:
-            summary = f"  \u25cb Plan: {completed}/{total} steps complete\n"
-            _fullscreen_layout.append_output_fragments([("class:status.hint", summary)])
-        if _fullscreen_invalidate:
-            _fullscreen_invalidate()
-    elif _repl_mode and _stdout:
+    if _repl_mode and _stdout:
         green = "\033[32m"
         muted = "\033[38;2;139;139;139m"
         rst = "\033[0m"
@@ -428,14 +244,10 @@ def cycle_verbosity() -> Verbosity:
     return _verbosity
 
 
-_fs_ai_turn_rendered: bool = False
-
-
 def clear_turn_history() -> None:
     """Clear current turn tool history. Called at start of each turn."""
-    global _fs_ai_turn_rendered, _streaming_buffer
+    global _streaming_buffer
     _current_turn_tools.clear()
-    _fs_ai_turn_rendered = False
     _streaming_buffer = []
 
 
@@ -447,50 +259,6 @@ def save_turn_history() -> None:
     if _current_turn_tools:
         _tool_history.clear()
         _tool_history.extend(_current_turn_tools)
-
-
-_SEPARATOR_WIDTH = 60
-
-
-def render_user_turn(text: str) -> None:
-    """Render a styled user turn separator in fullscreen mode."""
-    if not (_fullscreen_mode and _fullscreen_layout):
-        return
-    truncated = text if len(text) <= 60 else text[:57] + "..."
-    remaining = max(0, _SEPARATOR_WIDTH - 6)  # 6 = "─── " + "You" + space before dashes
-    fragments: list[tuple[str, str]] = [
-        ("class:separator", "\u2500\u2500\u2500 "),
-        ("class:turn.user", "You"),
-        ("class:separator", " " + "\u2500" * remaining + "\n"),
-        ("class:turn.user.text", f"  {truncated}\n"),
-        ("class:output", "\n"),
-    ]
-    _fullscreen_layout.append_output_fragments(fragments)
-    if _fullscreen_invalidate:
-        _fullscreen_invalidate()
-
-
-def render_ai_turn_start() -> None:
-    """Render a styled AI turn separator in fullscreen mode.
-
-    Guarded by ``_fs_ai_turn_rendered`` flag to avoid duplicate separators
-    when ``start_thinking()`` is called multiple times per turn.
-    """
-    global _fs_ai_turn_rendered
-    if not (_fullscreen_mode and _fullscreen_layout):
-        return
-    if _fs_ai_turn_rendered:
-        return
-    _fs_ai_turn_rendered = True
-    remaining = max(0, _SEPARATOR_WIDTH - 5)  # 5 = "─── " + "AI" + space before dashes
-    fragments: list[tuple[str, str]] = [
-        ("class:separator", "\u2500\u2500\u2500 "),
-        ("class:turn.ai", "AI"),
-        ("class:separator", " " + "\u2500" * remaining + "\n"),
-    ]
-    _fullscreen_layout.append_output_fragments(fragments)
-    if _fullscreen_invalidate:
-        _fullscreen_invalidate()
 
 
 # ---------------------------------------------------------------------------
@@ -691,7 +459,7 @@ def start_thinking(*, newline: bool = False) -> None:
     """
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
-    global _plan_written_lines, _streaming_checkpoint
+    global _plan_written_lines
     _flush_dedup()
     # Emit spacing after tool call block before AI narration text (#680).
     # Must happen here because start_thinking() is called before
@@ -709,12 +477,7 @@ def start_thinking(*, newline: bool = False) -> None:
     _last_spinner_update = _thinking_start
     # Reset plan written lines — the block will be freshly written
     _plan_written_lines = 0
-    if _fullscreen_mode and _fullscreen_layout:
-        # Fullscreen: render AI separator on first call, update status line
-        render_ai_turn_start()
-        _write_thinking_line(0.0)
-        _spinner = None
-    elif _repl_mode:
+    if _repl_mode:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
@@ -845,33 +608,6 @@ def _write_thinking_block(
     _plan_written_lines = height  # remember how many plan lines we wrote
 
 
-def _build_status_fragments(
-    elapsed: float,
-    *,
-    error_msg: str = "",
-    countdown: int = 0,
-    cancel_msg: str = "",
-) -> list[tuple[str, str]]:
-    """Build prompt_toolkit fragments for the fullscreen status line."""
-    parts: list[tuple[str, str]] = [("class:status", " Thinking... ")]
-    if elapsed >= 0.5:
-        parts.append(("class:status.timer", f"{elapsed:.0f}s"))
-    if cancel_msg:
-        parts.append(("class:status.hint", f"  {cancel_msg}"))
-    elif error_msg:
-        parts.append(("class:status", f"  {error_msg}"))
-        if countdown > 0:
-            parts.append(("class:status.hint", f" \u00b7 retrying in {countdown}s"))
-            parts.append(("class:status.hint", "  esc to give up"))
-    else:
-        suffix = _phase_suffix(elapsed)
-        if suffix:
-            parts.append(("class:status.phase", f"  {suffix}"))
-        if elapsed >= _ESC_HINT_DELAY:
-            parts.append(("class:status.hint", "  esc to cancel"))
-    return parts
-
-
 def _write_thinking_line(
     elapsed: float,
     *,
@@ -884,21 +620,11 @@ def _write_thinking_line(
     When a plan checklist is active, delegates to ``_write_thinking_block()``
     to render the full plan + thinking block.
 
-    In fullscreen mode, updates the layout's status line instead of writing
-    raw ANSI cursor codes.
-
     Optional keyword args for special states:
     - ``error_msg``: pale-red inline error replacing phase text
     - ``countdown``: seconds remaining for auto-retry (shown after error_msg)
     - ``cancel_msg``: muted message like "cancelled" (user-initiated, not error)
     """
-    if _fullscreen_mode and _fullscreen_layout:
-        fragments = _build_status_fragments(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
-        _fullscreen_layout.set_status(fragments)
-        if _fullscreen_invalidate:
-            _fullscreen_invalidate()
-        return
-
     if _plan_visible and _plan_steps:
         _write_thinking_block(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
         return
@@ -957,12 +683,7 @@ async def stop_thinking(
         except (asyncio.CancelledError, Exception):
             pass
         _thinking_ticker_task = None
-    if _fullscreen_mode and _fullscreen_layout:
-        elapsed = time.monotonic() - _thinking_start
-        _fullscreen_layout.clear_status()
-        if _fullscreen_invalidate:
-            _fullscreen_invalidate()
-    elif _spinner:
+    if _spinner:
         elapsed = time.monotonic() - _thinking_start
         _spinner.stop()
         _spinner = None
@@ -1013,12 +734,7 @@ def stop_thinking_sync() -> float:
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
         _thinking_ticker_task = None
-    if _fullscreen_mode and _fullscreen_layout:
-        elapsed = time.monotonic() - _thinking_start
-        _fullscreen_layout.clear_status()
-        if _fullscreen_invalidate:
-            _fullscreen_invalidate()
-    elif _spinner:
+    if _spinner:
         elapsed = time.monotonic() - _thinking_start
         _spinner.stop()
         _spinner = None
@@ -1068,9 +784,8 @@ async def thinking_countdown(
             # cancel_event fired — give up
             if _repl_mode and _stdout:
                 _write_thinking_line(elapsed, cancel_msg="cancelled")
-                if not _fullscreen_mode:
-                    _stdout.write("\n")
-                    _stdout.flush()
+                _stdout.write("\n")
+                _stdout.flush()
             return False
         except asyncio.TimeoutError:
             remaining -= 1
@@ -1190,17 +905,8 @@ def flush_buffered_text() -> None:
 
     Called before tool calls start so the AI's task explanation
     (e.g. 'Let me review your auth files') renders before the tool output.
-
-    In fullscreen mode, stops the streaming cursor first to prevent
-    stale checkpoint issues where subsequent token updates would truncate
-    already-rendered content (tool frames, Markdown text).
     """
-    global _streaming_buffer, _streaming_checkpoint, _tool_batch_active
-    # Save whether streaming was active before stopping — we need this to
-    # decide whether to truncate raw fragments. Cannot use _streaming_checkpoint
-    # value alone since checkpoint 0 is valid (empty pane at conversation start).
-    had_active_cursor = _streaming_cursor_active
-    _stop_streaming_cursor()
+    global _streaming_buffer, _tool_batch_active
     text = "".join(_streaming_buffer)
     _streaming_buffer = []
     if not text.strip():
@@ -1212,17 +918,9 @@ def flush_buffered_text() -> None:
         console.print()
         _tool_batch_active = False
 
-    # In fullscreen, truncate raw streamed text before rendering Markdown.
-    if _fullscreen_mode and _fullscreen_layout and had_active_cursor:
-        _fullscreen_layout.output.truncate_to(_streaming_checkpoint)
-
     from rich.padding import Padding
 
     _stdout_console.print(Padding(_make_markdown(text), (0, 2, 0, 2)))
-
-    # Update checkpoint so subsequent streaming starts after this rendered block
-    if _fullscreen_mode and _fullscreen_layout:
-        _streaming_checkpoint = _fullscreen_layout.output.checkpoint()
 
 
 def _flush_dedup() -> None:
@@ -1237,67 +935,20 @@ def _flush_dedup() -> None:
     _dedup_summary = ""
 
 
-# Streaming cursor state — checkpoint/truncate pattern for live cursor
-_streaming_cursor_active: bool = False
-_streaming_checkpoint: int = 0  # fragment count before cursor
-
-
-def _start_streaming_cursor() -> None:
-    """Begin showing a gold block cursor at the end of streaming text."""
-    global _streaming_cursor_active, _streaming_checkpoint
-    if not (_fullscreen_mode and _fullscreen_layout):
-        return
-    _streaming_cursor_active = True
-    _streaming_checkpoint = _fullscreen_layout.output.fragment_count
-
-
-def _update_streaming_cursor() -> None:
-    """Update the streaming cursor position — truncate to checkpoint, re-append text + cursor."""
-    if not (_streaming_cursor_active and _fullscreen_mode and _fullscreen_layout):
-        return
-    output = _fullscreen_layout.output
-    output.truncate_to(_streaming_checkpoint)
-    text = "".join(_streaming_buffer)
-    if text:
-        output.append_text(text, "class:output")
-    output.append_text("\u258a", "class:streaming.cursor")
-    if _fullscreen_invalidate:
-        _fullscreen_invalidate()
-
-
-def _stop_streaming_cursor() -> None:
-    """Remove the streaming cursor glyph and raw text, preserving checkpoint for render_response_end."""
-    global _streaming_cursor_active
-    if not _streaming_cursor_active:
-        return
-    if _fullscreen_mode and _fullscreen_layout:
-        _fullscreen_layout.output.truncate_to(_streaming_checkpoint)
-    _streaming_cursor_active = False
-
-
 def render_token(content: str) -> None:
-    """Buffer token content silently (no streaming output).
-
-    In fullscreen mode, also updates the live streaming cursor.
-    """
+    """Buffer token content silently (no streaming output)."""
     _streaming_buffer.append(content)
-    if _fullscreen_mode and _fullscreen_layout:
-        if not _streaming_cursor_active:
-            _start_streaming_cursor()
-        _update_streaming_cursor()
 
 
 def render_response_end() -> None:
     """Render the complete buffered response with Rich Markdown."""
-    global _streaming_buffer, _tool_batch_active, _streaming_checkpoint
-    _stop_streaming_cursor()
+    global _streaming_buffer, _tool_batch_active
     _flush_dedup()
 
     full_text = "".join(_streaming_buffer)
     _streaming_buffer = []
 
     if not full_text.strip():
-        _streaming_checkpoint = 0
         _tool_batch_active = False
         return
 
@@ -1305,8 +956,6 @@ def render_response_end() -> None:
     if _tool_batch_active:
         console.print()
         _tool_batch_active = False
-
-    _streaming_checkpoint = 0
 
     from rich.padding import Padding
 
@@ -1478,16 +1127,7 @@ async def _tool_ticker() -> None:
             await asyncio.sleep(0.5)
             if _tool_start:
                 elapsed = time.monotonic() - _tool_start
-                if _fullscreen_mode and _fullscreen_layout:
-                    _fullscreen_layout.set_status(
-                        [
-                            ("class:status.phase", f"  {_tool_ticker_summary}  "),
-                            ("class:status.timer", f"{elapsed:.0f}s"),
-                        ]
-                    )
-                    if _fullscreen_invalidate:
-                        _fullscreen_invalidate()
-                elif _tool_spinner:
+                if _tool_spinner:
                     label = f"  [{MUTED}]{escape(_tool_ticker_summary)}  {elapsed:.0f}s[/{MUTED}]"
                     _tool_spinner.update(label)
                 elif _repl_mode and _stdout:
@@ -1522,11 +1162,7 @@ def stop_tool_ticker_sync() -> None:
     if _tool_ticker_task is not None:
         _tool_ticker_task.cancel()
         _tool_ticker_task = None
-    if _fullscreen_mode and _fullscreen_layout:
-        _fullscreen_layout.clear_status()
-        if _fullscreen_invalidate:
-            _fullscreen_invalidate()
-    elif _tool_spinner:
+    if _tool_spinner:
         _tool_spinner.stop()
         _tool_spinner = None
     elif _repl_mode and _stdout:
@@ -1563,16 +1199,6 @@ def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
             "start_time": _tool_start,
         }
     )
-
-    if _fullscreen_mode and _fullscreen_layout:
-        # Fullscreen: defer all visual output to render_tool_call_end().
-        # Parallel tool calls (asyncio.as_completed) cause starts to stack
-        # before results arrive, disconnecting frames from their results.
-        # Instead, render a single self-contained line per tool at completion.
-        _tool_batch_active = True
-        if tool_name not in ("ask_user", "ask_human"):
-            start_tool_ticker(summary)
-        return
 
     # Add spacing before the first tool call in a batch
     if not _tool_batch_active:
@@ -1620,32 +1246,6 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
         matched_entry["elapsed"] = elapsed
 
     summary = matched_entry["summary"] if matched_entry else tool_name
-
-    if _fullscreen_mode and _fullscreen_layout:
-        # Fullscreen: single self-contained line per tool call.
-        # No separate frame — parallel tools (asyncio.as_completed) would
-        # stack all frames before any results, making them useless.
-        if status == "success":
-            icon_style, icon = "class:tool.ok", "  \u2713 "
-        else:
-            icon_style, icon = "class:tool.err", "  \u2717 "
-        elapsed_str = f" ({elapsed:.1f}s)" if elapsed >= 0.1 else ""
-        detail = _output_summary(output) if status == "success" else _error_summary(output)
-        fragments: list[tuple[str, str]] = [
-            (icon_style, icon),
-            ("class:tool.name", summary),
-            ("class:tool.elapsed", elapsed_str),
-        ]
-        if detail:
-            fragments.append(("class:tool.detail", f" \u2014 {detail}"))
-        fragments.append(("class:output", "\n"))
-        _fullscreen_layout.append_output_fragments(fragments)
-        # Inline diff rendering still works via OutputPaneWriter
-        if status == "success" and _has_diff_data(tool_name, output):
-            _render_inline_diff(tool_name, output)
-        if _fullscreen_invalidate:
-            _fullscreen_invalidate()
-        return
 
     if _verbosity == Verbosity.VERBOSE:
         # Legacy-style
@@ -1901,15 +1501,32 @@ def format_status_toolbar(
     approval_mode: str = "",
     tool_count: int = 0,
     mcp_statuses: dict[str, dict[str, Any]] | None = None,
+    space_name: str = "",
+    plan_mode: bool = False,
+    working_dir: str = "",
 ) -> list[tuple[str, str]]:
     """Format the persistent bottom toolbar for the REPL.
 
     Returns a list of (style, text) tuples for prompt_toolkit FormattedText.
     """
+    from .layout import _shorten_path
+
     parts: list[tuple[str, str]] = [("class:bottom-toolbar", " ")]
 
     if model:
         parts.append(("class:bottom-toolbar.model", model))
+        parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+
+    if working_dir:
+        parts.append(("class:bottom-toolbar.dim", _shorten_path(working_dir)))
+        parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+
+    if space_name:
+        parts.append(("class:bottom-toolbar.mcp", space_name))
+        parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
+
+    if plan_mode:
+        parts.append(("class:bottom-toolbar.tokens-warn", "PLAN"))
         parts.append(("class:bottom-toolbar.sep", " \u00b7 "))
 
     if max_context > 0:

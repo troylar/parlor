@@ -136,7 +136,6 @@ async def _watch_for_escape(cancel_event: asyncio.Event) -> None:
 
 _MAX_PASTE_DISPLAY_LINES = 6
 _PASTE_THRESHOLD = 0.05  # 50ms; paste arrives faster than human typing
-_SUB_PROMPT_TIMEOUT = 300  # seconds — failsafe for stuck sub-prompts
 
 
 def _is_paste(last_text_change: float, threshold: float = _PASTE_THRESHOLD) -> bool:
@@ -152,11 +151,6 @@ def _collapse_long_input(user_input: str) -> None:
     preserved; only the visual display is truncated.
     """
     if not sys.stdout.isatty():
-        return
-
-    # In fullscreen mode the input pane handles display; raw cursor codes
-    # would be meaningless inside the OutputPaneWriter.
-    if renderer.is_fullscreen():
         return
 
     lines = user_input.split("\n")
@@ -772,54 +766,6 @@ async def _check_project_trust(
     renderer.console.print(f"  Path: [{MUTED}]{file_path}[/{MUTED}]")
     renderer.console.print(f"  Size: [{MUTED}]{file_size:,} bytes[/{MUTED}]")
 
-    if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-        while True:
-            body: list[tuple[str, str]] = [
-                ("class:dialog.body", f"  Path: {file_path}\n"),
-                ("class:dialog.body", f"  Size: {file_size:,} bytes\n\n"),
-                ("class:dialog.option.key", "  [y]"),
-                ("class:dialog.option", " Trust this folder   "),
-                ("class:dialog.option.key", "[r]"),
-                ("class:dialog.option", " Trust parent\n"),
-                ("class:dialog.option.key", "  [v]"),
-                ("class:dialog.option", " View content        "),
-                ("class:dialog.option.key", "[n]"),
-                ("class:dialog.option", " Skip"),
-            ]
-            answer = await renderer.get_fullscreen_layout().show_dialog(
-                title="Project Trust — ANTEROOM.md",
-                body_fragments=body,
-            )
-            if answer is None:
-                renderer.console.print(f"  [{MUTED}]Skipped: project context not loaded[/{MUTED}]\n")
-                return None
-            choice = answer.strip().lower()
-            if choice in ("y", "yes"):
-                save_trust_decision(folder_path, content_hash, data_dir=data_dir)
-                renderer.console.print(f"  [{MUTED}]Trusted: {folder_path}[/{MUTED}]\n")
-                return content
-            if choice in ("r", "recursive"):
-                parent_path = str(file_path.parent.parent)
-                save_trust_decision(parent_path, content_hash, recursive=True, data_dir=data_dir)
-                renderer.console.print(f"  [{MUTED}]Trusted (recursive): {parent_path}[/{MUTED}]\n")
-                return content
-            if choice in ("v", "view"):
-                renderer.console.print(f"\n[dim]{'─' * 60}[/dim]")
-                lines = content.splitlines()
-                if len(lines) > 50:
-                    for line in lines[:50]:
-                        renderer.console.print(f"  [dim]{line}[/dim]")
-                    renderer.console.print(f"  [dim]... ({len(lines) - 50} more lines)[/dim]")
-                else:
-                    for line in lines:
-                        renderer.console.print(f"  [dim]{line}[/dim]")
-                renderer.console.print(f"[dim]{'─' * 60}[/dim]\n")
-                continue
-            if choice in ("n", "no", ""):
-                renderer.console.print(f"  [{MUTED}]Skipped: project context not loaded[/{MUTED}]\n")
-                return None
-        return None  # unreachable but keeps mypy happy
-
     try:
         from prompt_toolkit import PromptSession as _TrustSession
 
@@ -960,49 +906,24 @@ async def _resolve_pack_interactive(
     """
     _pm, _pc = packs_service.resolve_pack(db, ns, name)
     if not _pm and _pc:
-        if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-            _pk_body: list[tuple[str, str]] = [
-                ("class:dialog.body", f"  Multiple packs match @{ns}/{name}:\n\n"),
-            ]
-            for _pi, _c in enumerate(_pc, 1):
-                _pk_body.append(
-                    (
-                        "class:dialog.body",
-                        f"  [{_pi}] {_c.get('namespace', '')}/{_c.get('name', '')} "
-                        f"v{_c.get('version', '')} [{_c['id'][:8]}...]\n",
-                    )
-                )
-            _pk_ans = await renderer.get_fullscreen_layout().show_dialog(
-                title="Select Pack",
-                body_fragments=_pk_body,
-            )
-            if _pk_ans is not None:
-                try:
-                    _idx = int(_pk_ans.strip()) - 1
-                    if 0 <= _idx < len(_pc):
-                        _pm = _pc[_idx]
-                except ValueError:
-                    pass
-        else:
-            if escape_markup:
-                from rich.markup import escape as rich_escape
+        if escape_markup:
+            from rich.markup import escape as rich_escape
 
-                display_ns, display_name = rich_escape(ns), rich_escape(name)
-            else:
-                display_ns, display_name = ns, name
-            renderer.console.print(f"\nMultiple packs match @{display_ns}/{display_name}:")
-            for _pi, _c in enumerate(_pc, 1):
-                renderer.console.print(
-                    f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} "
-                    f"v{_c.get('version', '')} [{_c['id'][:8]}...]"
-                )
-            try:
-                _ch = input(f"Select (1-{len(_pc)}): ").strip()
-                _idx = int(_ch) - 1
-                if 0 <= _idx < len(_pc):
-                    _pm = _pc[_idx]
-            except (ValueError, EOFError, KeyboardInterrupt):
-                pass
+            display_ns, display_name = rich_escape(ns), rich_escape(name)
+        else:
+            display_ns, display_name = ns, name
+        renderer.console.print(f"\nMultiple packs match @{display_ns}/{display_name}:")
+        for _pi, _c in enumerate(_pc, 1):
+            renderer.console.print(
+                f"  {_pi}. {_c.get('namespace', '')}/{_c.get('name', '')} v{_c.get('version', '')} [{_c['id'][:8]}...]"
+            )
+        try:
+            _ch = input(f"Select (1-{len(_pc)}): ").strip()
+            _idx = int(_ch) - 1
+            if 0 <= _idx < len(_pc):
+                _pm = _pc[_idx]
+        except (ValueError, EOFError, KeyboardInterrupt):
+            pass
     return _pm
 
 
@@ -1148,39 +1069,6 @@ async def run_cli(
             return False
 
         async with _approval_lock:
-            if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                body: list[tuple[str, str]] = [
-                    ("class:dialog.body", f"  {verdict.reason}\n"),
-                ]
-                cmd = verdict.details.get("command", "")
-                path = verdict.details.get("path", "")
-                if cmd:
-                    body.append(("class:dialog.hint", f"  Command: {cmd}\n\n"))
-                elif path:
-                    body.append(("class:dialog.hint", f"  Path: {path}\n\n"))
-                else:
-                    body.append(("class:dialog.body", "\n"))
-                body.extend(
-                    [
-                        ("class:dialog.option.key", "  [y]"),
-                        ("class:dialog.option", " Allow once   "),
-                        ("class:dialog.option.key", "[s]"),
-                        ("class:dialog.option", " Session\n"),
-                        ("class:dialog.option.key", "  [a]"),
-                        ("class:dialog.option", " Always       "),
-                        ("class:dialog.option.key", "[n]"),
-                        ("class:dialog.option", " Deny"),
-                    ]
-                )
-                answer = await renderer.get_fullscreen_layout().show_dialog(
-                    title="Approval Required",
-                    body_fragments=body,
-                )
-                if answer is None:
-                    renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
-                    return False
-                return _apply_choice(answer.strip().lower())
-
             renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
             if verdict.details.get("command"):
                 renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
@@ -1221,21 +1109,6 @@ async def run_cli(
             return answer
 
         await renderer.stop_thinking()
-
-        if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-            body: list[tuple[str, str]] = [("class:dialog.body", f"  {question}\n\n")]
-            if options:
-                for i, opt in enumerate(options, 1):
-                    body.append(("class:dialog.option.key", f"  {i}. "))
-                    body.append(("class:dialog.option", f"{opt}\n"))
-            answer = await renderer.get_fullscreen_layout().show_dialog(
-                title="Question",
-                body_fragments=body,
-            )
-            renderer.start_thinking()
-            if answer is None:
-                return ""
-            return _resolve_choice(answer.strip(), options)
 
         renderer.console.print(f"\n[yellow bold]Question:[/yellow bold] {question}")
         try:
@@ -1954,17 +1827,12 @@ async def _run_repl(
     id_kw = _identity_kwargs(config)
 
     from prompt_toolkit import PromptSession
-    from prompt_toolkit.application import Application
-    from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.document import Document
-    from prompt_toolkit.filters import Condition
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style as PtStyle
-
-    from .layout import AnteroomLayout, create_anteroom_style, format_header
 
     _command_descriptions: dict[str, str] = {
         "new": "new conversation",
@@ -2297,148 +2165,6 @@ async def _run_repl(
 
     session.default_buffer.on_text_changed += _on_buffer_change
 
-    # -- Full-screen Application setup --
-    # The input buffer feeds accepted text into the input queue.
-    # An asyncio.Event signals when new input is available.
-    _input_ready = asyncio.Event()
-    _accepted_text: list[str] = [""]
-    _sub_prompt_event: list[asyncio.Event | None] = [None]
-
-    def _on_accept(buf: Buffer) -> bool:
-        """Buffer accept handler — stash text and signal the input loop."""
-        _accepted_text[0] = buf.text
-        # If a sub-prompt is active, signal it instead of the main input loop
-        if _sub_prompt_event[0] is not None:
-            _sub_prompt_event[0].set()
-        else:
-            _input_ready.set()
-        return True  # keep text in buffer (we clear it after reading)
-
-    async def _fs_sub_prompt(prompt_text: str = "  ") -> str:
-        """Prompt for a single line of input within the fullscreen app.
-
-        Used by interactive slash commands (/space create, /model, etc.)
-        that need sub-prompt input without leaving fullscreen.
-        """
-        evt = asyncio.Event()
-        _sub_prompt_event[0] = evt
-        # Show prompt hint in the output pane
-        renderer.console.print(f"[{CHROME}]{prompt_text}[/{CHROME}]", end="")
-        _fs_input_buffer.reset()
-        _fs_app.invalidate()
-        try:
-            await asyncio.wait_for(evt.wait(), timeout=_SUB_PROMPT_TIMEOUT)
-            result = _accepted_text[0]
-            _fs_input_buffer.reset()
-            _fs_app.invalidate()
-            return result
-        except asyncio.TimeoutError:
-            return ""
-        finally:
-            _sub_prompt_event[0] = None
-
-    _fs_input_buffer = Buffer(
-        name="anteroom-input",
-        completer=completer,
-        complete_while_typing=True,
-        history=FileHistory(str(history_path)),
-        accept_handler=_on_accept,
-        multiline=True,
-    )
-
-    def _should_auto_complete() -> bool:
-        text = _fs_input_buffer.text
-        stripped = text.lstrip()
-        if stripped.startswith("/") and " " not in stripped:
-            return True
-        if "@" in (text.split()[-1] if text.split() else ""):
-            return True
-        return False
-
-    _fs_input_buffer.complete_while_typing = Condition(_should_auto_complete)
-    _fs_input_buffer.on_text_changed += _on_buffer_change
-
-    _cached_git_branch: list[str] = [""]
-    _cached_git_branch_time: list[float] = [0.0]
-    _git_branch_pending: list[bool] = [False]
-    _header_plan_mode: list[bool] = [plan_mode]
-
-    def _fetch_git_branch_sync() -> str:
-        """Run git rev-parse in a thread-safe way (called via asyncio.to_thread)."""
-        import subprocess as _sp
-
-        try:
-            return (
-                _sp.check_output(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=working_dir,
-                    stderr=_sp.DEVNULL,
-                    timeout=5,
-                )
-                .decode("utf-8", errors="replace")
-                .strip()
-            )
-        except Exception:
-            return ""
-
-    async def _refresh_git_branch() -> None:
-        """Refresh git branch cache in a background thread."""
-        if _git_branch_pending[0]:
-            return
-        _git_branch_pending[0] = True
-        try:
-            _cached_git_branch[0] = await asyncio.to_thread(_fetch_git_branch_sync)
-            _cached_git_branch_time[0] = time.monotonic()
-        finally:
-            _git_branch_pending[0] = False
-        _fs_app.invalidate()
-
-    def _header_fn() -> list[tuple[str, str] | tuple[str, str, Any]]:
-        """Build header fragments from current session state."""
-        # Schedule background git branch refresh when cache is stale
-        now = time.monotonic()
-        if now - _cached_git_branch_time[0] > 5.0 and not _git_branch_pending[0]:
-            try:
-                asyncio.get_running_loop().create_task(_refresh_git_branch())
-            except RuntimeError:
-                pass  # no event loop yet
-
-        return format_header(
-            model=current_model,
-            working_dir=working_dir,
-            git_branch=_cached_git_branch[0],
-            space_name=space["name"] if space else "",
-            conv_title=conv.get("title", "") or "",
-            plan_mode=_header_plan_mode[0],
-        )
-
-    _anteroom_layout = AnteroomLayout(
-        header_fn=_header_fn,
-        footer_fn=_bottom_toolbar,
-        input_buffer=_fs_input_buffer,
-    )
-
-    _use_fullscreen = sys.stdout.isatty() and sys.stdin.isatty()
-
-    # Mouse support toggle: ON by default for scroll wheel, Ctrl-S to disable
-    # for native text selection (like Gemini CLI). When off, the terminal handles
-    # selection/copy natively but scroll wheel falls through to terminal scrollback.
-    _mouse_enabled: list[bool] = [True]
-
-    from prompt_toolkit.filters import Condition
-
-    @Condition
-    def _mouse_filter() -> bool:
-        return _mouse_enabled[0]
-
-    _fs_app: Application[None] = Application(
-        layout=_anteroom_layout.layout,
-        key_bindings=kb,
-        style=create_anteroom_style(),
-        full_screen=_use_fullscreen,
-        mouse_support=_mouse_filter,
-    )
-
     # Set approval mode for prompt coloring
     from anteroom.cli.layout import set_approval_mode
 
@@ -2455,7 +2181,6 @@ async def _run_repl(
             ai_messages = _load_conversation_messages(db, resume_conversation_id)
             is_first_message = False
             working_dir = _restore_working_dir(conv, tool_registry, working_dir)
-            # Resume info is deferred to _run_fullscreen() so it renders in the output pane
             _pending_resume_info = True
             # Load space from resumed conversation
             if not space and conv.get("space_id"):
@@ -2709,36 +2434,6 @@ async def _run_repl(
     exit_flag = asyncio.Event()
     _current_cancel_event: list[asyncio.Event | None] = [None]
 
-    # Escape cancels the agent loop (only active during streaming).
-    # prompt_toolkit's key processor handles the Escape timeout (~100ms)
-    # to distinguish bare Escape from escape sequences (arrow keys, etc.).
-    @kb.add("pageup")
-    def _scroll_up(event: Any) -> None:
-        _anteroom_layout.scroll_output_up(10)
-        _fs_app.invalidate()
-
-    @kb.add("pagedown")
-    def _scroll_down(event: Any) -> None:
-        _anteroom_layout.scroll_output_down(10)
-        _fs_app.invalidate()
-
-    @kb.add("home")
-    def _scroll_to_top(event: Any) -> None:
-        _anteroom_layout.scroll_output_to_top()
-        _fs_app.invalidate()
-
-    @kb.add("end")
-    def _scroll_to_bottom(event: Any) -> None:
-        _anteroom_layout.scroll_output_to_bottom()
-        _fs_app.invalidate()
-
-    @kb.add("c-s")
-    def _toggle_mouse(event: Any) -> None:
-        """Toggle mouse capture on/off. Off = native terminal text selection."""
-        _mouse_enabled[0] = not _mouse_enabled[0]
-        _anteroom_layout.set_mouse_mode(_mouse_enabled[0])
-        _fs_app.invalidate()
-
     @kb.add("tab")
     def _tab_complete(event: Any) -> None:
         buf = event.current_buffer
@@ -2753,86 +2448,6 @@ async def _run_repl(
         buf = event.current_buffer
         if buf.complete_state:
             buf.complete_previous()
-
-    _picker_filter = Condition(lambda: _anteroom_layout._picker_visible)
-
-    @kb.add("up", filter=_picker_filter)
-    @kb.add("k", filter=_picker_filter)
-    def _picker_up(event: Any) -> None:
-        _anteroom_layout.picker_move_up()
-        _fs_app.invalidate()
-
-    @kb.add("down", filter=_picker_filter)
-    @kb.add("j", filter=_picker_filter)
-    def _picker_down(event: Any) -> None:
-        _anteroom_layout.picker_move_down()
-        _fs_app.invalidate()
-
-    @kb.add("enter", filter=_picker_filter)
-    def _picker_accept(event: Any) -> None:
-        _anteroom_layout.accept_picker()
-
-    @kb.add("escape", filter=_picker_filter)
-    def _picker_cancel(event: Any) -> None:
-        _anteroom_layout.cancel_picker()
-
-    _dialog_esc_filter = Condition(lambda: _anteroom_layout._dialog_visible and not _anteroom_layout._picker_visible)
-
-    @kb.add("escape", filter=_dialog_esc_filter)
-    def _dialog_cancel_on_escape(event: Any) -> None:
-        _anteroom_layout.cancel_dialog()
-
-    _agent_esc_filter = Condition(
-        lambda: agent_busy.is_set() and not _anteroom_layout._dialog_visible and not _anteroom_layout._picker_visible
-    )
-
-    @kb.add("escape", filter=_agent_esc_filter)
-    def _cancel_on_escape(event: Any) -> None:
-        ce = _current_cancel_event[0]
-        if ce is not None:
-            ce.set()
-            # Cancel display is handled by stop_thinking(cancel_msg="cancelled")
-            # in the event loop when it detects the cancel_event.
-
-    async def _collect_input() -> None:
-        """Continuously collect user input via the fullscreen buffer accept handler."""
-        while not exit_flag.is_set():
-            _exit_flag[0] = False
-
-            # Wait for the buffer accept handler to fire
-            try:
-                await _input_ready.wait()
-            except asyncio.CancelledError:
-                return
-
-            user_input_raw = _accepted_text[0]
-            # Clear after reading — prevents losing input set between iterations
-            _input_ready.clear()
-            # Clear the input buffer for the next prompt
-            _fs_input_buffer.reset()
-            _fs_app.invalidate()
-
-            if _exit_flag[0]:
-                exit_flag.set()
-                return
-
-            _collapse_long_input(user_input_raw)
-            text = user_input_raw.strip()
-            if not text:
-                continue
-
-            # Render styled user turn separator with input text
-            renderer.render_user_turn(text)
-            _fs_app.invalidate()
-
-            if agent_busy.is_set():
-                if input_queue.full():
-                    renderer.console.print("[yellow]Queue full (max 10 messages)[/yellow]")
-                    continue
-                renderer.console.print(f"[{CHROME}]Message queued[/{CHROME}]")
-
-            await input_queue.put(text)
-            agent_busy.set()
 
     def _has_pending_work() -> bool:
         """Check if there's more work queued."""
@@ -2890,7 +2505,6 @@ async def _run_repl(
             plan_path = get_plan_file_path(config.app.data_dir, conv_id)
             _plan_file[0] = plan_path
             _plan_active[0] = True
-            _header_plan_mode[0] = True
             # Back up full tools before filtering
             _full_tools_backup[0] = tools_openai
 
@@ -2905,7 +2519,6 @@ async def _run_repl(
         def _exit_plan_mode(plan_content: str | None = None) -> None:
             nonlocal tools_openai, extra_system_prompt
             _plan_active[0] = False
-            _header_plan_mode[0] = False
 
             # Restore full tools
             if _full_tools_backup[0] is not None:
@@ -2938,34 +2551,16 @@ async def _run_repl(
             if match:
                 return match
             if candidates:
-                if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                    _sp_lines: list[tuple[str, str]] = [
-                        ("class:dialog.body", f"  Multiple spaces match '{name_or_id}':\n\n"),
-                    ]
-                    for i, c in enumerate(candidates, 1):
-                        _sp_lines.append(("class:dialog.body", f"  [{i}] {c['name']} [{c['id'][:8]}...]\n"))
-                    _sp_ans = await renderer.get_fullscreen_layout().show_dialog(
-                        title="Select Space",
-                        body_fragments=_sp_lines,
-                    )
-                    if _sp_ans is not None:
-                        try:
-                            idx = int(_sp_ans.strip()) - 1
-                            if 0 <= idx < len(candidates):
-                                return candidates[idx]
-                        except ValueError:
-                            pass
-                else:
-                    renderer.console.print(f"\nMultiple spaces match '{name_or_id}':")
-                    for i, c in enumerate(candidates, 1):
-                        renderer.console.print(f"  {i}. {c['name']} [{c['id'][:8]}...]")
-                    try:
-                        choice = input(f"Select (1-{len(candidates)}): ").strip()
-                        idx = int(choice) - 1
-                        if 0 <= idx < len(candidates):
-                            return candidates[idx]
-                    except (ValueError, EOFError, KeyboardInterrupt):
-                        pass
+                renderer.console.print(f"\nMultiple spaces match '{name_or_id}':")
+                for i, c in enumerate(candidates, 1):
+                    renderer.console.print(f"  {i}. {c['name']} [{c['id'][:8]}...]")
+                try:
+                    choice = input(f"Select (1-{len(candidates)}): ").strip()
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(candidates):
+                        return candidates[idx]
+                except (ValueError, EOFError, KeyboardInterrupt):
+                    pass
             return None
 
         def _inject_space_instructions(sp: dict[str, Any], instr: str | None = None) -> None:
@@ -2992,11 +2587,8 @@ async def _run_repl(
             _apply_plan_mode(conv["id"])
 
         while not exit_flag.is_set():
-            # If agent_busy was set (by _collect_input) but we're back here waiting
-            # for input, clear it so the prompt renders as gold (idle).
             if agent_busy.is_set() and not _has_pending_work():
                 agent_busy.clear()
-                _fs_app.invalidate()
 
             try:
                 user_input = await asyncio.wait_for(input_queue.get(), timeout=0.5)
@@ -3183,30 +2775,14 @@ async def _run_repl(
                         renderer.render_error(f"Conversation not found: {target}. Use /list to see conversations.")
                         continue
                     title = to_delete.get("title", "Untitled")
-                    if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                        _del_body: list[tuple[str, str]] = [
-                            ("class:dialog.body", f'  Delete "{title}"?\n\n'),
-                            ("class:dialog.option.key", "  [y]"),
-                            ("class:dialog.option", " Yes   "),
-                            ("class:dialog.option.key", "[n]"),
-                            ("class:dialog.option", " No"),
-                        ]
-                        answer = await renderer.get_fullscreen_layout().show_dialog(
-                            title="Delete Conversation",
-                            body_fragments=_del_body,
-                        )
-                        if answer is None or answer.strip().lower() not in ("y", "yes"):
-                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                            continue
-                    else:
-                        try:
-                            answer = input(f'  Delete "{title}"? [y/N] ').strip().lower()
-                        except (EOFError, KeyboardInterrupt):
-                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                            continue
-                        if answer not in ("y", "yes"):
-                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                            continue
+                    try:
+                        answer = input(f'  Delete "{title}"? [y/N] ').strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
+                        continue
+                    if answer not in ("y", "yes"):
+                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
+                        continue
                     storage.delete_conversation(db, to_delete["id"], config.app.data_dir)
                     renderer.console.print(f"[{CHROME}]Deleted: {title}[/{CHROME}]\n")
                     if conv.get("id") == to_delete["id"]:
@@ -4417,33 +3993,7 @@ async def _run_repl(
                 elif cmd == "/resume":
                     parts = user_input.split(maxsplit=1)
                     if len(parts) < 2:
-                        if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                            convs = storage.list_conversations(db, limit=20)
-                            if not convs:
-                                renderer.console.print("[dim]No conversations found.[/dim]")
-                                continue
-                            for c in convs:
-                                title = (c.get("title") or "Untitled")[:35]
-                                badge = _picker_type_badge(c.get("type") or "chat")
-                                ts = _picker_relative_time(c.get("updated_at") or "")
-                                count = c.get("message_count") or 0
-                                slug = (c.get("slug") or "")[:20]
-                                c["_label"] = f"{title}" + (f" {badge}" if badge else "")
-                                c["_meta"] = f"{slug}  {count}msg  {ts}"
-
-                            preview_cache: dict[str, list[tuple[str, str]]] = {}
-
-                            def _preview(item: dict[str, Any]) -> list[tuple[str, str]]:
-                                cid = item["id"]
-                                if cid not in preview_cache:
-                                    msgs = storage.list_messages(db, cid)
-                                    preview_cache[cid] = _picker_format_preview(msgs)
-                                return preview_cache[cid]
-
-                            _fs_layout = renderer.get_fullscreen_layout()
-                            picked = await _fs_layout.show_picker(items=convs, preview_fn=_preview)
-                        else:
-                            picked = await _show_resume_picker()
+                        picked = await _show_resume_picker()
                         if picked is None:
                             continue
                         loaded = storage.get_conversation(db, picked["id"])
@@ -4473,28 +4023,14 @@ async def _run_repl(
                             msg_preview += "..."
                         renderer.console.print(f"  {smsg['position']}. [{role_label}] {msg_preview}")
 
-                    if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                        _rw_body: list[tuple[str, str]] = [
-                            ("class:dialog.body", "  Enter position to rewind to\n"),
-                            ("class:dialog.body", "  (keep that message, delete after)\n"),
-                        ]
-                        pos_input_raw = await renderer.get_fullscreen_layout().show_dialog(
-                            title="Rewind Conversation",
-                            body_fragments=_rw_body,
-                        )
-                        if pos_input_raw is None:
-                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                            continue
-                        pos_input = pos_input_raw.strip()
-                    else:
-                        renderer.console.print(
-                            f"\n[{CHROME}]Enter position to rewind to (keep that message, delete after):[/{CHROME}]"
-                        )
-                        try:
-                            pos_input = input("  Position: ").strip()
-                        except (EOFError, KeyboardInterrupt):
-                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                            continue
+                    renderer.console.print(
+                        f"\n[{CHROME}]Enter position to rewind to (keep that message, delete after):[/{CHROME}]"
+                    )
+                    try:
+                        pos_input = input("  Position: ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
+                        continue
 
                     if not pos_input.isdigit():
                         renderer.render_error("Invalid position")
@@ -4517,32 +4053,12 @@ async def _run_repl(
                         )
                         for fp in sorted(file_paths):
                             renderer.console.print(f"  - {fp}")
-                        if renderer.is_fullscreen() and renderer.get_fullscreen_layout() is not None:
-                            _undo_body: list[tuple[str, str]] = [
-                                (
-                                    "class:dialog.body",
-                                    f"  {len(file_paths)} file(s) modified after this point.\n  Undo file changes?\n\n",
-                                ),
-                                ("class:dialog.option.key", "  [y]"),
-                                ("class:dialog.option", " Yes   "),
-                                ("class:dialog.option.key", "[n]"),
-                                ("class:dialog.option", " No"),
-                            ]
-                            _undo_ans = await renderer.get_fullscreen_layout().show_dialog(
-                                title="Undo File Changes",
-                                body_fragments=_undo_body,
-                            )
-                            if _undo_ans is None:
-                                renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                                continue
-                            undo_files = _undo_ans.strip().lower() in ("y", "yes")
-                        else:
-                            try:
-                                answer = input("  Undo file changes? [y/N] ").strip().lower()
-                                undo_files = answer in ("y", "yes")
-                            except (EOFError, KeyboardInterrupt):
-                                renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
-                                continue
+                        try:
+                            answer = input("  Undo file changes? [y/N] ").strip().lower()
+                            undo_files = answer in ("y", "yes")
+                        except (EOFError, KeyboardInterrupt):
+                            renderer.console.print(f"[{CHROME}]Cancelled[/{CHROME}]\n")
+                            continue
 
                     rewind_result = await rewind_service(
                         db=db,
@@ -4869,7 +4385,7 @@ async def _run_repl(
                             renderer.render_newline()
                             # Show styled separator for the queued user message
                             queued_content = event.data.get("content", "")
-                            renderer.render_user_turn(queued_content)
+                            renderer.console.print(f"\n[{GOLD}]> {escape(queued_content[:200])}[/{GOLD}]")
                             renderer.render_newline()
                             renderer.clear_turn_history()
                             response_token_count = 0
@@ -4960,7 +4476,6 @@ async def _run_repl(
                     thinking = False
                 if not _has_pending_work():
                     agent_busy.clear()
-                    _fs_app.invalidate()
                 _current_cancel_event[0] = None
                 if cancel_event_ref is not None:
                     cancel_event_ref[0] = None
@@ -4969,10 +4484,6 @@ async def _run_repl(
                 if not _IS_WINDOWS:
                     signal.signal(signal.SIGINT, original_handler)
 
-    # -- Full-screen application lifecycle --
-    if _use_fullscreen:
-        renderer.use_fullscreen_output(_anteroom_layout, _fs_app.invalidate)
-        renderer.install_fullscreen_log_handler()
     renderer.set_tool_dedup(config.cli.tool_dedup)
     renderer.configure_thresholds(
         esc_hint_delay=config.cli.esc_hint_delay,
@@ -4980,41 +4491,52 @@ async def _run_repl(
         stall_warning=config.cli.stall_warning_threshold,
     )
 
-    async def _run_fullscreen() -> None:
-        """Run input collector and agent runner inside the fullscreen app."""
+    # -- Simple input loop --
+    # Print deferred resume info before entering the main loop.
+    if _pending_resume_info:
+        _show_resume_info(db, conv, ai_messages)
+
+    async def _collect_input_simple() -> None:
+        """Collect user input via prompt_async and feed into input_queue."""
+        from .layout import InputLexer, input_line_prefix
+
+        while not exit_flag.is_set():
+            try:
+                user_input_raw = await session.prompt_async(
+                    input_line_prefix,
+                    lexer=InputLexer(),
+                )
+            except (EOFError, KeyboardInterrupt):
+                exit_flag.set()
+                return
+
+            _collapse_long_input(user_input_raw)
+            text = user_input_raw.strip()
+            if not text:
+                continue
+
+            if agent_busy.is_set():
+                if input_queue.full():
+                    renderer.console.print("[yellow]Queue full (max 10 messages)[/yellow]")
+                    continue
+                renderer.console.print(f"[{CHROME}]Message queued[/{CHROME}]")
+
+            await input_queue.put(text)
+            agent_busy.set()
+
+    input_task = asyncio.create_task(_collect_input_simple())
+    runner_task = asyncio.create_task(_agent_runner())
+
+    done_tasks, pending_tasks = await asyncio.wait({input_task, runner_task}, return_when=asyncio.FIRST_COMPLETED)
+    exit_flag.set()
+    for t in pending_tasks:
+        t.cancel()
         try:
-            # Render deferred resume info now that console writes to the output pane
-            if _pending_resume_info:
-                _show_resume_info(db, conv, ai_messages)
+            await t
+        except BaseException:
+            pass
 
-            input_task = asyncio.create_task(_collect_input())
-            runner_task = asyncio.create_task(_agent_runner())
-
-            # Wait for either task to signal exit
-            done_tasks, pending_tasks = await asyncio.wait(
-                {input_task, runner_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-            exit_flag.set()
-            _input_ready.set()  # unblock _collect_input if waiting
-            for t in pending_tasks:
-                t.cancel()
-                try:
-                    await t
-                except BaseException:
-                    pass
-        finally:
-            # Always exit the fullscreen application, even on unhandled exceptions
-            _fs_app.exit()
-
-    asyncio.get_running_loop().call_soon(lambda: asyncio.create_task(_run_fullscreen()))
-
-    await _fs_app.run_async()
-
-    # Restore original log handlers now that fullscreen layout is gone
-    if _use_fullscreen:
-        renderer.restore_log_handlers()
-
-    # Show resume hint after fullscreen exits
+    # Show resume hint after exit
     if conv.get("id") and not is_first_message:
         resume_label = conv.get("slug") or conv["id"][:8]
         from rich.console import Console as _HintConsole

@@ -38,9 +38,8 @@ async def test_resolve_pack_interactive_ambiguous_inline() -> None:
     db = MagicMock()
     with (
         patch("anteroom.cli.repl.packs_service.resolve_pack", return_value=(None, candidates)),
-        patch("anteroom.cli.repl.renderer") as mock_renderer,
+        patch("anteroom.cli.repl.renderer"),
         patch("builtins.input", return_value="2"),
     ):
-        mock_renderer.is_fullscreen.return_value = False
         result = await _resolve_pack_interactive(db, "ns", "p")
     assert result == candidates[1]

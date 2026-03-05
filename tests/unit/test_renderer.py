@@ -10,7 +10,6 @@ from unittest.mock import patch
 import pytest
 
 from anteroom.cli.renderer import (
-    FullscreenLogHandler,
     Verbosity,
     _build_thinking_text,
     _collapse_plan,
@@ -38,14 +37,12 @@ from anteroom.cli.renderer import (
     get_verbosity,
     increment_streaming_chars,
     increment_thinking_tokens,
-    install_fullscreen_log_handler,
     is_plan_visible,
     render_error,
     render_response_end,
     render_tool_call_end,
     render_tool_call_start,
     render_warning,
-    restore_log_handlers,
     save_turn_history,
     set_retrying,
     set_thinking_phase,
@@ -3311,62 +3308,6 @@ class TestFormatStatusToolbar:
 # ---------------------------------------------------------------------------
 
 
-class TestFullscreenBridge:
-    """Tests for use_fullscreen_output() and is_fullscreen()."""
-
-    def setup_method(self):
-        import anteroom.cli.renderer as mod
-
-        self._mod = mod
-        # Save originals
-        self._orig_console = mod.console
-        self._orig_stdout_console = mod._stdout_console
-        self._orig_stdout = mod._stdout
-        self._orig_repl_mode = mod._repl_mode
-        self._orig_fullscreen = mod._fullscreen_mode
-        self._orig_layout = mod._fullscreen_layout
-        self._orig_invalidate = mod._fullscreen_invalidate
-
-    def teardown_method(self):
-        mod = self._mod
-        mod.console = self._orig_console
-        mod._stdout_console = self._orig_stdout_console
-        mod._stdout = self._orig_stdout
-        mod._repl_mode = self._orig_repl_mode
-        mod._fullscreen_mode = self._orig_fullscreen
-        mod._fullscreen_layout = self._orig_layout
-        mod._fullscreen_invalidate = self._orig_invalidate
-
-    def test_is_fullscreen_false_by_default(self):
-        self._mod._fullscreen_mode = False
-        assert self._mod.is_fullscreen() is False
-
-    def test_use_fullscreen_output_sets_mode(self):
-        from prompt_toolkit.buffer import Buffer
-
-        from anteroom.cli.layout import AnteroomLayout
-
-        buf = Buffer(name="test")
-        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
-        calls = []
-        self._mod.use_fullscreen_output(layout, lambda: calls.append(1))
-        assert self._mod.is_fullscreen() is True
-        assert self._mod._fullscreen_layout is layout
-
-    def test_console_writes_to_output_pane(self):
-        from prompt_toolkit.buffer import Buffer
-
-        from anteroom.cli.layout import AnteroomLayout
-
-        buf = Buffer(name="test")
-        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
-        calls = []
-        self._mod.use_fullscreen_output(layout, lambda: calls.append(1))
-        self._mod.console.print("hello world")
-        assert layout.output.fragment_count > 0
-        assert len(calls) >= 1
-
-
 # ---------------------------------------------------------------------------
 # Regression tests for #617 bug fixes
 # ---------------------------------------------------------------------------
@@ -3387,7 +3328,6 @@ class TestBugfix617Renderer:
         """#617-18: _thinking_start must be reset to 0 after stop_thinking."""
         self._mod._thinking_start = time.monotonic()
         self._mod._repl_mode = False
-        self._mod._fullscreen_mode = False
         self._mod._spinner = None
         self._mod._thinking_ticker_task = None
         asyncio.run(self._mod.stop_thinking())
@@ -3397,7 +3337,6 @@ class TestBugfix617Renderer:
         """#617-18: stop_thinking_sync must also reset _thinking_start."""
         self._mod._thinking_start = time.monotonic()
         self._mod._repl_mode = False
-        self._mod._fullscreen_mode = False
         self._mod._spinner = None
         self._mod._thinking_ticker_task = None
         self._mod.stop_thinking_sync()
@@ -3409,34 +3348,10 @@ class TestBugfix617Renderer:
         # Should not raise
         self._mod.render_newline()
 
-    def test_collapse_plan_fullscreen_uses_layout(self):
-        """#617-19: _collapse_plan in fullscreen writes to layout, not raw ANSI."""
-        from prompt_toolkit.buffer import Buffer
-
-        from anteroom.cli.layout import AnteroomLayout
-
-        buf = Buffer(name="test")
-        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
-        invalidated = []
-        self._mod._fullscreen_mode = True
-        self._mod._fullscreen_layout = layout
-        self._mod._fullscreen_invalidate = lambda: invalidated.append(1)
-        self._mod._plan_steps = [
-            {"text": "Step 1", "status": "complete"},
-            {"text": "Step 2", "status": "complete"},
-        ]
-        self._mod._plan_visible = True
-        self._mod._repl_mode = True
-        self._mod._collapse_plan()
-        assert not self._mod._plan_visible
-        assert layout.output.fragment_count > 0
-        assert len(invalidated) >= 1
-
     def test_stop_thinking_returns_elapsed(self):
         """#617-18: stop_thinking returns elapsed time even after reset."""
         self._mod._thinking_start = time.monotonic() - 2.5
         self._mod._repl_mode = False
-        self._mod._fullscreen_mode = False
         self._mod._spinner = None
         self._mod._thinking_ticker_task = None
         elapsed = asyncio.run(self._mod.stop_thinking())
@@ -3447,7 +3362,6 @@ class TestBugfix617Renderer:
         """#617-18: stop_thinking_sync returns elapsed time even after reset."""
         self._mod._thinking_start = time.monotonic() - 1.0
         self._mod._repl_mode = False
-        self._mod._fullscreen_mode = False
         self._mod._spinner = None
         self._mod._thinking_ticker_task = None
         elapsed = self._mod.stop_thinking_sync()
@@ -3458,7 +3372,6 @@ class TestBugfix617Renderer:
         """#617-18: Calling stop_thinking twice doesn't accumulate state."""
         self._mod._thinking_start = time.monotonic() - 1.0
         self._mod._repl_mode = False
-        self._mod._fullscreen_mode = False
         self._mod._spinner = None
         self._mod._thinking_ticker_task = None
         asyncio.run(self._mod.stop_thinking())
@@ -3466,29 +3379,6 @@ class TestBugfix617Renderer:
         # Second call should still work without error
         asyncio.run(self._mod.stop_thinking())
         assert self._mod._thinking_start == 0
-
-    def test_collapse_plan_partial_completion(self):
-        """#617-19: _collapse_plan with partial steps shows correct status."""
-        from prompt_toolkit.buffer import Buffer
-
-        from anteroom.cli.layout import AnteroomLayout
-
-        buf = Buffer(name="test")
-        layout = AnteroomLayout(header_fn=lambda: [], footer_fn=lambda: [], input_buffer=buf)
-        invalidated = []
-        self._mod._fullscreen_mode = True
-        self._mod._fullscreen_layout = layout
-        self._mod._fullscreen_invalidate = lambda: invalidated.append(1)
-        self._mod._plan_steps = [
-            {"text": "Step 1", "status": "complete"},
-            {"text": "Step 2", "status": "pending"},
-            {"text": "Step 3", "status": "pending"},
-        ]
-        self._mod._plan_visible = True
-        self._mod._repl_mode = True
-        self._mod._collapse_plan()
-        assert not self._mod._plan_visible
-        assert layout.output.fragment_count > 0
 
     def test_render_newline_with_stdout(self):
         """render_newline writes newline when _stdout is set."""
@@ -3498,269 +3388,6 @@ class TestBugfix617Renderer:
         self._mod._stdout = fake_stdout
         self._mod.render_newline()
         assert fake_stdout.getvalue() == "\n"
-
-
-class TestPhase3VisualPolish:
-    """#257 Phase 3: Turn separators, tool frames, streaming cursor."""
-
-    def setup_method(self):
-        import importlib
-
-        import anteroom.cli.renderer as mod
-
-        importlib.reload(mod)
-        self._mod = mod
-        self._orig_fs = self._mod._fullscreen_mode
-        self._orig_layout = self._mod._fullscreen_layout
-        self._orig_invalidate = self._mod._fullscreen_invalidate
-        self._orig_repl = self._mod._repl_mode
-
-    def teardown_method(self):
-        self._mod._fullscreen_mode = self._orig_fs
-        self._mod._fullscreen_layout = self._orig_layout
-        self._mod._fullscreen_invalidate = self._orig_invalidate
-        self._mod._repl_mode = self._orig_repl
-        self._mod._fs_ai_turn_rendered = False
-        self._mod._streaming_cursor_active = False
-        self._mod._streaming_checkpoint = 0
-        self._mod._streaming_buffer = []
-
-    def _setup_fullscreen(self):
-        from prompt_toolkit.buffer import Buffer
-
-        from anteroom.cli.layout import AnteroomLayout
-
-        layout = AnteroomLayout(
-            header_fn=lambda: [("", "h")],
-            footer_fn=lambda: [("", "f")],
-            input_buffer=Buffer(),
-        )
-        invalidated = []
-        self._mod._fullscreen_mode = True
-        self._mod._fullscreen_layout = layout
-        self._mod._fullscreen_invalidate = lambda: invalidated.append(1)
-        self._mod._repl_mode = True
-        return layout, invalidated
-
-    def test_render_user_turn_appends_fragments(self):
-        layout, inv = self._setup_fullscreen()
-        before = layout.output.fragment_count
-        self._mod.render_user_turn("Hello world")
-        after = layout.output.fragment_count
-        assert after > before
-        text = "".join(t for _, t in layout.output._output_fragments[before:])
-        assert "You" in text
-        assert "Hello world" in text
-
-    def test_render_user_turn_noop_without_fullscreen(self):
-        self._mod._fullscreen_mode = False
-        self._mod._fullscreen_layout = None
-        self._mod.render_user_turn("test")
-
-    def test_render_ai_turn_start_appends_separator(self):
-        layout, inv = self._setup_fullscreen()
-        before = layout.output.fragment_count
-        self._mod.render_ai_turn_start()
-        after = layout.output.fragment_count
-        assert after > before
-        text = "".join(t for _, t in layout.output._output_fragments[before:])
-        assert "AI" in text
-
-    def test_render_ai_turn_not_duplicated(self):
-        layout, inv = self._setup_fullscreen()
-        self._mod.render_ai_turn_start()
-        count_after_first = layout.output.fragment_count
-        self._mod.render_ai_turn_start()
-        assert layout.output.fragment_count == count_after_first
-
-    def test_clear_turn_history_resets_ai_flag(self):
-        self._mod._fs_ai_turn_rendered = True
-        self._mod.clear_turn_history()
-        assert not self._mod._fs_ai_turn_rendered
-
-    def test_clear_turn_history_clears_streaming_buffer(self):
-        self._mod._streaming_buffer = ["leftover", "tokens"]
-        self._mod.clear_turn_history()
-        assert self._mod._streaming_buffer == []
-
-    def test_tool_call_start_fullscreen_defers_rendering(self):
-        """In fullscreen, render_tool_call_start appends no fragments —
-        all visual output is deferred to render_tool_call_end to avoid
-        frame/result disconnection during parallel tool execution."""
-        layout, inv = self._setup_fullscreen()
-        before = layout.output.fragment_count
-        self._mod.render_tool_call_start("read_file", {"path": "src/test.py"})
-        after = layout.output.fragment_count
-        assert after == before  # nothing rendered at start
-
-    def test_tool_call_end_shows_args_via_summary(self):
-        """Result line includes humanized args from the summary."""
-        layout, inv = self._setup_fullscreen()
-        self._mod._tool_start = time.monotonic()
-        self._mod._current_turn_tools.append(
-            {"tool_name": "glob_files", "summary": "Finding src/*", "status": "running", "output": None}
-        )
-        before = layout.output.fragment_count
-        self._mod.render_tool_call_end("glob_files", "success", {"content": "3 files"})
-        frags = layout.output._output_fragments[before:]
-        text = "".join(t for _, t in frags)
-        assert "Finding src/*" in text
-
-    def test_tool_call_end_uses_humanized_summary(self):
-        layout, inv = self._setup_fullscreen()
-        self._mod._tool_start = time.monotonic()
-        self._mod._current_turn_tools.append(
-            {"tool_name": "bash", "summary": "bash \u2014 ls -la", "status": "running", "output": None}
-        )
-        before = layout.output.fragment_count
-        self._mod.render_tool_call_end("bash", "success", {"content": "total 42"})
-        frags = layout.output._output_fragments[before:]
-        text = "".join(t for _, t in frags)
-        # Result line should use humanized summary, not just "bash"
-        assert "ls -la" in text
-
-    def test_tool_call_end_fullscreen_success(self):
-        layout, inv = self._setup_fullscreen()
-        self._mod._tool_start = time.monotonic()
-        self._mod._current_turn_tools.append(
-            {"tool_name": "read_file", "summary": "Reading test.py", "status": "running", "output": None}
-        )
-        before = layout.output.fragment_count
-        self._mod.render_tool_call_end("read_file", "success", {"content": "file data"})
-        after = layout.output.fragment_count
-        assert after > before
-        styles = [s for s, _ in layout.output._output_fragments[before:]]
-        assert "class:tool.ok" in styles
-
-    def test_tool_call_end_fullscreen_error(self):
-        layout, inv = self._setup_fullscreen()
-        self._mod._tool_start = time.monotonic()
-        self._mod._current_turn_tools.append(
-            {"tool_name": "read_file", "summary": "Reading test.py", "status": "running", "output": None}
-        )
-        before = layout.output.fragment_count
-        self._mod.render_tool_call_end("read_file", "error", {"error": "Permission denied"})
-        after = layout.output.fragment_count
-        assert after > before
-        styles = [s for s, _ in layout.output._output_fragments[before:]]
-        assert "class:tool.err" in styles
-
-    def test_streaming_cursor_appears_during_tokens(self):
-        layout, inv = self._setup_fullscreen()
-        self._mod.render_token("Hello")
-        assert self._mod._streaming_cursor_active
-        frags = layout.output._output_fragments
-        text = "".join(t for _, t in frags)
-        assert "\u258a" in text
-
-    def test_streaming_cursor_gone_after_response_end(self):
-        layout, inv = self._setup_fullscreen()
-        self._mod.render_token("Hello world")
-        assert self._mod._streaming_cursor_active
-        self._mod.render_response_end()
-        assert not self._mod._streaming_cursor_active
-        frags = layout.output._output_fragments
-        cursor_frags = [t for s, t in frags if s == "class:streaming.cursor"]
-        assert not cursor_frags
-
-    def test_user_turn_truncates_long_text(self):
-        layout, inv = self._setup_fullscreen()
-        long_text = "x" * 100
-        self._mod.render_user_turn(long_text)
-        text = "".join(t for _, t in layout.output._output_fragments)
-        assert "..." in text
-        assert len([c for c in text if c == "x"]) <= 60
-
-    def test_stop_streaming_cursor_noop_when_inactive(self):
-        """_stop_streaming_cursor is a no-op when cursor is already inactive."""
-        layout, inv = self._setup_fullscreen()
-        layout.output.append_text("preserved content")
-        before = layout.output.fragment_count
-        self._mod._streaming_cursor_active = False
-        self._mod._stop_streaming_cursor()
-        assert layout.output.fragment_count == before
-
-    def test_streaming_checkpoint_preserved_across_stop(self):
-        """_stop_streaming_cursor must not reset _streaming_checkpoint to 0;
-        render_response_end handles the reset after using the checkpoint."""
-        layout, inv = self._setup_fullscreen()
-        layout.output.append_text("pre-existing\n")
-        self._mod.render_token("token1 ")
-        assert self._mod._streaming_checkpoint > 0
-        cp_before = self._mod._streaming_checkpoint
-        self._mod._stop_streaming_cursor()
-        # checkpoint should NOT have been zeroed
-        assert self._mod._streaming_checkpoint == cp_before
-
-    def test_plan_update_during_active_streaming(self):
-        """Updating a plan step while streaming tokens must preserve both
-        the plan block and the streaming cursor."""
-        layout, inv = self._setup_fullscreen()
-        # Start a plan
-        self._mod.start_plan(["Step one", "Step two"])
-        # Start streaming tokens
-        self._mod.render_token("Hello ")
-        assert self._mod._streaming_cursor_active
-        # Update plan while streaming
-        self._mod.update_plan_step(0, "complete")
-        # Both plan and streaming cursor should be present
-        assert self._mod._streaming_cursor_active
-        text = "".join(t for _, t in layout.output._output_fragments)
-        assert "\u2713" in text  # completed step icon
-        assert "Hello " in text  # streamed token preserved
-        assert "\u258a" in text  # streaming cursor still present
-
-    def test_clear_plan_removes_fragments_from_pane(self):
-        """clear_plan must remove plan fragments from the fullscreen output pane."""
-        layout, inv = self._setup_fullscreen()
-        layout.output.append_text("conversation content\n")
-        pre_plan = layout.output.fragment_count
-        self._mod.start_plan(["Step A", "Step B"])
-        assert layout.output.fragment_count > pre_plan
-        self._mod.clear_plan()
-        assert layout.output.fragment_count == pre_plan
-
-    def test_flush_buffered_text_safe_without_active_cursor(self):
-        """flush_buffered_text must not wipe the pane when no streaming cursor was active."""
-        layout, inv = self._setup_fullscreen()
-        layout.output.append_text("important history\n")
-        before = layout.output.fragment_count
-        self._mod._streaming_buffer = ["some text"]
-        self._mod._streaming_checkpoint = 0
-        self._mod._streaming_cursor_active = False
-        self._mod.flush_buffered_text()
-        # History must be preserved — not truncated
-        assert layout.output.fragment_count >= before
-
-    def test_flush_buffered_text_works_at_checkpoint_zero(self):
-        """flush_buffered_text must truncate raw fragments even when checkpoint is 0
-        (empty pane at conversation start)."""
-        layout, inv = self._setup_fullscreen()
-        # Simulate streaming starting on an empty pane (checkpoint = 0)
-        self._mod.render_token("Hello world")
-        assert self._mod._streaming_checkpoint == 0
-        assert self._mod._streaming_cursor_active
-        raw_count = layout.output.fragment_count
-        assert raw_count > 0  # raw text + cursor in the pane
-        self._mod.flush_buffered_text()
-        # Raw streamed text + cursor should have been truncated back to checkpoint 0
-        # (Rich markdown rendering goes through _stdout_console, not the pane fragments)
-        assert not self._mod._streaming_cursor_active
-        assert self._mod._streaming_buffer == []
-
-    def test_flush_buffered_text_fullscreen(self):
-        """flush_buffered_text renders accumulated tokens into the pane
-        and advances _streaming_checkpoint so subsequent streaming doesn't
-        overwrite the flushed content."""
-        layout, inv = self._setup_fullscreen()
-        self._mod.render_token("Hello ")
-        self._mod.render_token("world")
-        cp_before = self._mod._streaming_checkpoint
-        self._mod.flush_buffered_text()
-        # checkpoint should advance past the rendered markdown
-        assert self._mod._streaming_checkpoint >= cp_before
-        # buffer should be empty after flush
-        assert self._mod._streaming_buffer == []
 
 
 # ---------------------------------------------------------------------------
@@ -3796,121 +3423,3 @@ class TestRenderError:
             render_warning("[red]injection[/red]")
             printed = str(mock_console.print.call_args_list[0])
             assert "\\[red\\]" in printed or "\\[red]" in printed
-
-
-# ---------------------------------------------------------------------------
-# FullscreenLogHandler (#678)
-# ---------------------------------------------------------------------------
-
-
-class TestFullscreenLogHandler:
-    """Tests for the fullscreen-safe log handler."""
-
-    def test_handler_routes_error_through_console(self) -> None:
-        import logging
-
-        handler = FullscreenLogHandler()
-        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
-        record = logging.LogRecord(
-            name="anteroom.services.ai_service",
-            level=logging.ERROR,
-            pathname="",
-            lineno=0,
-            msg="Stream timed out",
-            args=(),
-            exc_info=None,
-        )
-        with patch("anteroom.cli.renderer.console") as mock_console:
-            handler.emit(record)
-            assert mock_console.print.called
-            printed = str(mock_console.print.call_args_list[0])
-            assert "Stream timed out" in printed
-
-    def test_handler_routes_warning_through_console(self) -> None:
-        import logging
-
-        handler = FullscreenLogHandler()
-        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
-        record = logging.LogRecord(
-            name="anteroom.services.ai_service",
-            level=logging.WARNING,
-            pathname="",
-            lineno=0,
-            msg="Rate limited",
-            args=(),
-            exc_info=None,
-        )
-        with patch("anteroom.cli.renderer.console") as mock_console:
-            handler.emit(record)
-            assert mock_console.print.called
-            printed = str(mock_console.print.call_args_list[0])
-            assert "Rate limited" in printed
-            assert "#8b8b8b" in printed  # MUTED color
-
-    def test_handler_does_not_raise_on_render_failure(self) -> None:
-        import logging
-        from unittest.mock import MagicMock
-
-        handler = FullscreenLogHandler()
-        handler.handleError = MagicMock()
-        record = logging.LogRecord(
-            name="test",
-            level=logging.ERROR,
-            pathname="",
-            lineno=0,
-            msg="test message",
-            args=(),
-            exc_info=None,
-        )
-        with patch("anteroom.cli.renderer.console") as mock_console:
-            mock_console.print.side_effect = Exception("render failed")
-            handler.emit(record)
-            handler.handleError.assert_called_once_with(record)
-
-
-class TestFullscreenLogHandlerLifecycle:
-    """Tests for install/restore of the fullscreen log handler."""
-
-    def test_install_replaces_stream_handlers(self) -> None:
-        import importlib
-        import logging
-
-        import anteroom.cli.renderer as mod
-
-        importlib.reload(mod)
-        root = logging.getLogger()
-        saved = list(root.handlers)
-        root.handlers.clear()
-        test_handler = logging.StreamHandler()
-        root.addHandler(test_handler)
-        try:
-            mod.install_fullscreen_log_handler()
-            fs_handlers = [h for h in root.handlers if type(h).__name__ == "FullscreenLogHandler"]
-            stream_handlers = [
-                h
-                for h in root.handlers
-                if isinstance(h, logging.StreamHandler) and type(h).__name__ != "FullscreenLogHandler"
-            ]
-            assert len(fs_handlers) == 1
-            assert len(stream_handlers) == 0
-        finally:
-            mod.restore_log_handlers()
-            root.handlers.clear()
-            root.handlers.extend(saved)
-
-    def test_restore_removes_fullscreen_handler(self) -> None:
-        import logging
-
-        root = logging.getLogger()
-        install_fullscreen_log_handler()
-        restore_log_handlers()
-        fs_handlers = [h for h in root.handlers if isinstance(h, FullscreenLogHandler)]
-        assert len(fs_handlers) == 0
-
-    def test_restore_without_install_is_noop(self) -> None:
-        import logging
-
-        root = logging.getLogger()
-        handlers_before = list(root.handlers)
-        restore_log_handlers()
-        assert root.handlers == handlers_before

@@ -134,7 +134,7 @@ class TestCollapseLongInput:
             patch("anteroom.cli.repl.shutil") as mock_shutil,
         ):
             mock_sys.stdout.isatty.return_value = True
-            mock_renderer.is_fullscreen.return_value = False
+
             mock_shutil.get_terminal_size.return_value = _TERM_SIZE
             _collapse_long_input(long_input)
 
@@ -167,7 +167,7 @@ class TestCollapseLongInput:
             patch("anteroom.cli.repl.shutil") as mock_shutil,
         ):
             mock_sys.stdout.isatty.return_value = True
-            mock_renderer.is_fullscreen.return_value = False
+
             mock_shutil.get_terminal_size.return_value = _TERM_SIZE
             _collapse_long_input(raw)
 
@@ -183,19 +183,6 @@ class TestCollapseLongInput:
             patch("anteroom.cli.repl.sys") as mock_sys,
         ):
             mock_sys.stdout.isatty.return_value = False
-            _collapse_long_input(long_input)
-            mock_renderer.console.print.assert_not_called()
-            mock_renderer._stdout.write.assert_not_called()
-
-    def test_fullscreen_mode_returns_early(self) -> None:
-        """In fullscreen mode, collapse is skipped (output pane handles display)."""
-        long_input = self._make_lines(20)
-        with (
-            patch("anteroom.cli.repl.renderer") as mock_renderer,
-            patch("anteroom.cli.repl.sys") as mock_sys,
-        ):
-            mock_sys.stdout.isatty.return_value = True
-            mock_renderer.is_fullscreen.return_value = True
             _collapse_long_input(long_input)
             mock_renderer.console.print.assert_not_called()
             mock_renderer._stdout.write.assert_not_called()

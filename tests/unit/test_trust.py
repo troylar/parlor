@@ -172,7 +172,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, new_content, data_dir=tmp_path)
         assert result == new_content
         # Trust store should be updated with new hash
@@ -194,7 +193,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, new_content, data_dir=tmp_path)
         assert result is None
 
@@ -213,7 +211,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, content, data_dir=tmp_path)
 
         assert result == content
@@ -234,7 +231,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, content, data_dir=tmp_path)
 
         assert result is None
@@ -255,7 +251,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, content, data_dir=tmp_path)
 
         assert result is None
@@ -275,7 +270,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, content, data_dir=tmp_path)
 
         assert result is None
@@ -297,7 +291,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, content, data_dir=tmp_path)
 
         assert result == content
@@ -321,7 +314,6 @@ class TestCheckProjectTrust:
             patch("anteroom.cli.repl.renderer") as _mock_rend,
             patch("prompt_toolkit.PromptSession", return_value=mock_session),
         ):
-            _mock_rend.is_fullscreen.return_value = False
             result = await _check_project_trust(md, content, data_dir=tmp_path)
 
         assert result == content
