@@ -4,7 +4,6 @@ Tests cover:
 - ``is_local_space()`` — local vs global space detection
 - ``slugify_dir_name()`` — directory name to space name conversion
 - ``write_space_template()`` — self-documenting YAML template generation
-- ``format_header()`` — space name display in CLI header
 - Router ``origin`` field — local/global annotation in API responses
 """
 
@@ -17,7 +16,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from anteroom.cli.layout import format_header
 from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, _create_indexes
 from anteroom.services.spaces import (
     _SPACE_TEMPLATE,
@@ -242,64 +240,6 @@ class TestWriteSpaceTemplate:
         content = out.read_text(encoding="utf-8")
         assert "old content" not in content
         assert "name: new-space" in content
-
-
-# ===================================================================
-# format_header() — space_name display
-# ===================================================================
-
-
-class TestFormatHeaderSpaceName:
-    """Tests for ``format_header()`` with ``space_name`` parameter."""
-
-    def test_with_space_name(self) -> None:
-        parts = format_header(space_name="my-workspace")
-        text = "".join(t for _, t in parts)
-        assert "Space: my-workspace" in text
-
-    def test_without_space_name(self) -> None:
-        parts = format_header(model="gpt-4o")
-        text = "".join(t for _, t in parts)
-        assert "Space:" not in text
-
-    def test_space_name_empty_string(self) -> None:
-        parts = format_header(space_name="")
-        text = "".join(t for _, t in parts)
-        assert "Space:" not in text
-
-    def test_space_name_with_other_fields(self) -> None:
-        parts = format_header(
-            model="gpt-4o",
-            working_dir="/home/user/project",
-            git_branch="main",
-            space_name="dev-env",
-        )
-        text = "".join(t for _, t in parts)
-        assert "Space: dev-env" in text
-        assert "gpt-4o" in text
-        assert "main" in text
-
-    def test_space_name_style_class(self) -> None:
-        parts = format_header(space_name="test")
-        space_parts = [(s, t) for s, t in parts if "Space:" in t]
-        assert len(space_parts) == 1
-        assert space_parts[0][0] == "class:header.space"
-
-    def test_space_name_has_separator(self) -> None:
-        parts = format_header(model="gpt-4o", space_name="test")
-        styles = [s for s, _ in parts]
-        assert "class:header.sep" in styles
-
-    def test_space_name_only(self) -> None:
-        parts = format_header(space_name="dev")
-        text = "".join(t for _, t in parts)
-        assert "Space: dev" in text
-
-    def test_space_name_with_plan_mode(self) -> None:
-        parts = format_header(space_name="staging", plan_mode=True)
-        text = "".join(t for _, t in parts)
-        assert "Space: staging" in text
-        assert "PLAN" in text
 
 
 # ===================================================================

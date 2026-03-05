@@ -397,12 +397,24 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
     team_ai = _load_team_ai_settings(team_config_path)
 
     # Welcome
+    from rich.text import Text
+
     console.print()
-    console.print(f"[{GOLD}]      \u25b2[/]")
-    console.print(f"[{GOLD}]     / \\[/]")
-    console.print(f"[{GOLD}]    /   \\[/]")
-    console.print(f"[{GOLD}]   / [{BLUE}]\u25fc\u25fc[/{GOLD}] \\      [bold]A N T E R O O M[/bold][/]")
-    console.print(f"[{GOLD}]  /_______\\     [{SLATE}]Let's get you set up.[/]")
+    console.print(Text("      \u25b2", style=GOLD))
+    console.print(Text("     / \\", style=GOLD))
+    console.print(Text("    /   \\", style=GOLD))
+    _logo4 = Text()
+    _logo4.append("   / ", style=GOLD)
+    _logo4.append("\u25a0\u25a0", style=BLUE)
+    _logo4.append("  \\", style=GOLD)
+    _logo4.append("   ")
+    _logo4.append("A N T E R O O M", style="bold")
+    console.print(_logo4)
+    _logo5 = Text()
+    _logo5.append("  /       \\", style=GOLD)
+    _logo5.append("  ")
+    _logo5.append("Let's get you set up.", style=SLATE)
+    console.print(_logo5)
     console.print()
 
     try:
