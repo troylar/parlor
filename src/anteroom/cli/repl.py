@@ -2127,14 +2127,12 @@ async def _run_repl(
     )
 
     _toolbar_cache: list[tuple[str, str]] = []
-    _toolbar_msg_count: list[int] = [0]
     _toolbar_dirty: list[bool] = [True]
 
     _cached_git_branch: list[str] = [_detect_git_branch() or ""]
 
     def _toolbar_refresh() -> None:
         """Recompute the cached toolbar content."""
-        _toolbar_msg_count[0] = len(ai_messages)
         _toolbar_dirty[0] = False
         # _active_space and _plan_active are defined later in _run_repl but
         # _toolbar_refresh is only ever called during prompt rendering, which
@@ -2147,10 +2145,7 @@ async def _run_repl(
             pm = _plan_active[0]
         except NameError:
             pm = False
-        try:
-            cn = conv.get("slug") or ""
-        except NameError:
-            cn = ""
+        cn = conv.get("slug") or ""
         _toolbar_cache[:] = renderer.format_status_toolbar(
             model=current_model,
             current_tokens=_estimate_tokens(ai_messages),
