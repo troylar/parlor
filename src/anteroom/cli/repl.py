@@ -4500,10 +4500,15 @@ async def _run_repl(
         """Collect user input via prompt_async and feed into input_queue."""
         from .layout import InputLexer, input_line_prefix
 
+        def _prompt_message() -> list[tuple[str, str]]:
+            """Dynamic prompt prefix colored by approval mode."""
+            return input_line_prefix(0, 0)
+
         while not exit_flag.is_set():
             try:
                 user_input_raw = await session.prompt_async(
-                    input_line_prefix,
+                    _prompt_message,
+                    prompt_continuation=input_line_prefix,
                     lexer=InputLexer(),
                 )
             except (EOFError, KeyboardInterrupt):

@@ -398,9 +398,11 @@ def run_init_wizard(force: bool = False, team_config_path: str | None = None) ->
 
     # Welcome
     console.print()
-    console.print(f"  [{GOLD}]  \u2584\u2584\u2584[/]")
-    console.print(f"  [{GOLD}] \u2588[{BLUE}]\u2588\u2588[/{GOLD}]\u2588 [/]  [bold]A N T E R O O M[/bold]")
-    console.print(f"  [{GOLD}]\u2588\u2588\u2588\u2588\u2588[/]  [{SLATE}]Let's get you set up.[/]")
+    console.print(f"  [{GOLD}]    \u25b2[/]")
+    console.print(f"  [{GOLD}]   / \\[/]")
+    console.print(f"  [{GOLD}]  /   \\[/]")
+    console.print(f"  [{GOLD}] / [{BLUE}]\u25a0\u25a0[/{GOLD}] \\[/]   [bold]A N T E R O O M[/bold]")
+    console.print(f"  [{GOLD}]/       \\[/]  [{SLATE}]Let's get you set up.[/]")
     console.print()
 
     try:
