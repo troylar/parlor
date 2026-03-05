@@ -36,11 +36,12 @@ def attach_pack(
     pack_id: str,
     *,
     project_path: str | None = None,
+    check_overlay_conflicts: bool = True,
 ) -> dict[str, Any]:
     """Attach a pack to global scope or a specific project.
 
-    Raises ``ValueError`` if the pack doesn't exist or is already attached
-    at the same scope.
+    Raises ``ValueError`` if the pack doesn't exist, is already attached
+    at the same scope, or its config overlays conflict with already-attached packs.
     """
     _validate_project_path(project_path)
     pack = db.execute("SELECT id, namespace, name FROM packs WHERE id = ?", (pack_id,)).fetchone()
@@ -59,6 +60,20 @@ def attach_pack(
         nm = pack["name"] if isinstance(pack, dict) else pack[2]
         msg = f"Pack {ns}/{nm} is already attached at {scope} scope"
         raise ValueError(msg)
+
+    # --- Config overlay conflict detection -----------------------------------
+    if check_overlay_conflicts:
+        from .config_overlays import collect_pack_overlays, detect_overlay_conflicts
+
+        new_overlays = collect_pack_overlays(db, [pack_id])
+        if new_overlays:
+            active_ids = get_active_pack_ids(db, project_path=project_path)
+            existing_overlays = collect_pack_overlays(db, active_ids)
+            for new_label, new_dict in new_overlays:
+                conflicts = detect_overlay_conflicts(existing_overlays, (new_label, new_dict))
+                if conflicts:
+                    msg = "Config overlay conflict — cannot attach pack. Conflicting keys:\n  " + "\n  ".join(conflicts)
+                    raise ValueError(msg)
 
     att_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
@@ -171,11 +186,13 @@ def attach_pack_to_space(
     db: ThreadSafeConnection,
     pack_id: str,
     space_id: str,
+    *,
+    check_overlay_conflicts: bool = True,
 ) -> dict[str, Any]:
     """Attach a pack to a space scope.
 
-    Raises ``ValueError`` if the pack or space doesn't exist, or is already
-    attached to this space.
+    Raises ``ValueError`` if the pack or space doesn't exist, is already
+    attached to this space, or its config overlays conflict with already-attached packs.
     """
     pack = db.execute("SELECT id, namespace, name FROM packs WHERE id = ?", (pack_id,)).fetchone()
     if not pack:
@@ -196,6 +213,20 @@ def attach_pack_to_space(
         nm = pack["name"] if isinstance(pack, dict) else pack[2]
         msg = f"Pack {ns}/{nm} is already attached to space {space_id}"
         raise ValueError(msg)
+
+    # --- Config overlay conflict detection -----------------------------------
+    if check_overlay_conflicts:
+        from .config_overlays import collect_pack_overlays, detect_overlay_conflicts
+
+        new_overlays = collect_pack_overlays(db, [pack_id])
+        if new_overlays:
+            active_ids = get_active_pack_ids_for_space(db, space_id)
+            existing_overlays = collect_pack_overlays(db, active_ids)
+            for new_label, new_dict in new_overlays:
+                conflicts = detect_overlay_conflicts(existing_overlays, (new_label, new_dict))
+                if conflicts:
+                    msg = "Config overlay conflict — cannot attach pack. Conflicting keys:\n  " + "\n  ".join(conflicts)
+                    raise ValueError(msg)
 
     att_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()

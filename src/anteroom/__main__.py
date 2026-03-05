@@ -88,6 +88,70 @@ def _run_config_validate(team_config_path: Path | None = None) -> None:
         sys.exit(1)
 
 
+def _run_config_view(team_config_path: Path | None = None, *, with_sources: bool = False) -> None:
+    """Display current configuration, optionally annotated with source layers."""
+    from dataclasses import asdict
+
+    from rich.console import Console
+    from rich.table import Table
+
+    config_path, config, enforced_fields = _load_config_or_exit(
+        team_config_path,
+        interactive=False,
+    )
+
+    if not with_sources:
+        import yaml
+
+        console = Console()
+        console.print(yaml.dump(asdict(config), default_flow_style=False, sort_keys=True))
+        return
+
+    # Collect raw layers for source tracking
+    import yaml
+
+    from .services.config_overlays import flatten_to_dot_paths, track_config_sources
+
+    layers: list[tuple[str, dict[str, Any]]] = []
+
+    # 1. Personal config
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as f:
+            personal_raw = yaml.safe_load(f) or {}
+        layers.append(("personal", personal_raw))
+
+    # 2. Enforced fields
+    enforced_set = set(enforced_fields)
+
+    # Build source map from personal layer (the only one we can reconstruct
+    # without replaying the full merge — in a future iteration we could
+    # instrument load_config to return the full layer stack)
+    source_map = track_config_sources(layers)
+
+    # Flatten final config for display
+    final_flat = flatten_to_dot_paths(asdict(config))
+
+    console = Console()
+    table = Table(title="Configuration", show_lines=False)
+    table.add_column("Key", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+    table.add_column("Source", style="green")
+
+    for key in sorted(final_flat.keys()):
+        value = str(final_flat[key])
+        if len(value) > 80:
+            value = value[:77] + "..."
+        if key in enforced_set:
+            source = "[bold red]team (enforced)[/bold red]"
+        elif key in source_map:
+            source = source_map[key]
+        else:
+            source = "default"
+        table.add_row(key, value, source)
+
+    console.print(table)
+
+
 async def _validate_ai_connection(config: AppConfig) -> None:
     from .services.ai_service import create_ai_service
 
@@ -1772,6 +1836,8 @@ def main() -> None:
     config_parser = subparsers.add_parser("config", help="View and edit configuration")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
     config_subparsers.add_parser("validate", help="Check compliance rules without starting the app")
+    view_parser = config_subparsers.add_parser("view", help="Display current configuration")
+    view_parser.add_argument("--with-sources", action="store_true", help="Show which layer set each value")
 
     # `aroom chat` subcommand
     chat_parser = subparsers.add_parser("chat", help="Interactive CLI chat mode")
@@ -2106,6 +2172,11 @@ def main() -> None:
             tc_arg = getattr(args, "team_config", None)
             tc_path = Path(tc_arg) if tc_arg else None
             _run_config_validate(team_config_path=tc_path)
+            return
+        if getattr(args, "config_command", None) == "view":
+            tc_arg = getattr(args, "team_config", None)
+            tc_path = Path(tc_arg) if tc_arg else None
+            _run_config_view(team_config_path=tc_path, with_sources=getattr(args, "with_sources", False))
             return
         from .cli.setup import run_config_editor
 

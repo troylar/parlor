@@ -820,17 +820,18 @@ def load_config(
     *,
     team_config_path: Path | None = None,
     project_config_path: Path | None = None,
+    pack_config: dict[str, Any] | None = None,
     space_config: dict[str, Any] | None = None,
     working_dir: str | None = None,
     interactive: bool = False,
 ) -> tuple[AppConfig, list[str]]:
-    """Load configuration with optional team, space, and project config layers.
+    """Load configuration with optional team, pack, space, and project config layers.
 
     Returns ``(AppConfig, enforced_fields)`` where *enforced_fields* is
     the list of dot-paths from the team config's ``enforce`` section.
 
     Layer precedence (highest wins):
-      env vars > project config > space config > personal config > team config > defaults
+      env vars > project config > space config > personal config > pack config > team config > defaults
     Enforced team fields override everything.
     """
     raw: dict[str, Any] = {}
@@ -862,13 +863,19 @@ def load_config(
         env_path=os.environ.get("AI_CHAT_TEAM_CONFIG"),
         personal_path=raw.get("team_config_path"),
     )
+    # Pack overlays sit between team and personal in precedence:
+    #   defaults < team < packs < personal < space < project < env vars
+    # Apply pack as a base that personal overrides, before team merge.
+    if pack_config and isinstance(pack_config, dict):
+        raw = deep_merge(pack_config, raw)
+
     if team_path:
         data_dir = path.parent if path.exists() else None
         team_raw, enforced_fields = load_team_config(team_path, data_dir, interactive=interactive)
         if team_raw:
-            # Team is the base, personal overlays on top
+            # Team is the deepest base; personal+pack overlays sit on top
             raw = deep_merge(team_raw, raw)
-            # Re-apply enforced fields so personal values can't override them
+            # Re-apply enforced fields so neither packs nor personal can override them
             raw = apply_enforcement(raw, team_raw, enforced_fields)
 
     # --- Space config layer --------------------------------------------------
