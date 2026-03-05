@@ -1,4 +1,4 @@
-"""Tests for paste detection, input collapsing, and fullscreen helpers in the CLI REPL."""
+"""Tests for paste detection and input collapsing in the CLI REPL."""
 
 from __future__ import annotations
 

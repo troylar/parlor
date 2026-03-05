@@ -30,7 +30,7 @@ async def test_resolve_pack_interactive_not_found() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_pack_interactive_ambiguous_inline() -> None:
-    """Prompts user for disambiguation in inline (non-fullscreen) mode."""
+    """Prompts user for disambiguation in inline mode."""
     candidates = [
         {"id": "aaa11111", "namespace": "ns", "name": "p", "version": "1.0"},
         {"id": "bbb22222", "namespace": "ns", "name": "p", "version": "2.0"},

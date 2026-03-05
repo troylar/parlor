@@ -3304,11 +3304,6 @@ class TestFormatStatusToolbar:
 
 
 # ---------------------------------------------------------------------------
-# Fullscreen mode bridge
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Regression tests for #617 bug fixes
 # ---------------------------------------------------------------------------
 
@@ -3381,13 +3376,10 @@ class TestBugfix617Renderer:
         assert self._mod._thinking_start == 0
 
     def test_render_newline_with_stdout(self):
-        """render_newline writes newline when _stdout is set."""
-        import io as io_mod
-
-        fake_stdout = io_mod.StringIO()
-        self._mod._stdout = fake_stdout
-        self._mod.render_newline()
-        assert fake_stdout.getvalue() == "\n"
+        """render_newline emits a blank line via console.print()."""
+        with patch("anteroom.cli.renderer.console") as mock_console:
+            self._mod.render_newline()
+            mock_console.print.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

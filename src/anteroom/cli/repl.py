@@ -2448,7 +2448,6 @@ async def _run_repl(
             layout=layout,
             key_bindings=picker_kb,
             style=style,
-            full_screen=True,
         )
         await app.run_async()
         return result[0]
@@ -4567,6 +4566,7 @@ async def _run_repl(
     from prompt_toolkit.patch_stdout import patch_stdout as _patch_stdout
 
     with _patch_stdout(raw=True):
+        renderer.use_stdout_console()
         input_task = asyncio.create_task(_collect_input_simple())
         runner_task = asyncio.create_task(_agent_runner())
 

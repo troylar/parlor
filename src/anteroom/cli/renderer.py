@@ -40,19 +40,25 @@ _STALL_THRESHOLD: float = 15.0  # seconds before showing API stall warning
 def use_stdout_console() -> None:
     """Switch renderer to REPL-compatible mode.
 
-    - Opens a duplicate of the real stderr file descriptor so Rich output
-      bypasses prompt_toolkit's ``patch_stdout`` proxy entirely.  The proxy
-      corrupts ANSI escape bytes; a raw fd duplicate does not.
-    - Disables the animated spinner (Rich Live/Status) whose cursor
-      manipulation conflicts with prompt_toolkit's terminal management.
-      A static "Thinking..." line is printed instead.
+    Routes Rich console output through ``sys.stdout`` (the ``patch_stdout``
+    proxy) so prompt_toolkit can manage cursor positioning — the prompt and
+    bottom toolbar stay anchored at the terminal bottom while output scrolls
+    above.
+
+    A duplicated stderr fd is kept as ``_stdout`` for raw ANSI escape writes
+    (thinking spinner, tool ticker) that need direct terminal access without
+    proxy buffering.
 
     Call from inside ``patch_stdout()`` context.
     """
     global console, _stdout_console, _stdout, _repl_mode
+    # Rich consoles write through the patch_stdout proxy so prompt_toolkit
+    # knows about output and can keep the prompt at the bottom.
+    console = Console(file=sys.stdout, force_terminal=True)
+    _stdout_console = Console(file=sys.stdout, force_terminal=True)
+    # Raw ANSI writes (spinners, tickers) go to a real stderr fd to avoid
+    # proxy buffering and allow carriage-return cursor manipulation.
     _real_stderr = os.fdopen(os.dup(sys.stderr.fileno()), "w", newline="")
-    console = Console(file=_real_stderr, force_terminal=True)
-    _stdout_console = Console(file=_real_stderr, force_terminal=True)
     _stdout = _real_stderr
     _repl_mode = True
 
@@ -963,9 +969,7 @@ def render_response_end() -> None:
 
 
 def render_newline() -> None:
-    if _stdout:
-        _stdout.write("\n")
-        _stdout.flush()
+    console.print()
 
 
 # ---------------------------------------------------------------------------
