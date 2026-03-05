@@ -830,9 +830,48 @@ def load_config(
     Returns ``(AppConfig, enforced_fields)`` where *enforced_fields* is
     the list of dot-paths from the team config's ``enforce`` section.
 
-    Layer precedence (highest wins):
+    Layer precedence (highest wins)::
+
       env vars > project config > space config > personal config > pack config > team config > defaults
-    Enforced team fields override everything.
+
+    Enforced team fields override everything — they are re-applied after
+    each merge step via :func:`~anteroom.services.team_config.apply_enforcement`.
+
+    Parameters
+    ----------
+    config_path:
+        Path to the personal YAML config file.  If ``None``, auto-detected
+        via ``_get_config_path()``.
+    team_config_path:
+        Explicit path to a team config file (overrides discovery).
+    project_config_path:
+        Explicit path to a project config file (overrides discovery).
+    pack_config:
+        Pre-merged pack overlay dict (output of
+        :func:`~anteroom.services.config_overlays.merge_pack_overlays`).
+        Applied between team and personal layers.  ``None`` or empty dict
+        is a no-op.  The caller is responsible for collecting and merging
+        pack overlays from the DB before calling this function.
+    space_config:
+        Space-scoped config dict.  Applied after personal layer.
+    working_dir:
+        Working directory for project config auto-discovery.
+    interactive:
+        If ``True``, prompt on untrusted team/project configs.
+
+    Merge strategy
+    --------------
+    ``raw`` starts as the personal config (from the YAML file).  Layers
+    are applied using :func:`~anteroom.services.team_config.deep_merge`
+    which creates new dicts at each level — no input is mutated.
+
+    Pack overlays are merged *before* the team layer so that the merge
+    chain is: ``deep_merge(pack, personal)`` → ``deep_merge(team, result)``.
+    This means team < pack < personal, which is correct.  Critically,
+    pack overlay application is *unconditional* — it does not depend on
+    whether a team config exists or is non-empty.  This prevents a subtle
+    bug where pack overlays would be silently dropped when
+    ``team_config_path`` is set but the file is empty or malformed.
     """
     raw: dict[str, Any] = {}
     path = config_path or _get_config_path()
@@ -863,9 +902,19 @@ def load_config(
         env_path=os.environ.get("AI_CHAT_TEAM_CONFIG"),
         personal_path=raw.get("team_config_path"),
     )
+    # --- Pack config layer ---------------------------------------------------
     # Pack overlays sit between team and personal in precedence:
-    #   defaults < team < packs < personal < space < project < env vars
-    # Apply pack as a base that personal overrides, before team merge.
+    #   defaults < team < **packs** < personal < space < project < env vars
+    #
+    # We apply pack overlays here (before team merge) so that:
+    #   1. deep_merge(pack, personal) makes personal win over packs  ✓
+    #   2. deep_merge(team, result) makes team the base under both   ✓
+    #   3. apply_enforcement() re-applies team locks after all merges ✓
+    #
+    # This is deliberately outside the `if team_path:` block — pack overlays
+    # must apply regardless of whether team config exists.  An earlier design
+    # nested this inside the team conditional, which silently dropped pack
+    # overlays when team_config_path was set but the file was empty.
     if pack_config and isinstance(pack_config, dict):
         raw = deep_merge(pack_config, raw)
 
@@ -873,7 +922,6 @@ def load_config(
         data_dir = path.parent if path.exists() else None
         team_raw, enforced_fields = load_team_config(team_path, data_dir, interactive=interactive)
         if team_raw:
-            # Team is the deepest base; personal+pack overlays sit on top
             raw = deep_merge(team_raw, raw)
             # Re-apply enforced fields so neither packs nor personal can override them
             raw = apply_enforcement(raw, team_raw, enforced_fields)

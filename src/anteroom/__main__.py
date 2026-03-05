@@ -89,7 +89,25 @@ def _run_config_validate(team_config_path: Path | None = None) -> None:
 
 
 def _run_config_view(team_config_path: Path | None = None, *, with_sources: bool = False) -> None:
-    """Display current configuration, optionally annotated with source layers."""
+    """Display current configuration, optionally annotated with source layers.
+
+    Without ``--with-sources``, prints the final merged config as YAML.
+
+    With ``--with-sources``, displays a Rich table where each config key is
+    annotated with the layer that set it.  Layers are reconstructed by
+    re-reading the raw config files and checking environment variables::
+
+        default  → value comes from dataclass defaults (no file set it)
+        personal → value present in ~/.anteroom/config.yaml
+        team     → value present in team config file
+        team (enforced) → team config + listed in ``enforce`` section
+        env var  → overridden by an AI_CHAT_* environment variable
+
+    Pack and space layers require DB / runtime context and are not yet
+    tracked here — they will show as "default" or "personal" depending
+    on whether the personal file also sets the key.  This is a known v1
+    limitation documented in the PR (#759).
+    """
     from dataclasses import asdict
 
     from rich.console import Console
@@ -107,28 +125,70 @@ def _run_config_view(team_config_path: Path | None = None, *, with_sources: bool
         console.print(yaml.dump(asdict(config), default_flow_style=False, sort_keys=True))
         return
 
-    # Collect raw layers for source tracking
+    import os
+
     import yaml
 
     from .services.config_overlays import flatten_to_dot_paths, track_config_sources
 
+    # Reconstruct layers in precedence order (lowest to highest).
+    # track_config_sources uses last-writer-wins, so we add layers from
+    # lowest precedence to highest — the final source_map reflects the
+    # highest-precedence layer that actually set each key.
     layers: list[tuple[str, dict[str, Any]]] = []
 
-    # 1. Personal config
+    # 1. Team config (lowest precedence among file layers)
+    from .services.team_config import discover_team_config, load_team_config
+
+    team_path = discover_team_config(
+        cli_path=team_config_path,
+        env_path=os.environ.get("AI_CHAT_TEAM_CONFIG"),
+    )
+    if team_path:
+        team_raw, _enforced = load_team_config(team_path, interactive=False)
+        if team_raw:
+            layers.append(("team", team_raw))
+
+    # 2. Personal config (overrides team)
     if config_path.exists():
         with open(config_path, encoding="utf-8") as f:
             personal_raw = yaml.safe_load(f) or {}
-        layers.append(("personal", personal_raw))
+        if personal_raw:
+            layers.append(("personal", personal_raw))
 
-    # 2. Enforced fields
+    # 3. Environment variable overrides (highest tracked precedence).
+    # Check which AI_CHAT_* env vars are set and build a synthetic layer.
+    env_overrides: dict[str, Any] = {}
+    _env_to_dotpath = {
+        "AI_CHAT_BASE_URL": "ai.base_url",
+        "AI_CHAT_API_KEY": "ai.api_key",
+        "AI_CHAT_API_KEY_COMMAND": "ai.api_key_command",
+        "AI_CHAT_MODEL": "ai.model",
+        "AI_CHAT_SYSTEM_PROMPT": "ai.system_prompt",
+        "AI_CHAT_VERIFY_SSL": "ai.verify_ssl",
+        "AI_CHAT_REQUEST_TIMEOUT": "ai.request_timeout",
+        "AI_CHAT_CONNECT_TIMEOUT": "ai.connect_timeout",
+        "AI_CHAT_WRITE_TIMEOUT": "ai.write_timeout",
+        "AI_CHAT_POOL_TIMEOUT": "ai.pool_timeout",
+        "AI_CHAT_FIRST_TOKEN_TIMEOUT": "ai.first_token_timeout",
+        "AI_CHAT_CHUNK_STALL_TIMEOUT": "ai.chunk_stall_timeout",
+    }
+    for env_var, dot_path in _env_to_dotpath.items():
+        if os.environ.get(env_var):
+            # Build nested dict from dot path for track_config_sources
+            parts = dot_path.split(".")
+            d: dict[str, Any] = env_overrides
+            for part in parts[:-1]:
+                d = d.setdefault(part, {})
+            d[parts[-1]] = os.environ[env_var]
+    if env_overrides:
+        layers.append(("env var", env_overrides))
+
+    # Build source map — last writer wins, matching real precedence
     enforced_set = set(enforced_fields)
-
-    # Build source map from personal layer (the only one we can reconstruct
-    # without replaying the full merge — in a future iteration we could
-    # instrument load_config to return the full layer stack)
     source_map = track_config_sources(layers)
 
-    # Flatten final config for display
+    # Flatten final merged config for display
     final_flat = flatten_to_dot_paths(asdict(config))
 
     console = Console()
@@ -141,6 +201,8 @@ def _run_config_view(team_config_path: Path | None = None, *, with_sources: bool
         value = str(final_flat[key])
         if len(value) > 80:
             value = value[:77] + "..."
+        # Enforced fields always show as team (enforced), regardless of
+        # what source_map says — enforcement re-applies after every merge.
         if key in enforced_set:
             source = "[bold red]team (enforced)[/bold red]"
         elif key in source_map:
