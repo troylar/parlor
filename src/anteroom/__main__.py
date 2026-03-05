@@ -137,7 +137,10 @@ def _ensure_db_for_pack_ops() -> tuple[Path, "ThreadSafeConnection"]:
         try:
             config, _ = load_config()
             data_dir = config.app.data_dir
-        except ValueError:
+        except Exception:
+            # Config may be malformed YAML (yaml.YAMLError), invalid
+            # (ValueError), or unreadable (OSError).  Fall back to the
+            # default data directory so pack operations still work.
             data_dir = _resolve_data_dir()
     else:
         data_dir = _resolve_data_dir()
@@ -1325,6 +1328,15 @@ def _install_from_url(
     # Discover pack.yaml manifests in the cloned repo
     subpath = getattr(args, "subpath", None)
     search_root = cache_path / subpath if subpath else cache_path
+    # Path traversal prevention: subpath must not escape the cache directory
+    try:
+        resolved_root = search_root.resolve()
+        if not resolved_root.is_relative_to(cache_path.resolve()):
+            console.print("[red]Subdirectory must not escape the cloned repository.[/red]")
+            sys.exit(1)
+    except (OSError, ValueError):
+        console.print("[red]Invalid subdirectory path.[/red]")
+        sys.exit(1)
     if not search_root.is_dir():
         console.print(f"[red]Subdirectory not found:[/red] {escape(subpath or '')}")
         sys.exit(1)
