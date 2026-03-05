@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 5, 2026
 
+### v1.98.2
+
+**Improved:**
+
+- Removed 5 unused runtime dependencies, reducing install footprint and supply chain surface (#763)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.98.2)
+
 ### v1.98.1
 
 **Fixed:**
