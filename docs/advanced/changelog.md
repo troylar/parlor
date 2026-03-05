@@ -5,6 +5,23 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## March 5, 2026
+
+### v1.98.1
+
+**Fixed:**
+
+- Paste (right-click, ctrl-v, cmd-v) now works correctly in the CLI prompt (#754)
+
+**Improved:**
+
+- Simplified CLI architecture: removed full-screen layout in favor of scrolling console output with anchored prompt (#754)
+- Git branch refreshes in the toolbar during sessions; interactive sub-prompts have a 5-minute timeout (#754)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.98.1)
+
+---
+
 ## March 4, 2026
 
 ### v1.98.0
