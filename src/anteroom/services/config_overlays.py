@@ -360,7 +360,7 @@ def detect_overlay_conflicts(
         if not overlap:
             continue
 
-        if use_priorities:
+        if use_priorities and existing_priorities is not None:
             existing_pri = existing_priorities.get(existing_label, 50)
             if existing_pri != new_priority:
                 # Different priorities — lower number wins at merge time.
