@@ -1616,10 +1616,17 @@ def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
         }
     )
 
-    # Add spacing before the first tool call in a batch
+    # Add spacing before the first tool call in a batch.
+    # In REPL mode, use raw fd to avoid desyncing the cursor with
+    # console.print() (patch_stdout proxy) — the thinking/fold ticker
+    # writes also use the raw fd (#758).
     if not _tool_batch_active:
         if not _fold_batch_active:
-            console.print()
+            if _repl_mode and _stdout:
+                _stdout.write("\n")
+                _stdout.flush()
+            else:
+                console.print()
         _tool_batch_active = True
 
     # Update fold ticker with current tool name
