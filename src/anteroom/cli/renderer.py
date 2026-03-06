@@ -888,11 +888,7 @@ def _phase_suffix(elapsed: float) -> str:
         # Throughput-based stall (#774): chunks trickle in but throughput is
         # extremely low (e.g. 6 chars/sec).  Only check after warmup period
         # so we have enough data for a meaningful measurement.
-        if (
-            _phase_start_time
-            and now - _phase_start_time > _THROUGHPUT_WARMUP_SECS
-            and _throughput_window
-        ):
+        if _phase_start_time and now - _phase_start_time > _THROUGHPUT_WARMUP_SECS and _throughput_window:
             window_span = now - _throughput_window[0][0]
             if window_span > 0:
                 window_chars = sum(n for _, n in _throughput_window)
