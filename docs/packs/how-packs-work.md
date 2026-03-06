@@ -180,7 +180,7 @@ When two artifacts have the same FQN (`@namespace/type/name`), the higher-layer 
 |----------|-------------|
 | **SkillRegistry** | All `skill` artifacts → slash commands and `invoke_skill` tool |
 | **RuleEnforcer** | All `rule` artifacts with `enforce: hard` → tool call blocking |
-| **System prompt** | All `rule`, `instruction`, `context`, `memory` artifacts → injected text |
+| **System prompt** | All `rule`, `instruction`, `context` artifacts → injected text |
 | **Config loader** | All `config_overlay` artifacts → merged into config chain |
 | **MCP manager** | All `mcp_server` artifacts → server connections |
 

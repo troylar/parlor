@@ -3052,12 +3052,13 @@ async def _run_repl(
                         skill_registry.reload(working_dir)
                         if artifact_registry is not None:
                             skill_registry.load_from_artifacts(artifact_registry)
-                        skills = skill_registry.list_skills()
-                        if skills:
+                        descs = skill_registry.get_skill_descriptions()
+                        if descs:
                             renderer.console.print("\n[bold]Available skills:[/bold]")
-                            for s in skills:
-                                src = s.source
-                                renderer.console.print(f"  /{s.name} - {s.description} [{CHROME}]({src})[/{CHROME}]")
+                            for display_name, desc in descs:
+                                sk = skill_registry.get(display_name)
+                                src = sk.source if sk else "unknown"
+                                renderer.console.print(f"  /{display_name} - {desc} [{CHROME}]({src})[/{CHROME}]")
                         else:
                             renderer.console.print(
                                 f"\n[{CHROME}]No skills loaded. Add .yaml files to"

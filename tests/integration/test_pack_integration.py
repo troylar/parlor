@@ -1817,8 +1817,8 @@ class TestAdditiveArtifacts:
         ids = get_active_pack_ids(db)
         assert set(ids) == {r1["id"], r2["id"]}
 
-    def test_skill_same_name_from_two_packs_is_conflict(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Skills are exclusive — same name from two packs MUST conflict."""
+    def test_skill_same_name_from_two_packs_is_additive(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        """Skills are additive — same name from two packs resolves via namespace."""
         p1 = _write_pack(
             tmp_path,
             name="team-a",
@@ -1835,8 +1835,7 @@ class TestAdditiveArtifacts:
         r2 = _install(db, p2)
 
         attach_pack(db, r1["id"])
-        with pytest.raises(ValueError, match="Artifact conflict"):
-            attach_pack(db, r2["id"])
+        attach_pack(db, r2["id"])  # No conflict — namespace-aware resolution
 
     def test_detect_artifact_conflicts_skips_additive_types(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """detect_artifact_conflicts() returns empty for additive types."""

@@ -136,9 +136,9 @@ def attach_pack(
                     )
                     raise ValueError(msg)
 
-        # 2. All other artifact type/name collisions (skill, rule, etc.)
-        # Non-config artifacts always conflict on same name — priority
-        # doesn't help because the artifact loader doesn't support shadowing.
+        # 2. Non-config artifact collisions (currently all additive — no conflicts).
+        # Skills use namespace-qualified display names on collision.
+        # This check remains as a guard for any future exclusive types.
         art_conflicts = detect_artifact_conflicts(db, pack_id, active_ids)
         if art_conflicts:
             msg = (

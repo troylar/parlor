@@ -955,8 +955,8 @@ class TestDetectArtifactConflicts:
         conflicts = detect_artifact_conflicts(db, pid2, [pid1])
         assert conflicts == []
 
-    def test_skill_same_name_always_conflicts(self, db: ThreadSafeConnection) -> None:
-        """Skills are exclusive — same name from two packs always conflicts."""
+    def test_skill_same_name_is_additive(self, db: ThreadSafeConnection) -> None:
+        """Skills are additive — same name from two packs is resolved via namespace."""
         from anteroom.services.config_overlays import detect_artifact_conflicts
 
         pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
@@ -966,11 +966,10 @@ class TestDetectArtifactConflicts:
         _insert_artifact(db, pid2, "@ns2/skill/deploy", "skill")
 
         conflicts = detect_artifact_conflicts(db, pid2, [pid1])
-        assert len(conflicts) == 1
-        assert "skill/deploy" in conflicts[0]
+        assert conflicts == []  # No conflict — namespace-aware resolution handles it
 
-    def test_skill_conflict_ignores_priority(self, db: ThreadSafeConnection) -> None:
-        """Skills conflict regardless of priority — priority only helps config overlays."""
+    def test_skill_same_name_no_conflict_with_priority(self, db: ThreadSafeConnection) -> None:
+        """Skills don't conflict even at different priorities — they're additive."""
         from anteroom.services.config_overlays import detect_artifact_conflicts
         from anteroom.services.pack_attachments import attach_pack, get_attachment_priorities
 
@@ -982,7 +981,6 @@ class TestDetectArtifactConflicts:
         _insert_artifact(db, pid2, "@ns2/skill/deploy", "skill")
 
         priorities = get_attachment_priorities(db, [pid1])
-        # Even with different priorities, skills still conflict
         conflicts = detect_artifact_conflicts(
             db,
             pid2,
@@ -990,7 +988,7 @@ class TestDetectArtifactConflicts:
             new_priority=10,
             existing_priorities=priorities,
         )
-        assert len(conflicts) == 1
+        assert conflicts == []  # No conflict — skills are additive
 
     def test_rule_same_name_is_additive(self, db: ThreadSafeConnection) -> None:
         """Rules are additive — multiple packs can provide rules with the same name."""
@@ -1072,8 +1070,8 @@ class TestDetectArtifactConflicts:
         conflicts = detect_artifact_conflicts(db, pid2, [pid1])
         assert conflicts == []
 
-    def test_mixed_exclusive_and_additive(self, db: ThreadSafeConnection) -> None:
-        """Only exclusive types (skill) conflict; additive types (rule) don't."""
+    def test_mixed_types_all_additive(self, db: ThreadSafeConnection) -> None:
+        """All non-config artifact types (skill, rule, etc.) are additive — no conflicts."""
         from anteroom.services.config_overlays import detect_artifact_conflicts
 
         pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
@@ -1085,9 +1083,8 @@ class TestDetectArtifactConflicts:
         _insert_artifact(db, pid2, "@ns2/rule/style-guide", "rule")
 
         conflicts = detect_artifact_conflicts(db, pid2, [pid1])
-        # Only skill/deploy conflicts, rule/style-guide is additive
-        assert len(conflicts) == 1
-        assert "skill/deploy" in conflicts[0]
+        # Skills use namespace-qualified display names on collision; rules are additive
+        assert conflicts == []
 
     def test_empty_existing_packs(self, db: ThreadSafeConnection) -> None:
         from anteroom.services.config_overlays import detect_artifact_conflicts
@@ -1113,7 +1110,8 @@ class TestDetectArtifactConflicts:
 class TestAttachPackArtifactConflictIntegration:
     """Integration tests: attach_pack detects artifact conflicts (not just config overlays)."""
 
-    def test_skill_conflict_same_priority_blocks_attach(self, db: ThreadSafeConnection) -> None:
+    def test_skill_same_name_same_priority_is_additive(self, db: ThreadSafeConnection) -> None:
+        """Skills are additive — same name from two packs uses namespace-qualified display names."""
         from anteroom.services.pack_attachments import attach_pack
 
         pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
@@ -1123,11 +1121,11 @@ class TestAttachPackArtifactConflictIntegration:
         pid2 = _insert_pack(db, namespace="ns2", name="pack-b")
         _insert_artifact(db, pid2, "@ns2/skill/deploy", "skill")
 
-        with pytest.raises(ValueError, match="Artifact conflict"):
-            attach_pack(db, pid2, priority=50)
+        result = attach_pack(db, pid2, priority=50)
+        assert result["pack_id"] == pid2
 
-    def test_skill_conflict_blocks_even_with_different_priority(self, db: ThreadSafeConnection) -> None:
-        """Skills are exclusive — different priority doesn't help."""
+    def test_skill_same_name_different_priority_is_additive(self, db: ThreadSafeConnection) -> None:
+        """Skills are additive — different priority also fine."""
         from anteroom.services.pack_attachments import attach_pack
 
         pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
@@ -1137,8 +1135,8 @@ class TestAttachPackArtifactConflictIntegration:
         pid2 = _insert_pack(db, namespace="ns2", name="pack-b")
         _insert_artifact(db, pid2, "@ns2/skill/deploy", "skill")
 
-        with pytest.raises(ValueError, match="Artifact conflict"):
-            attach_pack(db, pid2, priority=10)
+        result = attach_pack(db, pid2, priority=10)
+        assert result["pack_id"] == pid2
 
     def test_rule_same_name_allowed(self, db: ThreadSafeConnection) -> None:
         """Rules are additive — same name from two packs is fine."""
@@ -1154,8 +1152,8 @@ class TestAttachPackArtifactConflictIntegration:
         result = attach_pack(db, pid2, priority=50)
         assert result["pack_id"] == pid2
 
-    def test_mixed_overlay_and_artifact_conflicts(self, db: ThreadSafeConnection) -> None:
-        """Both config overlay and skill conflicts should be caught."""
+    def test_mixed_overlay_conflict_but_skill_additive(self, db: ThreadSafeConnection) -> None:
+        """Config overlay conflicts still caught; skill same-name is additive."""
         from anteroom.services.pack_attachments import attach_pack
 
         pid1 = _insert_pack(db, namespace="ns1", name="pack-a")
@@ -1163,19 +1161,19 @@ class TestAttachPackArtifactConflictIntegration:
         _insert_artifact(db, pid1, "@ns1/skill/deploy", "skill")
         attach_pack(db, pid1, priority=50)
 
-        # Pack with only a config overlay conflict
+        # Pack with only a config overlay conflict — still blocked
         pid2 = _insert_pack(db, namespace="ns2", name="pack-b")
         _insert_config_overlay(db, pid2, "@ns2/config_overlay/y", {"ai": {"model": "claude"}})
 
         with pytest.raises(ValueError, match="Config overlay conflict"):
             attach_pack(db, pid2, priority=50)
 
-        # Pack with only a skill conflict
+        # Pack with only a skill same-name — additive, no conflict
         pid3 = _insert_pack(db, namespace="ns3", name="pack-c")
         _insert_artifact(db, pid3, "@ns3/skill/deploy", "skill")
 
-        with pytest.raises(ValueError, match="Artifact conflict"):
-            attach_pack(db, pid3, priority=50)
+        result = attach_pack(db, pid3, priority=50)
+        assert result["pack_id"] == pid3
 
     def test_skip_conflict_check_bypasses_artifact_detection(self, db: ThreadSafeConnection) -> None:
         from anteroom.services.pack_attachments import attach_pack

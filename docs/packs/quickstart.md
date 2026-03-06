@@ -126,8 +126,8 @@ Anteroom ships with 3 example packs you can install to explore:
 | Pack | Namespace | What It Contains |
 |------|-----------|-----------------|
 | `code-review` | anteroom | 2 skills (review, changelog) + 2 rules (coding standards) |
-| `writing-assistant` | anteroom | 3 skills (summarize, rewrite, proofread) + 1 rule (writing quality) |
-| `strict-safety` | anteroom | 1 config overlay (strict safety defaults: ask mode, no network in sandbox) |
+| `writing-assistant` | anteroom | 3 skills (summarize, rewrite, proofread) |
+| `strict-safety` | anteroom | 2 rules (no-destructive-commands, confirm-before-deploy) + 1 config overlay (strict safety defaults) |
 
 Install one to see a realistic multi-artifact pack:
 
