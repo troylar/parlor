@@ -434,7 +434,7 @@ const Chat = (() => {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
         // Preserve tool-call and tool-batch DOM nodes that innerHTML would destroy
-        const preserved = Array.from(contentEl.querySelectorAll('.tool-call, .tool-batch'));
+        const preserved = Array.from(contentEl.querySelectorAll(':scope > .tool-call, :scope > .tool-batch, :scope > .tool-call-group'));
         if (_streamRawMode) {
             contentEl.textContent = currentAssistantContent;
         } else {
@@ -449,7 +449,7 @@ const Chat = (() => {
     function finalizeAssistant(doneData) {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
-        const preserved = Array.from(contentEl.querySelectorAll('.tool-call, .tool-batch'));
+        const preserved = Array.from(contentEl.querySelectorAll(':scope > .tool-call, :scope > .tool-batch, :scope > .tool-call-group'));
         contentEl.innerHTML = renderMarkdown(currentAssistantContent);
         renderMath(contentEl);
         preserved.forEach(el => contentEl.appendChild(el));
@@ -1525,7 +1525,12 @@ const Chat = (() => {
 
     function _startToolBatch(data) {
         _toolBatchCallCount = 0;
-        const msgEl = document.querySelector('.message.assistant:last-child .message-content');
+        // Ensure the current assistant message exists (tool-first turns
+        // fire tool_batch_start before any text_delta creates it)
+        if (!currentAssistantEl) {
+            currentAssistantEl = appendMessage('assistant', '');
+        }
+        const msgEl = currentAssistantEl.querySelector('.message-content');
         if (!msgEl) return;
 
         const details = document.createElement('details');
