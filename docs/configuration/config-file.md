@@ -69,6 +69,7 @@ cli:
   esc_hint_delay: 3.0              # Seconds before showing "esc to cancel" hint (default: 3.0, clamped 0+)
   stall_display_threshold: 5.0     # Seconds of chunk silence before showing "stalled" indicator (default: 5.0, clamped 1+)
   stall_warning_threshold: 15.0    # Seconds before showing full stall warning (default: 15.0, clamped 1+)
+  stall_throughput_threshold: 30.0 # Chars/sec below which "slow" indicator shows during streaming (default: 30.0)
   tool_output_max_chars: 2000      # Max chars per tool result before truncation (default: 2000, clamped 100+)
   file_reference_max_chars: 100000 # Max chars from @file references (default: 100000, clamped 1000+)
   model_context_window: 128000     # Model context window size for usage bar (default: 128000, clamped 1000+)
@@ -324,6 +325,7 @@ aroom db encrypt --key-from identity  # use identity key as encryption key
 | `esc_hint_delay` | float | `3.0` | Seconds before showing "esc to cancel" hint |
 | `stall_display_threshold` | float | `5.0` | Seconds of chunk silence before showing "stalled" indicator (clamped 1+) |
 | `stall_warning_threshold` | float | `15.0` | Seconds before showing full stall warning (clamped 1+) |
+| `stall_throughput_threshold` | float | `30.0` | Chars/sec below which "slow" indicator shows during streaming |
 | `tool_output_max_chars` | integer | `2000` | Max chars per tool result before truncation (clamped 100+) |
 | `file_reference_max_chars` | integer | `100000` | Max chars from @file references (clamped 1000+) |
 | `model_context_window` | integer | `128000` | Model context window size for usage bar (clamped 1000+) |

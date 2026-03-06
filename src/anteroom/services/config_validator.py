@@ -130,6 +130,7 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "esc_hint_delay",
         "stall_display_threshold",
         "stall_warning_threshold",
+        "stall_throughput_threshold",
         "tool_output_max_chars",
         "file_reference_max_chars",
         "model_context_window",
@@ -310,6 +311,7 @@ _FLOAT_FIELDS: list[tuple[str, str, float, float, float]] = [
     ("cli", "esc_hint_delay", 0.0, 60.0, 3.0),
     ("cli", "stall_display_threshold", 1.0, 120.0, 5.0),
     ("cli", "stall_warning_threshold", 1.0, 300.0, 15.0),
+    ("cli", "stall_throughput_threshold", 0.0, 1000.0, 30.0),
     ("safety.prompt_injection", "heuristic_threshold", 0.0, 1.0, 0.7),
 ]
 

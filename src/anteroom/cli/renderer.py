@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections import deque
 from enum import Enum
 from typing import Any
 
@@ -67,15 +68,18 @@ def configure_thresholds(
     esc_hint_delay: float | None = None,
     stall_display: float | None = None,
     stall_warning: float | None = None,
+    throughput_threshold: float | None = None,
 ) -> None:
     """Override default visual thresholds from config."""
-    global _ESC_HINT_DELAY, _MID_STREAM_STALL, _STALL_THRESHOLD
+    global _ESC_HINT_DELAY, _MID_STREAM_STALL, _STALL_THRESHOLD, _THROUGHPUT_STALL_THRESHOLD
     if esc_hint_delay is not None:
         _ESC_HINT_DELAY = esc_hint_delay
     if stall_display is not None:
         _MID_STREAM_STALL = stall_display
     if stall_warning is not None:
         _STALL_THRESHOLD = stall_warning
+    if throughput_threshold is not None:
+        _THROUGHPUT_STALL_THRESHOLD = throughput_threshold
 
 
 # Response buffer (tokens collected silently, rendered on completion)
@@ -94,6 +98,14 @@ _streaming_chars: int = 0  # character counter during streaming
 _last_chunk_time: float = 0  # monotonic time of last token (for stall detection)
 _phase_start_time: float = 0  # monotonic time when current phase began
 _MID_STREAM_STALL: float = 5.0  # seconds of silence before marking "stalled"
+
+# Throughput-based stall detection (#774): catches slow-trickle streams where
+# tiny chunks arrive often enough to avoid gap-based detection but overall
+# throughput is extremely low (e.g. 6 chars/sec over 2 minutes).
+_throughput_window: deque[tuple[float, int]] = deque()  # (monotonic_time, chars) entries
+_THROUGHPUT_STALL_THRESHOLD: float = 30.0  # chars/sec below which "stalled" triggers
+_THROUGHPUT_WINDOW_SECS: float = 10.0  # rolling window size
+_THROUGHPUT_WARMUP_SECS: float = 8.0  # don't trigger throughput stall before this
 
 # Tool call timing
 _tool_start: float = 0
@@ -480,6 +492,7 @@ def start_thinking(*, newline: bool = False) -> None:
     _last_chunk_time = 0
     _phase_start_time = _thinking_start
     _retrying_info = {}
+    _throughput_window.clear()
     _last_spinner_update = _thinking_start
     # Reset plan written lines — the block will be freshly written
     _plan_written_lines = 0
@@ -836,6 +849,11 @@ def increment_streaming_chars(n: int) -> None:
     """Accumulate character count during streaming for the health display."""
     global _streaming_chars
     _streaming_chars += n
+    now = time.monotonic()
+    _throughput_window.append((now, n))
+    cutoff = now - _THROUGHPUT_WINDOW_SECS
+    while _throughput_window and _throughput_window[0][0] < cutoff:
+        _throughput_window.popleft()
 
 
 def _phase_elapsed_str() -> str:
@@ -864,9 +882,20 @@ def _phase_suffix(elapsed: float) -> str:
         return f"connected · waiting for first token{pe}"
     if phase == "streaming":
         now = time.monotonic()
+        # Gap-based stall: no chunks at all for > threshold
         if _last_chunk_time and now - _last_chunk_time > _MID_STREAM_STALL:
             stall_secs = now - _last_chunk_time
             return f"streaming · {_streaming_chars:,} chars · stalled {stall_secs:.0f}s"
+        # Throughput-based stall (#774): chunks trickle in but throughput is
+        # extremely low (e.g. 6 chars/sec).  Only check after warmup period
+        # so we have enough data for a meaningful measurement.
+        if _phase_start_time and now - _phase_start_time > _THROUGHPUT_WARMUP_SECS and _throughput_window:
+            window_span = now - _throughput_window[0][0]
+            if window_span > 0:
+                window_chars = sum(n for _, n in _throughput_window)
+                throughput = window_chars / window_span
+                if throughput < _THROUGHPUT_STALL_THRESHOLD:
+                    return f"streaming · {_streaming_chars:,} chars · slow ({throughput:.0f} chars/s)"
         return f"streaming · {_streaming_chars:,} chars"
     if phase == "retrying":
         attempt = _retrying_info.get("attempt", 2)

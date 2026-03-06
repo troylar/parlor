@@ -364,6 +364,7 @@ class CliConfig:
     esc_hint_delay: float = 3.0  # seconds before showing "esc to cancel" hint
     stall_display_threshold: float = 5.0  # seconds of chunk silence before showing "stalled"
     stall_warning_threshold: float = 15.0  # seconds before showing full stall warning
+    stall_throughput_threshold: float = 30.0  # chars/sec below which "slow" indicator shows
     tool_output_max_chars: int = 2000  # max chars per tool result before truncation
     file_reference_max_chars: int = 100_000  # max chars from @file references
     model_context_window: int = 128_000  # model context window size for usage bar
@@ -1244,6 +1245,10 @@ def load_config(
     except (ValueError, TypeError):
         stall_warning_threshold = 15.0
     try:
+        stall_throughput_threshold = max(0.0, float(cli_raw.get("stall_throughput_threshold", 30.0)))
+    except (ValueError, TypeError):
+        stall_throughput_threshold = 30.0
+    try:
         tool_output_max_chars = max(100, int(cli_raw.get("tool_output_max_chars", 2000)))
     except (ValueError, TypeError):
         tool_output_max_chars = 2000
@@ -1397,6 +1402,7 @@ def load_config(
         esc_hint_delay=esc_hint_delay,
         stall_display_threshold=stall_display_threshold,
         stall_warning_threshold=stall_warning_threshold,
+        stall_throughput_threshold=stall_throughput_threshold,
         tool_output_max_chars=tool_output_max_chars,
         file_reference_max_chars=file_reference_max_chars,
         model_context_window=model_context_window,

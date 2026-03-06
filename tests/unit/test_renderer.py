@@ -1341,6 +1341,7 @@ class TestThinkingPhases:
         r._last_chunk_time = 0
         r._phase_start_time = 0
         r._retrying_info = {}
+        r._throughput_window.clear()
         set_verbosity(Verbosity.DETAILED)
 
     def teardown_method(self) -> None:
@@ -1352,6 +1353,7 @@ class TestThinkingPhases:
         r._last_chunk_time = 0
         r._phase_start_time = 0
         r._retrying_info = {}
+        r._throughput_window.clear()
         set_verbosity(Verbosity.COMPACT)
 
     def test_set_thinking_phase_connecting(self) -> None:
@@ -1566,6 +1568,151 @@ class TestThinkingPhases:
         result = _phase_suffix(20.0)
         assert "stalled" not in result
         assert result == "streaming · 70 chars"
+
+
+class TestThroughputStallDetection:
+    """Tests for throughput-based stall detection (#774).
+
+    Catches slow-trickle streams where tiny chunks arrive frequently enough
+    to avoid gap-based stall detection but overall throughput is very low.
+    """
+
+    def setup_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._streaming_chars = 0
+        r._last_chunk_time = 0
+        r._phase_start_time = 0
+        r._retrying_info = {}
+        r._throughput_window.clear()
+        set_verbosity(Verbosity.DETAILED)
+
+    def teardown_method(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._thinking_phase = ""
+        r._thinking_tokens = 0
+        r._streaming_chars = 0
+        r._last_chunk_time = 0
+        r._phase_start_time = 0
+        r._retrying_info = {}
+        r._throughput_window.clear()
+        set_verbosity(Verbosity.COMPACT)
+
+    def test_slow_trickle_shows_slow_indicator(self) -> None:
+        """Low throughput stream shows 'slow (N chars/s)' even if chunks arrive within gap threshold."""
+        import anteroom.cli.renderer as r
+
+        now = time.monotonic()
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 50
+        r._last_chunk_time = now  # recent chunk — no gap-based stall
+        r._phase_start_time = now - 15.0  # streaming for 15s (past warmup)
+        # Simulate 5 chars/sec over the last 10s window
+        for i in range(10):
+            r._throughput_window.append((now - 10.0 + i, 5))
+        result = _phase_suffix(20.0)
+        assert "slow" in result
+        assert "chars/s" in result
+
+    def test_normal_throughput_no_slow_indicator(self) -> None:
+        """Normal throughput does NOT show slow indicator."""
+        import anteroom.cli.renderer as r
+
+        now = time.monotonic()
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 5000
+        r._last_chunk_time = now
+        r._phase_start_time = now - 15.0
+        # Simulate 500 chars/sec
+        for i in range(10):
+            r._throughput_window.append((now - 10.0 + i, 500))
+        result = _phase_suffix(20.0)
+        assert "slow" not in result
+        assert result == "streaming · 5,000 chars"
+
+    def test_no_slow_indicator_during_warmup(self) -> None:
+        """Throughput stall not triggered during warmup period."""
+        import anteroom.cli.renderer as r
+
+        now = time.monotonic()
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 10
+        r._last_chunk_time = now
+        r._phase_start_time = now - 3.0  # only 3s into streaming (under 8s warmup)
+        r._throughput_window.append((now - 2.0, 5))
+        r._throughput_window.append((now - 1.0, 5))
+        result = _phase_suffix(5.0)
+        assert "slow" not in result
+
+    def test_gap_stall_takes_priority_over_throughput(self) -> None:
+        """Gap-based stall is shown when both conditions are met."""
+        import anteroom.cli.renderer as r
+
+        now = time.monotonic()
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 50
+        r._last_chunk_time = now - 7.0  # 7s gap — triggers gap stall
+        r._phase_start_time = now - 20.0
+        r._throughput_window.append((now - 7.0, 5))
+        result = _phase_suffix(25.0)
+        assert "stalled" in result  # gap-based takes priority
+        assert "slow" not in result
+
+    def test_throughput_window_pruned_on_increment(self) -> None:
+        """Old entries are pruned from the throughput window."""
+        import anteroom.cli.renderer as r
+
+        now = time.monotonic()
+        # Add old entry outside window
+        r._throughput_window.append((now - 20.0, 100))
+        r._throughput_window.append((now - 15.0, 100))
+        increment_streaming_chars(10)
+        # Old entries should be pruned (window is 10s)
+        assert len(r._throughput_window) == 1
+        assert r._throughput_window[0][1] == 10
+
+    def test_start_thinking_resets_throughput_window(self) -> None:
+        """start_thinking() clears the throughput window."""
+        import anteroom.cli.renderer as r
+
+        r._throughput_window.append((time.monotonic(), 100))
+        assert len(r._throughput_window) == 1
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        try:
+            start_thinking()
+            assert len(r._throughput_window) == 0
+        finally:
+            stop_thinking_sync()
+            r._repl_mode = False
+            r._stdout = None
+
+    def test_empty_throughput_window_no_slow(self) -> None:
+        """Empty throughput window does not trigger slow indicator."""
+        import anteroom.cli.renderer as r
+
+        now = time.monotonic()
+        r._thinking_phase = "streaming"
+        r._streaming_chars = 0
+        r._last_chunk_time = now
+        r._phase_start_time = now - 15.0
+        # Empty window
+        result = _phase_suffix(20.0)
+        assert "slow" not in result
+
+    def test_configure_throughput_threshold(self) -> None:
+        """configure_thresholds() can override the throughput stall threshold."""
+        import anteroom.cli.renderer as r
+
+        original = r._THROUGHPUT_STALL_THRESHOLD
+        try:
+            configure_thresholds(throughput_threshold=100.0)
+            assert r._THROUGHPUT_STALL_THRESHOLD == 100.0
+        finally:
+            r._THROUGHPUT_STALL_THRESHOLD = original
 
 
 class TestWriteThinkingLinePhases:

@@ -1636,6 +1636,8 @@ async def _run_one_shot(
                     renderer.increment_thinking_tokens()
                     renderer.increment_streaming_chars(len(event.data.get("content", "")))
                     renderer.update_thinking()
+                    # Yield to event loop so the thinking ticker task can update (#775)
+                    await asyncio.sleep(0)
                 elif event.kind == "tool_call_start":
                     if thinking:
                         await renderer.stop_thinking()
@@ -4342,6 +4344,8 @@ async def _run_repl(
                                 response_token_count += len(enc.encode(event.data["content"], allowed_special="all"))
                             else:
                                 response_token_count += max(1, len(event.data["content"]) // 4)
+                            # Yield to event loop so the thinking ticker task can update (#775)
+                            await asyncio.sleep(0)
                         elif event.kind == "tool_call_start":
                             if thinking:
                                 total_elapsed += await renderer.stop_thinking()
@@ -4540,6 +4544,7 @@ async def _run_repl(
         esc_hint_delay=config.cli.esc_hint_delay,
         stall_display=config.cli.stall_display_threshold,
         stall_warning=config.cli.stall_warning_threshold,
+        throughput_threshold=config.cli.stall_throughput_threshold,
     )
 
     # -- Simple input loop --
