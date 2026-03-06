@@ -792,12 +792,15 @@ def start_thinking(*, newline: bool = False) -> None:
     # The next visible output will be either another fold or the AI's text.
     if _fold_batch_active or _fold_suppress_thinking or _fold_between_batches:
         _fold_suppress_thinking = False
-        _thinking_start = time.monotonic()
+        # Do NOT set _thinking_start — keep it at 0 so stop_thinking()
+        # recognises no visible thinking was shown and no-ops cleanly,
+        # preventing a ghost "Thinking... 0s" line (#779).
+        _thinking_start = 0
         _thinking_phase = ""
         _thinking_tokens = 0
         _streaming_chars = 0
         _last_chunk_time = 0
-        _phase_start_time = _thinking_start
+        _phase_start_time = 0
         _retrying_info = {}
         _throughput_window.clear()
         _tool_batch_active = False
