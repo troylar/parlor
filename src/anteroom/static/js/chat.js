@@ -420,8 +420,7 @@ const Chat = (() => {
                 break;
             case 'error':
                 hideThinking();
-                _toolBatchContainer = null;
-                _toolBatchCallCount = 0;
+                _cancelToolBatch('error');
                 if (currentAssistantEl) {
                     showError(currentAssistantEl, data.message);
                 } else {
@@ -434,6 +433,8 @@ const Chat = (() => {
     function renderAssistantContent() {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
+        // Preserve tool-call and tool-batch DOM nodes that innerHTML would destroy
+        const preserved = Array.from(contentEl.querySelectorAll('.tool-call, .tool-batch'));
         if (_streamRawMode) {
             contentEl.textContent = currentAssistantContent;
         } else {
@@ -441,14 +442,17 @@ const Chat = (() => {
             renderMath(contentEl);
             highlightCode(contentEl);
         }
+        preserved.forEach(el => contentEl.appendChild(el));
         scrollToBottom();
     }
 
     function finalizeAssistant(doneData) {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
+        const preserved = Array.from(contentEl.querySelectorAll('.tool-call, .tool-batch'));
         contentEl.innerHTML = renderMarkdown(currentAssistantContent);
         renderMath(contentEl);
+        preserved.forEach(el => contentEl.appendChild(el));
         addCodeCopyButtons(contentEl);
         let msgData = null;
         if (doneData && typeof doneData.assistant_message_id === 'string'
@@ -1546,6 +1550,17 @@ const Chat = (() => {
         _toolBatchCallCount = 0;
     }
 
+    function _cancelToolBatch(label) {
+        if (!_toolBatchContainer) return;
+        const summary = _toolBatchContainer.querySelector(':scope > summary');
+        const count = _toolBatchCallCount;
+        if (summary) {
+            summary.textContent = `Tools (${count} call${count !== 1 ? 's' : ''}, ${label})`;
+        }
+        _toolBatchContainer = null;
+        _toolBatchCallCount = 0;
+    }
+
     // Tool call dedup state for web UI
     let _webDedupToolName = '';
     let _webDedupGroup = null;  // the <details> wrapper for grouped calls
@@ -1824,6 +1839,7 @@ const Chat = (() => {
         // Immediately reset client state so UI is responsive
         abortStream();
         hideThinking();
+        _cancelToolBatch('cancelled');
         _clearAllToolTimers();
         setStreaming(false);
         _pendingUserMessages = [];
