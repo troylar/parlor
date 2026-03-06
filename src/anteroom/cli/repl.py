@@ -1093,8 +1093,11 @@ async def run_cli(
             return False
 
         async with _approval_lock:
-            # Clear any fold ticker line before rendering the approval gate
+            # Clear any ticker line (tool ticker or fold ticker) before rendering the approval gate
             renderer.stop_tool_ticker_sync()
+            if renderer._repl_mode and renderer._stdout:
+                renderer._stdout.write("\r\033[2K")
+                renderer._stdout.flush()
             renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
             if verdict.details.get("command"):
                 renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")

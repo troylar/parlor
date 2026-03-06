@@ -477,8 +477,8 @@ class TestFoldSuppressThinking:
         renderer._repl_mode = False
         # Should NOT have written a thinking line
         mock_write.assert_not_called()
-        # But timing state should be reset
-        assert renderer._thinking_start > 0
+        # _thinking_start stays 0 so stop_thinking() no-ops cleanly
+        assert renderer._thinking_start == 0
         assert renderer._fold_suppress_thinking is False
 
     @patch("anteroom.cli.renderer._write_thinking_line")
@@ -490,7 +490,8 @@ class TestFoldSuppressThinking:
         renderer.start_thinking()
         renderer._repl_mode = False
         mock_write.assert_not_called()
-        assert renderer._thinking_start > 0
+        # _thinking_start stays 0 so stop_thinking() no-ops cleanly
+        assert renderer._thinking_start == 0
 
 
 class TestBatchStartStopsToolTicker:
@@ -836,6 +837,34 @@ class TestSuppressedThinkingClearsThroughputWindow:
         renderer.start_thinking()
         renderer._repl_mode = False
         assert len(renderer._throughput_window) == 0
+
+
+class TestSuppressedThinkingNoGhostLine:
+    """Suppressed start_thinking must not cause a ghost 'Thinking... 0s' on stop."""
+
+    def setup_method(self) -> None:
+        renderer._fold_suppress_thinking = False
+        renderer._fold_between_batches = True
+        renderer._fold_batch_active = False
+        renderer._thinking_start = 0
+        renderer._spinner = None
+        renderer._thinking_ticker_task = None
+
+    @pytest.mark.asyncio
+    async def test_stop_after_suppressed_start_no_output(self) -> None:
+        """Regression: suppressed start_thinking + stop_thinking must not write."""
+        mock_stdout = MagicMock()
+        renderer._repl_mode = True
+        renderer._stdout = mock_stdout
+
+        renderer.start_thinking()  # suppressed (between batches)
+        assert renderer._thinking_start == 0  # kept at 0 for clean no-op
+
+        await renderer.stop_thinking()  # should no-op
+
+        # No "Thinking..." line should have been written
+        mock_stdout.write.assert_not_called()
+        renderer._repl_mode = False
 
 
 class TestToggleLastFoldExtended:
