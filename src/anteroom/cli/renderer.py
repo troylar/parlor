@@ -817,8 +817,15 @@ def start_thinking(*, newline: bool = False) -> None:
     # Emit spacing after tool call block before AI narration text (#680).
     # Must happen here because start_thinking() is called before
     # render_response_end(), which would otherwise handle this.
-    if _tool_batch_active:
-        console.print()
+    # Skip when between fold batches — the fold narrative already
+    # provides visual separation, and console.print() through
+    # patch_stdout desyncs the raw fd cursor (#758).
+    if _tool_batch_active and not _fold_between_batches:
+        if _repl_mode and _stdout:
+            _stdout.write("\n")
+            _stdout.flush()
+        else:
+            console.print()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
     _thinking_phase = ""
