@@ -1671,7 +1671,7 @@ async def _run_one_shot(
                     renderer.render_tool_batch_start(event.data["call_count"])
                 elif event.kind == "tool_call_start":
                     if thinking:
-                        await renderer.stop_thinking()
+                        await renderer.stop_thinking(clear=True)
                         thinking = False
                     renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
                 elif event.kind == "tool_call_end":
@@ -4456,7 +4456,7 @@ async def _run_repl(
                             renderer.render_tool_batch_start(event.data["call_count"])
                         elif event.kind == "tool_call_start":
                             if thinking:
-                                total_elapsed += await renderer.stop_thinking()
+                                total_elapsed += await renderer.stop_thinking(clear=True)
                                 thinking = False
                             # Advance plan checklist: mark current step as in_progress
                             if _plan_checklist_steps and _plan_current_step[0] < len(_plan_checklist_steps):

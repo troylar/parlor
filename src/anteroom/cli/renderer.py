@@ -836,15 +836,20 @@ def start_thinking(*, newline: bool = False) -> None:
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
         if newline and _stdout:
-            # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
-            gold = "\033[38;2;197;160;89m"
-            rst = "\033[0m"
-            if _plan_visible and _plan_steps:
-                # Write newline then full plan + thinking block
+            if _fold_between_batches:
+                # After a fold narrative (raw fd write ending with \n), the
+                # cursor is already on a fresh line. Skip the leading \n to
+                # avoid a blank line between the narrative and thinking.
+                _write_thinking_line(0.0)
+            elif _plan_visible and _plan_steps:
+                # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
                 _stdout.write("\n")
                 _stdout.flush()
                 _write_thinking_block(0.0)
             else:
+                # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
+                gold = "\033[38;2;197;160;89m"
+                rst = "\033[0m"
                 _stdout.write(f"\n\r\033[2K{gold}Thinking...{rst}")
                 _stdout.flush()
         else:
