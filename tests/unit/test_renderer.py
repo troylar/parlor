@@ -290,6 +290,9 @@ class TestStartThinkingFlushesDedup:
         r._dedup_summary = ""
         r._tool_batch_active = False
         r._tool_dedup_enabled = True
+        r._fold_batch_active = False
+        r._fold_between_batches = False
+        r._fold_suppress_thinking = False
 
     def test_start_thinking_flushes_dedup(self) -> None:
         import anteroom.cli.renderer as r
@@ -306,20 +309,22 @@ class TestStartThinkingFlushesDedup:
         assert r._dedup_count == 0
 
     def test_start_thinking_resets_tool_batch(self) -> None:
+        from unittest.mock import MagicMock
+
         import anteroom.cli.renderer as r
 
         r._tool_batch_active = True
-        with (
-            patch("anteroom.cli.renderer._write_thinking_line"),
-            patch("anteroom.cli.renderer.console") as mock_console,
-        ):
+        mock_stdout = MagicMock()
+        r._stdout = mock_stdout
+        with patch("anteroom.cli.renderer._write_thinking_line"):
             r._repl_mode = True
             start_thinking()
             r._repl_mode = False
+            r._stdout = None
         assert r._tool_batch_active is False
-        # Should have emitted a blank line for spacing (#680)
-        blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
-        assert len(blank_calls) >= 1
+        # In REPL mode, spacing uses raw fd write (#758)
+        raw_writes = [c[0][0] for c in mock_stdout.write.call_args_list]
+        assert any("\n" in w for w in raw_writes)
 
     def test_start_thinking_no_spacing_without_tool_batch(self) -> None:
         """start_thinking() should NOT emit a blank line when no tool batch was active."""
@@ -405,6 +410,8 @@ class TestFlushBufferedTextToolSpacing:
 
         r._streaming_buffer.clear()
         r._tool_batch_active = False
+        r._fold_batch_active = False
+        r._fold_between_batches = False
 
     def test_flush_adds_spacing_after_tool_batch(self) -> None:
         """flush_buffered_text() should print a blank line when _tool_batch_active is True."""
@@ -1256,7 +1263,7 @@ class TestFirstThinkingNewline:
 
     @pytest.mark.asyncio
     async def test_newline_true_writes_atomic_line(self) -> None:
-        """newline=True writes \\n + erase + Thinking... in one write call."""
+        """newline=True clears prompt line, then writes Thinking... on next line."""
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
@@ -1267,9 +1274,9 @@ class TestFirstThinkingNewline:
             output = buf.getvalue()
             # Must contain Thinking... text
             assert "Thinking..." in output
-            # Must start with \n for visual separation
-            assert output.startswith("\n")
-            # The \n and Thinking... must be in the same write (atomic)
+            # Starts with \r\033[2K to clear prompt_toolkit's waiting prompt (#758)
+            assert output.startswith("\r\033[2K")
+            # Then \n to move down and Thinking... on the new line
             assert "\n\r\033[2K" in output
         finally:
             stop_thinking_sync()

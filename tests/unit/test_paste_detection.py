@@ -138,23 +138,15 @@ class TestCollapseLongInput:
             mock_shutil.get_terminal_size.return_value = _TERM_SIZE
             _collapse_long_input(long_input)
 
-            # Cursor movement via _stdout (real fd)
+            # Single atomic write to _stdout (no console.print calls after #779)
             assert mock_renderer._stdout.write.call_count == 1
-            cursor_call = mock_renderer._stdout.write.call_args[0][0]
-            assert "\033[" in cursor_call  # ANSI cursor movement
-            assert "\033[J" in cursor_call  # clear to end
+            output = mock_renderer._stdout.write.call_args[0][0]
+            assert "\033[" in output  # ANSI cursor movement
+            assert "\033[J" in output  # clear to end
+            assert "❯" in output  # prompt character
+            assert "17 more lines" in output
 
-            # 3 shown lines + 1 hidden count = 4 console.print calls
-            assert mock_renderer.console.print.call_count == 4
-
-            # First call has the prompt character
-            first_call = mock_renderer.console.print.call_args_list[0][0][0]
-            assert "❯" in first_call
-
-            # Last call has the hidden line count
-            last_call = mock_renderer.console.print.call_args_list[3][0][0]
-            assert "17 more lines" in last_call
-
+            mock_renderer.console.print.assert_not_called()
             mock_renderer._stdout.flush.assert_called_once()
 
     def test_user_content_escaped(self) -> None:
@@ -171,9 +163,11 @@ class TestCollapseLongInput:
             mock_shutil.get_terminal_size.return_value = _TERM_SIZE
             _collapse_long_input(raw)
 
-            first_call = mock_renderer.console.print.call_args_list[0][0][0]
-            # The raw markup should be escaped — Rich escape() turns [ into \[
-            assert "[bold red]" not in first_call or "\\[bold red]" in first_call
+            output = mock_renderer._stdout.write.call_args[0][0]
+            # Raw ANSI output — Rich markup like [bold red] passes through
+            # literally (no Rich rendering), so it appears as plain text
+            assert "❯" in output
+            assert "[bold red]danger[/]" in output
 
     def test_not_a_tty_no_output(self) -> None:
         """When stdout is not a TTY, function returns early."""

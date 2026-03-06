@@ -196,7 +196,11 @@ class TestAutoPlanSuggestEvent:
             if call_count <= 3:
                 yield {
                     "event": "tool_call",
-                    "data": {"id": f"call_{call_count}", "function_name": "bash", "arguments": {"command": "ls"}},
+                    "data": {
+                        "id": f"call_{call_count}",
+                        "function_name": "bash",
+                        "arguments": {"command": f"ls {call_count}"},
+                    },
                 }
                 yield {"event": "done", "data": {}}
             else:

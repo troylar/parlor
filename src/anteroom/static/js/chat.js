@@ -341,12 +341,19 @@ const Chat = (() => {
                 currentAssistantContent += data.content;
                 renderAssistantContent();
                 break;
+            case 'tool_batch_start':
+                hideThinking();
+                _startToolBatch(data);
+                break;
             case 'tool_call_start':
                 hideThinking();
                 renderToolCallStart(data);
                 break;
             case 'tool_call_end':
                 renderToolCallEnd(data);
+                break;
+            case 'tool_batch_end':
+                _endToolBatch(data);
                 break;
             case 'canvas_stream_start':
                 hideThinking();
@@ -413,6 +420,7 @@ const Chat = (() => {
                 break;
             case 'error':
                 hideThinking();
+                _cancelToolBatch('error');
                 if (currentAssistantEl) {
                     showError(currentAssistantEl, data.message);
                 } else {
@@ -425,6 +433,8 @@ const Chat = (() => {
     function renderAssistantContent() {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
+        // Preserve tool-call and tool-batch DOM nodes that innerHTML would destroy
+        const preserved = Array.from(contentEl.querySelectorAll(':scope > .tool-call, :scope > .tool-batch, :scope > .tool-call-group'));
         if (_streamRawMode) {
             contentEl.textContent = currentAssistantContent;
         } else {
@@ -432,14 +442,17 @@ const Chat = (() => {
             renderMath(contentEl);
             highlightCode(contentEl);
         }
+        preserved.forEach(el => contentEl.appendChild(el));
         scrollToBottom();
     }
 
     function finalizeAssistant(doneData) {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
+        const preserved = Array.from(contentEl.querySelectorAll(':scope > .tool-call, :scope > .tool-batch, :scope > .tool-call-group'));
         contentEl.innerHTML = renderMarkdown(currentAssistantContent);
         renderMath(contentEl);
+        preserved.forEach(el => contentEl.appendChild(el));
         addCodeCopyButtons(contentEl);
         let msgData = null;
         if (doneData && typeof doneData.assistant_message_id === 'string'
@@ -449,6 +462,8 @@ const Chat = (() => {
         addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent, msgData, { isLast: true });
         currentAssistantEl = null;
         currentAssistantContent = '';
+        _toolBatchContainer = null;
+        _toolBatchCallCount = 0;
         scrollToBottom();
     }
 
@@ -1504,6 +1519,53 @@ const Chat = (() => {
         scrollToBottom();
     }
 
+    // Tool batch (Focus & Fold) state — groups all tool calls per turn
+    let _toolBatchContainer = null;  // current <details class="tool-batch"> wrapper
+    let _toolBatchCallCount = 0;
+
+    function _startToolBatch(data) {
+        _toolBatchCallCount = 0;
+        // Ensure the current assistant message exists (tool-first turns
+        // fire tool_batch_start before any text_delta creates it)
+        if (!currentAssistantEl) {
+            currentAssistantEl = appendMessage('assistant', '');
+        }
+        const msgEl = currentAssistantEl.querySelector('.message-content');
+        if (!msgEl) return;
+
+        const details = document.createElement('details');
+        details.className = 'tool-batch';
+        const summary = document.createElement('summary');
+        summary.textContent = `Tools (running...)`;
+        details.appendChild(summary);
+        msgEl.appendChild(details);
+        _toolBatchContainer = details;
+    }
+
+    function _endToolBatch(data) {
+        if (!_toolBatchContainer) return;
+        const count = data.call_count || _toolBatchCallCount;
+        const elapsed = data.elapsed_seconds || 0;
+        const summary = _toolBatchContainer.querySelector(':scope > summary');
+        const elapsedStr = elapsed >= 0.1 ? `, ${elapsed.toFixed(1)}s` : '';
+        if (summary) {
+            summary.textContent = `Tools (${count} call${count !== 1 ? 's' : ''}${elapsedStr})`;
+        }
+        _toolBatchContainer = null;
+        _toolBatchCallCount = 0;
+    }
+
+    function _cancelToolBatch(label) {
+        if (!_toolBatchContainer) return;
+        const summary = _toolBatchContainer.querySelector(':scope > summary');
+        const count = _toolBatchCallCount;
+        if (summary) {
+            summary.textContent = `Tools (${count} call${count !== 1 ? 's' : ''}, ${label})`;
+        }
+        _toolBatchContainer = null;
+        _toolBatchCallCount = 0;
+    }
+
     // Tool call dedup state for web UI
     let _webDedupToolName = '';
     let _webDedupGroup = null;  // the <details> wrapper for grouped calls
@@ -1528,6 +1590,9 @@ const Chat = (() => {
             currentAssistantEl = appendMessage('assistant', '');
         }
         const contentEl = currentAssistantEl.querySelector('.message-content');
+        // Use the active batch container as the parent when folding is active
+        const parentEl = _toolBatchContainer || contentEl;
+        _toolBatchCallCount++;
         const isSubagent = data.tool_name === 'run_agent';
         const details = document.createElement('details');
         details.className = isSubagent ? 'tool-call tool-call-subagent subagent-running' : 'tool-call';
@@ -1566,7 +1631,7 @@ const Chat = (() => {
             toolContent.appendChild(cardsContainer);
             details.appendChild(toolContent);
 
-            contentEl.appendChild(details);
+            parentEl.appendChild(details);
         } else {
             const summary = document.createElement('summary');
             summary.textContent = `Tool: ${data.tool_name} `;
@@ -1611,10 +1676,10 @@ const Chat = (() => {
                     group.appendChild(groupSummary);
 
                     // Find the previous tool call element and wrap it
-                    const prevTools = contentEl.querySelectorAll(':scope > .tool-call:not(.tool-call-subagent)');
+                    const prevTools = parentEl.querySelectorAll(':scope > .tool-call:not(.tool-call-subagent)');
                     const prevTool = prevTools[prevTools.length - 1];
                     if (prevTool) {
-                        contentEl.insertBefore(group, prevTool);
+                        parentEl.insertBefore(group, prevTool);
                         group.appendChild(prevTool);
                     }
                     group.appendChild(details);
@@ -1630,7 +1695,7 @@ const Chat = (() => {
                 _webDedupFlush();
                 _webDedupToolName = key;
                 _webDedupCount = 1;
-                contentEl.appendChild(details);
+                parentEl.appendChild(details);
             }
         }
 
@@ -1779,6 +1844,7 @@ const Chat = (() => {
         // Immediately reset client state so UI is responsive
         abortStream();
         hideThinking();
+        _cancelToolBatch('cancelled');
         _clearAllToolTimers();
         setStreaming(false);
         _pendingUserMessages = [];

@@ -437,6 +437,7 @@ async def run_exec_mode(
             output_filter=_output_filter,
             max_consecutive_text_only=config.cli.max_consecutive_text_only,
             max_line_repeats=config.cli.max_line_repeats,
+            max_identical_tool_repeats=config.cli.max_identical_tool_repeats,
         ):
             if event.kind == "token":
                 if output_total_chars < _MAX_OUTPUT_CHARS:
