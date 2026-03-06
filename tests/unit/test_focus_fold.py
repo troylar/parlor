@@ -1022,6 +1022,13 @@ class TestIdenticalToolCallDetector:
         assert "Repetitive tool calls" in error_events[0].data["message"]
         assert call_count == 3  # stopped after 3 identical calls
 
+        # tool_batch_end must be emitted before the error event so the CLI
+        # renderer exits fold-suppression mode before displaying the error.
+        batch_end_indices = [i for i, e in enumerate(events) if e.kind == "tool_batch_end"]
+        error_index = next(i for i, e in enumerate(events) if e.kind == "error")
+        assert batch_end_indices, "tool_batch_end must be emitted on early return"
+        assert batch_end_indices[-1] < error_index
+
     @pytest.mark.asyncio
     async def test_resets_on_different_args(self) -> None:
         from anteroom.services.agent_loop import AgentEvent, run_agent_loop

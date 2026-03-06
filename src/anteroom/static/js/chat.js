@@ -456,6 +456,8 @@ const Chat = (() => {
         addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent, msgData, { isLast: true });
         currentAssistantEl = null;
         currentAssistantContent = '';
+        _toolBatchContainer = null;
+        _toolBatchCallCount = 0;
         scrollToBottom();
     }
 
