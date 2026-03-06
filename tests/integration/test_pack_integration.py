@@ -1177,6 +1177,248 @@ class TestSkillRegistryFromPacks:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Namespace-aware skill resolution
+# ---------------------------------------------------------------------------
+
+
+class TestSkillNamespaceResolution:
+    """Verify namespace/name disambiguation when multiple packs define
+    skills with the same name."""
+
+    def test_unique_name_resolves_bare(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """When a skill name is unique, bare name resolves it."""
+        from anteroom.cli.skills import SkillRegistry
+
+        _install(db, _python_pack(tmp_path))
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        # "lint" is unique — bare name works
+        assert skill_reg.has_skill("lint") is True
+        skill = skill_reg.get("lint")
+        assert skill is not None
+        assert skill.name == "lint"
+
+    def test_duplicate_name_both_loaded(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """Two packs with same skill name should both be loaded."""
+        from anteroom.cli.skills import SkillRegistry
+
+        pack_a = _write_pack(
+            tmp_path, name="pack-a", namespace="team-a",
+            skill_files={"deploy": "Deploy to staging."},
+        )
+        pack_b = _write_pack(
+            tmp_path, name="pack-b", namespace="team-b",
+            skill_files={"deploy": "Deploy to production."},
+        )
+        _install(db, pack_a)
+        _install(db, pack_b)
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        # Both should be loadable by namespace/name
+        skill_a = skill_reg.get("team-a/deploy")
+        skill_b = skill_reg.get("team-b/deploy")
+        assert skill_a is not None
+        assert skill_b is not None
+        assert "staging" in skill_a.prompt.lower()
+        assert "production" in skill_b.prompt.lower()
+
+    def test_duplicate_name_bare_lookup_fails(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """When two packs share a skill name, bare name returns None (ambiguous)."""
+        from anteroom.cli.skills import SkillRegistry
+
+        pack_a = _write_pack(
+            tmp_path, name="pack-a", namespace="team-a",
+            skill_files={"deploy": "Deploy to staging."},
+        )
+        pack_b = _write_pack(
+            tmp_path, name="pack-b", namespace="team-b",
+            skill_files={"deploy": "Deploy to production."},
+        )
+        _install(db, pack_a)
+        _install(db, pack_b)
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        # Bare "deploy" is ambiguous — should return None
+        assert skill_reg.get("deploy") is None
+        assert skill_reg.has_skill("deploy") is False
+
+    def test_display_names_qualified_on_collision(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """get_skill_descriptions returns namespace/name for colliding skills."""
+        from anteroom.cli.skills import SkillRegistry
+
+        pack_a = _write_pack(
+            tmp_path, name="pack-a", namespace="team-a",
+            skill_files={"deploy": "Deploy to staging."},
+        )
+        pack_b = _write_pack(
+            tmp_path, name="pack-b", namespace="team-b",
+            skill_files={"deploy": "Deploy to production."},
+        )
+        _install(db, pack_a)
+        _install(db, pack_b)
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        descs = skill_reg.get_skill_descriptions()
+        display_names = [name for name, _ in descs]
+        assert "team-a/deploy" in display_names
+        assert "team-b/deploy" in display_names
+        # Bare "deploy" should NOT appear
+        assert "deploy" not in display_names
+
+    def test_display_name_bare_when_unique(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """get_skill_descriptions returns bare name when no collision."""
+        from anteroom.cli.skills import SkillRegistry
+
+        _install(db, _python_pack(tmp_path))
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        descs = skill_reg.get_skill_descriptions()
+        display_names = [name for name, _ in descs]
+        # "lint" and "test" are unique — should be bare
+        assert "lint" in display_names
+        assert "test" in display_names
+
+    def test_resolve_input_with_namespace(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """resolve_input accepts /namespace/name for disambiguation."""
+        from anteroom.cli.skills import SkillRegistry
+
+        pack_a = _write_pack(
+            tmp_path, name="pack-a", namespace="team-a",
+            skill_files={"deploy": "Deploy to staging."},
+        )
+        pack_b = _write_pack(
+            tmp_path, name="pack-b", namespace="team-b",
+            skill_files={"deploy": "Deploy to production."},
+        )
+        _install(db, pack_a)
+        _install(db, pack_b)
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        # Bare /deploy is ambiguous — should not resolve
+        is_skill, _ = skill_reg.resolve_input("/deploy")
+        assert is_skill is False
+
+        # Qualified /team-a/deploy should resolve
+        is_skill, prompt = skill_reg.resolve_input("/team-a/deploy")
+        assert is_skill is True
+        assert "staging" in prompt.lower()
+
+    def test_invoke_skill_enum_qualified_on_collision(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """invoke_skill tool definition uses namespace/name in enum when colliding."""
+        from anteroom.cli.skills import SkillRegistry
+
+        pack_a = _write_pack(
+            tmp_path, name="pack-a", namespace="team-a",
+            skill_files={"deploy": "Deploy to staging."},
+        )
+        pack_b = _write_pack(
+            tmp_path, name="pack-b", namespace="team-b",
+            skill_files={"deploy": "Deploy to production."},
+        )
+        _install(db, pack_a)
+        _install(db, pack_b)
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        defn = skill_reg.get_invoke_skill_definition()
+        assert defn is not None
+        enum_values = defn["function"]["parameters"]["properties"]["skill_name"]["enum"]
+        assert "team-a/deploy" in enum_values
+        assert "team-b/deploy" in enum_values
+
+    def test_mixed_unique_and_colliding(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """Mix of unique and colliding skill names displays correctly."""
+        from anteroom.cli.skills import SkillRegistry
+
+        pack_a = _write_pack(
+            tmp_path, name="pack-a", namespace="team-a",
+            skill_files={"deploy": "Deploy staging.", "lint": "Lint code."},
+        )
+        pack_b = _write_pack(
+            tmp_path, name="pack-b", namespace="team-b",
+            skill_files={"deploy": "Deploy prod."},
+        )
+        _install(db, pack_a)
+        _install(db, pack_b)
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        skill_reg.load_from_artifacts(registry)
+
+        descs = skill_reg.get_skill_descriptions()
+        display_names = [name for name, _ in descs]
+        # "deploy" collides — should be qualified
+        assert "team-a/deploy" in display_names
+        assert "team-b/deploy" in display_names
+        # "lint" is unique — should be bare
+        assert "lint" in display_names
+
+    def test_filesystem_skill_blocks_artifact_same_name(
+        self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
+    ) -> None:
+        """Filesystem skill with no namespace blocks pack skill with same bare name."""
+        from anteroom.cli.skills import Skill, SkillRegistry
+
+        pack = _write_pack(
+            tmp_path, name="pack-a", namespace="team-a",
+            skill_files={"lint": "Pack lint."},
+        )
+        _install(db, pack)
+        registry.load_from_db(db)
+
+        skill_reg = SkillRegistry()
+        # Pre-load filesystem skill
+        skill_reg._skills["lint"] = Skill(
+            name="lint", description="FS lint", prompt="FS lint.",
+            source="project",
+        )
+        skill_reg._rebuild_name_index()
+
+        skill_reg.load_from_artifacts(registry)
+
+        # Filesystem version should win
+        skill = skill_reg.get("lint")
+        assert skill is not None
+        assert skill.source == "project"
+
+
+# ---------------------------------------------------------------------------
 # Tests: Space-scoped pack attachments
 # ---------------------------------------------------------------------------
 

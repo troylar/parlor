@@ -80,6 +80,7 @@ class Skill:
     description: str
     prompt: str
     source: str = ""  # "default", "global", or "project"
+    namespace: str = ""  # pack namespace, empty for filesystem skills
 
 
 @dataclass
@@ -272,12 +273,51 @@ def _expand_args(prompt: str, args: str) -> str:
 
 
 class SkillRegistry:
-    """Manages loaded skills."""
+    """Manages loaded skills with namespace-aware resolution.
+
+    Skills are stored by canonical key (``namespace/name`` for namespaced
+    skills, bare ``name`` for filesystem skills).  When a name is unique
+    across all namespaces, it can be invoked by bare name.  When two or
+    more skills share a name, they must be invoked by ``namespace/name``.
+    """
 
     def __init__(self) -> None:
         self._skills: dict[str, Skill] = {}
         self.load_warnings: list[str] = []
         self.searched_dirs: list[_SearchedDir] = []
+        # Maps bare name → list of canonical keys that share it
+        self._name_index: dict[str, list[str]] = {}
+
+    def _rebuild_name_index(self) -> None:
+        """Rebuild the bare-name → canonical-keys index."""
+        index: dict[str, list[str]] = {}
+        for key, skill in self._skills.items():
+            bare = skill.name.lower()
+            index.setdefault(bare, []).append(key)
+        self._name_index = index
+
+    def _resolve_key(self, name: str) -> str | None:
+        """Resolve a user-provided name to a canonical key.
+
+        Accepts bare ``name`` (unique match) or ``namespace/name`` (exact).
+        """
+        lower = name.lower() if name else ""
+        # Direct canonical key match (namespace/name or bare name)
+        if lower in self._skills:
+            return lower
+        # Try bare name lookup
+        candidates = self._name_index.get(lower, [])
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
+    def _display_name(self, skill: Skill) -> str:
+        """Return the display name: bare name if unique, namespace/name if ambiguous."""
+        bare = skill.name.lower()
+        candidates = self._name_index.get(bare, [])
+        if len(candidates) > 1 and skill.namespace:
+            return f"{skill.namespace}/{skill.name}"
+        return skill.name
 
     def load(self, working_dir: str | None = None) -> list[Skill]:
         """Load skills from default, global, and project directories.
@@ -317,19 +357,21 @@ class SkillRegistry:
         self._skills = new_skills
         self.load_warnings = new_warnings
         self.searched_dirs = new_searched
+        self._rebuild_name_index()
 
         return sorted(new_skills.values(), key=lambda s: s.name)
 
     reload = load
 
     def get(self, name: str) -> Skill | None:
-        return self._skills.get(name.lower() if name else name)
+        key = self._resolve_key(name)
+        return self._skills.get(key) if key else None
 
     def list_skills(self) -> list[Skill]:
         return sorted(self._skills.values(), key=lambda s: s.name)
 
     def has_skill(self, name: str) -> bool:
-        return (name.lower() if name else name) in self._skills
+        return self._resolve_key(name) is not None
 
     def resolve_input(self, user_input: str) -> tuple[bool, str]:
         """Check if input is a skill invocation. Returns (is_skill, expanded_prompt)."""
@@ -337,7 +379,7 @@ class SkillRegistry:
             return False, user_input
         parts = user_input.split(maxsplit=1)
         skill_name = parts[0][1:].lower()  # Remove leading /, normalize case
-        skill = self._skills.get(skill_name)
+        skill = self.get(skill_name)
         if not skill:
             return False, user_input
         args = parts[1] if len(parts) > 1 else ""
@@ -347,19 +389,33 @@ class SkillRegistry:
         return True, prompt
 
     def get_skill_descriptions(self) -> list[tuple[str, str]]:
-        """Return (name, description) pairs for all loaded skills, sorted by name."""
-        return [(s.name, s.description) for s in self.list_skills()]
+        """Return (display_name, description) pairs for all loaded skills.
+
+        Uses bare name when unique, namespace/name when ambiguous.
+        """
+        return [
+            (self._display_name(s), s.description)
+            for s in self.list_skills()
+        ]
 
     def load_from_artifacts(self, artifact_registry: Any) -> int:
         """Load skill-type artifacts from the artifact registry.
 
-        Filesystem skills take precedence — artifact skills are only added for
-        names not already present. Returns the number of skills added.
+        Filesystem skills take precedence — artifact skills are only added
+        when the exact ``namespace/name`` key is not already present.
+        Bare-name filesystem skills still block artifact skills with the
+        same bare name (filesystem wins).  Returns the number of skills added.
         """
         added = 0
         for art in artifact_registry.list_all(artifact_type="skill"):
-            key = art.name.lower()
-            if key in self._skills:
+            ns = art.namespace.lower()
+            bare = art.name.lower()
+            canonical = f"{ns}/{bare}"
+            # Skip if this exact canonical key exists
+            if canonical in self._skills:
+                continue
+            # Skip if a filesystem skill (no namespace) owns the bare name
+            if bare in self._skills and not self._skills[bare].namespace:
                 continue
             description = art.name
             prompt = art.content
@@ -372,19 +428,22 @@ class SkillRegistry:
                 pass
             if not prompt or not prompt.strip():
                 continue
-            self._skills[key] = Skill(
+            self._skills[canonical] = Skill(
                 name=art.name,
                 description=description,
                 prompt=prompt,
                 source=f"artifact:{art.source.value}",
+                namespace=ns,
             )
             added += 1
+        self._rebuild_name_index()
         return added
 
     def get_invoke_skill_definition(self) -> dict[str, Any] | None:
         """Return an OpenAI function schema for the invoke_skill tool.
 
-        Returns None if no skills are loaded.
+        Returns None if no skills are loaded.  Uses display names
+        (namespace-qualified when ambiguous) as the enum values.
         """
         skills = self.list_skills()
         if not skills:
@@ -402,7 +461,7 @@ class SkillRegistry:
                     "properties": {
                         "skill_name": {
                             "type": "string",
-                            "enum": [s.name for s in skills],
+                            "enum": [self._display_name(s) for s in skills],
                             "description": "The name of the skill to invoke.",
                         },
                         "args": {

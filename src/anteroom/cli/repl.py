@@ -2019,8 +2019,9 @@ async def _run_repl(
         "quit",
         "exit",
     ]
-    skill_names = [s.name for s in skill_registry.list_skills()] if skill_registry else []
-    skill_descs = {s.name: s.description for s in skill_registry.list_skills()} if skill_registry else {}
+    skill_descs_list = skill_registry.get_skill_descriptions() if skill_registry else []
+    skill_names = [name for name, _ in skill_descs_list]
+    skill_descs = {name: desc for name, desc in skill_descs_list}
     completer = AnteroomCompleter(commands, skill_names, skill_descs, working_dir, db)
 
     def _rebuild_tools() -> None:
@@ -3071,9 +3072,10 @@ async def _run_repl(
                             if invoke_def:
                                 tools_openai.append(invoke_def)
                         # Refresh tab-completion skill names and descriptions
+                        descs = skill_registry.get_skill_descriptions()
                         completer.update_skill_names(
-                            [s.name for s in skills],
-                            {s.name: s.description for s in skills},
+                            [n for n, _ in descs],
+                            {n: d for n, d in descs},
                         )
                     continue
                 elif cmd in ("/spaces", "/space"):
