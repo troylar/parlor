@@ -393,10 +393,7 @@ class SkillRegistry:
 
         Uses bare name when unique, namespace/name when ambiguous.
         """
-        return [
-            (self._display_name(s), s.description)
-            for s in self.list_skills()
-        ]
+        return [(self._display_name(s), s.description) for s in self.list_skills()]
 
     def load_from_artifacts(self, artifact_registry: Any) -> int:
         """Load skill-type artifacts from the artifact registry.

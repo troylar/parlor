@@ -1246,9 +1246,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='packs'"
         ).fetchall()
         has_unique = any(
-            r[0] and "UNIQUE" in r[0] and "namespace" in r[0] and "name" in r[0]
-            for r in existing_indexes
-            if r[0]
+            r[0] and "UNIQUE" in r[0] and "namespace" in r[0] and "name" in r[0] for r in existing_indexes if r[0]
         )
         # Also check table DDL for inline UNIQUE constraint
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'").fetchone()
@@ -1271,10 +1269,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                     )"""
                 )
                 # Add uniqueness via index (avoids DROP TABLE + CASCADE destruction)
-                conn.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_packs_unique_ns_name "
-                    "ON packs(namespace, name)"
-                )
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_packs_unique_ns_name ON packs(namespace, name)")
                 conn.execute("RELEASE packs_dedup")
             except Exception:
                 conn.execute("ROLLBACK TO packs_dedup")

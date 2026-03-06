@@ -701,9 +701,7 @@ class TestInstallPackSource:
 class TestRemovePackByIdOrphanDetection:
     """Tests for CRITICAL bug — remove_pack_by_id must not delete shared artifacts."""
 
-    def _create_two_packs_sharing_artifact(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> tuple[str, str, str]:
+    def _create_two_packs_sharing_artifact(self, tmp_path: Path, db: ThreadSafeConnection) -> tuple[str, str, str]:
         """Create two packs that share one artifact. Returns (pack1_id, pack2_id, shared_artifact_id)."""
         # Pack 1 with skill "greet"
         pack1_dir = tmp_path / "pack1"
@@ -740,16 +738,12 @@ class TestRemovePackByIdOrphanDetection:
         r2 = install_pack(db, m2, pack2_dir)
 
         # The shared artifact should exist once (upserted)
-        shared_row = db.execute(
-            "SELECT artifact_id FROM pack_artifacts WHERE pack_id = ?", (r1["id"],)
-        ).fetchone()
+        shared_row = db.execute("SELECT artifact_id FROM pack_artifacts WHERE pack_id = ?", (r1["id"],)).fetchone()
         shared_id = shared_row["artifact_id"]
 
         return r1["id"], r2["id"], shared_id
 
-    def test_removing_one_pack_preserves_shared_artifact(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_removing_one_pack_preserves_shared_artifact(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         pack1_id, pack2_id, shared_id = self._create_two_packs_sharing_artifact(tmp_path, db)
 
         # Remove pack1 — shared artifact should survive
@@ -766,9 +760,7 @@ class TestRemovePackByIdOrphanDetection:
         ).fetchone()
         assert link is not None
 
-    def test_removing_both_packs_deletes_orphaned_artifact(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_removing_both_packs_deletes_orphaned_artifact(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         pack1_id, pack2_id, shared_id = self._create_two_packs_sharing_artifact(tmp_path, db)
 
         assert remove_pack_by_id(db, pack1_id)
@@ -778,9 +770,7 @@ class TestRemovePackByIdOrphanDetection:
         art_row = db.execute("SELECT id FROM artifacts WHERE id = ?", (shared_id,)).fetchone()
         assert art_row is None
 
-    def test_remove_pack_by_id_cleans_attachments(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_remove_pack_by_id_cleans_attachments(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         pack_dir = _create_pack_dir(tmp_path)
         manifest = parse_manifest(pack_dir / "pack.yaml")
         result = install_pack(db, manifest, pack_dir)

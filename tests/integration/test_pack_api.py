@@ -721,14 +721,24 @@ class TestAPIErrorMessages:
         self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient
     ) -> None:
         """Skill name collision should include the conflicting skill name."""
-        _install_pack(db, _write_pack(
-            tmp_path, name="pack-a", namespace="acme-a",
-            skill_files={"deploy": "Deploy staging."},
-        ))
-        _install_pack(db, _write_pack(
-            tmp_path, name="pack-b", namespace="acme-b",
-            skill_files={"deploy": "Deploy production."},
-        ))
+        _install_pack(
+            db,
+            _write_pack(
+                tmp_path,
+                name="pack-a",
+                namespace="acme-a",
+                skill_files={"deploy": "Deploy staging."},
+            ),
+        )
+        _install_pack(
+            db,
+            _write_pack(
+                tmp_path,
+                name="pack-b",
+                namespace="acme-b",
+                skill_files={"deploy": "Deploy production."},
+            ),
+        )
 
         resp1 = client.post("/api/packs/acme-a/pack-a/attach", json={})
         assert resp1.status_code == 200
@@ -779,9 +789,7 @@ class TestAPISecurityBehavior:
 class TestConfigOverlayConflictsAPI:
     """Verify config overlay conflict detection through the HTTP layer."""
 
-    def test_same_priority_conflict_blocked(
-        self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient
-    ) -> None:
+    def test_same_priority_conflict_blocked(self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient) -> None:
         """Two packs with overlapping config keys at same priority => 409."""
         _install_pack(db, _config_pack(tmp_path))
         conflict_dir = _write_pack(
@@ -805,9 +813,7 @@ class TestConfigOverlayConflictsAPI:
         detail = resp2.json()["detail"]
         assert "Config overlay conflict" in detail
 
-    def test_different_priority_no_conflict(
-        self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient
-    ) -> None:
+    def test_different_priority_no_conflict(self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient) -> None:
         """Same keys at different priorities should succeed.
 
         Note: The attach API doesn't yet support a priority parameter,
@@ -875,33 +881,37 @@ class TestArtifactConflictsAPI:
     """Rules are additive (same name from two packs = OK).
     Skills are exclusive (same name = conflict)."""
 
-    def test_same_rule_name_both_attach(
-        self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient
-    ) -> None:
+    def test_same_rule_name_both_attach(self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient) -> None:
         """Two packs with identically-named rules should both attach."""
         pack_a = _write_pack(
             tmp_path,
             name="pack-a",
             namespace="org-a",
-            rule_files={"deploy-gate": {
-                "content": "Run tests before deploy.",
-                "metadata": {
-                    "enforce": "hard", "reason": "Tests first",
-                    "matches": [{"tool": "bash", "pattern": "deploy"}],
-                },
-            }},
+            rule_files={
+                "deploy-gate": {
+                    "content": "Run tests before deploy.",
+                    "metadata": {
+                        "enforce": "hard",
+                        "reason": "Tests first",
+                        "matches": [{"tool": "bash", "pattern": "deploy"}],
+                    },
+                }
+            },
         )
         pack_b = _write_pack(
             tmp_path,
             name="pack-b",
             namespace="org-b",
-            rule_files={"deploy-gate": {
-                "content": "Notify team before deploy.",
-                "metadata": {
-                    "enforce": "hard", "reason": "Notify",
-                    "matches": [{"tool": "bash", "pattern": "deploy"}],
-                },
-            }},
+            rule_files={
+                "deploy-gate": {
+                    "content": "Notify team before deploy.",
+                    "metadata": {
+                        "enforce": "hard",
+                        "reason": "Notify",
+                        "matches": [{"tool": "bash", "pattern": "deploy"}],
+                    },
+                }
+            },
         )
         _install_pack(db, pack_a)
         _install_pack(db, pack_b)
@@ -911,9 +921,7 @@ class TestArtifactConflictsAPI:
         resp2 = client.post("/api/packs/org-b/pack-b/attach", json={})
         assert resp2.status_code == 200
 
-    def test_same_skill_name_conflict(
-        self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient
-    ) -> None:
+    def test_same_skill_name_conflict(self, tmp_path: Path, db: ThreadSafeConnection, client: TestClient) -> None:
         """Two packs with same skill name should conflict at attach."""
         pack_a = _write_pack(
             tmp_path,
@@ -946,13 +954,16 @@ class TestArtifactConflictsAPI:
             name="full-pack",
             namespace="acme",
             skill_files={"lint": "Run linter."},
-            rule_files={"no-force": {
-                "content": "No force push.",
-                "metadata": {
-                    "enforce": "hard", "reason": "Safety",
-                    "matches": [{"tool": "bash", "pattern": "force"}],
-                },
-            }},
+            rule_files={
+                "no-force": {
+                    "content": "No force push.",
+                    "metadata": {
+                        "enforce": "hard",
+                        "reason": "Safety",
+                        "matches": [{"tool": "bash", "pattern": "force"}],
+                    },
+                }
+            },
         )
         _install_pack(db, pack)
 
@@ -980,16 +991,12 @@ class TestRuleEnforcementViaAPI:
         _install_pack(db, _security_pack(tmp_path))
 
         # Attach via API
-        resp = client.post(
-            "/api/packs/acme/security-baseline/attach", json={}
-        )
+        resp = client.post("/api/packs/acme/security-baseline/attach", json={})
         assert resp.status_code == 200
 
         # Rule enforcer should now be loaded
         enforcer = app.state.rule_enforcer
-        blocked, reason, _ = enforcer.check_tool_call(
-            "bash", {"command": "git push --force origin main"}
-        )
+        blocked, reason, _ = enforcer.check_tool_call("bash", {"command": "git push --force origin main"})
         assert blocked is True
         assert "Force push" in reason
 
@@ -1007,18 +1014,14 @@ class TestRuleEnforcementViaAPI:
 
         # Verify blocked
         enforcer = app.state.rule_enforcer
-        blocked, _, _ = enforcer.check_tool_call(
-            "bash", {"command": "git push --force origin main"}
-        )
+        blocked, _, _ = enforcer.check_tool_call("bash", {"command": "git push --force origin main"})
         assert blocked is True
 
         # Remove pack via API
         client.delete("/api/packs/acme/security-baseline")
 
         # Should no longer be blocked
-        blocked, _, _ = enforcer.check_tool_call(
-            "bash", {"command": "git push --force origin main"}
-        )
+        blocked, _, _ = enforcer.check_tool_call("bash", {"command": "git push --force origin main"})
         assert blocked is False
 
     def test_rules_cleared_after_api_detach(
@@ -1034,9 +1037,7 @@ class TestRuleEnforcementViaAPI:
         client.post("/api/packs/acme/security-baseline/attach", json={})
 
         enforcer = app.state.rule_enforcer
-        blocked, _, _ = enforcer.check_tool_call(
-            "bash", {"command": "git push --force origin main"}
-        )
+        blocked, _, _ = enforcer.check_tool_call("bash", {"command": "git push --force origin main"})
         assert blocked is True
 
         # Detach
@@ -1177,9 +1178,7 @@ class TestMultiPackLifecycleAPI:
         _install_pack(db, _security_pack(tmp_path))
 
         # Attach
-        resp = client.post(
-            "/api/packs/acme/security-baseline/attach", json={}
-        )
+        resp = client.post("/api/packs/acme/security-baseline/attach", json={})
         assert resp.status_code == 200
 
         # Detach
@@ -1187,9 +1186,7 @@ class TestMultiPackLifecycleAPI:
         assert resp.status_code == 200
 
         # Reattach
-        resp = client.post(
-            "/api/packs/acme/security-baseline/attach", json={}
-        )
+        resp = client.post("/api/packs/acme/security-baseline/attach", json={})
         assert resp.status_code == 200
 
     def test_multiple_packs_independent_lifecycle(
@@ -1204,13 +1201,9 @@ class TestMultiPackLifecycleAPI:
         _install_pack(db, _python_pack(tmp_path))
 
         # Attach both
-        resp1 = client.post(
-            "/api/packs/acme/security-baseline/attach", json={}
-        )
+        resp1 = client.post("/api/packs/acme/security-baseline/attach", json={})
         assert resp1.status_code == 200
-        resp2 = client.post(
-            "/api/packs/acme/python-dev/attach", json={}
-        )
+        resp2 = client.post("/api/packs/acme/python-dev/attach", json={})
         assert resp2.status_code == 200
 
         # Remove one
@@ -1237,16 +1230,12 @@ class TestMultiPackLifecycleAPI:
         client.post("/api/packs/acme/security-baseline/attach", json={})
 
         # Verify attachment exists
-        count = db.execute(
-            "SELECT COUNT(*) FROM pack_attachments"
-        ).fetchone()[0]
+        count = db.execute("SELECT COUNT(*) FROM pack_attachments").fetchone()[0]
         assert count == 1
 
         # Remove pack
         client.delete("/api/packs/acme/security-baseline")
 
         # Attachment should be cascade-deleted
-        count = db.execute(
-            "SELECT COUNT(*) FROM pack_attachments"
-        ).fetchone()[0]
+        count = db.execute("SELECT COUNT(*) FROM pack_attachments").fetchone()[0]
         assert count == 0

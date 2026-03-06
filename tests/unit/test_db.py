@@ -955,8 +955,21 @@ class TestPacksUniqueConstraint:
         )
         conn.execute(
             "INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("art1", "@my-ns/skill/greet", "skill", "my-ns", "greet", "hello",
-             "abc123", "global", "{}", None, None, "2024-01-01", "2024-01-01"),
+            (
+                "art1",
+                "@my-ns/skill/greet",
+                "skill",
+                "my-ns",
+                "greet",
+                "hello",
+                "abc123",
+                "global",
+                "{}",
+                None,
+                None,
+                "2024-01-01",
+                "2024-01-01",
+            ),
         )
         conn.execute("INSERT INTO pack_artifacts VALUES ('old-id', 'art1')")
         conn.execute("INSERT INTO pack_artifacts VALUES ('new-id', 'art1')")

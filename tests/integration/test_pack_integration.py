@@ -1210,11 +1210,15 @@ class TestSkillNamespaceResolution:
         from anteroom.cli.skills import SkillRegistry
 
         pack_a = _write_pack(
-            tmp_path, name="pack-a", namespace="team-a",
+            tmp_path,
+            name="pack-a",
+            namespace="team-a",
             skill_files={"deploy": "Deploy to staging."},
         )
         pack_b = _write_pack(
-            tmp_path, name="pack-b", namespace="team-b",
+            tmp_path,
+            name="pack-b",
+            namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
         _install(db, pack_a)
@@ -1239,11 +1243,15 @@ class TestSkillNamespaceResolution:
         from anteroom.cli.skills import SkillRegistry
 
         pack_a = _write_pack(
-            tmp_path, name="pack-a", namespace="team-a",
+            tmp_path,
+            name="pack-a",
+            namespace="team-a",
             skill_files={"deploy": "Deploy to staging."},
         )
         pack_b = _write_pack(
-            tmp_path, name="pack-b", namespace="team-b",
+            tmp_path,
+            name="pack-b",
+            namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
         _install(db, pack_a)
@@ -1264,11 +1272,15 @@ class TestSkillNamespaceResolution:
         from anteroom.cli.skills import SkillRegistry
 
         pack_a = _write_pack(
-            tmp_path, name="pack-a", namespace="team-a",
+            tmp_path,
+            name="pack-a",
+            namespace="team-a",
             skill_files={"deploy": "Deploy to staging."},
         )
         pack_b = _write_pack(
-            tmp_path, name="pack-b", namespace="team-b",
+            tmp_path,
+            name="pack-b",
+            namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
         _install(db, pack_a)
@@ -1310,11 +1322,15 @@ class TestSkillNamespaceResolution:
         from anteroom.cli.skills import SkillRegistry
 
         pack_a = _write_pack(
-            tmp_path, name="pack-a", namespace="team-a",
+            tmp_path,
+            name="pack-a",
+            namespace="team-a",
             skill_files={"deploy": "Deploy to staging."},
         )
         pack_b = _write_pack(
-            tmp_path, name="pack-b", namespace="team-b",
+            tmp_path,
+            name="pack-b",
+            namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
         _install(db, pack_a)
@@ -1340,11 +1356,15 @@ class TestSkillNamespaceResolution:
         from anteroom.cli.skills import SkillRegistry
 
         pack_a = _write_pack(
-            tmp_path, name="pack-a", namespace="team-a",
+            tmp_path,
+            name="pack-a",
+            namespace="team-a",
             skill_files={"deploy": "Deploy to staging."},
         )
         pack_b = _write_pack(
-            tmp_path, name="pack-b", namespace="team-b",
+            tmp_path,
+            name="pack-b",
+            namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
         _install(db, pack_a)
@@ -1367,11 +1387,15 @@ class TestSkillNamespaceResolution:
         from anteroom.cli.skills import SkillRegistry
 
         pack_a = _write_pack(
-            tmp_path, name="pack-a", namespace="team-a",
+            tmp_path,
+            name="pack-a",
+            namespace="team-a",
             skill_files={"deploy": "Deploy staging.", "lint": "Lint code."},
         )
         pack_b = _write_pack(
-            tmp_path, name="pack-b", namespace="team-b",
+            tmp_path,
+            name="pack-b",
+            namespace="team-b",
             skill_files={"deploy": "Deploy prod."},
         )
         _install(db, pack_a)
@@ -1396,7 +1420,9 @@ class TestSkillNamespaceResolution:
         from anteroom.cli.skills import Skill, SkillRegistry
 
         pack = _write_pack(
-            tmp_path, name="pack-a", namespace="team-a",
+            tmp_path,
+            name="pack-a",
+            namespace="team-a",
             skill_files={"lint": "Pack lint."},
         )
         _install(db, pack)
@@ -1405,7 +1431,9 @@ class TestSkillNamespaceResolution:
         skill_reg = SkillRegistry()
         # Pre-load filesystem skill
         skill_reg._skills["lint"] = Skill(
-            name="lint", description="FS lint", prompt="FS lint.",
+            name="lint",
+            description="FS lint",
+            prompt="FS lint.",
             source="project",
         )
         skill_reg._rebuild_name_index()
@@ -1476,9 +1504,7 @@ class TestSpaceScopedAttachments:
         # Detaching again returns False
         assert detach_pack_from_space(db, result["id"], space_id) is False
 
-    def test_active_pack_ids_for_space_includes_global(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_active_pack_ids_for_space_includes_global(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """Space context includes both global and space-scoped packs."""
         from anteroom.services.pack_attachments import (
             attach_pack_to_space,
@@ -1496,9 +1522,7 @@ class TestSpaceScopedAttachments:
         ids = get_active_pack_ids_for_space(db, space_id)
         assert set(ids) == {r1["id"], r2["id"]}
 
-    def test_active_pack_ids_for_space_excludes_other_spaces(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_active_pack_ids_for_space_excludes_other_spaces(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         from anteroom.services.pack_attachments import (
             attach_pack_to_space,
             get_active_pack_ids_for_space,
@@ -1513,9 +1537,7 @@ class TestSpaceScopedAttachments:
         ids_b = get_active_pack_ids_for_space(db, space_b)
         assert result["id"] not in ids_b
 
-    def test_active_pack_ids_three_scope_union(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_active_pack_ids_three_scope_union(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """Three-scope union: global + space + project all included."""
         from anteroom.services.pack_attachments import (
             attach_pack_to_space,
@@ -1652,7 +1674,9 @@ class TestAttachmentMetadataPreservation:
         )
 
         pack_dir = _write_pack(
-            tmp_path, name="multi-attach", namespace="test",
+            tmp_path,
+            name="multi-attach",
+            namespace="test",
             rule_files={"info": {"content": "Be nice.", "metadata": {"enforce": "soft"}}},
         )
         r1 = _install(db, pack_dir)
@@ -1678,29 +1702,37 @@ class TestAdditiveArtifacts:
     """Rules, instructions, and other additive artifact types from multiple
     packs with the same name should NOT conflict."""
 
-    def test_same_rule_name_from_two_packs_no_conflict(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_same_rule_name_from_two_packs_no_conflict(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """Two packs providing rule/deploy should both be attachable."""
         p1 = _write_pack(
-            tmp_path, name="team-a", namespace="team-a",
-            rule_files={"deploy": {
-                "content": "Always run tests before deploying.",
-                "metadata": {
-                    "enforce": "hard", "reason": "Tests first",
-                    "matches": [{"tool": "bash", "pattern": "deploy"}],
-                },
-            }},
+            tmp_path,
+            name="team-a",
+            namespace="team-a",
+            rule_files={
+                "deploy": {
+                    "content": "Always run tests before deploying.",
+                    "metadata": {
+                        "enforce": "hard",
+                        "reason": "Tests first",
+                        "matches": [{"tool": "bash", "pattern": "deploy"}],
+                    },
+                }
+            },
         )
         p2 = _write_pack(
-            tmp_path, name="team-b", namespace="team-b",
-            rule_files={"deploy": {
-                "content": "Notify the channel before deploying.",
-                "metadata": {
-                    "enforce": "hard", "reason": "Notify team",
-                    "matches": [{"tool": "bash", "pattern": "deploy"}],
-                },
-            }},
+            tmp_path,
+            name="team-b",
+            namespace="team-b",
+            rule_files={
+                "deploy": {
+                    "content": "Notify the channel before deploying.",
+                    "metadata": {
+                        "enforce": "hard",
+                        "reason": "Notify team",
+                        "matches": [{"tool": "bash", "pattern": "deploy"}],
+                    },
+                }
+            },
         )
         r1 = _install(db, p1)
         r2 = _install(db, p2)
@@ -1721,24 +1753,34 @@ class TestAdditiveArtifacts:
     ) -> None:
         """Both same-named rules from different packs should be loaded and enforced."""
         p1 = _write_pack(
-            tmp_path, name="team-a", namespace="team-a",
-            rule_files={"guardrails": {
-                "content": "Block force push.",
-                "metadata": {
-                    "enforce": "hard", "reason": "No force push",
-                    "matches": [{"tool": "bash", "pattern": r"git\s+push\s+--force"}],
-                },
-            }},
+            tmp_path,
+            name="team-a",
+            namespace="team-a",
+            rule_files={
+                "guardrails": {
+                    "content": "Block force push.",
+                    "metadata": {
+                        "enforce": "hard",
+                        "reason": "No force push",
+                        "matches": [{"tool": "bash", "pattern": r"git\s+push\s+--force"}],
+                    },
+                }
+            },
         )
         p2 = _write_pack(
-            tmp_path, name="team-b", namespace="team-b",
-            rule_files={"guardrails": {
-                "content": "Block rm -rf.",
-                "metadata": {
-                    "enforce": "hard", "reason": "No rm -rf",
-                    "matches": [{"tool": "bash", "pattern": r"rm\s+-rf"}],
-                },
-            }},
+            tmp_path,
+            name="team-b",
+            namespace="team-b",
+            rule_files={
+                "guardrails": {
+                    "content": "Block rm -rf.",
+                    "metadata": {
+                        "enforce": "hard",
+                        "reason": "No rm -rf",
+                        "matches": [{"tool": "bash", "pattern": r"rm\s+-rf"}],
+                    },
+                }
+            },
         )
         _install(db, p1)
         _install(db, p2)
@@ -1752,16 +1794,18 @@ class TestAdditiveArtifacts:
         blocked_rm, _, _ = enforcer.check_tool_call("bash", {"command": "rm -rf /"})
         assert blocked_rm is True
 
-    def test_same_instruction_name_from_two_packs_no_conflict(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_same_instruction_name_from_two_packs_no_conflict(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """Instructions are additive — same name from two packs is fine."""
         p1 = _write_pack(
-            tmp_path, name="style-a", namespace="org-a",
+            tmp_path,
+            name="style-a",
+            namespace="org-a",
             instruction_files={"coding-style": "Use 4-space indentation."},
         )
         p2 = _write_pack(
-            tmp_path, name="style-b", namespace="org-b",
+            tmp_path,
+            name="style-b",
+            namespace="org-b",
             instruction_files={"coding-style": "Use type hints everywhere."},
         )
         r1 = _install(db, p1)
@@ -1773,16 +1817,18 @@ class TestAdditiveArtifacts:
         ids = get_active_pack_ids(db)
         assert set(ids) == {r1["id"], r2["id"]}
 
-    def test_skill_same_name_from_two_packs_is_conflict(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_skill_same_name_from_two_packs_is_conflict(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """Skills are exclusive — same name from two packs MUST conflict."""
         p1 = _write_pack(
-            tmp_path, name="team-a", namespace="team-a",
+            tmp_path,
+            name="team-a",
+            namespace="team-a",
             skill_files={"deploy": "Deploy to staging."},
         )
         p2 = _write_pack(
-            tmp_path, name="team-b", namespace="team-b",
+            tmp_path,
+            name="team-b",
+            namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
         r1 = _install(db, p1)
@@ -1792,16 +1838,18 @@ class TestAdditiveArtifacts:
         with pytest.raises(ValueError, match="Artifact conflict"):
             attach_pack(db, r2["id"])
 
-    def test_detect_artifact_conflicts_skips_additive_types(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_detect_artifact_conflicts_skips_additive_types(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """detect_artifact_conflicts() returns empty for additive types."""
         p1 = _write_pack(
-            tmp_path, name="rules-a", namespace="org-a",
+            tmp_path,
+            name="rules-a",
+            namespace="org-a",
             rule_files={"shared-rule": {"content": "Rule A.", "metadata": {"enforce": "soft"}}},
         )
         p2 = _write_pack(
-            tmp_path, name="rules-b", namespace="org-b",
+            tmp_path,
+            name="rules-b",
+            namespace="org-b",
             rule_files={"shared-rule": {"content": "Rule B.", "metadata": {"enforce": "soft"}}},
         )
         r1 = _install(db, p1)
@@ -1951,8 +1999,7 @@ class TestPackLockFile:
 
         # Tamper with artifact content in DB
         db.execute(
-            "UPDATE artifacts SET content = 'TAMPERED', content_hash = 'badhash'"
-            " WHERE fqn = '@acme/rule/no-force-push'"
+            "UPDATE artifacts SET content = 'TAMPERED', content_hash = 'badhash' WHERE fqn = '@acme/rule/no-force-push'"
         )
         db.commit()
 
