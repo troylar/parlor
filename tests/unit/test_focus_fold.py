@@ -479,17 +479,21 @@ class TestFoldSuppressThinking:
         mock_write.assert_not_called()
         assert renderer._thinking_start == 0
 
-    @patch("anteroom.cli.renderer._write_thinking_line")
     @patch("anteroom.cli.renderer.console")
-    def test_between_batches_shows_thinking(self, mock_console: MagicMock, mock_write: MagicMock) -> None:
+    def test_between_batches_shows_thinking(self, mock_console: MagicMock) -> None:
         """Between batches, thinking indicator shows so user knows agent is working."""
         renderer._fold_between_batches = True
         renderer._fold_suppress_thinking = False
+        mock_stdout = MagicMock()
+        renderer._stdout = mock_stdout
         renderer._repl_mode = True
         renderer.start_thinking()
         renderer._repl_mode = False
-        # Thinking SHOULD show between batches — user needs feedback
-        mock_write.assert_called()
+        # Thinking SHOULD show between batches with a leading newline
+        mock_stdout.write.assert_called()
+        written = mock_stdout.write.call_args[0][0]
+        assert "\n" in written  # forced newline after fold narrative
+        assert "Thinking" in written
         assert renderer._thinking_start > 0
 
 

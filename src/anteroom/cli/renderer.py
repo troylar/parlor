@@ -826,6 +826,11 @@ def start_thinking(*, newline: bool = False) -> None:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
+        # After a fold narrative (console.print on patched stdout), the raw
+        # stderr fd cursor is still on the narrative line. Force a newline
+        # so the thinking line starts on a fresh line.
+        if _fold_between_batches:
+            newline = True
         if newline and _stdout:
             # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
             gold = "\033[38;2;197;160;89m"
