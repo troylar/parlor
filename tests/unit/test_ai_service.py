@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from anteroom.config import AIConfig
-from anteroom.services.ai_service import AIService, _StreamTimeoutError
+from anteroom.services.ai_service import AIService, _is_html_error, _StreamTimeoutError
 
 
 def _make_config(**overrides) -> AIConfig:
@@ -2225,6 +2225,27 @@ class TestSamplingParameters:
         assert call_kwargs["temperature"] == 0.5
         assert "top_p" not in call_kwargs
         assert "seed" not in call_kwargs
+
+
+class TestIsHtmlError:
+    """Direct tests for _is_html_error() helper (#784)."""
+
+    def test_detects_doctype(self):
+        assert _is_html_error(Exception("<!DOCTYPE html><html>...")) is True
+
+    def test_detects_html_tag(self):
+        assert _is_html_error(Exception("<html><body>Not Found</body></html>")) is True
+
+    def test_case_insensitive(self):
+        assert _is_html_error(Exception("<!doctype HTML>")) is True
+        assert _is_html_error(Exception("<HTML><BODY>")) is True
+
+    def test_non_html_returns_false(self):
+        assert _is_html_error(Exception("Internal Server Error")) is False
+        assert _is_html_error(Exception("")) is False
+
+    def test_json_error_returns_false(self):
+        assert _is_html_error(Exception('{"error": {"message": "bad request"}}')) is False
 
 
 class TestHTMLErrorResponseHandling:
