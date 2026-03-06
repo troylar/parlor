@@ -1107,3 +1107,110 @@ class TestExecModeSpaceId:
 
         mock_storage.create_conversation.assert_called_once()
         assert mock_storage.create_conversation.call_args.kwargs.get("space_id") == "s1"
+
+
+class TestExecModeRuleEnforcement:
+    """Verify exec mode bootstraps artifact registry and rule enforcer (#777)."""
+
+    @pytest.mark.asyncio
+    async def test_rule_enforcer_loaded_from_db(self, tmp_path: Path) -> None:
+        """Exec mode should load hard rules from the DB and wire them to the tool registry."""
+        config = _make_config(tmp_path)
+        events = [FakeEvent("token", {"content": "ok"}), FakeEvent("done", {})]
+
+        async def _fake_loop(**kw: Any) -> Any:
+            for e in events:
+                yield e
+
+        mock_artifact_registry = MagicMock()
+        mock_rule_enforcer = MagicMock()
+        mock_rules = [MagicMock()]
+        mock_artifact_registry.list_all.return_value = mock_rules
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="sys"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+            patch(
+                "anteroom.services.artifact_registry.ArtifactRegistry",
+                return_value=mock_artifact_registry,
+            ) as mock_art_cls,
+            patch(
+                "anteroom.services.rule_enforcer.RuleEnforcer",
+                return_value=mock_rule_enforcer,
+            ) as mock_re_cls,
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = io.StringIO()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = []
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
+
+            await run_exec_mode(config, prompt="test", no_conversation=True)
+
+        # Artifact registry was created and loaded from DB
+        mock_art_cls.assert_called_once()
+        mock_artifact_registry.load_from_db.assert_called_once()
+
+        # Rule enforcer was created and loaded with rules from the artifact registry
+        mock_re_cls.assert_called_once()
+        mock_rule_enforcer.load_rules.assert_called_once_with(mock_rules)
+
+        # Rule enforcer was wired to the tool registry
+        mock_reg.set_rule_enforcer.assert_called_once_with(mock_rule_enforcer)
+
+    @pytest.mark.asyncio
+    async def test_rule_enforcer_failure_does_not_crash(self, tmp_path: Path) -> None:
+        """If artifact registry fails to load, exec mode should still run."""
+        config = _make_config(tmp_path)
+        events = [FakeEvent("token", {"content": "ok"}), FakeEvent("done", {})]
+
+        async def _fake_loop(**kw: Any) -> Any:
+            for e in events:
+                yield e
+
+        with (
+            patch("anteroom.cli.exec_mode.init_db", return_value=MagicMock()),
+            patch("anteroom.cli.exec_mode.get_effective_dimensions", return_value=384),
+            patch("anteroom.cli.exec_mode.create_ai_service"),
+            patch("anteroom.cli.exec_mode.ToolRegistry") as mock_reg_cls,
+            patch("anteroom.cli.exec_mode.register_default_tools"),
+            patch("anteroom.cli.exec_mode._load_instructions", return_value=None),
+            patch("anteroom.cli.exec_mode._build_system_prompt", return_value="sys"),
+            patch("anteroom.cli.exec_mode._read_stdin", return_value=None),
+            patch("anteroom.cli.exec_mode.storage") as mock_storage,
+            patch("anteroom.cli.exec_mode.run_agent_loop", side_effect=_fake_loop),
+            patch("anteroom.cli.exec_mode.sys") as mock_sys,
+            patch(
+                "anteroom.services.artifact_registry.ArtifactRegistry",
+                side_effect=RuntimeError("DB corrupt"),
+            ),
+        ):
+            mock_sys.stdin.isatty.return_value = True
+            mock_sys.stdout = io.StringIO()
+            mock_sys.stderr = io.StringIO()
+            mock_reg = MagicMock()
+            mock_reg.get_openai_tools.return_value = []
+            mock_reg.list_tools.return_value = []
+            mock_reg_cls.return_value = mock_reg
+            mock_storage.create_conversation.return_value = {"id": "c1"}
+            mock_storage.create_message.return_value = {"id": "m1"}
+
+            code = await run_exec_mode(config, prompt="test", no_conversation=True)
+
+        # Should still succeed — rule enforcement is best-effort
+        assert code == 0
+        # Rule enforcer should NOT be set (since artifact registry failed)
+        mock_reg.set_rule_enforcer.assert_not_called()
