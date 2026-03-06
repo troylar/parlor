@@ -1289,11 +1289,13 @@ def flush_buffered_text() -> None:
     """
     global _streaming_buffer, _tool_batch_active
 
-    # Between fold batches, suppress mid-turn text. This prevents the model's
-    # streaming narration (often containing raw tool call JSON) from leaking
-    # through between tool batches.  Keep the buffer intact so
-    # render_response_end() can flush it when the turn finishes.
+    # During or between fold batches, discard mid-turn text. The model often
+    # streams intermediate narration between tool batches (partial answers,
+    # "thinking out loud") that duplicates what the final response will say.
+    # Discarding keeps the output clean — only the final response after the
+    # last batch renders via render_response_end().
     if _fold_batch_active or _fold_between_batches:
+        _streaming_buffer = []
         return
 
     text = "".join(_streaming_buffer)

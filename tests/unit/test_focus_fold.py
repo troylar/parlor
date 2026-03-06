@@ -303,8 +303,8 @@ class TestFlushBufferedTextDuringBatch:
         with patch("anteroom.cli.renderer._stdout_console") as mock_stdout:
             renderer.flush_buffered_text()
         mock_stdout.print.assert_not_called()
-        # Buffer preserved so render_response_end() can flush it
-        assert renderer._streaming_buffer == ["raw json tool data"]
+        # Buffer discarded — mid-turn narration during batches is noise
+        assert renderer._streaming_buffer == []
 
     def test_flush_works_normally_outside_batch(self) -> None:
         renderer._streaming_buffer = ["hello world"]
@@ -343,8 +343,8 @@ class TestBetweenBatchesSuppression:
         with patch("anteroom.cli.renderer._stdout_console") as mock_stdout:
             renderer.flush_buffered_text()
         mock_stdout.print.assert_not_called()
-        # Buffer preserved so render_response_end() can flush it
-        assert renderer._streaming_buffer == ["raw tool json data"]
+        # Buffer discarded — mid-turn narration between batches is noise
+        assert renderer._streaming_buffer == []
 
     def test_between_batches_cleared_on_response_end(self) -> None:
         renderer._fold_between_batches = True
