@@ -1023,6 +1023,7 @@ class TestMixedScenarios:
                 tool_executor=tool_executor,
                 tools_openai=[],
                 max_iterations=3,
+                max_identical_tool_repeats=0,  # disable — this test targets max_iterations
             )
         )
 

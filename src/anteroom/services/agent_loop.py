@@ -236,6 +236,7 @@ async def run_agent_loop(
     output_filter: Any | None = None,
     max_consecutive_text_only: int = 3,
     max_line_repeats: int = 5,
+    max_identical_tool_repeats: int = 3,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -250,6 +251,8 @@ async def run_agent_loop(
     auto_plan_suggested = False
     request_tokens = 0  # tokens accumulated in this run_agent_loop invocation
     consecutive_text_only = 0
+    _last_tool_sig: str = ""  # hash of (tool_name, args) for repeat detection
+    _identical_tool_repeats: int = 0
 
     _loop_start = time.monotonic()
 
@@ -596,6 +599,10 @@ async def run_agent_loop(
 
         # Execute tool calls in parallel
         _tools_start = time.monotonic()
+        yield AgentEvent(
+            kind="tool_batch_start",
+            data={"call_count": len(tool_calls_pending)},
+        )
         logger.debug(
             "agent_loop tool_exec_start iteration=%d count=%d tools=%s",
             iteration,
@@ -681,12 +688,47 @@ async def run_agent_loop(
                 )
             total_tool_calls += len(tool_calls_pending)
             consecutive_text_only = 0
+
+            # Detect consecutive identical tool call batches
+            if max_identical_tool_repeats > 0:
+                import hashlib
+
+                _sig_parts = sorted(
+                    (tc["function_name"], json.dumps(tc["arguments"], sort_keys=True)) for tc in tool_calls_pending
+                )
+                _batch_sig = hashlib.sha256(json.dumps(_sig_parts).encode()).hexdigest()[:16]
+                if _batch_sig == _last_tool_sig:
+                    _identical_tool_repeats += 1
+                    if _identical_tool_repeats >= max_identical_tool_repeats:
+                        yield AgentEvent(
+                            kind="error",
+                            data={
+                                "message": (
+                                    f"Repetitive tool calls detected: same tool(s) called with "
+                                    f"identical arguments {_identical_tool_repeats} times "
+                                    "consecutively. Stopping to prevent runaway loop."
+                                )
+                            },
+                        )
+                        return
+                else:
+                    _identical_tool_repeats = 1
+                    _last_tool_sig = _batch_sig
+
+            _tools_elapsed = time.monotonic() - _tools_start
             logger.debug(
                 "agent_loop tool_exec_done iteration=%d count=%d elapsed=%.2fs",
                 iteration,
                 len(tool_calls_pending),
-                time.monotonic() - _tools_start,
+                _tools_elapsed,
             )
+        yield AgentEvent(
+            kind="tool_batch_end",
+            data={
+                "call_count": len(tool_calls_pending),
+                "elapsed_seconds": round(time.monotonic() - _tools_start, 1),
+            },
+        )
 
         if cancel_event and cancel_event.is_set():
             yield AgentEvent(kind="done", data={})

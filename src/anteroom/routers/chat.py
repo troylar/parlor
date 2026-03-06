@@ -1125,6 +1125,11 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                 "max_line_repeats",
                 CliConfig.max_line_repeats,
             ),
+            max_identical_tool_repeats=getattr(
+                getattr(_app_config, "cli", None),
+                "max_identical_tool_repeats",
+                CliConfig.max_identical_tool_repeats,
+            ),
         )
         _pending_usage: dict[str, Any] | None = None
         async for agent_event in _with_keepalive(agent_gen):
@@ -1193,6 +1198,12 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                                 "event": "canvas_streaming",
                                 "data": json.dumps({"content_delta": delta_text}),
                             }
+
+            elif kind == "tool_batch_start":
+                yield {
+                    "event": "tool_batch_start",
+                    "data": json.dumps({"call_count": data["call_count"]}),
+                }
 
             elif kind == "tool_call_start":
                 idx = data.get("index", 0)
@@ -1398,6 +1409,17 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                                     "data": json.dumps(sa_event),
                                 }
                             del ctx.subagent_events[sa_agent_id]
+
+            elif kind == "tool_batch_end":
+                yield {
+                    "event": "tool_batch_end",
+                    "data": json.dumps(
+                        {
+                            "call_count": data["call_count"],
+                            "elapsed_seconds": data["elapsed_seconds"],
+                        }
+                    ),
+                }
 
             elif kind == "error":
                 yield {"event": "error", "data": json.dumps(data)}

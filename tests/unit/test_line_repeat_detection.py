@@ -238,6 +238,7 @@ class TestLineRepeatDetection:
                 tool_executor=_executor,
                 tools_openai=[{"type": "function", "function": {"name": "read_file"}}],
                 max_line_repeats=5,
+                max_identical_tool_repeats=0,  # disable — this test targets line repeat detection
             )
         )
 

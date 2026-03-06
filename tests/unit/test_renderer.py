@@ -290,6 +290,9 @@ class TestStartThinkingFlushesDedup:
         r._dedup_summary = ""
         r._tool_batch_active = False
         r._tool_dedup_enabled = True
+        r._fold_batch_active = False
+        r._fold_between_batches = False
+        r._fold_suppress_thinking = False
 
     def test_start_thinking_flushes_dedup(self) -> None:
         import anteroom.cli.renderer as r
@@ -405,6 +408,8 @@ class TestFlushBufferedTextToolSpacing:
 
         r._streaming_buffer.clear()
         r._tool_batch_active = False
+        r._fold_batch_active = False
+        r._fold_between_batches = False
 
     def test_flush_adds_spacing_after_tool_batch(self) -> None:
         """flush_buffered_text() should print a blank line when _tool_batch_active is True."""

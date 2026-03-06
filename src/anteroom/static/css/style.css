@@ -1697,6 +1697,36 @@ body {
     box-shadow: none;
 }
 
+/* Tool batch: Focus & Fold — groups all tool calls per turn */
+.tool-batch {
+    margin: 8px 0;
+    border-left: 2px solid var(--border-color);
+    padding-left: 12px;
+}
+.tool-batch > summary {
+    padding: 6px 0;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-muted);
+    list-style: none;
+    transition: background var(--transition-speed) var(--easing);
+}
+.tool-batch > summary::-webkit-details-marker {
+    display: none;
+}
+.tool-batch > summary::before {
+    content: '\25B8 ';
+    font-size: 12px;
+    margin-right: 4px;
+}
+.tool-batch[open] > summary::before {
+    content: '\25BE ';
+}
+.tool-batch .tool-call,
+.tool-batch .tool-call-group {
+    opacity: 0.85;
+}
+
 /* ============================================================
    ATTACHMENTS
    ============================================================ */

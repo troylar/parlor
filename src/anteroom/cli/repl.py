@@ -149,6 +149,11 @@ def _collapse_long_input(user_input: str) -> None:
     Replaces the displayed multi-line input with the first few lines
     plus a "... (N more lines)" indicator. The actual content is
     preserved; only the visual display is truncated.
+
+    All output goes through ``renderer._stdout`` (the raw fd) as a single
+    atomic write — mixing raw ANSI with Rich console.print() through the
+    patch_stdout proxy caused desync (#779).  The row count includes +1
+    for prompt_toolkit's bottom toolbar row.
     """
     if not sys.stdout.isatty():
         return
@@ -160,21 +165,29 @@ def _collapse_long_input(user_input: str) -> None:
     term_cols = shutil.get_terminal_size((80, 24)).columns
     usable = max(term_cols - 2, 10)  # 2 = "❯ " prompt width
 
-    # Estimate terminal rows the prompt_toolkit input occupied
-    total_rows = sum(max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines)
+    # Estimate terminal rows the prompt_toolkit input occupied.
+    # +1 accounts for prompt_toolkit's bottom toolbar row, which is
+    # cleared on accept but shifts the cursor down by one.
+    total_rows = sum(max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines) + 1
 
     show = 3
     hidden = len(lines) - show
 
-    # Move cursor up to input start and clear to end of screen.
-    # Use renderer._stdout (real fd) to bypass patch_stdout() proxy
-    # which corrupts raw ESC bytes.
-    renderer._stdout.write(f"\033[{total_rows}A\033[J")
-    # Reprint truncated with styled prompt via Rich (handles patch_stdout correctly)
-    renderer.console.print(f"[bold cyan]❯[/] {escape(lines[0])}")
+    # ANSI color codes matching the Rich styles we replaced.
+    cyan_bold = "\033[1;36m"
+    dim = "\033[2m"
+    rst = "\033[0m"
+
+    # Single atomic write to the raw fd — no dual-fd race (#779).
+    parts = [
+        f"\033[{total_rows}A\033[J",  # move up + clear to end of screen
+        f"{cyan_bold}❯{rst} {lines[0]}\n",
+    ]
     for ln in lines[1:show]:
-        renderer.console.print(f"  {escape(ln)}")
-    renderer.console.print(f"  [dim]... ({hidden} more lines)[/]")
+        parts.append(f"  {ln}\n")
+    parts.append(f"  {dim}... ({hidden} more lines){rst}")
+
+    renderer._stdout.write("".join(parts))
     renderer._stdout.flush()
 
 
@@ -1080,6 +1093,8 @@ async def run_cli(
             return False
 
         async with _approval_lock:
+            # Clear any fold ticker line before rendering the approval gate
+            renderer.stop_tool_ticker_sync()
             renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
             if verdict.details.get("command"):
                 renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
@@ -1626,6 +1641,7 @@ async def _run_one_shot(
                 output_filter=output_filter,
                 max_consecutive_text_only=config.cli.max_consecutive_text_only,
                 max_line_repeats=config.cli.max_line_repeats,
+                max_identical_tool_repeats=config.cli.max_identical_tool_repeats,
             ):
                 if event.kind == "thinking":
                     if not thinking:
@@ -1645,6 +1661,11 @@ async def _run_one_shot(
                     renderer.update_thinking()
                     # Yield to event loop so the thinking ticker task can update (#775)
                     await asyncio.sleep(0)
+                elif event.kind == "tool_batch_start":
+                    if thinking:
+                        await renderer.stop_thinking()
+                        thinking = False
+                    renderer.render_tool_batch_start(event.data["call_count"])
                 elif event.kind == "tool_call_start":
                     if thinking:
                         await renderer.stop_thinking()
@@ -1652,6 +1673,8 @@ async def _run_one_shot(
                     renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
                 elif event.kind == "tool_call_end":
                     renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
+                elif event.kind == "tool_batch_end":
+                    renderer.render_tool_batch_end(event.data["call_count"], event.data["elapsed_seconds"])
                 elif event.kind == "assistant_message":
                     if event.data["content"]:
                         storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
@@ -2489,6 +2512,11 @@ async def _run_repl(
     agent_busy = asyncio.Event()  # set while agent loop is running
     exit_flag = asyncio.Event()
     _current_cancel_event: list[asyncio.Event | None] = [None]
+
+    @kb.add("c-o")
+    def _toggle_fold(event: Any) -> None:
+        """Ctrl-O: expand/collapse the most recent tool batch fold."""
+        renderer.toggle_last_fold()
 
     @kb.add("tab")
     def _tab_complete(event: Any) -> None:
@@ -4277,9 +4305,9 @@ async def _run_repl(
                                 f"  [{MUTED}][RAG: {len(_rag_chunks)} relevant chunk(s) retrieved][/{MUTED}]"
                             )
                         else:
-                            renderer.console.print(f"  [{MUTED}][RAG: no relevant context found][/{MUTED}]")
+                            logger.debug("RAG: no relevant context found")
                     else:
-                        renderer.console.print(f"  [{MUTED}][RAG: embedding service unavailable][/{MUTED}]")
+                        logger.debug("RAG: embedding service unavailable")
                 except Exception:
                     logger.debug("RAG retrieval failed in CLI", exc_info=True)
                     renderer.console.print(f"  [{MUTED}][RAG: retrieval failed][/{MUTED}]")
@@ -4369,6 +4397,7 @@ async def _run_repl(
                         output_filter=output_filter,
                         max_consecutive_text_only=config.cli.max_consecutive_text_only,
                         max_line_repeats=config.cli.max_line_repeats,
+                        max_identical_tool_repeats=config.cli.max_identical_tool_repeats,
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(
@@ -4417,6 +4446,11 @@ async def _run_repl(
                                 response_token_count += max(1, len(event.data["content"]) // 4)
                             # Yield to event loop so the thinking ticker task can update (#775)
                             await asyncio.sleep(0)
+                        elif event.kind == "tool_batch_start":
+                            if thinking:
+                                total_elapsed += await renderer.stop_thinking()
+                                thinking = False
+                            renderer.render_tool_batch_start(event.data["call_count"])
                         elif event.kind == "tool_call_start":
                             if thinking:
                                 total_elapsed += await renderer.stop_thinking()
@@ -4430,6 +4464,8 @@ async def _run_repl(
                             renderer.render_tool_call_end(
                                 event.data["tool_name"], event.data["status"], event.data["output"]
                             )
+                        elif event.kind == "tool_batch_end":
+                            renderer.render_tool_batch_end(event.data["call_count"], event.data["elapsed_seconds"])
                         elif event.kind == "auto_plan_suggest":
                             _auto_mode = config.cli.planning.auto_mode
                             if _auto_mode == "auto" and not _plan_active[0]:
