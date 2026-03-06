@@ -3696,6 +3696,11 @@ async def _run_repl(
                         renderer.console.print(
                             f"[green]Attached[/green] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                         )
+                        if artifact_registry is not None:
+                            artifact_registry.load_from_db(db)
+                            if skill_registry is not None:
+                                skill_registry.load_from_artifacts(artifact_registry)
+                            _refresh_artifact_prompt()
 
                     elif sub == "detach":
                         _detach_rest = parts[2].strip() if len(parts) >= 3 else ""
@@ -3727,6 +3732,11 @@ async def _run_repl(
                             renderer.console.print(
                                 f"[green]Detached[/green] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                             )
+                            if artifact_registry is not None:
+                                artifact_registry.load_from_db(db)
+                                if skill_registry is not None:
+                                    skill_registry.load_from_artifacts(artifact_registry)
+                                _refresh_artifact_prompt()
                         else:
                             renderer.console.print(
                                 f"[yellow]Not attached:[/yellow] @{rich_escape(ns)}/{rich_escape(name)}\n"

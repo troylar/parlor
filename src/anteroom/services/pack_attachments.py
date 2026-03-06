@@ -23,9 +23,9 @@ def _validate_project_path(project_path: str | None) -> None:
     """Reject project paths with traversal components."""
     if project_path is None:
         return
-    from pathlib import PurePosixPath
+    from pathlib import PurePath
 
-    parts = PurePosixPath(project_path).parts
+    parts = PurePath(project_path).parts
     if ".." in parts:
         msg = "project_path must not contain '..' components"
         raise ValueError(msg)

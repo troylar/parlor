@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 _ARTIFACT_COLUMNS = (
     "id, fqn, type, namespace, name, content, content_hash, source, "
-    "metadata, user_id, user_display_name, created_at, updated_at"
+    "metadata, user_id, user_display_name, created_at, updated_at, "
+    "(SELECT COALESCE(MAX(version), 1) FROM artifact_versions WHERE artifact_id = artifacts.id) AS version"
 )
 _VERSION_COLUMNS = "id, artifact_id, version, content, content_hash, created_at"
 

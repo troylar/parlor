@@ -138,6 +138,7 @@ async def attach_pack(request: Request, namespace: str, name: str, body: AttachR
         result = do_attach(db, pack["id"], project_path=body.project_path)
     except ValueError:
         raise HTTPException(status_code=409, detail="Pack is already attached at this scope")
+    _reload_registries(request, db)
     return result
 
 
@@ -158,6 +159,7 @@ async def detach_pack(
     removed = do_detach(db, pack["id"], project_path=project_path)
     if not removed:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    _reload_registries(request, db)
     return {"status": "detached"}
 
 
