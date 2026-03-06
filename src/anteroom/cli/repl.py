@@ -1351,6 +1351,13 @@ async def run_cli(
         _artifact_registry.load_from_db(db)
         if _artifact_registry.count:
             skill_registry.load_from_artifacts(_artifact_registry)
+        # Load hard-enforced rules from the registry
+        from ..services.artifacts import ArtifactType as _ArtType
+        from ..services.rule_enforcer import RuleEnforcer
+
+        _rule_enforcer = RuleEnforcer()
+        _rule_enforcer.load_rules(_artifact_registry.list_all(artifact_type=_ArtType.RULE))
+        tool_registry.set_rule_enforcer(_rule_enforcer)
     except Exception:
         pass
 
@@ -2505,6 +2512,7 @@ async def _run_repl(
         """Process messages from input_queue, run commands and agent loop."""
         nonlocal conv, ai_messages, is_first_message, tools_openai, all_tool_names
         nonlocal current_model, ai_service, extra_system_prompt, working_dir
+        nonlocal artifact_registry
 
         # -- Plan mode state --
         from .plan import (
@@ -2625,6 +2633,39 @@ async def _run_repl(
 
         def _strip_space_instructions(prompt: str) -> str:
             return re.sub(r"\n*<space_instructions[^>]*>.*?</space_instructions>", "", prompt, flags=re.DOTALL)
+
+        def _refresh_artifact_prompt() -> None:
+            """Rebuild the artifact (rules/instructions/context) section in extra_system_prompt."""
+            nonlocal extra_system_prompt, artifact_registry
+            if artifact_registry is None:
+                return
+            # Strip existing artifact tags (trusted and untrusted)
+            extra_system_prompt = re.sub(r"\n*<artifact [^>]*>.*?</artifact>", "", extra_system_prompt, flags=re.DOTALL)
+            extra_system_prompt = re.sub(
+                r"\n*<untrusted_content [^>]*origin=\"artifact:[^\"]*\"[^>]*>.*?</untrusted_content>",
+                "",
+                extra_system_prompt,
+                flags=re.DOTALL,
+            )
+            # Re-inject from current registry
+            from ..services.artifacts import ArtifactType
+
+            for art_type in (ArtifactType.INSTRUCTION, ArtifactType.RULE, ArtifactType.CONTEXT):
+                artifacts = artifact_registry.list_all(artifact_type=art_type)
+                for art in artifacts:
+                    if art.content.strip():
+                        if art.source == "built_in":
+                            tag = f'<artifact type="{art_type.value}" fqn="{art.fqn}">'
+                            extra_system_prompt += f"\n{tag}\n{art.content}\n</artifact>"
+                        else:
+                            wrapped = wrap_untrusted(
+                                art.content, origin=f"artifact:{art.fqn}", content_type=art_type.value
+                            )
+                            extra_system_prompt += f"\n{wrapped}"
+            # Reload hard-enforced rules into the tool registry's enforcer
+            enforcer = getattr(tool_registry, "_rule_enforcer", None) if tool_registry else None
+            if enforcer is not None:
+                enforcer.load_rules(artifact_registry.list_all(artifact_type=ArtifactType.RULE))
 
         # Inject initial space instructions if space is active
         if _active_space[0] and space_instructions:
@@ -3510,14 +3551,16 @@ async def _run_repl(
                                     renderer.console.print(f"[red]  {err}[/red]")
                                 continue
                             install_result: dict[str, Any] = packs_service.install_pack(db, manifest, pack_path)
+                            action_word = "Updated" if install_result.get("action") == "updated" else "Installed"
                             renderer.console.print(
-                                f"[green]Installed[/green] @{manifest.namespace}/{manifest.name}"
+                                f"[green]{action_word}[/green] @{manifest.namespace}/{manifest.name}"
                                 f" v{manifest.version} ({install_result.get('artifact_count', 0)} artifacts)"
                             )
-                            if _artifact_registry is not None:  # noqa: F821  # type: ignore[name-defined]
-                                _artifact_registry.load_from_db(db)  # noqa: F821  # type: ignore[name-defined]
+                            if artifact_registry is not None:
+                                artifact_registry.load_from_db(db)
                                 if skill_registry is not None:
-                                    skill_registry.load_from_artifacts(_artifact_registry)  # noqa: F821  # type: ignore[name-defined]
+                                    skill_registry.load_from_artifacts(artifact_registry)
+                                _refresh_artifact_prompt()
                         except ValueError as exc:
                             renderer.console.print(f"[red]{exc}[/red]")
                         renderer.console.print()
@@ -3537,6 +3580,11 @@ async def _run_repl(
                         removed = packs_service.remove_pack_by_id(db, _pm["id"])
                         if removed:
                             renderer.console.print(f"[green]Removed[/green] @{ns}/{name}\n")
+                            if artifact_registry is not None:
+                                artifact_registry.load_from_db(db)
+                                if skill_registry is not None:
+                                    skill_registry.load_from_artifacts(artifact_registry)
+                                _refresh_artifact_prompt()
                         else:
                             renderer.console.print(f"[{CHROME}]Pack @{ns}/{name} not found.[/{CHROME}]\n")
 
