@@ -85,6 +85,7 @@ def _build_system_prompt(
     builtin_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
     space_instructions: str | None = None,
+    artifact_registry: Any = None,
 ) -> str:
     runtime_ctx = build_runtime_context(
         model=config.ai.model,
@@ -99,6 +100,24 @@ def _build_system_prompt(
         parts.append(f"\n{space_instructions}")
     if instructions:
         parts.append(f"\n{instructions}")
+
+    # Inject pack artifacts (instructions, rules, context) into the system
+    # prompt — matching what the REPL does in _build_system_prompt().
+    if artifact_registry is not None:
+        from ..services.artifacts import ArtifactType
+        from ..services.context_trust import wrap_untrusted
+
+        for art_type in (ArtifactType.INSTRUCTION, ArtifactType.RULE, ArtifactType.CONTEXT):
+            artifacts = artifact_registry.list_all(artifact_type=art_type)
+            for art in artifacts:
+                if art.content.strip():
+                    if art.source == "built_in":
+                        tag = f'<artifact type="{art_type.value}" fqn="{art.fqn}">'
+                        parts.append(f"\n{tag}\n{art.content}\n</artifact>")
+                    else:
+                        wrapped = wrap_untrusted(art.content, origin=f"artifact:{art.fqn}", content_type=art_type.value)
+                        parts.append(f"\n{wrapped}")
+
     return "\n".join(parts)
 
 
@@ -242,6 +261,7 @@ async def run_exec_mode(
     tool_registry.set_rate_limiter(_rate_limiter)
 
     # Artifact registry and rule enforcement
+    _artifact_registry = None
     try:
         from ..services.artifact_registry import ArtifactRegistry
         from ..services.artifacts import ArtifactType as _ArtType
@@ -348,6 +368,7 @@ async def run_exec_mode(
         instructions,
         builtin_tools=tool_registry.list_tools() if not no_tools else None,
         mcp_servers=mcp_statuses,
+        artifact_registry=_artifact_registry,
     )
 
     # Inject space instructions if a space is active

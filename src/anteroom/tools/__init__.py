@@ -97,6 +97,18 @@ class ToolRegistry:
         A verdict with hard_denied=True means the tool is blocked by config (denied_tools
         or per-tool enabled=false) and must be blocked without prompting.
         """
+        # Hard rule enforcement runs unconditionally — even when safety is
+        # disabled — so that ``enforce: hard`` pack rules cannot be bypassed.
+        if self._rule_enforcer is not None:
+            blocked, reason, rule_fqn = self._rule_enforcer.check_tool_call(tool_name, arguments)
+            if blocked:
+                return SafetyVerdict(
+                    needs_approval=True,
+                    reason=f"Blocked by rule {rule_fqn}: {reason}",
+                    tool_name=tool_name,
+                    hard_denied=True,
+                )
+
         config = self._safety_config
         if not config or not config.enabled:
             return None
@@ -116,18 +128,6 @@ class ToolRegistry:
                 tool_name=tool_name,
                 hard_denied=True,
             )
-
-        # Hard rule enforcement: check before tier-based checks so rules
-        # cannot be bypassed by approval mode or allowed_tools.
-        if self._rule_enforcer is not None:
-            blocked, reason, rule_fqn = self._rule_enforcer.check_tool_call(tool_name, arguments)
-            if blocked:
-                return SafetyVerdict(
-                    needs_approval=True,
-                    reason=f"Blocked by rule {rule_fqn}: {reason}",
-                    tool_name=tool_name,
-                    hard_denied=True,
-                )
 
         tier = get_tool_tier(tool_name, tier_overrides=config.tool_tiers)
 
@@ -233,9 +233,9 @@ class ToolRegistry:
         user_approved_hard_block = False
         if verdict and verdict.needs_approval:
             if verdict.hard_denied:
-                logger.warning("Tool hard-denied by config: %s", name)
+                logger.warning("Tool hard-denied by config: %s — %s", name, verdict.reason)
                 return {
-                    "error": f"Tool '{name}' is blocked by configuration",
+                    "error": verdict.reason,
                     "safety_blocked": True,
                     "_approval_decision": "hard_denied",
                 }
