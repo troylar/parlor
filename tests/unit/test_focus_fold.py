@@ -452,11 +452,12 @@ class TestToolCallStartDuringBatch:
 
 
 class TestFoldSuppressThinking:
-    """Verify start_thinking is suppressed after a fold batch."""
+    """Verify start_thinking is suppressed during an active fold batch but shows between batches."""
 
     def setup_method(self) -> None:
         renderer._fold_suppress_thinking = False
         renderer._fold_batch_active = False
+        renderer._fold_between_batches = False
         renderer._fold_batch_summaries.clear()
         renderer._fold_batch_types.clear()
         renderer._fold_groups.clear()
@@ -470,28 +471,26 @@ class TestFoldSuppressThinking:
 
     @patch("anteroom.cli.renderer._write_thinking_line")
     @patch("anteroom.cli.renderer.console")
-    def test_suppressed_thinking_skips_display(self, mock_console: MagicMock, mock_write: MagicMock) -> None:
-        renderer._fold_suppress_thinking = True
+    def test_active_batch_suppresses_thinking(self, mock_console: MagicMock, mock_write: MagicMock) -> None:
+        renderer._fold_batch_active = True
         renderer._repl_mode = True
         renderer.start_thinking()
         renderer._repl_mode = False
-        # Should NOT have written a thinking line
         mock_write.assert_not_called()
-        # _thinking_start stays 0 so stop_thinking() no-ops cleanly
         assert renderer._thinking_start == 0
-        assert renderer._fold_suppress_thinking is False
 
     @patch("anteroom.cli.renderer._write_thinking_line")
     @patch("anteroom.cli.renderer.console")
-    def test_between_batches_suppresses_thinking(self, mock_console: MagicMock, mock_write: MagicMock) -> None:
+    def test_between_batches_shows_thinking(self, mock_console: MagicMock, mock_write: MagicMock) -> None:
+        """Between batches, thinking indicator shows so user knows agent is working."""
         renderer._fold_between_batches = True
         renderer._fold_suppress_thinking = False
         renderer._repl_mode = True
         renderer.start_thinking()
         renderer._repl_mode = False
-        mock_write.assert_not_called()
-        # _thinking_start stays 0 so stop_thinking() no-ops cleanly
-        assert renderer._thinking_start == 0
+        # Thinking SHOULD show between batches — user needs feedback
+        mock_write.assert_called()
+        assert renderer._thinking_start > 0
 
 
 class TestBatchStartStopsToolTicker:
@@ -821,10 +820,10 @@ class TestCancellationClearsFoldState:
 
 
 class TestSuppressedThinkingClearsThroughputWindow:
-    """The suppressed thinking path should clear _throughput_window."""
+    """The suppressed thinking path (active batch) should clear _throughput_window."""
 
     def setup_method(self) -> None:
-        renderer._fold_suppress_thinking = True
+        renderer._fold_batch_active = True
         renderer._thinking_start = 0
         renderer._spinner = None
         renderer._thinking_ticker_task = None
@@ -840,12 +839,10 @@ class TestSuppressedThinkingClearsThroughputWindow:
 
 
 class TestSuppressedThinkingNoGhostLine:
-    """Suppressed start_thinking must not cause a ghost 'Thinking... 0s' on stop."""
+    """Suppressed start_thinking (active batch) + stop_thinking must not write."""
 
     def setup_method(self) -> None:
-        renderer._fold_suppress_thinking = False
-        renderer._fold_between_batches = True
-        renderer._fold_batch_active = False
+        renderer._fold_batch_active = True
         renderer._thinking_start = 0
         renderer._spinner = None
         renderer._thinking_ticker_task = None
@@ -857,12 +854,11 @@ class TestSuppressedThinkingNoGhostLine:
         renderer._repl_mode = True
         renderer._stdout = mock_stdout
 
-        renderer.start_thinking()  # suppressed (between batches)
-        assert renderer._thinking_start == 0  # kept at 0 for clean no-op
+        renderer.start_thinking()  # suppressed (active batch)
+        assert renderer._thinking_start == 0
 
         await renderer.stop_thinking()  # should no-op
 
-        # No "Thinking..." line should have been written
         mock_stdout.write.assert_not_called()
         renderer._repl_mode = False
 

@@ -779,11 +779,10 @@ def start_thinking(*, newline: bool = False) -> None:
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
     global _plan_written_lines, _fold_suppress_thinking
 
-    # During a fold batch (e.g. after ask_user returns), suppress thinking.
-    # After a fold batch, skip the "Thinking..." display entirely — the fold
-    # summary already told the user what happened. No ticker, no spinner.
-    # The next visible output will be either another fold or the AI's text.
-    if _fold_batch_active or _fold_suppress_thinking or _fold_between_batches:
+    # During an active fold batch, suppress thinking — the fold ticker is
+    # the visual indicator. Between batches, show thinking normally so the
+    # user knows the agent is still working (not hung).
+    if _fold_batch_active:
         _fold_suppress_thinking = False
         # Do NOT set _thinking_start — keep it at 0 so stop_thinking()
         # recognises no visible thinking was shown and no-ops cleanly,
