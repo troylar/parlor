@@ -303,8 +303,8 @@ class TestFlushBufferedTextDuringBatch:
         with patch("anteroom.cli.renderer._stdout_console") as mock_stdout:
             renderer.flush_buffered_text()
         mock_stdout.print.assert_not_called()
-        # Buffer discarded — mid-turn narration during batches is noise
-        assert renderer._streaming_buffer == []
+        # Buffer preserved — render_response_end() or next batch_start will handle it
+        assert renderer._streaming_buffer == ["raw json tool data"]
 
     def test_flush_works_normally_outside_batch(self) -> None:
         renderer._streaming_buffer = ["hello world"]
@@ -343,8 +343,8 @@ class TestBetweenBatchesSuppression:
         with patch("anteroom.cli.renderer._stdout_console") as mock_stdout:
             renderer.flush_buffered_text()
         mock_stdout.print.assert_not_called()
-        # Buffer discarded — mid-turn narration between batches is noise
-        assert renderer._streaming_buffer == []
+        # Buffer preserved — render_response_end() or next batch_start will handle it
+        assert renderer._streaming_buffer == ["raw tool json data"]
 
     def test_between_batches_cleared_on_response_end(self) -> None:
         renderer._fold_between_batches = True
@@ -1002,6 +1002,33 @@ class TestCollapseInputToolbarRow:
             output = mock_renderer._stdout.write.call_args[0][0]
             # 12 lines + 1 toolbar = 13
             assert "\033[13A" in output
+
+
+class TestBatchStartDiscardsInterBatchNarration:
+    """render_tool_batch_start clears _streaming_buffer to discard inter-batch text."""
+
+    def setup_method(self) -> None:
+        renderer._fold_batch_active = False
+        renderer._fold_between_batches = False
+        renderer._streaming_buffer = []
+
+    def test_buffer_cleared_on_batch_start(self) -> None:
+        """Inter-batch narration accumulated in buffer is discarded when next batch starts."""
+        renderer._streaming_buffer = ["partial answer", " from model"]
+        renderer.render_tool_batch_start(2)
+        assert renderer._streaming_buffer == []
+
+    def test_final_response_preserved_after_last_batch(self) -> None:
+        """Buffer accumulated after last batch_end is kept for render_response_end."""
+        with patch("anteroom.cli.renderer.console"):
+            renderer.render_tool_batch_start(1)
+            renderer._fold_batch_summaries.append("\u2713 Read a.py")
+            renderer._fold_batch_types.append("read")
+            renderer.render_tool_batch_end(1, 0.3)
+        # Simulate final response tokens arriving after last batch
+        renderer._streaming_buffer = ["Final answer text"]
+        # No more batch_start — render_response_end would flush this
+        assert renderer._streaming_buffer == ["Final answer text"]
 
 
 class TestBatchSummariesClearedAfterGroup:

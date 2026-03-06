@@ -475,7 +475,7 @@ def render_tool_batch_start(call_count: int) -> None:
     """
     global _fold_batch_active, _fold_batch_total, _fold_batch_done
     global _fold_last_expanded, _fold_batch_current, _fold_between_batches
-    global _thinking_ticker_task, _spinner
+    global _thinking_ticker_task, _spinner, _streaming_buffer
     _fold_batch_summaries.clear()
     _fold_batch_types.clear()
     _fold_batch_total = call_count
@@ -483,6 +483,10 @@ def render_tool_batch_start(call_count: int) -> None:
     _fold_batch_current = ""
     _fold_batch_active = True
     _fold_last_expanded = False
+    # Discard any inter-batch narration the model streamed between the previous
+    # batch end and this batch start. This prevents duplicate partial answers
+    # from accumulating and rendering after the final batch.
+    _streaming_buffer = []
     _fold_between_batches = False  # No longer between batches
     # Kill any stale thinking ticker — fold ticker takes over
     if _thinking_ticker_task is not None:
@@ -1289,13 +1293,11 @@ def flush_buffered_text() -> None:
     """
     global _streaming_buffer, _tool_batch_active
 
-    # During or between fold batches, discard mid-turn text. The model often
-    # streams intermediate narration between tool batches (partial answers,
-    # "thinking out loud") that duplicates what the final response will say.
-    # Discarding keeps the output clean — only the final response after the
-    # last batch renders via render_response_end().
+    # During or between fold batches, suppress mid-turn text rendering.
+    # The buffer is kept intact — render_tool_batch_start() will clear it
+    # when the next batch begins (discarding inter-batch narration), while
+    # render_response_end() will flush whatever remains after the last batch.
     if _fold_batch_active or _fold_between_batches:
-        _streaming_buffer = []
         return
 
     text = "".join(_streaming_buffer)
