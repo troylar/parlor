@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -728,8 +729,6 @@ async def run_agent_loop(
 
             # Detect consecutive identical tool call batches
             if max_identical_tool_repeats > 0:
-                import hashlib
-
                 _sig_parts = sorted(
                     (tc["function_name"], json.dumps(tc["arguments"], sort_keys=True)) for tc in tool_calls_pending
                 )
@@ -737,6 +736,13 @@ async def run_agent_loop(
                 if _batch_sig == _last_tool_sig:
                     _identical_tool_repeats += 1
                     if _identical_tool_repeats >= max_identical_tool_repeats:
+                        yield AgentEvent(
+                            kind="tool_batch_end",
+                            data={
+                                "call_count": len(tool_calls_pending),
+                                "elapsed_seconds": round(time.monotonic() - _tools_start, 2),
+                            },
+                        )
                         yield AgentEvent(
                             kind="error",
                             data={

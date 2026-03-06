@@ -473,6 +473,8 @@ const Chat = (() => {
         }
         currentAssistantEl = null;
         currentAssistantContent = '';
+        _toolBatchContainer = null;
+        _toolBatchCallCount = 0;
         scrollToBottom();
     }
 
