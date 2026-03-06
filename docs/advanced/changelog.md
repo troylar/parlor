@@ -24,13 +24,19 @@ pattern: "psql.*production"
 reason: "Production database writes require a change ticket"
 ```
 
+See [Artifact Types — Rules](../packs/artifact-types.md) for the full rule schema and [How Packs Work — Phase 5: Enforce](../packs/how-packs-work.md) for the enforcement lifecycle.
+
 #### Additive Skills with Namespace Resolution
 
 Previously, if two packs defined a skill with the same name, attach failed with an error. Now all non-config artifact types — skills, rules, instructions, context, memory, MCP servers — are **additive** across packs. When skill names collide, they're displayed with namespace-qualified names (e.g., `ops/deploy` vs `dev/deploy`) so you can tell them apart. No more conflicts, no more "first pack wins." (#770)
 
+See [Artifact Types](../packs/artifact-types.md) for the full list of additive types and [Pack Commands — Conflict Detection](../packs/pack-commands.md) for how conflicts are surfaced at attach time.
+
 #### Exec Mode Parity
 
 `aroom exec` was missing pack support entirely — no artifact injection, no rule enforcement. Now exec mode loads the full artifact registry and rule enforcer, injects instruction/rule/context artifacts into the system prompt, and enforces hard rules on every tool call. Scripts and CI pipelines get the same safety guarantees as interactive sessions. (#777)
+
+See [CLI — Exec Mode](../cli/exec-mode.md) for usage details.
 
 #### Example Packs
 
@@ -40,7 +46,7 @@ Three new example packs ship with Anteroom to help you get started:
 - **writing-assistant** — instructions and context for document drafting
 - **strict-safety** — hard rules that lock down destructive operations
 
-Install with `aroom pack install --name code-review`. (#770)
+Install with `aroom pack install --name code-review`. See the [Quickstart](../packs/quickstart.md) to get up and running, or browse the [Manifest Format](../packs/manifest-format.md) to create your own. (#770)
 
 #### Bug Fixes
 
@@ -50,6 +56,8 @@ Install with `aroom pack install --name code-review`. (#770)
 - Pack attachments are preserved during pack updates (#770)
 - Orphan artifact detection runs inside a DB transaction to prevent TOCTOU races (#770)
 - Router regex for pack namespace/name validation aligned with manifest parser (#770)
+
+See [Troubleshooting](../packs/troubleshooting.md) for common pack issues and [Health Check](../packs/health-check.md) to diagnose artifact conflicts.
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.100.0)
 
