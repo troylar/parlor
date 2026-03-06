@@ -432,6 +432,8 @@ const Chat = (() => {
                 break;
             case 'error':
                 hideThinking();
+                _toolBatchContainer = null;
+                _toolBatchCallCount = 0;
                 if (currentAssistantEl) {
                     showError(currentAssistantEl, data.message);
                 } else {

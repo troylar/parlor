@@ -857,6 +857,22 @@ class TestClearTurnHistoryResetsFoldState:
         renderer.clear_turn_history()
         assert renderer._streaming_buffer == []
 
+    def test_clears_batch_counters(self) -> None:
+        renderer._fold_batch_done = 5
+        renderer._fold_batch_total = 8
+        renderer._fold_batch_current = "read_file"
+        renderer.clear_turn_history()
+        assert renderer._fold_batch_done == 0
+        assert renderer._fold_batch_total == 0
+        assert renderer._fold_batch_current == ""
+
+    def test_clears_batch_summaries_and_types(self) -> None:
+        renderer._fold_batch_summaries.append("read x.py")
+        renderer._fold_batch_types.append("read")
+        renderer.clear_turn_history()
+        assert len(renderer._fold_batch_summaries) == 0
+        assert len(renderer._fold_batch_types) == 0
+
 
 class TestCancellationClearsFoldState:
     """stop_thinking and stop_thinking_sync must clear fold flags on cancel."""

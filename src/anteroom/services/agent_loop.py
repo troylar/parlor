@@ -740,7 +740,7 @@ async def run_agent_loop(
                             kind="tool_batch_end",
                             data={
                                 "call_count": len(tool_calls_pending),
-                                "elapsed_seconds": round(time.monotonic() - _tools_start, 2),
+                                "elapsed_seconds": round(time.monotonic() - _tools_start, 1),
                             },
                         )
                         yield AgentEvent(
