@@ -842,15 +842,17 @@ def start_thinking(*, newline: bool = False) -> None:
                 # avoid a blank line between the narrative and thinking.
                 _write_thinking_line(0.0)
             elif _plan_visible and _plan_steps:
-                # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
-                _stdout.write("\n")
+                # Clear prompt_toolkit's "waiting" prompt on the current line,
+                # then move down for the thinking block (#249, #758).
+                _stdout.write("\r\033[2K\n")
                 _stdout.flush()
                 _write_thinking_block(0.0)
             else:
-                # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
+                # Clear prompt_toolkit's "waiting" prompt on the current line,
+                # then move down and write the initial thinking line (#249, #758).
                 gold = "\033[38;2;197;160;89m"
                 rst = "\033[0m"
-                _stdout.write(f"\n\r\033[2K{gold}Thinking...{rst}")
+                _stdout.write(f"\r\033[2K\n\r\033[2K{gold}Thinking...{rst}")
                 _stdout.flush()
         else:
             _write_thinking_line(0.0)

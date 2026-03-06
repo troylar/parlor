@@ -1261,7 +1261,7 @@ class TestFirstThinkingNewline:
 
     @pytest.mark.asyncio
     async def test_newline_true_writes_atomic_line(self) -> None:
-        """newline=True writes \\n + erase + Thinking... in one write call."""
+        """newline=True clears prompt line, then writes Thinking... on next line."""
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
@@ -1272,9 +1272,9 @@ class TestFirstThinkingNewline:
             output = buf.getvalue()
             # Must contain Thinking... text
             assert "Thinking..." in output
-            # Must start with \n for visual separation
-            assert output.startswith("\n")
-            # The \n and Thinking... must be in the same write (atomic)
+            # Starts with \r\033[2K to clear prompt_toolkit's waiting prompt (#758)
+            assert output.startswith("\r\033[2K")
+            # Then \n to move down and Thinking... on the new line
             assert "\n\r\033[2K" in output
         finally:
             stop_thinking_sync()
