@@ -411,7 +411,12 @@ class SkillRegistry:
         when the exact ``namespace/name`` key is not already present.
         Bare-name filesystem skills still block artifact skills with the
         same bare name (filesystem wins).  Returns the number of skills added.
+
+        Clears previously loaded artifact skills first so that detached or
+        removed packs don't leave stale entries in the registry.
         """
+        # Remove stale artifact-sourced skills before re-adding
+        self._skills = {k: v for k, v in self._skills.items() if not v.source.startswith("artifact:")}
         added = 0
         for art in artifact_registry.list_all(artifact_type="skill"):
             ns = art.namespace.lower()

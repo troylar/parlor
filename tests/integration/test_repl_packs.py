@@ -256,6 +256,38 @@ class TestReplSkillRegistryChain:
 
         assert skill_registry.has_skill("custom-check")
 
+    def test_stale_artifact_skills_cleared_on_reload(self, db: ThreadSafeConnection) -> None:
+        """Detaching a pack should remove its skills from the registry on reload."""
+        # Add a skill artifact
+        upsert_artifact(
+            db,
+            fqn="@devops/skill/stale-skill",
+            artifact_type="skill",
+            namespace="devops",
+            name="stale-skill",
+            content="name: stale-skill\ndescription: Will be removed\nprompt: Do something",
+            source=ArtifactSource.TEAM,
+        )
+
+        artifact_registry = ArtifactRegistry()
+        artifact_registry.load_from_db(db)
+
+        skill_registry = SkillRegistry()
+        skill_registry.load()
+        skill_registry.load_from_artifacts(artifact_registry)
+
+        assert skill_registry.has_skill("stale-skill")
+
+        # Remove the artifact from the DB (simulating pack detach/remove)
+        db.execute("DELETE FROM artifacts WHERE fqn = ?", ("@devops/skill/stale-skill",))
+        db.commit()
+
+        # Reload — stale skill should be gone
+        artifact_registry.load_from_db(db)
+        skill_registry.load_from_artifacts(artifact_registry)
+
+        assert not skill_registry.has_skill("stale-skill")
+
 
 class TestReplFullPackInstallChain:
     """End-to-end: install example pack from disk → verify rules and skills load."""
