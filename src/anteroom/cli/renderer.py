@@ -527,9 +527,18 @@ def render_tool_batch_end(call_count: int, elapsed_seconds: float) -> None:
     _fold_batch_types.clear()
 
     # Print narrative completion line (e.g. "✓ Listed tests/, docs/, src/anteroom/")
+    # Use raw _stdout.write() to keep cursor in sync with the thinking/ticker
+    # writes that also use the raw fd.  console.print() goes through the
+    # patch_stdout proxy and desyncs the cursor position (#758).
     global _fold_suppress_thinking, _fold_between_batches
     narrative = _build_fold_narrative(group.summaries, elapsed_seconds)
-    console.print(f"  [{MUTED}]\u2713 {narrative}[/{MUTED}]")
+    if _repl_mode and _stdout:
+        muted = "\033[38;2;139;139;139m"
+        rst = "\033[0m"
+        _stdout.write(f"  {muted}\u2713 {narrative}{rst}\n")
+        _stdout.flush()
+    else:
+        console.print(f"  [{MUTED}]\u2713 {narrative}[/{MUTED}]")
     # Suppress thinking and mid-turn text until next batch or turn end
     _fold_suppress_thinking = True
     _fold_between_batches = True
@@ -826,11 +835,6 @@ def start_thinking(*, newline: bool = False) -> None:
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
-        # After a fold narrative (console.print on patched stdout), the raw
-        # stderr fd cursor is still on the narrative line. Force a newline
-        # so the thinking line starts on a fresh line.
-        if _fold_between_batches:
-            newline = True
         if newline and _stdout:
             # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
             gold = "\033[38;2;197;160;89m"
@@ -1016,6 +1020,7 @@ async def stop_thinking(
     error_msg: str = "",
     cancel_msg: str = "",
     collapse_plan: bool = False,
+    clear: bool = False,
 ) -> float:
     """Stop the spinner, return elapsed seconds.
 
@@ -1025,6 +1030,8 @@ async def stop_thinking(
     - ``error_msg``: pale-red inline error (system failure)
     - ``cancel_msg``: muted message (user-initiated cancel)
     - ``collapse_plan``: if True, collapse the plan to a one-line summary
+    - ``clear``: erase the thinking line entirely (no permanent text).
+      Used before fold batches where the thinking line is transient.
     - Neither: clean final line (just "Thinking... Ns")
     """
     global _spinner, _thinking_ticker_task, _thinking_phase, _plan_written_lines, _thinking_start
@@ -1053,36 +1060,42 @@ async def stop_thinking(
     else:
         elapsed = time.monotonic() - _thinking_start
         if _repl_mode and _stdout:
-            # Clear the plan block if it's on screen
-            if _plan_written_lines > 0:
-                # Move cursor up to the top of the plan block
-                _stdout.write(f"\033[{_plan_written_lines}A")
-                # Clear all plan lines + thinking line
-                for _ in range(_plan_written_lines + 1):
-                    _stdout.write("\r\033[2K\n")
-                # Move back up one line (we wrote one too many \n)
-                _stdout.write("\033[1A")
-                _plan_written_lines = 0
-
-            if collapse_plan:
-                _collapse_plan()
-
-            if error_msg:
-                _write_thinking_line(elapsed, error_msg=error_msg)
-                _stdout.write("\n")
-                _stdout.flush()
-            elif cancel_msg:
-                _write_thinking_line(elapsed, cancel_msg=cancel_msg)
-                _stdout.write("\n")
+            if clear:
+                # Erase the thinking line — no permanent text, cursor stays
+                # on this line for the next output (fold ticker, etc.).
+                _stdout.write("\r\033[2K")
                 _stdout.flush()
             else:
-                # Clean final line: just "Thinking... Ns" — no phase, no hint.
-                _thinking_phase = ""
-                gold = "\033[38;2;197;160;89m"
-                timer_c = "\033[38;2;107;114;128m"
-                rst = "\033[0m"
-                _stdout.write(f"\r\033[2K{gold}Thinking...{rst} {timer_c}{elapsed:.0f}s{rst}\n")
-                _stdout.flush()
+                # Clear the plan block if it's on screen
+                if _plan_written_lines > 0:
+                    # Move cursor up to the top of the plan block
+                    _stdout.write(f"\033[{_plan_written_lines}A")
+                    # Clear all plan lines + thinking line
+                    for _ in range(_plan_written_lines + 1):
+                        _stdout.write("\r\033[2K\n")
+                    # Move back up one line (we wrote one too many \n)
+                    _stdout.write("\033[1A")
+                    _plan_written_lines = 0
+
+                if collapse_plan:
+                    _collapse_plan()
+
+                if error_msg:
+                    _write_thinking_line(elapsed, error_msg=error_msg)
+                    _stdout.write("\n")
+                    _stdout.flush()
+                elif cancel_msg:
+                    _write_thinking_line(elapsed, cancel_msg=cancel_msg)
+                    _stdout.write("\n")
+                    _stdout.flush()
+                else:
+                    # Clean final line: just "Thinking... Ns" — no phase, no hint.
+                    _thinking_phase = ""
+                    gold = "\033[38;2;197;160;89m"
+                    timer_c = "\033[38;2;107;114;128m"
+                    rst = "\033[0m"
+                    _stdout.write(f"\r\033[2K{gold}Thinking...{rst} {timer_c}{elapsed:.0f}s{rst}\n")
+                    _stdout.flush()
     _thinking_start = 0
     return elapsed
 

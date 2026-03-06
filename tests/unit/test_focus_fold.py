@@ -489,12 +489,86 @@ class TestFoldSuppressThinking:
         renderer._repl_mode = True
         renderer.start_thinking()
         renderer._repl_mode = False
-        # Thinking SHOULD show between batches with a leading newline
+        # Thinking SHOULD show between batches (no forced newline needed —
+        # fold narratives now use raw writes, so cursor is already on a fresh line).
         mock_stdout.write.assert_called()
         written = mock_stdout.write.call_args[0][0]
-        assert "\n" in written  # forced newline after fold narrative
         assert "Thinking" in written
         assert renderer._thinking_start > 0
+
+
+class TestStopThinkingClear:
+    """stop_thinking(clear=True) erases the thinking line without finalizing."""
+
+    def setup_method(self) -> None:
+        renderer._fold_batch_active = False
+        renderer._fold_between_batches = False
+        renderer._fold_suppress_thinking = False
+        renderer._thinking_start = 0
+        renderer._spinner = None
+        renderer._thinking_ticker_task = None
+        renderer._plan_written_lines = 0
+
+    @pytest.mark.asyncio
+    async def test_clear_erases_line(self) -> None:
+        """clear=True writes \\r\\033[2K without text or newline."""
+        mock_stdout = MagicMock()
+        renderer._stdout = mock_stdout
+        renderer._repl_mode = True
+        renderer._thinking_start = time.monotonic() - 1.0
+        elapsed = await renderer.stop_thinking(clear=True)
+        renderer._repl_mode = False
+        assert elapsed > 0
+        mock_stdout.write.assert_called_once_with("\r\033[2K")
+        mock_stdout.flush.assert_called_once()
+        assert renderer._thinking_start == 0
+
+    @pytest.mark.asyncio
+    async def test_clear_noop_when_not_thinking(self) -> None:
+        """clear=True is still a no-op when thinking wasn't active."""
+        mock_stdout = MagicMock()
+        renderer._stdout = mock_stdout
+        renderer._repl_mode = True
+        elapsed = await renderer.stop_thinking(clear=True)
+        renderer._repl_mode = False
+        assert elapsed == 0.0
+        mock_stdout.write.assert_not_called()
+
+
+class TestFoldNarrativeRawWrite:
+    """Fold narrative uses raw _stdout.write in REPL mode for cursor sync."""
+
+    def setup_method(self) -> None:
+        renderer._fold_batch_active = True
+        renderer._fold_batch_total = 1
+        renderer._fold_batch_done = 0
+        renderer._fold_batch_current = ""
+        renderer._fold_last_expanded = False
+        renderer._fold_between_batches = False
+        renderer._fold_suppress_thinking = False
+        renderer._fold_batch_summaries.clear()
+        renderer._fold_batch_types.clear()
+        renderer._fold_groups.clear()
+
+    @patch("anteroom.cli.renderer.console")
+    def test_repl_mode_uses_raw_write(self, mock_console: MagicMock) -> None:
+        """In REPL mode, fold narrative goes to raw _stdout, not console.print."""
+        renderer._fold_batch_summaries.append("grep def toggle")
+        renderer._fold_batch_types.append("grep")
+        mock_stdout = MagicMock()
+        renderer._stdout = mock_stdout
+        renderer._repl_mode = True
+        renderer._stdout_is_tty = True
+        renderer.render_tool_batch_end(1, 0.1)
+        renderer._repl_mode = False
+        # Should have written the narrative via raw fd (contains checkmark)
+        raw_writes = [c[0][0] for c in mock_stdout.write.call_args_list]
+        narrative_write = [w for w in raw_writes if "\u2713" in w]
+        assert len(narrative_write) == 1
+        assert "\n" in narrative_write[0]  # ends with newline
+        # console.print should NOT have been used for the narrative
+        narrative_prints = [c for c in mock_console.print.call_args_list if c[0] and "\u2713" in str(c[0][0])]
+        assert len(narrative_prints) == 0
 
 
 class TestBatchStartStopsToolTicker:
