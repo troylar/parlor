@@ -237,7 +237,7 @@ class TestGetPackAPI:
         assert resp.status_code == 404
 
     def test_invalid_namespace_rejected(self, client: TestClient) -> None:
-        resp = client.get("/api/packs/INVALID/test-pack")
+        resp = client.get("/api/packs/!invalid/test-pack")
         assert resp.status_code == 400
         assert "Invalid namespace" in resp.json()["detail"]
 
@@ -768,8 +768,13 @@ class TestAPISecurityBehavior:
         resp = client.get("/api/packs/../etc/passwd")
         assert resp.status_code in (400, 404, 422)
 
-    def test_uppercase_namespace_rejected(self, client: TestClient) -> None:
+    def test_uppercase_namespace_accepted(self, client: TestClient) -> None:
+        """Uppercase is valid — matches manifest parser regex."""
         resp = client.get("/api/packs/UPPERCASE/valid-name")
+        assert resp.status_code == 404  # valid format, just not found
+
+    def test_special_chars_namespace_rejected(self, client: TestClient) -> None:
+        resp = client.get("/api/packs/inv@lid/valid-name")
         assert resp.status_code == 400
 
     def test_long_namespace_rejected(self, client: TestClient) -> None:
