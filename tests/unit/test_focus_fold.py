@@ -319,7 +319,7 @@ class TestBetweenBatchesSuppression:
     def setup_method(self) -> None:
         renderer._fold_batch_active = False
         renderer._fold_between_batches = False
-        renderer._fold_suppress_thinking = False
+
         renderer._fold_batch_summaries.clear()
         renderer._fold_batch_types.clear()
         renderer._fold_groups.clear()
@@ -455,19 +455,13 @@ class TestFoldSuppressThinking:
     """Verify start_thinking is suppressed during an active fold batch but shows between batches."""
 
     def setup_method(self) -> None:
-        renderer._fold_suppress_thinking = False
+
         renderer._fold_batch_active = False
         renderer._fold_between_batches = False
         renderer._fold_batch_summaries.clear()
         renderer._fold_batch_types.clear()
         renderer._fold_groups.clear()
         renderer._thinking_start = 0
-
-    def test_batch_end_sets_suppress_flag(self) -> None:
-        with patch("anteroom.cli.renderer.console"):
-            renderer.render_tool_batch_start(1)
-            renderer.render_tool_batch_end(1, 0.1)
-        assert renderer._fold_suppress_thinking is True
 
     @patch("anteroom.cli.renderer._write_thinking_line")
     @patch("anteroom.cli.renderer.console")
@@ -483,7 +477,7 @@ class TestFoldSuppressThinking:
     def test_between_batches_shows_thinking(self, mock_console: MagicMock) -> None:
         """Between batches, thinking indicator shows so user knows agent is working."""
         renderer._fold_between_batches = True
-        renderer._fold_suppress_thinking = False
+
         mock_stdout = MagicMock()
         renderer._stdout = mock_stdout
         renderer._repl_mode = True
@@ -503,7 +497,7 @@ class TestStopThinkingClear:
     def setup_method(self) -> None:
         renderer._fold_batch_active = False
         renderer._fold_between_batches = False
-        renderer._fold_suppress_thinking = False
+
         renderer._thinking_start = 0
         renderer._spinner = None
         renderer._thinking_ticker_task = None
@@ -545,7 +539,7 @@ class TestFoldNarrativeRawWrite:
         renderer._fold_batch_current = ""
         renderer._fold_last_expanded = False
         renderer._fold_between_batches = False
-        renderer._fold_suppress_thinking = False
+
         renderer._fold_batch_summaries.clear()
         renderer._fold_batch_types.clear()
         renderer._fold_groups.clear()
@@ -828,7 +822,6 @@ class TestClearTurnHistoryResetsFoldState:
         # Set up dirty fold state as if a batch was interrupted
         renderer._fold_batch_active = True
         renderer._fold_between_batches = True
-        renderer._fold_suppress_thinking = True
         renderer._fold_last_expanded = True
         renderer._fold_groups.append(FoldGroup(call_count=1, elapsed_seconds=0.1, summaries=["x"], tool_types=["read"]))
 
@@ -839,10 +832,6 @@ class TestClearTurnHistoryResetsFoldState:
     def test_clears_between_batches(self) -> None:
         renderer.clear_turn_history()
         assert renderer._fold_between_batches is False
-
-    def test_clears_suppress_thinking(self) -> None:
-        renderer.clear_turn_history()
-        assert renderer._fold_suppress_thinking is False
 
     def test_clears_last_expanded(self) -> None:
         renderer.clear_turn_history()
@@ -880,7 +869,6 @@ class TestCancellationClearsFoldState:
     def setup_method(self) -> None:
         renderer._fold_batch_active = True
         renderer._fold_between_batches = True
-        renderer._fold_suppress_thinking = True
         renderer._thinking_start = time.monotonic()
         renderer._spinner = None
         renderer._thinking_ticker_task = None
@@ -891,13 +879,11 @@ class TestCancellationClearsFoldState:
         await renderer.stop_thinking()
         assert renderer._fold_batch_active is False
         assert renderer._fold_between_batches is False
-        assert renderer._fold_suppress_thinking is False
 
     def test_stop_thinking_sync_clears_fold_state(self) -> None:
         renderer.stop_thinking_sync()
         assert renderer._fold_batch_active is False
         assert renderer._fold_between_batches is False
-        assert renderer._fold_suppress_thinking is False
 
     @pytest.mark.asyncio
     @patch("anteroom.cli.renderer._write_thinking_line")

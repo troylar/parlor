@@ -175,7 +175,6 @@ _fold_batch_done: int = 0  # completed tool count for current batch
 _fold_batch_summaries: list[str] = []  # compact summaries collected during batch
 _fold_batch_types: list[str] = []  # tool action types for grouping
 _fold_batch_current: str = ""  # current tool summary for live ticker
-_fold_suppress_thinking: bool = False  # suppress next start_thinking after batch
 _fold_between_batches: bool = False  # True between batch end and next batch start
 
 
@@ -461,7 +460,7 @@ def cycle_verbosity() -> Verbosity:
 def clear_turn_history() -> None:
     """Clear current turn tool history. Called at start of each turn."""
     global _streaming_buffer, _fold_batch_active, _fold_last_expanded
-    global _fold_suppress_thinking, _fold_between_batches
+    global _fold_between_batches
     global _fold_batch_done, _fold_batch_total, _fold_batch_current
     _current_turn_tools.clear()
     _streaming_buffer = []
@@ -470,7 +469,6 @@ def clear_turn_history() -> None:
     _fold_groups.clear()
     _fold_batch_active = False
     _fold_last_expanded = False
-    _fold_suppress_thinking = False
     _fold_between_batches = False
     _fold_batch_done = 0
     _fold_batch_total = 0
@@ -547,7 +545,7 @@ def render_tool_batch_end(call_count: int, elapsed_seconds: float) -> None:
     # Use raw _stdout.write() to keep cursor in sync with the thinking/ticker
     # writes that also use the raw fd.  console.print() goes through the
     # patch_stdout proxy and desyncs the cursor position (#758).
-    global _fold_suppress_thinking, _fold_between_batches
+    global _fold_between_batches
     narrative = _build_fold_narrative(group.summaries, elapsed_seconds)
     if _repl_mode and _stdout:
         muted = "\033[38;2;139;139;139m"
@@ -556,8 +554,6 @@ def render_tool_batch_end(call_count: int, elapsed_seconds: float) -> None:
         _stdout.flush()
     else:
         console.print(f"  [{MUTED}]\u2713 {narrative}[/{MUTED}]")
-    # Suppress thinking and mid-turn text until next batch or turn end
-    _fold_suppress_thinking = True
     _fold_between_batches = True
 
 
@@ -803,13 +799,12 @@ def start_thinking(*, newline: bool = False) -> None:
     """
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
-    global _plan_written_lines, _fold_suppress_thinking
+    global _plan_written_lines
 
     # During an active fold batch, suppress thinking — the fold ticker is
     # the visual indicator. Between batches, show thinking normally so the
     # user knows the agent is still working (not hung).
     if _fold_batch_active:
-        _fold_suppress_thinking = False
         # Do NOT set _thinking_start — keep it at 0 so stop_thinking()
         # recognises no visible thinking was shown and no-ops cleanly,
         # preventing a ghost "Thinking... 0s" line (#779).
@@ -1066,7 +1061,7 @@ async def stop_thinking(
     - Neither: clean final line (just "Thinking... Ns")
     """
     global _spinner, _thinking_ticker_task, _thinking_phase, _plan_written_lines, _thinking_start
-    global _fold_batch_active, _fold_suppress_thinking, _fold_between_batches
+    global _fold_batch_active, _fold_between_batches
     elapsed = 0.0
     # No-op if thinking isn't active — prevents stale timer display when
     # stop_thinking() is called twice (e.g. REPL event handler + ask_user callback).
@@ -1074,7 +1069,6 @@ async def stop_thinking(
         return 0.0
     # Clear fold state so a cancelled batch doesn't suppress future output.
     _fold_batch_active = False
-    _fold_suppress_thinking = False
     _fold_between_batches = False
     # Await ticker termination to prevent race conditions
     if _thinking_ticker_task is not None:
@@ -1138,7 +1132,7 @@ def stop_thinking_sync() -> float:
     Also clears fold batch state so a cancelled batch doesn't swallow future output.
     """
     global _spinner, _thinking_ticker_task, _plan_written_lines, _thinking_start
-    global _fold_batch_active, _fold_suppress_thinking, _fold_between_batches
+    global _fold_batch_active, _fold_between_batches
     elapsed = 0.0
     if not _thinking_start and _spinner is None and _thinking_ticker_task is None:
         return 0.0
@@ -1164,7 +1158,6 @@ def stop_thinking_sync() -> float:
     _thinking_start = 0
     # Clear fold state so a cancelled batch doesn't suppress future output.
     _fold_batch_active = False
-    _fold_suppress_thinking = False
     _fold_between_batches = False
     return elapsed
 
