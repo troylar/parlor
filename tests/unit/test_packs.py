@@ -698,6 +698,135 @@ class TestInstallPackSource:
         assert art["source"] == "project"
 
 
+class TestRemovePackByIdOrphanDetection:
+    """Tests for CRITICAL bug — remove_pack_by_id must not delete shared artifacts."""
+
+    def _create_two_packs_sharing_artifact(
+        self, tmp_path: Path, db: ThreadSafeConnection
+    ) -> tuple[str, str, str]:
+        """Create two packs that share one artifact. Returns (pack1_id, pack2_id, shared_artifact_id)."""
+        # Pack 1 with skill "greet"
+        pack1_dir = tmp_path / "pack1"
+        pack1_dir.mkdir()
+        (pack1_dir / "skills").mkdir()
+        (pack1_dir / "skills" / "greet.yaml").write_text("content: Hello!\n", encoding="utf-8")
+        _write_manifest(
+            pack1_dir,
+            {
+                "name": "pack-a",
+                "namespace": "shared-ns",
+                "version": "1.0.0",
+                "artifacts": [{"type": "skill", "name": "greet"}],
+            },
+        )
+        m1 = parse_manifest(pack1_dir / "pack.yaml")
+        r1 = install_pack(db, m1, pack1_dir)
+
+        # Pack 2 referencing the same artifact FQN
+        pack2_dir = tmp_path / "pack2"
+        pack2_dir.mkdir()
+        (pack2_dir / "skills").mkdir()
+        (pack2_dir / "skills" / "greet.yaml").write_text("content: Hello!\n", encoding="utf-8")
+        _write_manifest(
+            pack2_dir,
+            {
+                "name": "pack-b",
+                "namespace": "shared-ns",
+                "version": "1.0.0",
+                "artifacts": [{"type": "skill", "name": "greet"}],
+            },
+        )
+        m2 = parse_manifest(pack2_dir / "pack.yaml")
+        r2 = install_pack(db, m2, pack2_dir)
+
+        # The shared artifact should exist once (upserted)
+        shared_row = db.execute(
+            "SELECT artifact_id FROM pack_artifacts WHERE pack_id = ?", (r1["id"],)
+        ).fetchone()
+        shared_id = shared_row["artifact_id"]
+
+        return r1["id"], r2["id"], shared_id
+
+    def test_removing_one_pack_preserves_shared_artifact(
+        self, tmp_path: Path, db: ThreadSafeConnection
+    ) -> None:
+        pack1_id, pack2_id, shared_id = self._create_two_packs_sharing_artifact(tmp_path, db)
+
+        # Remove pack1 — shared artifact should survive
+        assert remove_pack_by_id(db, pack1_id)
+
+        # Artifact still exists because pack2 references it
+        art_row = db.execute("SELECT id FROM artifacts WHERE id = ?", (shared_id,)).fetchone()
+        assert art_row is not None
+
+        # pack2 still has its link
+        link = db.execute(
+            "SELECT * FROM pack_artifacts WHERE pack_id = ? AND artifact_id = ?",
+            (pack2_id, shared_id),
+        ).fetchone()
+        assert link is not None
+
+    def test_removing_both_packs_deletes_orphaned_artifact(
+        self, tmp_path: Path, db: ThreadSafeConnection
+    ) -> None:
+        pack1_id, pack2_id, shared_id = self._create_two_packs_sharing_artifact(tmp_path, db)
+
+        assert remove_pack_by_id(db, pack1_id)
+        assert remove_pack_by_id(db, pack2_id)
+
+        # Now artifact is orphaned and should be deleted
+        art_row = db.execute("SELECT id FROM artifacts WHERE id = ?", (shared_id,)).fetchone()
+        assert art_row is None
+
+    def test_remove_pack_by_id_cleans_attachments(
+        self, tmp_path: Path, db: ThreadSafeConnection
+    ) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        pack_id = result["id"]
+
+        # Create an attachment
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO pack_attachments (id, pack_id, scope, created_at) VALUES (?, ?, 'global', ?)",
+            ("att-1", pack_id, now),
+        )
+        db.commit()
+
+        assert remove_pack_by_id(db, pack_id)
+
+        # Attachment should be cleaned up
+        att = db.execute("SELECT id FROM pack_attachments WHERE pack_id = ?", (pack_id,)).fetchone()
+        assert att is None
+
+
+class TestRemovePackAttachmentCleanup:
+    """Tests for remove_pack() cleaning up pack_attachments."""
+
+    def test_remove_pack_cleans_attachments(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        pack_id = result["id"]
+
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO pack_attachments (id, pack_id, scope, created_at) VALUES (?, ?, 'global', ?)",
+            ("att-1", pack_id, now),
+        )
+        db.commit()
+
+        assert remove_pack(db, "test-ns", "test-pack")
+
+        att = db.execute("SELECT id FROM pack_attachments WHERE pack_id = ?", (pack_id,)).fetchone()
+        assert att is None
+
+
 class TestInstallPackUpsert:
     """Tests for #772 — install_pack should update existing pack, not create duplicate."""
 

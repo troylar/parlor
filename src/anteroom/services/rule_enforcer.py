@@ -56,6 +56,12 @@ def parse_rule(artifact: Artifact) -> ParsedRule | None:
         return None
 
     meta = artifact.metadata or {}
+    if not meta:
+        logger.warning(
+            "Rule %s has empty metadata — cannot determine enforcement level (treating as soft)",
+            artifact.fqn,
+        )
+        return None
     if meta.get("enforce") != "hard":
         return None
 
@@ -64,19 +70,31 @@ def parse_rule(artifact: Artifact) -> ParsedRule | None:
         return None
 
     rule_matches: list[RuleMatch] = []
+    skipped = 0
     for entry in raw_matches:
         if not isinstance(entry, dict):
+            skipped += 1
             continue
         tool = str(entry.get("tool", "*"))
         pattern_str = entry.get("pattern", "")
         if not pattern_str:
+            skipped += 1
             continue
         try:
             compiled = re.compile(pattern_str)
         except re.error:
             logger.warning("Invalid regex in rule %s: %r", artifact.fqn, pattern_str)
+            skipped += 1
             continue
         rule_matches.append(RuleMatch(tool=tool, pattern=compiled))
+
+    if skipped:
+        logger.warning(
+            "Rule %s: %d of %d match patterns skipped (invalid or empty)",
+            artifact.fqn,
+            skipped,
+            len(raw_matches),
+        )
 
     if not rule_matches:
         return None

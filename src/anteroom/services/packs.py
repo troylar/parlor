@@ -345,6 +345,7 @@ def remove_pack(db: ThreadSafeConnection, namespace: str, name: str) -> bool:
 
     # Remove inside a single transaction
     with db.transaction():
+        db.execute("DELETE FROM pack_attachments WHERE pack_id = ?", (pack_id,))
         db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
         for art_id in orphan_ids:
             delete_artifact(db, art_id, commit=False)
@@ -589,15 +590,6 @@ def _get_pack_row(db: ThreadSafeConnection, namespace: str, name: str) -> Any:
     ).fetchone()
 
 
-def _get_pack_rows(db: ThreadSafeConnection, namespace: str, name: str) -> list[Any]:
-    """Fetch all pack rows matching namespace and name."""
-    return db.execute(
-        "SELECT id, name, namespace, version, description, source_path, installed_at, updated_at"
-        " FROM packs WHERE namespace = ? AND name = ?",
-        (namespace, name),
-    ).fetchall()
-
-
 def get_pack_by_source_path(db: ThreadSafeConnection, source_path: str) -> dict[str, Any] | None:
     """Get a pack by its source_path. Returns None if not found."""
     row = db.execute(
@@ -638,14 +630,12 @@ def resolve_pack(
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Resolve a pack by namespace/name.
 
-    Returns ``(match, [])`` on unique match, or ``(None, candidates)`` when
-    ambiguous. An empty candidates list with ``None`` match means not found.
+    Returns ``(match, [])`` on unique match, or ``(None, [])`` when not found.
+    With the UNIQUE(namespace, name) constraint, ambiguity is impossible.
     """
-    rows = _get_pack_rows(db, namespace, name)
-    if len(rows) == 1:
-        return _pack_row_to_dict(rows[0]), []
-    if len(rows) > 1:
-        return None, [_pack_row_to_dict(r) for r in rows]
+    row = _get_pack_row(db, namespace, name)
+    if row:
+        return _pack_row_to_dict(row), []
     return None, []
 
 
@@ -656,22 +646,32 @@ def remove_pack_by_id(db: ThreadSafeConnection, pack_id: str) -> bool:
         return False
 
     with db.transaction():
+        # Collect artifact IDs BEFORE deleting the junction rows
         art_rows = db.execute(
             "SELECT artifact_id FROM pack_artifacts WHERE pack_id = ?",
             (pack_id,),
         ).fetchall()
         artifact_ids = [r[0] if isinstance(r, (tuple, list)) else r["artifact_id"] for r in art_rows]
 
+        # Find orphans: artifacts owned ONLY by this pack (not shared with others)
+        orphan_ids: list[str] = []
+        for aid in artifact_ids:
+            ref = db.execute(
+                "SELECT COUNT(*) FROM pack_artifacts WHERE artifact_id = ? AND pack_id != ?",
+                (aid, pack_id),
+            ).fetchone()
+            count = ref[0] if isinstance(ref, (tuple, list)) else ref["COUNT(*)"]
+            if count == 0:
+                orphan_ids.append(aid)
+
+        # Now safe to delete junction rows and pack
         db.execute("DELETE FROM pack_artifacts WHERE pack_id = ?", (pack_id,))
         db.execute("DELETE FROM pack_attachments WHERE pack_id = ?", (pack_id,))
         db.execute("DELETE FROM packs WHERE id = ?", (pack_id,))
 
-        for aid in artifact_ids:
-            ref = db.execute("SELECT COUNT(*) FROM pack_artifacts WHERE artifact_id = ?", (aid,)).fetchone()
-            count = ref[0] if isinstance(ref, (tuple, list)) else ref["COUNT(*)"]
-            if count == 0:
-                db.execute("DELETE FROM artifact_versions WHERE artifact_id = ?", (aid,))
-                db.execute("DELETE FROM artifacts WHERE id = ?", (aid,))
+        # Delete only truly orphaned artifacts
+        for aid in orphan_ids:
+            delete_artifact(db, aid, commit=False)
 
     return True
 

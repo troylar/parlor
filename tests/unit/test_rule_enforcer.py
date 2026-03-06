@@ -225,3 +225,45 @@ class TestRuleEnforcer:
         assert blocked
         blocked, _, _ = enforcer.check_tool_call("read_file", {"path": "/app/.env"})
         assert not blocked
+
+
+class TestRuleEnforcerEdgeCases:
+    def test_empty_metadata_logs_warning(self) -> None:
+        """Rule with empty metadata should be treated as soft and log a warning."""
+        art = Artifact(
+            fqn="@test/rule/empty-meta",
+            type=ArtifactType.RULE,
+            namespace="test",
+            name="empty-meta",
+            content="Do not do this",
+            source=ArtifactSource.LOCAL,
+            metadata={},
+        )
+        assert parse_rule(art) is None
+
+    def test_partial_bad_regex_keeps_good_matches(self) -> None:
+        """A rule with some valid and some invalid match patterns keeps the valid ones."""
+        art = _make_rule_artifact(
+            matches=[
+                {"tool": "bash", "pattern": r"git\s+push\s+--force"},
+                {"tool": "bash", "pattern": "[invalid"},  # bad regex
+            ]
+        )
+        result = parse_rule(art)
+        assert result is not None
+        assert len(result.matches) == 1  # only the valid one
+
+    def test_all_bad_regex_returns_none(self) -> None:
+        art = _make_rule_artifact(matches=[{"tool": "bash", "pattern": "[bad"}])
+        assert parse_rule(art) is None
+
+    def test_match_entry_not_dict_skipped(self) -> None:
+        art = _make_rule_artifact(
+            matches=[
+                "not a dict",  # type: ignore[list-item]
+                {"tool": "bash", "pattern": "danger"},
+            ]
+        )
+        result = parse_rule(art)
+        assert result is not None
+        assert len(result.matches) == 1

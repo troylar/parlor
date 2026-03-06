@@ -1079,6 +1079,8 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         # Default 50 gives room for both high-priority (1-49) and low-priority (51-100) packs.
         if "priority" not in pa_cols:
             conn.execute("ALTER TABLE pack_attachments ADD COLUMN priority INTEGER NOT NULL DEFAULT 50")
+            # Backfill existing rows to ensure no NULLs
+            conn.execute("UPDATE pack_attachments SET priority = 50 WHERE priority IS NULL")
 
     # Spaces tables (v1.74.0)
     conn.execute(
@@ -1228,39 +1230,36 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         logger.warning("Failed to migrate spaces index to non-unique", exc_info=True)
 
     # Drop UNIQUE(namespace, name) on packs (v1.79.0)
+    # NOTE: This migration is now a no-op. The v1.99.1 migration below restores
+    # the UNIQUE constraint via a UNIQUE INDEX (which is the correct approach).
+    # The original implementation used DROP TABLE + rebuild, which CASCADE-deleted
+    # all pack_artifacts rows — a data-destroying bug. We skip this migration
+    # entirely; v1.99.1 handles the correct final state.
+
+    # Restore UNIQUE(namespace, name) on packs and deduplicate (#772, v1.99.1)
+    # Uses CREATE UNIQUE INDEX instead of DROP TABLE + rebuild to avoid
+    # CASCADE-deleting pack_artifacts rows (DROP TABLE with foreign_keys=ON
+    # triggers CASCADE on referencing tables, destroying all pack_artifacts data).
     try:
+        # Check if a unique index on (namespace, name) already exists
+        existing_indexes = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='packs'"
+        ).fetchall()
+        has_unique = any(
+            r[0] and "UNIQUE" in r[0] and "namespace" in r[0] and "name" in r[0]
+            for r in existing_indexes
+            if r[0]
+        )
+        # Also check table DDL for inline UNIQUE constraint
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'").fetchone()
         if row:
             ddl = row[0] if isinstance(row, (tuple, list)) else row["sql"]
             if ddl and "UNIQUE" in ddl:
-                conn.execute(
-                    """CREATE TABLE IF NOT EXISTS packs_new (
-                        id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        namespace TEXT NOT NULL,
-                        version TEXT NOT NULL DEFAULT '0.0.0',
-                        description TEXT NOT NULL DEFAULT '',
-                        source_path TEXT NOT NULL DEFAULT '',
-                        installed_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
-                    )"""
-                )
-                conn.execute(
-                    "INSERT OR IGNORE INTO packs_new SELECT id, name, namespace, version, "
-                    "description, source_path, installed_at, updated_at FROM packs"
-                )
-                conn.execute("DROP TABLE packs")
-                conn.execute("ALTER TABLE packs_new RENAME TO packs")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
-    except sqlite3.OperationalError:
-        logger.warning("Failed to migrate packs table to drop UNIQUE constraint", exc_info=True)
+                has_unique = True
 
-    # Restore UNIQUE(namespace, name) on packs and deduplicate (#772, v1.99.1)
-    try:
-        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'").fetchone()
-        if row:
-            ddl = row[0] if isinstance(row, (tuple, list)) else row["sql"]
-            if ddl and "UNIQUE" not in ddl:
+        if not has_unique:
+            conn.execute("SAVEPOINT packs_dedup")
+            try:
                 # Deduplicate: keep the newest row per (namespace, name)
                 conn.execute(
                     """DELETE FROM packs WHERE id NOT IN (
@@ -1271,27 +1270,16 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                         ) WHERE rn = 1
                     )"""
                 )
-                # Rebuild table with UNIQUE constraint
+                # Add uniqueness via index (avoids DROP TABLE + CASCADE destruction)
                 conn.execute(
-                    """CREATE TABLE IF NOT EXISTS packs_unique (
-                        id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        namespace TEXT NOT NULL,
-                        version TEXT NOT NULL DEFAULT '0.0.0',
-                        description TEXT NOT NULL DEFAULT '',
-                        source_path TEXT NOT NULL DEFAULT '',
-                        installed_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        UNIQUE(namespace, name)
-                    )"""
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_packs_unique_ns_name "
+                    "ON packs(namespace, name)"
                 )
-                conn.execute(
-                    "INSERT OR IGNORE INTO packs_unique SELECT id, name, namespace, version, "
-                    "description, source_path, installed_at, updated_at FROM packs"
-                )
-                conn.execute("DROP TABLE packs")
-                conn.execute("ALTER TABLE packs_unique RENAME TO packs")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
+                conn.execute("RELEASE packs_dedup")
+            except Exception:
+                conn.execute("ROLLBACK TO packs_dedup")
+                conn.execute("RELEASE packs_dedup")
+                raise
     except sqlite3.OperationalError:
         logger.warning("Failed to restore UNIQUE constraint on packs", exc_info=True)
 

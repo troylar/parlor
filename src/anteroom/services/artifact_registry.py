@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from .artifact_storage import list_artifacts
 from .artifacts import Artifact, ArtifactSource, ArtifactType
+from .artifacts import content_hash as compute_hash
 
 logger = logging.getLogger(__name__)
 
@@ -123,13 +124,27 @@ class ArtifactRegistry:
 
 
 def _artifact_from_row(row: dict[str, Any]) -> Artifact:
-    """Convert a storage dict to an Artifact dataclass."""
+    """Convert a storage dict to an Artifact dataclass.
+
+    Validates content hash if present — warns on mismatch (data corruption).
+    """
+    stored_hash = row.get("content_hash", "")
+    content = row["content"]
+    if stored_hash:
+        actual = compute_hash(content)
+        if actual != stored_hash:
+            logger.warning(
+                "Content hash mismatch for artifact %s: stored=%s, actual=%s (possible corruption)",
+                row["fqn"],
+                stored_hash[:12],
+                actual[:12],
+            )
     return Artifact(
         fqn=row["fqn"],
         type=ArtifactType(row["type"]),
         namespace=row["namespace"],
         name=row["name"],
-        content=row["content"],
+        content=content,
         version=row.get("version", 1),
         source=ArtifactSource(row["source"]),
         metadata=row.get("metadata") or {},

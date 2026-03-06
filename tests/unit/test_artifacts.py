@@ -611,3 +611,68 @@ class TestRowToDictMalformedJson:
         row = db_conn.execute("SELECT * FROM t").fetchone()
         result = _row_to_dict(row)
         assert result["metadata"] == {}
+
+
+class TestArtifactRegistryContentHashValidation:
+    """Tests for content hash mismatch detection on artifact load."""
+
+    def test_mismatched_hash_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Artifact with mismatched content_hash should log a warning."""
+        row = {
+            "fqn": "@test/skill/greet",
+            "type": "skill",
+            "namespace": "test",
+            "name": "greet",
+            "content": "Hello!",
+            "version": 1,
+            "source": "local",
+            "metadata": {},
+            "content_hash": "deadbeef0000",  # wrong hash
+        }
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="anteroom.services.artifact_registry"):
+            art = _artifact_from_row(row)
+        assert "Content hash mismatch" in caplog.text
+        assert art.content == "Hello!"  # still loads the artifact
+
+    def test_correct_hash_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Artifact with correct content_hash should not log a warning."""
+        from anteroom.services.artifacts import content_hash as compute
+
+        c = "Hello!"
+        row = {
+            "fqn": "@test/skill/greet",
+            "type": "skill",
+            "namespace": "test",
+            "name": "greet",
+            "content": c,
+            "version": 1,
+            "source": "local",
+            "metadata": {},
+            "content_hash": compute(c),
+        }
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="anteroom.services.artifact_registry"):
+            _artifact_from_row(row)
+        assert "Content hash mismatch" not in caplog.text
+
+    def test_empty_hash_skips_validation(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Artifact with empty content_hash should skip validation (old data)."""
+        row = {
+            "fqn": "@test/skill/greet",
+            "type": "skill",
+            "namespace": "test",
+            "name": "greet",
+            "content": "Hello!",
+            "version": 1,
+            "source": "local",
+            "metadata": {},
+            "content_hash": "",
+        }
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="anteroom.services.artifact_registry"):
+            _artifact_from_row(row)
+        assert "Content hash mismatch" not in caplog.text

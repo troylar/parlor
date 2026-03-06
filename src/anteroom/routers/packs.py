@@ -17,6 +17,21 @@ _SAFE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _SAFE_ID_RE = re.compile(r"^[a-f0-9-]{32,36}$")
 
 
+def _reload_registries(request: Request, db: Any) -> None:
+    """Reload artifact registry, rule enforcer, and skill registry after pack changes."""
+    registry = getattr(request.app.state, "artifact_registry", None)
+    if registry is not None:
+        registry.load_from_db(db)
+    rule_enforcer = getattr(request.app.state, "rule_enforcer", None)
+    if rule_enforcer is not None and registry is not None:
+        from ..services.artifacts import ArtifactType
+
+        rule_enforcer.load_rules(registry.list_all(artifact_type=ArtifactType.RULE))
+    skill_registry = getattr(request.app.state, "skill_registry", None)
+    if skill_registry is not None and registry is not None:
+        skill_registry.load_from_artifacts(registry)
+
+
 def _validate_pack_path_params(namespace: str, name: str) -> None:
     """Validate namespace and name path parameters against safe name regex."""
     if not _SAFE_NAME_RE.match(namespace):
@@ -91,6 +106,8 @@ async def refresh_sources(request: Request) -> list[dict[str, Any]]:
 
     worker = PackRefreshWorker(db=db, data_dir=data_dir, sources=sources)
     results = worker.refresh_all()
+    if any(r.changed for r in results):
+        _reload_registries(request, db)
     return [
         {
             "url": r.url,
@@ -165,9 +182,7 @@ async def remove_pack(request: Request, namespace: str, name: str) -> dict[str, 
     removed = packs.remove_pack_by_id(db, pack["id"])
     if not removed:
         raise HTTPException(status_code=404, detail="Pack not found")
-    registry = getattr(request.app.state, "artifact_registry", None)
-    if registry is not None:
-        registry.load_from_db(db)
+    _reload_registries(request, db)
     return {"status": "removed"}
 
 
@@ -210,7 +225,5 @@ async def remove_pack_by_id(request: Request, pack_id: str) -> dict[str, str]:
     removed = packs.remove_pack_by_id(db, pack_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Pack not found")
-    registry = getattr(request.app.state, "artifact_registry", None)
-    if registry is not None:
-        registry.load_from_db(db)
+    _reload_registries(request, db)
     return {"status": "removed"}
