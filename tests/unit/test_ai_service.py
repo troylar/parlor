@@ -2225,3 +2225,115 @@ class TestSamplingParameters:
         assert call_kwargs["temperature"] == 0.5
         assert "top_p" not in call_kwargs
         assert "seed" not in call_kwargs
+
+
+class TestHTMLErrorResponseHandling:
+    """Tests for HTML error response detection (#784)."""
+
+    @pytest.mark.asyncio
+    async def test_html_502_shows_clean_message_after_retries(self):
+        """5xx HTML response should retry and show clean message when exhausted."""
+        from openai import APIStatusError
+
+        config = _make_config(retry_max_attempts=1, retry_backoff_base=0.01)
+        service = _make_service(config)
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        html_body = "<!DOCTYPE html><html><head><title>Error</title></head><body>Bad Gateway</body></html>"
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError(html_body, response=mock_response, body=None)
+        )
+
+        events = []
+        with patch.object(service, "_build_client"):
+            async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+                events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert "error page" in error_events[0]["data"]["message"]
+        assert "<!DOCTYPE" not in error_events[0]["data"]["message"]
+        assert error_events[0]["data"]["retryable"] is True
+
+    @pytest.mark.asyncio
+    async def test_html_404_shows_url_hint(self):
+        """Non-5xx HTML response should hint at URL misconfiguration."""
+        from openai import APIStatusError
+
+        service = _make_service()
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        html_body = "<html><body><h1>Not Found</h1></body></html>"
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError(html_body, response=mock_response, body=None)
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert "base URL" in error_events[0]["data"]["message"]
+        assert "API endpoint" in error_events[0]["data"]["message"]
+        assert "<html>" not in error_events[0]["data"]["message"]
+        assert error_events[0]["data"]["retryable"] is False
+
+    @pytest.mark.asyncio
+    async def test_html_detection_case_insensitive(self):
+        """HTML detection should be case-insensitive."""
+        from openai import APIStatusError
+
+        service = _make_service()
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        html_body = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">'
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError(html_body, response=mock_response, body=None)
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert "base URL" in error_events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_non_html_errors_unchanged(self):
+        """Normal JSON API errors should not be affected by HTML detection."""
+        from openai import APIStatusError
+
+        service = _make_service()
+        mock_response = MagicMock()
+        mock_response.status_code = 422
+        service.client.chat.completions.create = AsyncMock(
+            side_effect=APIStatusError("Unprocessable Entity", response=mock_response, body=None)
+        )
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["message"] == "API error (HTTP 422)"
+        assert "base URL" not in error_events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_with_html_shows_url_hint(self):
+        """Generic exception containing HTML (e.g., bare openai.APIError) should show URL hint."""
+        html_msg = "<!DOCTYPE html><html><head><title>Error</title></head></html>"
+        service = _make_service()
+        service.client.chat.completions.create = AsyncMock(side_effect=Exception(html_msg))
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert "base URL" in error_events[0]["data"]["message"]
+        assert "<!DOCTYPE" not in error_events[0]["data"]["message"]
+        assert error_events[0]["data"]["code"] == "html_response"
