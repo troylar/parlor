@@ -52,6 +52,7 @@ Git Repos (pack sources)
 
 - [Quickstart](quickstart.md) — zero to packs in 5 minutes
 - [Core Concepts](concepts.md) — the mental model behind packs and artifacts
+- [How Packs Work](how-packs-work.md) — deep dive: lifecycle, config layering, DB storage, conflict resolution, rule enforcement
 
 ### Reference
 

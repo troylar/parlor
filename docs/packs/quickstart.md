@@ -119,8 +119,31 @@ Instead of creating pack files manually, use the `/new-pack` skill in the REPL f
 
 The AI walks you through choosing a namespace, designing artifacts, creating files, and validating the manifest. After creating a pack, use `/pack-lint` to validate it before install.
 
+## Try the Example Packs
+
+Anteroom ships with 3 example packs you can install to explore:
+
+| Pack | Namespace | What It Contains |
+|------|-----------|-----------------|
+| `code-review` | anteroom | 2 skills (review, changelog) + 2 rules (coding standards) |
+| `writing-assistant` | anteroom | 3 skills (summarize, rewrite, proofread) + 1 rule (writing quality) |
+| `strict-safety` | anteroom | 1 config overlay (strict safety defaults: ask mode, no network in sandbox) |
+
+Install one to see a realistic multi-artifact pack:
+
+```bash
+# Find the built-in pack path using the public API
+PACK_PATH=$(python -c "from anteroom.services.starter_packs import get_built_in_pack_path; print(get_built_in_pack_path('code-review'))")
+
+# Install and attach
+aroom pack install "$PACK_PATH" --attach
+```
+
+These are separate from the **starter packs** (`python-dev`, `security-baseline`) which auto-install at first run. Example packs are opt-in — install them when you want to explore or use as templates.
+
 ## Next Steps
 
 - [Create a Pack from Scratch](tutorials/create-pack-from-scratch.md) — build a realistic multi-artifact pack
+- [How Packs Work](how-packs-work.md) — deep dive into the full lifecycle
 - [Manifest Format](manifest-format.md) — all manifest fields and options
 - [Pack Commands](pack-commands.md) — full CLI reference

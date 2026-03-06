@@ -42,16 +42,61 @@ prompt: |
 
 **How Anteroom uses it**: All active rules are concatenated and injected into the system prompt on every turn. They're not optional — the agent sees them on every interaction.
 
-**Example**:
+### Enforcement Levels
 
-```markdown title="rules/security.md"
-# Security Standards
+Rules support two enforcement levels via the `enforce` metadata field:
 
-- Never generate code with SQL string concatenation
-- Always use parameterized queries for database access
-- Never log passwords, tokens, or API keys
-- Use `HttpOnly`, `Secure`, `SameSite=Strict` for all cookies
+| Level | Behavior |
+|-------|----------|
+| `soft` (default) | Injected into system prompt as guidance. The AI should follow it but is not mechanically prevented from violating it |
+| `hard` | Checked at the tool execution layer before every tool call. Matching tool calls are **blocked** — the tool never runs, regardless of user approval |
+
+### Soft Rule Example
+
+A soft rule provides guidance in the system prompt:
+
+```markdown title="rules/coding-standards.md"
+# Coding Standards
+
+- Use descriptive variable names
+- Prefer early returns to reduce nesting
+- Keep functions under 50 lines
 ```
+
+### Hard Rule Example
+
+A hard rule blocks specific tool calls via regex matching:
+
+```markdown title="rules/no-force-push.md"
+Never force push to shared branches.
+```
+
+The hard enforcement is configured in the artifact's **metadata** (set in `pack.yaml` or the artifact DB):
+
+```yaml
+enforce: hard
+reason: Force pushing destroys shared history
+matches:
+  - tool: bash
+    pattern: "git\\s+push\\s+--force"
+  - tool: bash
+    pattern: "git\\s+push\\s+-f"
+```
+
+Each `matches` entry specifies:
+
+- `tool`: The tool name to check (`bash`, `write_file`, `edit_file`, `read_file`, or `*` for all tools)
+- `pattern`: A regex matched against the tool's arguments
+
+When the AI tries to run `git push --force origin main`, the RuleEnforcer detects the match and returns a `hard_denied` verdict. The tool call never executes.
+
+**Safety guards on patterns:**
+
+- Patterns longer than 500 characters are rejected (ReDoS prevention)
+- Invalid regex patterns are skipped with a warning
+- Rules with no valid match patterns are ignored
+
+See [How Packs Work: Rule Enforcement](how-packs-work.md#rule-enforcement-hard-rules) for the full lifecycle.
 
 **Directory**: `rules/`
 
@@ -60,6 +105,8 @@ prompt: |
 - Writing rules that are too vague ("write good code") — be specific and actionable
 - Creating rules that conflict with each other across packs
 - Adding excessive rules that consume too many tokens
+- Using overly broad regex patterns in hard rules (e.g., `.*` matches everything)
+- Forgetting that hard rules cannot be overridden — use them only for non-negotiable policies
 
 ---
 

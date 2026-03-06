@@ -213,13 +213,33 @@ Skills can also be distributed as pack artifacts. When a pack containing skill a
 
 Pack skills participate in the same precedence system. A pack skill installed at the `project` layer overrides a built-in skill with the same name. A local skill file overrides a pack skill.
 
+### Namespace-Qualified Skill Names
+
+When two attached packs define a skill with the same name, the bare name becomes **ambiguous**. Anteroom resolves this with namespace-qualified names:
+
+```
+/deploy               → ambiguous (two packs define it)
+/team-alpha/deploy    → resolves to team-alpha's version
+/team-beta/deploy     → resolves to team-beta's version
+```
+
+When you try to use an ambiguous bare name, Anteroom shows a warning with the qualified options:
+
+```
+Ambiguous skill 'deploy' -- qualify with namespace: /team-alpha/deploy, /team-beta/deploy
+```
+
+If a skill name is unique across all attached packs, the bare name works as usual — no qualification needed.
+
+The AI's `invoke_skill` tool uses only unambiguous and qualified names in its enum, so it always resolves correctly.
+
 To see which skills come from packs:
 
 ```bash
 $ aroom artifact list --type skill
 ```
 
-See [Packs & Artifacts](../packs/index.md) for details on creating and installing packs with skills.
+See [Packs & Artifacts](../packs/index.md) for details on creating and installing packs with skills. See [How Packs Work: Skill Resolution](../packs/how-packs-work.md#skill-resolution-namespace-aware) for the full disambiguation logic.
 
 ## Compatibility
 

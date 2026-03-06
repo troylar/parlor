@@ -15,10 +15,14 @@ space config               ← space overlay sits here
     ▼
 personal config
     ▼
+pack overlays              ← merged from attached packs, sorted by priority
+    ▼
 team config
     ▼
 defaults                   ← lowest priority
 ```
+
+See [How Packs Work](../packs/how-packs-work.md#phase-4-config-merge) for details on how pack overlays merge by priority.
 
 **Key rule:** Team-enforced fields always win, regardless of where they're set.
 

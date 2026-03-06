@@ -35,6 +35,8 @@ Installed pack demo/my-pack v1.0.0 (3 artifacts)
 | Flag | Description |
 |------|-------------|
 | `--project` | Copy the pack directory into `.anteroom/packs/{namespace}/{name}/` for version control |
+| `--attach` | Automatically attach the pack after installing (saves a separate `pack attach` step) |
+| `--priority N` | Set the attachment priority when using `--attach` (1-100, default 50; lower = higher precedence) |
 
 **Errors**:
 
@@ -108,11 +110,22 @@ $ aroom pack attach acme/python-conventions
 Attached acme/python-conventions (global)
 ```
 
+**With priority** (lower number = higher precedence):
+
+```bash
+$ aroom pack attach acme/security-baseline --priority 10
+```
+
+This ensures the security pack's config overlays take precedence over other packs at default priority (50).
+
 **Flags**:
 
 | Flag | Description |
 |------|-------------|
 | `--project` | Attach to current project only (scoped to working directory) |
+| `--priority N` | Set precedence for conflict resolution (1-100, default 50; lower wins) |
+
+**Conflict detection**: At attach time, Anteroom checks for conflicts with already-attached packs. Config overlay dot-path collisions at the same priority are errors. Skill name collisions across packs are always errors. See [How Packs Work: Conflict Detection](how-packs-work.md#conflict-detection-at-attach-time) for details.
 
 ### aroom pack detach NAMESPACE/NAME
 
