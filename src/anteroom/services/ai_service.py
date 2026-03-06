@@ -153,7 +153,7 @@ class AIService:
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                logger.warning("Stream deadline exceeded before next chunk (%.0fs)", total_timeout)
+                logger.debug("Stream deadline exceeded before next chunk (%.0fs)", total_timeout)
                 try:
                     await stream_iter.aclose()
                 except Exception:
@@ -190,9 +190,9 @@ class AIService:
                     cancel_wait.cancel()
                 remaining_now = deadline - asyncio.get_running_loop().time()
                 if remaining_now <= 0:
-                    logger.warning("Stream total deadline exceeded after %.0fs", total_timeout)
+                    logger.debug("Stream total deadline exceeded after %.0fs", total_timeout)
                 else:
-                    logger.warning("Stream stalled — no chunk for %.0fs (%.0fs remaining)", wait_limit, remaining_now)
+                    logger.debug("Stream stalled — no chunk for %.0fs (%.0fs remaining)", wait_limit, remaining_now)
                 try:
                     await stream_iter.aclose()
                 except Exception:
@@ -604,14 +604,15 @@ class AIService:
                     }
                     return
             except _StreamTimeoutError:
-                logger.warning("Stream timed out mid-response after first token")
+                stream_elapsed = time.monotonic() - _attempt_start
+                logger.debug("Stream timed out mid-response after first token (%.0fs)", stream_elapsed)
                 self._build_client()
                 if cancel_event and cancel_event.is_set():
                     return  # user cancelled — don't emit retryable error
                 yield {
                     "event": "error",
                     "data": {
-                        "message": "Stream timed out",
+                        "message": f"Stream timed out after {stream_elapsed:.0f}s — response may be incomplete",
                         "code": "timeout",
                         "retryable": True,
                     },
