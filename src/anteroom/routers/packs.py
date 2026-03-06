@@ -125,6 +125,42 @@ class AttachRequest(BaseModel):
     project_path: str | None = None
 
 
+# --- by-id routes MUST come before {namespace}/{name} wildcard routes ---
+# FastAPI uses first-match routing; if the wildcard routes are first,
+# "by-id" is captured as the namespace parameter.
+
+
+@router.get("/packs/by-id/{pack_id}")
+async def get_pack_by_id(request: Request, pack_id: str) -> dict[str, Any]:
+    """Get a pack by its unique ID."""
+    if not _SAFE_ID_RE.match(pack_id):
+        raise HTTPException(status_code=400, detail="Invalid pack ID format")
+    db = request.app.state.db
+    result = packs.get_pack_by_id(db, pack_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Pack not found")
+    result.pop("source_path", None)
+    for art in result.get("artifacts", []):
+        art.pop("content", None)
+    return result
+
+
+@router.delete("/packs/by-id/{pack_id}")
+async def remove_pack_by_id(request: Request, pack_id: str) -> dict[str, str]:
+    """Remove a pack by its unique ID."""
+    if not _SAFE_ID_RE.match(pack_id):
+        raise HTTPException(status_code=400, detail="Invalid pack ID format")
+    db = request.app.state.db
+    removed = packs.remove_pack_by_id(db, pack_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Pack not found")
+    _reload_registries(request, db)
+    return {"status": "removed"}
+
+
+# --- {namespace}/{name} wildcard routes ---
+
+
 @router.post("/packs/{namespace}/{name}/attach")
 async def attach_pack(request: Request, namespace: str, name: str, body: AttachRequest) -> dict[str, Any]:
     """Attach a pack to global or project scope."""
@@ -201,31 +237,3 @@ async def get_pack(request: Request, namespace: str, name: str) -> dict[str, Any
     for art in pack.get("artifacts", []):
         art.pop("content", None)
     return pack
-
-
-@router.get("/packs/by-id/{pack_id}")
-async def get_pack_by_id(request: Request, pack_id: str) -> dict[str, Any]:
-    """Get a pack by its unique ID."""
-    if not _SAFE_ID_RE.match(pack_id):
-        raise HTTPException(status_code=400, detail="Invalid pack ID format")
-    db = request.app.state.db
-    result = packs.get_pack_by_id(db, pack_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Pack not found")
-    result.pop("source_path", None)
-    for art in result.get("artifacts", []):
-        art.pop("content", None)
-    return result
-
-
-@router.delete("/packs/by-id/{pack_id}")
-async def remove_pack_by_id(request: Request, pack_id: str) -> dict[str, str]:
-    """Remove a pack by its unique ID."""
-    if not _SAFE_ID_RE.match(pack_id):
-        raise HTTPException(status_code=400, detail="Invalid pack ID format")
-    db = request.app.state.db
-    removed = packs.remove_pack_by_id(db, pack_id)
-    if not removed:
-        raise HTTPException(status_code=404, detail="Pack not found")
-    _reload_registries(request, db)
-    return {"status": "removed"}

@@ -1115,10 +1115,48 @@ class TestPackUpdateViaAPI:
         resp2 = client.get("/api/packs/acme/evolving")
         assert len(resp2.json()["artifacts"]) == 2
 
-    # NOTE: /api/packs/by-id/{pack_id} routes are not testable here because
-    # FastAPI matches /packs/{namespace}/{name} first (route ordering bug).
-    # The by-id endpoints work when mounted in the full app with the correct
-    # route order. Skipping by-id tests in this isolated router test suite.
+    def test_get_pack_by_id(
+        self,
+        tmp_path: Path,
+        db: ThreadSafeConnection,
+        client: TestClient,
+    ) -> None:
+        """GET /api/packs/by-id/{pack_id} returns pack details."""
+        result = _install_pack(db, _security_pack(tmp_path))
+        pack_id = result["id"]
+
+        resp = client.get(f"/api/packs/by-id/{pack_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "security-baseline"
+        assert "source_path" not in data
+
+    def test_remove_by_id(
+        self,
+        tmp_path: Path,
+        db: ThreadSafeConnection,
+        client: TestClient,
+    ) -> None:
+        """DELETE /api/packs/by-id/{pack_id} removes the pack."""
+        result = _install_pack(db, _security_pack(tmp_path))
+        pack_id = result["id"]
+
+        resp = client.delete(f"/api/packs/by-id/{pack_id}")
+        assert resp.status_code == 200
+
+        resp2 = client.get(f"/api/packs/by-id/{pack_id}")
+        assert resp2.status_code == 404
+
+    def test_get_by_id_invalid_format(self, client: TestClient) -> None:
+        """Invalid pack ID format should return 400."""
+        resp = client.get("/api/packs/by-id/not-a-valid-id!")
+        assert resp.status_code == 400
+
+    def test_remove_by_id_not_found(self, client: TestClient) -> None:
+        """Non-existent pack ID should return 404."""
+        fake_id = "a" * 32
+        resp = client.delete(f"/api/packs/by-id/{fake_id}")
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
