@@ -125,7 +125,7 @@ This ensures the security pack's config overlays take precedence over other pack
 | `--project` | Attach to current project only (scoped to working directory) |
 | `--priority N` | Set precedence for conflict resolution (1-100, default 50; lower wins) |
 
-**Conflict detection**: At attach time, Anteroom checks for conflicts with already-attached packs. Config overlay dot-path collisions at the same priority are errors. Skill name collisions across packs are always errors. See [How Packs Work: Conflict Detection](how-packs-work.md#conflict-detection-at-attach-time) for details.
+**Conflict detection**: At attach time, Anteroom checks for conflicts with already-attached packs. Config overlay dot-path collisions at the same priority are errors. Skill name collisions are resolved via namespace-qualified names (e.g., `/ns-a/deploy` and `/ns-b/deploy`). See [How Packs Work: Conflict Detection](how-packs-work.md#conflict-detection-at-attach-time) for details.
 
 ### aroom pack detach NAMESPACE/NAME
 
