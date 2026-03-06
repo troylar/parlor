@@ -992,9 +992,13 @@ def update_thinking() -> None:
     """Update the spinner timer (throttled to once per second).
 
     No-op when the background ticker is running — the ticker handles updates.
+    No-op when thinking was suppressed (e.g. between fold batches) — _thinking_start
+    is 0, and writing a thinking line would show a bogus system-uptime elapsed time.
     """
     global _last_spinner_update
     if _thinking_ticker_task is not None:
+        return
+    if not _thinking_start:
         return
     if _spinner:
         now = time.monotonic()

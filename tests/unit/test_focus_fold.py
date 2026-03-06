@@ -867,6 +867,24 @@ class TestSuppressedThinkingNoGhostLine:
         renderer._repl_mode = False
 
 
+class TestUpdateThinkingSuppressed:
+    """update_thinking must no-op when _thinking_start is 0 (suppressed thinking)."""
+
+    def setup_method(self) -> None:
+        renderer._thinking_start = 0
+        renderer._thinking_ticker_task = None
+        renderer._spinner = None
+        renderer._last_spinner_update = 0
+
+    @patch("anteroom.cli.renderer._write_thinking_line")
+    def test_no_write_when_thinking_start_zero(self, mock_write: MagicMock) -> None:
+        """Regression: suppressed thinking + update_thinking must not write bogus elapsed."""
+        renderer._repl_mode = True
+        renderer.update_thinking()
+        renderer._repl_mode = False
+        mock_write.assert_not_called()
+
+
 class TestToggleLastFoldExtended:
     """Additional edge cases for toggle_last_fold."""
 
