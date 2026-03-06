@@ -451,6 +451,7 @@ def clear_turn_history() -> None:
     """Clear current turn tool history. Called at start of each turn."""
     global _streaming_buffer, _fold_batch_active, _fold_last_expanded
     global _fold_suppress_thinking, _fold_between_batches
+    global _fold_batch_done, _fold_batch_total, _fold_batch_current
     _current_turn_tools.clear()
     _streaming_buffer = []
     # Reset fold state so a stuck batch from a cancelled/errored turn
@@ -460,6 +461,11 @@ def clear_turn_history() -> None:
     _fold_last_expanded = False
     _fold_suppress_thinking = False
     _fold_between_batches = False
+    _fold_batch_done = 0
+    _fold_batch_total = 0
+    _fold_batch_current = ""
+    _fold_batch_summaries.clear()
+    _fold_batch_types.clear()
 
 
 # ---------------------------------------------------------------------------
