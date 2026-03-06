@@ -241,6 +241,20 @@ async def run_exec_mode(
     _rate_limiter = ToolRateLimiter(_cast(_SvcRateLimitConfig, config.safety.tool_rate_limit))
     tool_registry.set_rate_limiter(_rate_limiter)
 
+    # Artifact registry and rule enforcement
+    try:
+        from ..services.artifact_registry import ArtifactRegistry
+        from ..services.artifacts import ArtifactType as _ArtType
+        from ..services.rule_enforcer import RuleEnforcer
+
+        _artifact_registry = ArtifactRegistry()
+        _artifact_registry.load_from_db(db)
+        _rule_enforcer = RuleEnforcer()
+        _rule_enforcer.load_rules(_artifact_registry.list_all(artifact_type=_ArtType.RULE))
+        tool_registry.set_rule_enforcer(_rule_enforcer)
+    except Exception:
+        logger.debug("Artifact registry unavailable in exec mode", exc_info=True)
+
     # Sub-agent support
     sa_config = config.safety.subagent
     subagent_limiter = SubagentLimiter(
