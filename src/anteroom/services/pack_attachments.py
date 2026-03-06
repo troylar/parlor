@@ -273,12 +273,12 @@ def list_attachments_for_pack(
 ) -> list[dict[str, Any]]:
     """List all attachments for a specific pack."""
     rows = db.execute(
-        """SELECT id, pack_id, project_path, scope, priority, created_at
+        """SELECT id, pack_id, project_path, space_id, scope, priority, created_at
            FROM pack_attachments WHERE pack_id = ?
            ORDER BY priority, scope, project_path""",
         (pack_id,),
     ).fetchall()
-    keys = ("id", "pack_id", "project_path", "scope", "priority", "created_at")
+    keys = ("id", "pack_id", "project_path", "space_id", "scope", "priority", "created_at")
     return [dict(r) if isinstance(r, sqlite3.Row) else {k: v for k, v in zip(keys, r)} for r in rows]
 
 
