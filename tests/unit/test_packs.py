@@ -877,3 +877,57 @@ class TestInstallPackUpsert:
 
         row = db.execute("SELECT version FROM packs").fetchone()
         assert row["version"] == "2.0.0"
+
+
+class TestUpdatePackPreservesAttachments:
+    """update_pack() must preserve pack_attachments across the remove+reinstall cycle."""
+
+    def test_attachments_survive_update(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest, pack_dir)
+        pack_id = result["id"]
+
+        # Attach the pack at global scope
+        import uuid as _uuid
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
+        att_id = _uuid.uuid4().hex
+        db.execute(
+            """INSERT INTO pack_attachments (id, pack_id, project_path, space_id, scope, priority, created_at)
+               VALUES (?, ?, NULL, NULL, 'global', 10, ?)""",
+            (att_id, pack_id, _dt.now(_tz.utc).isoformat()),
+        )
+        db.commit()
+
+        # Update the pack (triggers remove+reinstall with new ID)
+        _write_manifest(
+            pack_dir,
+            {
+                "name": "test-pack",
+                "namespace": "test-ns",
+                "version": "2.0.0",
+                "description": "Updated",
+                "artifacts": [{"type": "skill", "name": "greet"}],
+            },
+        )
+        manifest2 = parse_manifest(pack_dir / "pack.yaml")
+        result2 = install_pack(db, manifest2, pack_dir)
+        new_pack_id = result2["id"]
+        assert new_pack_id != pack_id
+
+        # Attachment should be transferred to the new pack ID
+        att = db.execute(
+            "SELECT pack_id, priority FROM pack_attachments WHERE pack_id = ?",
+            (new_pack_id,),
+        ).fetchone()
+        assert att is not None, "Attachment was lost during update"
+        assert att["priority"] == 10
+
+        # Old attachment should be gone
+        old_att = db.execute(
+            "SELECT pack_id FROM pack_attachments WHERE pack_id = ?",
+            (pack_id,),
+        ).fetchone()
+        assert old_att is None

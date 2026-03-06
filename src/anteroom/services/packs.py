@@ -406,6 +406,13 @@ def update_pack(
     # Atomic remove-and-reinstall in a single transaction
     artifact_ids: list[str] = []
     with db.transaction():
+        # Save existing attachments before removing old pack
+        # (DELETE FROM packs CASCADE-deletes pack_attachments)
+        attachment_rows = db.execute(
+            "SELECT project_path, space_id, scope, priority FROM pack_attachments WHERE pack_id = ?",
+            (old_pack_id,),
+        ).fetchall()
+
         # Remove old pack
         db.execute("DELETE FROM packs WHERE id = ?", (old_pack_id,))
         for art_id in orphan_ids:
@@ -450,6 +457,24 @@ def update_pack(
             db.execute(
                 "INSERT INTO pack_artifacts (pack_id, artifact_id) VALUES (?, ?)",
                 (new_pack_id, art_id),
+            )
+
+        # Restore attachments from the old pack
+        for att in attachment_rows:
+            if isinstance(att, (tuple, list)):
+                project_path, space_id, scope, priority = att[0], att[1], att[2], att[3]
+            else:
+                project_path = att["project_path"]
+                space_id = att["space_id"]
+                scope = att["scope"]
+                priority = att["priority"]
+            att_id = uuid.uuid4().hex
+            att_now = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                """INSERT INTO pack_attachments
+                   (id, pack_id, project_path, space_id, scope, priority, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (att_id, new_pack_id, project_path, space_id, scope, priority, att_now),
             )
 
     # Copy to project if requested (outside transaction — file I/O)
