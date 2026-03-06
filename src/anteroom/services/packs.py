@@ -229,12 +229,23 @@ def install_pack(
 ) -> dict[str, Any]:
     """Install a pack from a local directory.
 
+    If a pack with the same namespace/name already exists, it is updated
+    atomically (remove old + reinstall).  Otherwise a fresh row is created.
+
     Upserts all artifacts, creates the pack DB row, and links them via
     ``pack_artifacts``. If *project_dir* is given, copies the pack
     directory into ``.anteroom/packs/<namespace>/<name>/``.
 
     Returns a dict with pack info and installed artifact count.
+    The ``"action"`` key is ``"installed"`` or ``"updated"``.
     """
+    # If the pack already exists, delegate to update_pack for atomic replace
+    existing = _get_pack_row(db, manifest.namespace, manifest.name)
+    if existing:
+        result = update_pack(db, manifest, pack_dir, project_dir=project_dir)
+        result["action"] = "updated"
+        return result
+
     now = datetime.now(timezone.utc).isoformat()
     pack_id = uuid.uuid4().hex
 
@@ -305,6 +316,7 @@ def install_pack(
         "version": manifest.version,
         "artifact_count": len(artifact_ids),
         "skipped_artifacts": skipped,
+        "action": "installed",
     }
 
 
@@ -458,6 +470,7 @@ def update_pack(
         "version": manifest.version,
         "artifact_count": len(artifact_ids),
         "skipped_artifacts": skipped,
+        "action": "updated",
     }
 
 

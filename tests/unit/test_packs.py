@@ -624,14 +624,15 @@ class TestResolvePack:
         assert match["id"] == result["id"]
         assert candidates == []
 
-    def test_resolve_ambiguous(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+    def test_resolve_after_reinstall(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        """Reinstalling a pack should not create duplicates (#772)."""
         pack_dir = _create_pack_dir(tmp_path)
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
         install_pack(db, manifest, pack_dir)
         match, candidates = resolve_pack(db, "test-ns", "test-pack")
-        assert match is None
-        assert len(candidates) == 2
+        assert match is not None
+        assert candidates == []
 
     def test_resolve_not_found(self, db: ThreadSafeConnection) -> None:
         match, candidates = resolve_pack(db, "no", "pack")
@@ -695,3 +696,55 @@ class TestInstallPackSource:
 
         art = db.execute("SELECT source FROM artifacts LIMIT 1").fetchone()
         assert art["source"] == "project"
+
+
+class TestInstallPackUpsert:
+    """Tests for #772 — install_pack should update existing pack, not create duplicate."""
+
+    def test_reinstall_updates_instead_of_duplicating(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+
+        result1 = install_pack(db, manifest, pack_dir)
+        assert result1["action"] == "installed"
+
+        result2 = install_pack(db, manifest, pack_dir)
+        assert result2["action"] == "updated"
+
+        # Only one pack row
+        rows = db.execute("SELECT COUNT(*) as c FROM packs").fetchone()
+        assert rows["c"] == 1
+
+    def test_reinstall_keeps_single_row(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+
+        install_pack(db, manifest, pack_dir)
+        install_pack(db, manifest, pack_dir)
+        install_pack(db, manifest, pack_dir)
+
+        rows = db.execute("SELECT COUNT(*) as c FROM packs WHERE namespace='test-ns' AND name='test-pack'").fetchone()
+        assert rows["c"] == 1
+
+    def test_reinstall_updates_version(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
+        pack_dir = _create_pack_dir(tmp_path)
+        manifest = parse_manifest(pack_dir / "pack.yaml")
+        install_pack(db, manifest, pack_dir)
+
+        # Update manifest version
+        _write_manifest(
+            pack_dir,
+            {
+                "name": "test-pack",
+                "namespace": "test-ns",
+                "version": "2.0.0",
+                "description": "Updated pack",
+                "artifacts": [{"type": "skill", "name": "greet"}],
+            },
+        )
+        manifest2 = parse_manifest(pack_dir / "pack.yaml")
+        result = install_pack(db, manifest2, pack_dir)
+        assert result["action"] == "updated"
+
+        row = db.execute("SELECT version FROM packs").fetchone()
+        assert row["version"] == "2.0.0"

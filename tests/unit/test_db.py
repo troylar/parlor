@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from anteroom.db import (
     _make_vec_schema,
     _run_migrations,
     has_vec_support,
+    init_db,
 )
 
 
@@ -866,3 +868,53 @@ class TestMigrationPaths:
         migrated_indexes = self._get_all_indexes(migrated)
         missing_indexes = fresh_indexes - migrated_indexes
         assert not missing_indexes, f"Indexes missing after migration: {missing_indexes}"
+
+
+class TestPacksUniqueConstraint:
+    """Tests for #772 — UNIQUE(namespace, name) on packs table."""
+
+    def test_fresh_db_has_unique_constraint(self, tmp_path: Path) -> None:
+        """Fresh installs should have UNIQUE(namespace, name) on packs."""
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'").fetchone()
+        assert row is not None
+        assert "UNIQUE" in row[0]
+        conn.close()
+
+    def test_migration_deduplicates_packs(self, tmp_path: Path) -> None:
+        """Migrating a DB with duplicate packs should keep only the newest."""
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        # Create old-style packs table without UNIQUE constraint
+        conn.execute("""CREATE TABLE packs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            version TEXT NOT NULL DEFAULT '0.0.0',
+            description TEXT NOT NULL DEFAULT '',
+            source_path TEXT NOT NULL DEFAULT '',
+            installed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""")
+        # Insert duplicates
+        conn.execute(
+            "INSERT INTO packs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("old-id", "my-pack", "my-ns", "1.0.0", "old", "/old", "2024-01-01", "2024-01-01"),
+        )
+        conn.execute(
+            "INSERT INTO packs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("new-id", "my-pack", "my-ns", "2.0.0", "new", "/new", "2024-06-01", "2024-06-01"),
+        )
+        # Also need other tables so init_db doesn't fail
+        conn.commit()
+        conn.close()
+
+        init_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        rows = conn.execute("SELECT id, version FROM packs WHERE namespace='my-ns' AND name='my-pack'").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "new-id"  # newest kept
+        assert rows[0][1] == "2.0.0"
+        conn.close()

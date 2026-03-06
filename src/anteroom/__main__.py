@@ -1449,8 +1449,9 @@ def _install_from_path(
         console.print(f"[red]Install failed:[/red] {e}")
         sys.exit(1)
 
+    action_word = "Updated" if install_result.get("action") == "updated" else "Installed"
     console.print(
-        f"[green]Installed[/green] {escape(install_result['namespace'])}/{escape(install_result['name'])} "
+        f"[green]{action_word}[/green] {escape(install_result['namespace'])}/{escape(install_result['name'])} "
         f"v{escape(install_result['version'])} ({install_result['artifact_count']} artifacts)"
     )
 

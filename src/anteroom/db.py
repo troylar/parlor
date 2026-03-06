@@ -252,7 +252,8 @@ CREATE TABLE IF NOT EXISTS packs (
     description TEXT NOT NULL DEFAULT '',
     source_path TEXT NOT NULL DEFAULT '',
     installed_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    UNIQUE(namespace, name)
 );
 
 CREATE TABLE IF NOT EXISTS pack_artifacts (
@@ -1253,6 +1254,46 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
     except sqlite3.OperationalError:
         logger.warning("Failed to migrate packs table to drop UNIQUE constraint", exc_info=True)
+
+    # Restore UNIQUE(namespace, name) on packs and deduplicate (#772, v1.99.1)
+    try:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='packs'").fetchone()
+        if row:
+            ddl = row[0] if isinstance(row, (tuple, list)) else row["sql"]
+            if ddl and "UNIQUE" not in ddl:
+                # Deduplicate: keep the newest row per (namespace, name)
+                conn.execute(
+                    """DELETE FROM packs WHERE id NOT IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY namespace, name ORDER BY updated_at DESC
+                            ) AS rn FROM packs
+                        ) WHERE rn = 1
+                    )"""
+                )
+                # Rebuild table with UNIQUE constraint
+                conn.execute(
+                    """CREATE TABLE IF NOT EXISTS packs_unique (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        namespace TEXT NOT NULL,
+                        version TEXT NOT NULL DEFAULT '0.0.0',
+                        description TEXT NOT NULL DEFAULT '',
+                        source_path TEXT NOT NULL DEFAULT '',
+                        installed_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(namespace, name)
+                    )"""
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO packs_unique SELECT id, name, namespace, version, "
+                    "description, source_path, installed_at, updated_at FROM packs"
+                )
+                conn.execute("DROP TABLE packs")
+                conn.execute("ALTER TABLE packs_unique RENAME TO packs")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_packs_namespace ON packs(namespace)")
+    except sqlite3.OperationalError:
+        logger.warning("Failed to restore UNIQUE constraint on packs", exc_info=True)
 
 
 def has_vec_support(conn: sqlite3.Connection | ThreadSafeConnection) -> bool:
