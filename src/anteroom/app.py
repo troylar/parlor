@@ -262,6 +262,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if artifact_registry.count:
         logger.info("Artifact registry loaded: %d artifacts", artifact_registry.count)
 
+    # Load hard-enforced rules into the tool registry
+    from .services.artifacts import ArtifactType as _ArtType
+    from .services.rule_enforcer import RuleEnforcer
+
+    _rule_enforcer = RuleEnforcer()
+    _rule_enforcer.load_rules(artifact_registry.list_all(artifact_type=_ArtType.RULE))
+    tool_registry.set_rule_enforcer(_rule_enforcer)
+    if _rule_enforcer.rule_count:
+        logger.info("Rule enforcer loaded: %d hard rules", _rule_enforcer.rule_count)
+
     # Initialize skill registry
     app.state.skill_registry = None
     if config.cli.skills.auto_invoke:

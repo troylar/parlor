@@ -371,6 +371,80 @@ class TestToolTierSafety:
         assert "disabled" in verdict.reason
 
 
+class TestRuleEnforcerIntegration:
+    """Test ToolRegistry.check_safety with RuleEnforcer (#773)."""
+
+    def test_hard_rule_blocks_tool(self) -> None:
+        from anteroom.config import SafetyConfig
+        from anteroom.services.artifacts import Artifact, ArtifactSource, ArtifactType
+        from anteroom.services.rule_enforcer import RuleEnforcer
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(), working_dir="/tmp")
+
+        enforcer = RuleEnforcer()
+        art = Artifact(
+            fqn="@team/rule/no-main-push",
+            type=ArtifactType.RULE,
+            namespace="team",
+            name="no-main-push",
+            content="Never push to main",
+            source=ArtifactSource.TEAM,
+            metadata={
+                "enforce": "hard",
+                "matches": [{"tool": "bash", "pattern": r"git\s+push.*main"}],
+                "reason": "Direct pushes to main are prohibited",
+            },
+        )
+        enforcer.load_rules([art])
+        reg.set_rule_enforcer(enforcer)
+
+        verdict = reg.check_safety("bash", {"command": "git push origin main"})
+        assert verdict is not None
+        assert verdict.hard_denied is True
+        assert "no-main-push" in verdict.reason
+
+    def test_non_matching_rule_allows_tool(self) -> None:
+        from anteroom.config import SafetyConfig
+        from anteroom.services.artifacts import Artifact, ArtifactSource, ArtifactType
+        from anteroom.services.rule_enforcer import RuleEnforcer
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(approval_mode="auto"), working_dir="/tmp")
+
+        enforcer = RuleEnforcer()
+        art = Artifact(
+            fqn="@team/rule/no-main-push",
+            type=ArtifactType.RULE,
+            namespace="team",
+            name="no-main-push",
+            content="Never push to main",
+            source=ArtifactSource.TEAM,
+            metadata={
+                "enforce": "hard",
+                "matches": [{"tool": "bash", "pattern": r"git\s+push.*main"}],
+                "reason": "Direct pushes to main are prohibited",
+            },
+        )
+        enforcer.load_rules([art])
+        reg.set_rule_enforcer(enforcer)
+
+        verdict = reg.check_safety("bash", {"command": "git status"})
+        assert verdict is None  # Auto mode, non-matching — no verdict
+
+    def test_no_enforcer_set_no_block(self) -> None:
+        from anteroom.config import SafetyConfig
+
+        reg = ToolRegistry()
+        register_default_tools(reg, working_dir="/tmp")
+        reg.set_safety_config(SafetyConfig(approval_mode="auto"), working_dir="/tmp")
+        # No rule enforcer set — should not block
+        verdict = reg.check_safety("bash", {"command": "git push --force main"})
+        assert verdict is None
+
+
 class TestApprovalDecisionAudit:
     """Verify _approval_decision metadata on call_tool results."""
 
