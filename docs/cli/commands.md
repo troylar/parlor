@@ -307,6 +307,7 @@ aroom exec "task" --no-project-context
 | Submit message | `Enter` |
 | Insert newline | `Alt+Enter` or `Shift+Enter` |
 | Cancel AI response | `Escape` |
+| Expand/collapse fold groups | `Ctrl+O` |
 | Clear input / exit | `Ctrl+C` |
 | Exit (EOF) | `Ctrl+D` |
 | Autocomplete | `Tab` |
