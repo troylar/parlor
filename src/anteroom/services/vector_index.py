@@ -128,27 +128,46 @@ class VectorIndex:
             self._int_to_str.pop(int_key, None)
 
     def search(self, query: list[float], limit: int = 10) -> list[dict[str, Any]]:
-        """Search for the most similar vectors. Returns list of {key, distance}."""
+        """Search for the most similar vectors. Returns list of {key, distance}.
+
+        Over-fetches when stale (unmapped) vectors are encountered so that
+        the caller always receives up to *limit* mapped results.
+        """
         import numpy as np
 
         _validate_embedding(query, dimensions=self._dimensions)
         limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
 
+        query_vector = np.array(query, dtype=np.float32)
+
         with self._lock:
-            if len(self._index) == 0:
+            index_size = len(self._index)
+            if index_size == 0:
                 return []
 
-            query_vector = np.array(query, dtype=np.float32)
-            actual_limit = min(limit, len(self._index))
-            results = self._index.search(query_vector, actual_limit)
+            fetch_k = min(limit, index_size)
+            matches: list[dict[str, Any]] = []
 
-        matches = []
-        for int_key, distance in zip(results.keys, results.distances):
-            int_key_val = int(int_key)
-            string_key = self._int_to_str.get(int_key_val)
-            if string_key is None:
-                continue
-            matches.append({"key": string_key, "distance": float(distance)})
+            while len(matches) < limit:
+                actual_k = min(fetch_k, index_size)
+                results = self._index.search(query_vector, actual_k)
+
+                matches.clear()
+                for int_key, distance in zip(results.keys, results.distances):
+                    int_key_val = int(int_key)
+                    string_key = self._int_to_str.get(int_key_val)
+                    if string_key is None:
+                        continue
+                    matches.append({"key": string_key, "distance": float(distance)})
+                    if len(matches) >= limit:
+                        break
+
+                # If we got enough, or we've already fetched everything, stop.
+                if len(matches) >= limit or fetch_k >= index_size:
+                    break
+                # Widen: double fetch_k to get past stale entries.
+                fetch_k = min(fetch_k * 2, index_size)
+
         return matches
 
     def contains(self, key: str) -> bool:

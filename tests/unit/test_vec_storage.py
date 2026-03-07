@@ -464,6 +464,63 @@ class TestVectorIndexManager:
 
 
 @pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
+class TestSearchSkipsStaleVectors:
+    """Test that search over-fetches to skip stale (unmapped) vectors."""
+
+    def test_returns_mapped_result_when_stale_vector_is_closer(self) -> None:
+        idx = _make_vec_index()
+
+        # Add two vectors: "stale" is closer to the query, "valid" is further
+        stale_emb = [0.0] * DIMS
+        stale_emb[0] = 1.0
+        idx.add("stale-key", stale_emb)
+
+        valid_emb = [0.0] * DIMS
+        valid_emb[0] = 0.8
+        valid_emb[1] = 0.2
+        idx.add("valid-key", valid_emb)
+
+        # Remove "stale-key" from the key map (simulating post-recovery state)
+        # but leave it in the usearch index (as happens after crash recovery)
+        from anteroom.services.vector_index import _string_key_to_int
+
+        stale_int = _string_key_to_int("stale-key")
+        idx._int_to_str.pop(stale_int, None)
+
+        # Search with limit=1 — should skip stale and return valid
+        query = [0.0] * DIMS
+        query[0] = 1.0
+        results = idx.search(query, limit=1)
+        assert len(results) == 1
+        assert results[0]["key"] == "valid-key"
+
+    def test_returns_all_mapped_when_multiple_stale(self) -> None:
+        idx = _make_vec_index()
+
+        from anteroom.services.vector_index import _string_key_to_int
+
+        # Add 5 stale vectors (closer to query) and 2 valid ones
+        for i in range(5):
+            emb = [0.0] * DIMS
+            emb[0] = 1.0
+            emb[1] = 0.001 * i
+            idx.add(f"stale-{i}", emb)
+            idx._int_to_str.pop(_string_key_to_int(f"stale-{i}"), None)
+
+        for i in range(2):
+            emb = [0.0] * DIMS
+            emb[0] = 0.5
+            emb[2] = 0.1 * (i + 1)
+            idx.add(f"valid-{i}", emb)
+
+        query = [0.0] * DIMS
+        query[0] = 1.0
+        results = idx.search(query, limit=2)
+        assert len(results) == 2
+        assert all(r["key"].startswith("valid-") for r in results)
+
+
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
 class TestStoreEmbeddingRollback:
     """Test that store_embedding resets to pending when vec_index.add() fails."""
 
