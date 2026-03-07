@@ -55,6 +55,31 @@ class TestServerBootstrap:
         assert "message-input" in resp.text
         assert "btn-new-chat" in resp.text
 
+    def test_welcome_actions_present(self, base_url: str) -> None:
+        """Welcome screen should have task-based onboarding action buttons."""
+        import httpx
+
+        resp = httpx.get(f"{base_url}/", follow_redirects=True)
+        html = resp.text
+        assert 'data-action="chat"' in html
+        assert 'data-action="settings"' in html
+        assert 'data-action="space"' in html
+        assert "welcome-actions" in html
+        assert "Start chatting" in html
+        assert "Configure your model" in html
+        assert "Create a space" in html
+
+    def test_welcome_actions_no_inline_handlers(self, base_url: str) -> None:
+        """Welcome action buttons must not use inline onclick (CSP blocks them)."""
+        import httpx
+
+        resp = httpx.get(f"{base_url}/", follow_redirects=True)
+        # Extract just the welcome-actions section
+        start = resp.text.find("welcome-actions")
+        end = resp.text.find("welcome-tips", start)
+        section = resp.text[start:end] if start >= 0 and end >= 0 else ""
+        assert "onclick" not in section, "Inline onclick handlers violate CSP"
+
     def test_security_headers_present(self, base_url: str) -> None:
         """Index response should include security headers."""
         import httpx
