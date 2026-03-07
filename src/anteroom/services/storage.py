@@ -870,8 +870,19 @@ def replace_document_content(
     content: str,
     user_id: str | None = None,
     user_display_name: str | None = None,
+    *,
+    vec_index: Any | None = None,
 ) -> dict[str, Any]:
     """Replace all messages in a document conversation with a single new message."""
+    # Remove old message vectors from usearch before CASCADE deletes metadata
+    if vec_index is not None:
+        emb_rows = db.execute_fetchall(
+            "SELECT message_id FROM message_embeddings WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        for r in emb_rows:
+            vec_index.remove(r["message_id"])
+
     mid = _uuid()
     now = _now()
     with db.transaction() as conn:
@@ -902,6 +913,8 @@ def delete_messages_after_position(
     conversation_id: str,
     position: int,
     data_dir: Path | None = None,
+    *,
+    vec_index: Any | None = None,
 ) -> int:
     msgs = db.execute_fetchall(
         "SELECT id FROM messages WHERE conversation_id = ? AND position > ?",
@@ -910,6 +923,16 @@ def delete_messages_after_position(
     msg_ids = [dict(m)["id"] for m in msgs]
     if not msg_ids:
         return 0
+
+    # Remove vectors from usearch before CASCADE deletes metadata
+    if vec_index is not None:
+        in_clause, in_params = _in_clause(msg_ids)
+        emb_rows = db.execute_fetchall(
+            f"SELECT message_id FROM message_embeddings WHERE message_id IN {in_clause}",
+            tuple(in_params),
+        )
+        for r in emb_rows:
+            vec_index.remove(r["message_id"])
 
     if data_dir:
         in_clause, in_params = _in_clause(msg_ids)

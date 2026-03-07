@@ -4200,6 +4200,7 @@ async def _run_repl(
                         to_position=target_pos,
                         undo_files=undo_files,
                         working_dir=working_dir,
+                        vec_index=vec_manager.messages if vec_manager and vec_manager.enabled else None,
                     )
 
                     ai_messages = _load_conversation_messages(db, conv["id"])

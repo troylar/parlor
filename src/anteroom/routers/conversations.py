@@ -363,7 +363,15 @@ async def replace_document(conversation_id: str, body: DocumentContent, request:
     if conv.get("type") != "document":
         raise HTTPException(status_code=400, detail="Only document conversations support full content replacement")
     uid, uname = _get_identity(request)
-    msg = storage.replace_document_content(db, conversation_id, body.content, user_id=uid, user_display_name=uname)
+    _vm = getattr(request.app.state, "vec_manager", None)
+    msg = storage.replace_document_content(
+        db,
+        conversation_id,
+        body.content,
+        user_id=uid,
+        user_display_name=uname,
+        vec_index=_vm.messages if _vm else None,
+    )
     return msg
 
 
@@ -376,7 +384,14 @@ async def delete_messages_after(conversation_id: str, request: Request, after_po
         raise HTTPException(status_code=404, detail="Conversation not found")
     data_dir = request.app.state.config.app.data_dir
     # SECURITY-REVIEW: after_position is int via Query(ge=0); all queries use parameterized ?
-    storage.delete_messages_after_position(db, conversation_id, after_position, data_dir)
+    _vm = getattr(request.app.state, "vec_manager", None)
+    storage.delete_messages_after_position(
+        db,
+        conversation_id,
+        after_position,
+        data_dir,
+        vec_index=_vm.messages if _vm else None,
+    )
     return None
 
 
@@ -395,12 +410,14 @@ async def rewind_conversation(conversation_id: str, body: RewindRequest, request
 
     data_dir = request.app.state.config.app.data_dir
     # SECURITY-REVIEW: to_position validated against known positions; parameterized queries throughout
+    _vm = getattr(request.app.state, "vec_manager", None)
     result = await rewind_service(
         db=db,
         conversation_id=conversation_id,
         to_position=body.to_position,
         undo_files=body.undo_files,
         data_dir=data_dir,
+        vec_index=_vm.messages if _vm else None,
     )
 
     return RewindResponse(

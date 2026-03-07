@@ -103,6 +103,8 @@ async def rewind_conversation(
     undo_files: bool = False,
     data_dir: Path | None = None,
     working_dir: str | None = None,
+    *,
+    vec_index: Any | None = None,
 ) -> RewindResult:
     """Rewind a conversation to a given position, optionally reverting file changes.
 
@@ -121,5 +123,11 @@ async def rewind_conversation(
         file_paths = collect_file_paths(db, msg_ids)
         result.reverted_files, result.skipped_files = await revert_files(file_paths, working_dir)
 
-    result.deleted_messages = storage.delete_messages_after_position(db, conversation_id, to_position, data_dir)
+    result.deleted_messages = storage.delete_messages_after_position(
+        db,
+        conversation_id,
+        to_position,
+        data_dir,
+        vec_index=vec_index,
+    )
     return result
