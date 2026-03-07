@@ -3266,7 +3266,7 @@ class TestRenderWelcomeFirstRunLayout:
             )
             lines = self._printed(mc)
             # Find the "Getting started:" line
-            gs_idx = next(i for i, l in enumerate(lines) if "Getting started:" in l)
+            gs_idx = next(i for i, line in enumerate(lines) if "Getting started:" in line)
             # Next 3 lines should be the hints
             assert "Just type a message" in lines[gs_idx + 1]
             assert "/space init" in lines[gs_idx + 2]
@@ -3288,7 +3288,7 @@ class TestRenderWelcomeFirstRunLayout:
             )
             lines = self._printed(mc)
             # The returning-user hint should not appear
-            single_help_lines = [l for l in lines if "Type /help for commands" in l and "Getting" not in l]
+            single_help_lines = [line for line in lines if "Type /help for commands" in line and "Getting" not in line]
             assert len(single_help_lines) == 0
 
     def test_returning_user_does_not_show_getting_started(self) -> None:
