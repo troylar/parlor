@@ -80,6 +80,46 @@ class TestServerBootstrap:
         section = resp.text[start:end] if start >= 0 and end >= 0 else ""
         assert "onclick" not in section, "Inline onclick handlers violate CSP"
 
+    def test_welcome_chat_js_has_action_handler(self, base_url: str) -> None:
+        """chat.js must contain the delegated click handler for welcome actions."""
+        import httpx
+
+        resp = httpx.get(f"{base_url}/", follow_redirects=True)
+        html = resp.text
+        # Extract the chat.js URL from the HTML
+        import re
+
+        match = re.search(r'src="(/js/chat\.js[^"]*)"', html)
+        assert match, "chat.js script tag not found"
+        js_resp = httpx.get(f"{base_url}{match.group(1)}")
+        js_resp.raise_for_status()
+        js = js_resp.text
+        # Verify the handler dispatches all 3 actions
+        assert "data-action" in js, "click handler must use data-action selector"
+        assert 'action === "chat"' in js or "action === 'chat'" in js, "handler must dispatch chat action"
+        assert 'action === "settings"' in js or "action === 'settings'" in js, "handler must dispatch settings action"
+        assert 'action === "space"' in js or "action === 'space'" in js, "handler must dispatch space action"
+        assert "openSettings" in js, "handler must call openSettings for settings action"
+        assert "btn-space-add" in js, "handler must target btn-space-add for space action"
+        assert ".focus()" in js, "handler must focus input for chat action"
+
+    def test_welcome_html_and_js_actions_match(self, base_url: str) -> None:
+        """The data-action values in the HTML must match those handled in chat.js."""
+        import re
+
+        import httpx
+
+        resp = httpx.get(f"{base_url}/", follow_redirects=True)
+        html_actions = set(re.findall(r'data-action="(\w+)"', resp.text))
+        assert html_actions == {"chat", "settings", "space"}
+        # Also verify chat.js _getWelcomeHtml produces the same actions
+        match = re.search(r'src="(/js/chat\.js[^"]*)"', resp.text)
+        assert match
+        js = httpx.get(f"{base_url}{match.group(1)}").text
+        js_actions = set(re.findall(r'data-action="(\w+)"', js))
+        # JS template should define the same 3 actions
+        assert js_actions == html_actions, f"HTML actions {html_actions} != JS template actions {js_actions}"
+
     def test_security_headers_present(self, base_url: str) -> None:
         """Index response should include security headers."""
         import httpx
