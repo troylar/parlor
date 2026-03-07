@@ -1,6 +1,9 @@
 # Spaces
 
-Spaces are the universal unit of workspace configuration. They group conversations under a shared context with custom instructions and per-space model selection.
+Spaces are saved workspace contexts. Think of them as profiles for different projects or roles &mdash; each with its own instructions, model, folders, and conversations.
+
+!!! example "Use case"
+    Your coding space uses Claude with a developer prompt. Your writing space uses GPT-4 with an editorial voice. Switch between them from the sidebar.
 
 ## How Spaces Work
 
@@ -19,9 +22,6 @@ Spaces can exist in two forms:
 
 - **DB-only** --- created in the web UI or CLI, stored in SQLite. Lightweight and immediate.
 - **File-backed** --- defined in a `space.yaml` file. Portable, git-committable, and auto-detected when you `cd` into a mapped directory.
-
-!!! example "Use case"
-    Your coding space uses Claude with a developer prompt. Your writing space uses GPT-4 with an editorial voice. Each space maintains its own context.
 
 ## Folders
 

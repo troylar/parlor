@@ -1,6 +1,17 @@
 # Spaces
 
-Spaces are named workspaces that bundle repos, packs, sources, instructions, and config overrides into a single YAML file. Activate a space to reconfigure Anteroom for a specific project, team, or workflow.
+## Why Spaces?
+
+Different projects need different AI configurations. Your frontend project might use GPT-4o with React coding standards, while your data pipeline uses Claude with PEP 8 rules and access to internal docs. Spaces let you save these configurations and switch between them instantly.
+
+**What a space gives you:**
+
+- **Custom instructions** injected into every conversation
+- **Per-space model selection** (or use the global default)
+- **Linked sources** for RAG context (docs, URLs, code)
+- **Config overrides** for safety settings, tool access, and more
+
+Create a space for a project directory and Anteroom auto-detects it when you `cd` in. No flags needed.
 
 ## What's What
 

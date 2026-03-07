@@ -76,4 +76,4 @@ GitHub Actions runs on every push and PR:
 | **MCP** | Model Context Protocol SDK (stdio + SSE) |
 | **Streaming** | Server-Sent Events (SSE) |
 | **Typography** | Inter + JetBrains Mono (self-hosted WOFF2) |
-| **Security** | OWASP ASVS L1, SRI, CSP, CSRF, rate limiting |
+| **Security** | OWASP ASVS L2, SRI, CSP, CSRF, rate limiting |

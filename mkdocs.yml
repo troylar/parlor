@@ -76,6 +76,7 @@ extra_css:
 
 nav:
   - Home: index.md
+  - Start Here: start-here.md
   - Getting Started:
     - getting-started/installation.md
     - getting-started/quickstart.md
@@ -83,7 +84,7 @@ nav:
   - Web UI:
     - web-ui/index.md
     - web-ui/conversations.md
-    - web-ui/projects.md
+    - web-ui/spaces.md
     - web-ui/streaming.md
     - web-ui/themes.md
     - web-ui/keyboard-shortcuts.md
@@ -115,7 +116,7 @@ nav:
     - api/index.md
     - api/conversations.md
     - api/messages.md
-    - api/projects.md
+    - api/spaces.md
     - api/config.md
   - Packs & Artifacts:
     - packs/index.md

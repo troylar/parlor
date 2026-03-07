@@ -1,6 +1,16 @@
 # Packs & Artifacts
 
-Packs and artifacts are Anteroom's extensibility system. They let you package skills, rules, instructions, config overlays, and MCP server configs into installable, versioned bundles — and distribute them via git.
+## Why Packs?
+
+Your team has coding standards, security policies, prompt templates, and model preferences. Without packs, everyone configures these independently &mdash; or doesn't. Packs let you bundle all of it into a single installable package and share it via git. Install once, stay in sync automatically.
+
+**Common examples:**
+
+- A **compliance pack** with regulatory rules and review skills
+- A **DevOps pack** with deployment skills and safety overrides
+- A **writing pack** with editorial skills and style instructions
+
+You don't need to create packs to benefit from them &mdash; install one that someone else built, and your AI immediately follows those conventions.
 
 ## What's What
 

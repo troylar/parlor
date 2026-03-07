@@ -15,7 +15,7 @@ Your browser opens to `http://127.0.0.1:8080`.
 | Feature | Description |
 |---|---|
 | [Conversations](conversations.md) | Create, search, fork, rewind, edit, export |
-| [Spaces](projects.md) | Group conversations with custom instructions and models |
+| [Spaces](spaces.md) | Group conversations with custom instructions and models |
 | [Streaming](streaming.md) | Token-by-token SSE streaming with prompt queue |
 | Canvas | AI-generated rich content panels rendered alongside chat in real-time |
 | [Themes](themes.md) | 4 built-in themes with instant switching |

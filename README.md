@@ -5,11 +5,7 @@
 <h1 align="center">Anteroom</h1>
 
 <p align="center">
-  <em>Your employees are already using ChatGPT. Your compliance team doesn't know.</em>
-</p>
-
-<p align="center">
-  <strong>Give your whole org AI &mdash; without giving up control.</strong>
+  <strong>Private AI that actually does things.</strong>
 </p>
 
 <p align="center">
@@ -28,7 +24,7 @@
 <p align="center">
   <a href="https://anteroom.readthedocs.io">Docs</a> &bull;
   <a href="#get-running-in-60-seconds">Quick Start</a> &bull;
-  <a href="#why-anteroom">Why Anteroom?</a> &bull;
+  <a href="#what-you-can-do">What You Can Do</a> &bull;
   <a href="https://anteroom.readthedocs.io/en/latest/advanced/changelog/">Changelog</a>
 </p>
 
@@ -44,37 +40,13 @@
 
 <br>
 
-## The backstory
+## What you can do
 
-I'm a CTO at a Fortune 500 in a regulated industry where we can't use third-party AI tools &mdash; no ChatGPT, no Claude Code, no Cursor, no Copilot. But we *can* `pip install` open-source packages.
+**Chat securely.** Talk to any LLM through a polished web UI or terminal &mdash; without sending data to third parties. Connect Azure OpenAI, Ollama, OpenAI, or any OpenAI-compatible endpoint. Go fully offline with local models.
 
-So I built Anteroom: a self-hosted AI gateway with a polished web UI for everyone on the team and an agentic CLI for developers. It connects to **any OpenAI-compatible API** &mdash; Azure OpenAI, Ollama, LM Studio, or your company's internal endpoint. Zero telemetry, no phone-home &mdash; data only goes to the LLM endpoint you choose. Go fully offline with local models.
+**Get real work done.** The AI reads files, edits code, runs commands, generates documents, creates presentations, and spawns parallel sub-agents &mdash; with safety gates at every step. This isn't just chat.
 
-JPMorgan built a private AI gateway for 250,000 employees. Goldman Sachs built one for 46,500. Anteroom gives every regulated institution the same capability &mdash; without a nine-figure technology budget.
-
-<br>
-
----
-
-<br>
-
-## Why Anteroom?
-
-**38% of employees paste confidential data into unauthorized AI tools.** Marketing teams, executives, and product owners are the worst offenders &mdash; not developers. Shadow AI breaches cost $650K+ per incident.
-
-Cloud-hosted AI sends your data to third parties. Self-hosted chat UIs can't actually *do* anything. Building a custom platform costs millions.
-
-Anteroom threads the needle:
-
-| Problem | Anteroom |
-|---------|----------|
-| "AI tools send our data to the cloud" | Self-hosted. Zero telemetry. Data only goes to the endpoint you choose. |
-| "Chat AI can't actually do things" | Agentic: edits files, runs commands, generates documents, creates presentations |
-| "Our compliance team won't approve it" | OWASP ASVS L2 security, HMAC-chained audit logs, DLP, bash sandboxing |
-| "It only works for developers" | Web UI for everyone + CLI for developers, same governed platform |
-| "We can't control costs at scale" | Token budgets per-request, per-user, per-day |
-| "We're locked into one AI vendor" | Any OpenAI-compatible API &mdash; Azure, Ollama, local models |
-| "It takes months to deploy" | `pip install anteroom && aroom init` &mdash; done in 60 seconds |
+**Share team conventions.** Package your team's rules, skills, and config into shareable bundles called *packs*. Everyone gets the same coding standards, security policies, and prompt templates &mdash; automatically.
 
 <br>
 
@@ -189,47 +161,6 @@ The AI reads files, edits code, runs commands, searches your codebase, generates
 
 ---
 
-### Packs: shareable AI capabilities
-
-Packs are versioned, git-distributed bundles with **7 artifact types**: skills, rules, instructions, context, memory, MCP servers, and config overlays. Build a "compliance pack" with regulatory rules, a "marketing pack" with brand guidelines, a "DevOps pack" with deployment skills &mdash; and share them across teams.
-
-```bash
-aroom pack install https://github.com/example/compliance-pack
-aroom pack list
-```
-
-Packs use a 6-layer precedence system (built-in &rarr; global &rarr; team &rarr; project &rarr; local &rarr; inline) so departments can customize without weakening security controls.
-
----
-
-### Spaces: named workspaces
-
-Spaces bundle repositories, tools, configs, and packs into named workspaces. Different teams, different projects, different configurations &mdash; centrally governed.
-
-```bash
-aroom space create my-space --repo ./frontend --repo ./backend
-aroom chat --space my-space
-```
-
----
-
-### Enterprise-grade security
-
-Built to [OWASP ASVS Level 2](SECURITY.md) standards. Not bolted on &mdash; baked in.
-
-- **Tool safety gate**: 4 risk tiers, 4 approval modes, 3 permission scopes
-- **16 hard-block patterns**: Catastrophic commands blocked unconditionally
-- **Bash sandboxing**: Execution timeouts, output limits, path/command blocking, network restrictions
-- **Prompt injection defense**: Trust classification, defensive XML envelopes, tag breakout prevention
-- **Tamper-evident audit log**: HMAC-SHA256 chained JSONL, daily rotation, content redaction, SIEM-ready
-- **Session hardening**: Ed25519 identity, concurrent session limits, IP allowlisting
-- **Token budgets**: Per-request, per-conversation, per-day limits (cost governance at scale)
-- **Sub-agent isolation**: Concurrency, depth, iteration, timeout, and output caps
-- **Team config enforcement**: Lock security settings across the entire organization
-- **DLP**: Configurable data loss prevention rules
-
----
-
 ### Works with any LLM
 
 Any endpoint that speaks the OpenAI protocol, plus 100+ providers via LiteLLM:
@@ -264,6 +195,17 @@ mcp_servers:
 
 ---
 
+### Knowledge sources
+
+Upload documents (PDFs, DOCX, code) via CLI or web UI drag-and-drop. Text is automatically extracted and indexed for semantic search with local vector embeddings &mdash; no external API needed.
+
+```bash
+pip install anteroom[docs]        # adds PDF/DOCX text extraction
+pip install anteroom[embeddings]  # adds local vector search
+```
+
+---
+
 ### Planning mode
 
 For complex tasks, the AI explores first, writes a plan, then executes only after you approve. Works in both CLI and web UI.
@@ -276,16 +218,89 @@ For complex tasks, the AI explores first, writes a plan, then executes only afte
   Executing plan: 8 steps across 5 files...
 ```
 
+<br>
+
 ---
 
-### Knowledge sources
+<br>
 
-Upload documents (PDFs, DOCX, code) via CLI or web UI drag-and-drop. Text is automatically extracted and indexed for semantic search with local vector embeddings &mdash; no external API needed.
+## Optional: packs and spaces
+
+These are power features you can adopt when you need them. They're not required to use Anteroom.
+
+### Packs: shareable AI capabilities
+
+Packs bundle skills, rules, instructions, and config overlays into versioned, git-distributed packages. Build a "compliance pack" with regulatory rules, a "marketing pack" with brand guidelines, a "DevOps pack" with deployment skills &mdash; and share them across teams.
 
 ```bash
-pip install anteroom[docs]        # adds PDF/DOCX text extraction
-pip install anteroom[embeddings]  # adds local vector search
+aroom pack install https://github.com/example/compliance-pack
+aroom pack list
 ```
+
+### Spaces: named workspaces
+
+Spaces bundle repositories, tools, configs, and packs into named workspaces. Different teams, different projects, different configurations &mdash; centrally governed.
+
+```bash
+aroom space create my-space --repo ./frontend --repo ./backend
+aroom chat --space my-space
+```
+
+<br>
+
+---
+
+<br>
+
+## Enterprise-grade security
+
+Built to [OWASP ASVS Level 2](SECURITY.md) standards. Not bolted on &mdash; baked in.
+
+- **Tool safety gate**: 4 risk tiers, 4 approval modes, 3 permission scopes
+- **16 hard-block patterns**: Catastrophic commands blocked unconditionally
+- **Bash sandboxing**: Execution timeouts, output limits, path/command blocking, network restrictions
+- **Prompt injection defense**: Trust classification, defensive XML envelopes, tag breakout prevention
+- **Tamper-evident audit log**: HMAC-SHA256 chained JSONL, daily rotation, content redaction, SIEM-ready
+- **Session hardening**: Ed25519 identity, concurrent session limits, IP allowlisting
+- **Token budgets**: Per-request, per-conversation, per-day limits (cost governance at scale)
+- **Sub-agent isolation**: Concurrency, depth, iteration, timeout, and output caps
+- **Team config enforcement**: Lock security settings across the entire organization
+- **DLP**: Configurable data loss prevention rules
+
+<br>
+
+---
+
+<br>
+
+## Why Anteroom?
+
+**38% of employees paste confidential data into unauthorized AI tools.** Marketing teams, executives, and product owners are the worst offenders &mdash; not developers. Shadow AI breaches cost $650K+ per incident.
+
+Cloud-hosted AI sends your data to third parties. Self-hosted chat UIs can't actually *do* anything. Building a custom platform costs millions.
+
+Anteroom threads the needle:
+
+| Problem | Anteroom |
+|---------|----------|
+| "AI tools send our data to the cloud" | Self-hosted. Zero telemetry. Data only goes to the endpoint you choose. |
+| "Chat AI can't actually do things" | Agentic: edits files, runs commands, generates documents, creates presentations |
+| "Our compliance team won't approve it" | OWASP ASVS L2 security, HMAC-chained audit logs, DLP, bash sandboxing |
+| "It only works for developers" | Web UI for everyone + CLI for developers, same governed platform |
+| "We can't control costs at scale" | Token budgets per-request, per-user, per-day |
+| "We're locked into one AI vendor" | Any OpenAI-compatible API &mdash; Azure, Ollama, local models |
+| "It takes months to deploy" | `pip install anteroom && aroom init` &mdash; done in 60 seconds |
+
+<details>
+<summary><strong>The backstory</strong></summary>
+
+I'm a CTO at a Fortune 500 in a regulated industry where we can't use third-party AI tools &mdash; no ChatGPT, no Claude Code, no Cursor, no Copilot. But we *can* `pip install` open-source packages.
+
+So I built Anteroom: a self-hosted AI gateway with a polished web UI for everyone on the team and an agentic CLI for developers. It connects to **any OpenAI-compatible API** &mdash; Azure OpenAI, Ollama, LM Studio, or your company's internal endpoint. Zero telemetry, no phone-home &mdash; data only goes to the LLM endpoint you choose.
+
+JPMorgan built a private AI gateway for 250,000 employees. Goldman Sachs built one for 46,500. Anteroom gives every regulated institution the same capability &mdash; without a nine-figure technology budget.
+
+</details>
 
 <br>
 

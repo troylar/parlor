@@ -1,16 +1,46 @@
 # Anteroom
 
-**A private anteroom for AI conversation.**
+**Private AI that actually does things.**
 
-Self-hosted ChatGPT-style web UI **and** agentic CLI that connects to any OpenAI-compatible API. Install with pip. Run locally. Own your data.
+Self-hosted AI gateway with a web UI **and** agentic CLI. Connects to any OpenAI-compatible API. Install with pip. Run locally. Own your data.
 
 ![Anteroom - Midnight Theme](screenshots/theme-midnight.png)
 
 ---
 
-## Two Interfaces, One Brain
+## What You Can Do
 
-Anteroom gives you two ways to interact with your AI --- a polished **web UI** and a powerful **agentic CLI** --- both backed by the same conversation database and agent loop.
+<div class="grid cards" markdown>
+
+-   **Chat securely**
+
+    ---
+
+    Talk to any LLM through a polished web UI or terminal. Your data stays on your machine &mdash; nothing goes anywhere except the endpoint you choose.
+
+    [:octicons-arrow-right-24: Start Here](start-here.md)
+
+-   **Get real work done**
+
+    ---
+
+    The AI edits files, runs commands, generates documents, creates presentations, and searches your codebase &mdash; with safety gates at every step.
+
+    [:octicons-arrow-right-24: CLI tools](cli/tools.md)
+
+-   **Share team conventions**
+
+    ---
+
+    Package rules, skills, and config into shareable packs. Everyone gets the same coding standards, security policies, and prompt templates.
+
+    [:octicons-arrow-right-24: Packs](packs/index.md)
+
+</div>
+
+## Two Interfaces, One Engine
+
+Anteroom gives you two ways to interact with your AI &mdash; a polished **web UI** and a powerful **agentic CLI** &mdash; both backed by the same conversation database and agent loop.
 
 <div class="grid cards" markdown>
 
@@ -37,16 +67,15 @@ Anteroom gives you two ways to interact with your AI --- a polished **web UI** a
 | Feature | Details |
 |---|---|
 | **Any OpenAI-compatible API** | OpenAI, Azure, Ollama, LM Studio, vLLM, or any endpoint that speaks the OpenAI protocol |
-| **Agentic tool use** | Read files, write code, run commands, search codebases --- up to 50 tool iterations per turn |
+| **Agentic tool use** | Read files, write code, run commands, search codebases &mdash; up to 50 tool iterations per turn |
 | **Parallel tool execution** | Multiple tool calls in one response run concurrently via `asyncio.as_completed` |
-| **Prompt queuing** | Type while the AI is working --- messages queue and process in FIFO order |
+| **Prompt queuing** | Type while the AI is working &mdash; messages queue and process in FIFO order |
 | **MCP integration** | Connect stdio or SSE-based MCP servers for external tool access |
 | **Full-text search** | FTS5-powered search across all messages and conversation titles |
 | **Spaces & folders** | Organize conversations with space-scoped instructions, folders, and color-coded tags |
-| **4 themes** | Midnight, Dawn, Aurora, Ember --- switch instantly via command palette |
-| **Security-first** | OWASP ASVS L1 compliant: CSP, CSRF, SRI, rate limiting, HSTS |
+| **4 themes** | Midnight, Dawn, Aurora, Ember &mdash; switch instantly via command palette |
+| **Security-first** | OWASP ASVS L2 compliant: CSP, CSRF, SRI, rate limiting, HSTS |
 | **Packs & artifacts** | Package skills, rules, instructions, and config overlays into installable packs. Distribute via git, auto-refresh in background |
-| **6-layer precedence** | Built-in → global → team → project → local → inline. Higher layers override lower. Fine-grained control over what the agent sees |
 | **Local-first** | SQLite-backed, no cloud, no telemetry. Everything stays on your machine |
 
 ## Quick Install
@@ -82,4 +111,4 @@ $ aroom chat      # Launch CLI
 | **Database** | SQLite with FTS5 full-text search, WAL journaling |
 | **AI** | OpenAI Python SDK (async streaming) |
 | **MCP** | Model Context Protocol SDK (stdio + SSE transports) |
-| **Security** | OWASP ASVS L1 compliance, SRI, CSP, CSRF, rate limiting |
+| **Security** | OWASP ASVS L2 compliance, SRI, CSP, CSRF, rate limiting |
