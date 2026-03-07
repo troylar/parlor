@@ -1455,7 +1455,11 @@ def render_welcome(
         console.print(f"  [{MUTED}]Packs: {', '.join(pack_names)}[/{MUTED}]")
     console.print()
     if is_first_run:
-        console.print(f"  [{MUTED}]New here? Type /help for commands, or ask me anything.[/{MUTED}]\n")
+        console.print(f"  [{GOLD}]Getting started:[/{GOLD}]")
+        console.print(f"  [{MUTED}]Just type a message to start chatting[/{MUTED}]")
+        console.print(f"  [{MUTED}]/space init   \u2014 set up a workspace with custom instructions[/{MUTED}]")
+        console.print(f"  [{MUTED}]/help         \u2014 see all commands[/{MUTED}]")
+        console.print()
     else:
         console.print(f"  [{MUTED}]Type /help for commands[/{MUTED}]\n")
 

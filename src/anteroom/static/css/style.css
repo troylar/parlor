@@ -1304,27 +1304,76 @@ body {
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
-.welcome-tips {
-    margin-top: 24px;
+.welcome-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 28px;
+    max-width: 380px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.welcome-action {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
     text-align: left;
-    display: inline-block;
+    color: var(--text-primary);
+    transition: background 0.15s var(--easing), border-color 0.15s var(--easing);
 }
-.welcome-tips ul {
-    list-style: none;
-    padding: 0;
-    margin-top: 8px;
+.welcome-action:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
 }
-.welcome-tips li {
-    padding: 4px 0;
-    font-size: 13px;
+.welcome-action-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--bg-sidebar);
+    color: var(--accent);
 }
-.welcome-tips li strong {
-    font-family: var(--font-mono);
+.welcome-action-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.welcome-action-text strong {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.welcome-action-text span {
     font-size: 12px;
-    padding: 2px 6px;
+    color: var(--text-secondary);
+}
+.welcome-tips {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.welcome-tips strong {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 1px 5px;
     background: var(--bg-input);
     border-radius: 4px;
     border: 1px solid var(--border-color);
+}
+.welcome-tip-sep {
+    opacity: 0.4;
 }
 
 @keyframes fadeIn {

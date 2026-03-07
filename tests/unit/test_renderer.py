@@ -3154,7 +3154,7 @@ class TestRenderWelcome:
             assert "skills" not in output
             assert "packs" not in output
             assert "Packs:" not in output
-            assert "New here?" not in output
+            assert "Getting started:" not in output
             assert "Type /help for commands" in output
 
     def test_shows_skill_count(self) -> None:
@@ -3187,8 +3187,10 @@ class TestRenderWelcome:
         with patch("anteroom.cli.renderer.console") as mc:
             self._render(is_first_run=True)
             output = self._printed(mc)
-            assert "New here? Type /help for commands, or ask me anything." in output
-            assert output.count("Type /help") == 1
+            assert "Getting started:" in output
+            assert "Just type a message to start chatting" in output
+            assert "/space init" in output
+            assert "/help" in output
 
     def test_returning_user_hint(self) -> None:
         with patch("anteroom.cli.renderer.console") as mc:
@@ -3231,6 +3233,81 @@ class TestRenderWelcome:
             packs_pos = info_line.index("3 packs")
             instructions_pos = info_line.index("instructions")
             assert tools_pos < skills_pos < packs_pos < instructions_pos
+
+
+class TestRenderWelcomeFirstRunLayout:
+    """Visual layout tests for first-run onboarding output (#798).
+
+    Validates the full structure of the getting-started block to catch
+    formatting regressions that simple string asserts would miss.
+    """
+
+    @staticmethod
+    def _printed(mock_console: object) -> list[str]:
+        lines = []
+        for c in mock_console.print.call_args_list:  # type: ignore[union-attr]
+            if c[0]:
+                lines.append(str(c[0][0]))
+            else:
+                lines.append("")
+        return lines
+
+    def test_first_run_block_structure(self) -> None:
+        """First-run output has: Getting started header, 3 hint lines, blank line."""
+        from anteroom.cli.renderer import render_welcome
+
+        with patch("anteroom.cli.renderer.console") as mc:
+            render_welcome(
+                model="gpt-4o",
+                tool_count=12,
+                instructions_loaded=False,
+                working_dir="/tmp",
+                is_first_run=True,
+            )
+            lines = self._printed(mc)
+            # Find the "Getting started:" line
+            gs_idx = next(i for i, line in enumerate(lines) if "Getting started:" in line)
+            # Next 3 lines should be the hints
+            assert "Just type a message" in lines[gs_idx + 1]
+            assert "/space init" in lines[gs_idx + 2]
+            assert "/help" in lines[gs_idx + 3]
+            # Followed by a blank line (empty print call)
+            assert lines[gs_idx + 4] == ""
+
+    def test_first_run_does_not_show_returning_user_hint(self) -> None:
+        """First-run should NOT show the compact 'Type /help' line."""
+        from anteroom.cli.renderer import render_welcome
+
+        with patch("anteroom.cli.renderer.console") as mc:
+            render_welcome(
+                model="gpt-4o",
+                tool_count=12,
+                instructions_loaded=False,
+                working_dir="/tmp",
+                is_first_run=True,
+            )
+            lines = self._printed(mc)
+            # The returning-user hint should not appear
+            single_help_lines = [line for line in lines if "Type /help for commands" in line and "Getting" not in line]
+            assert len(single_help_lines) == 0
+
+    def test_returning_user_does_not_show_getting_started(self) -> None:
+        """Returning user should see compact hint, not the full getting-started block."""
+        from anteroom.cli.renderer import render_welcome
+
+        with patch("anteroom.cli.renderer.console") as mc:
+            render_welcome(
+                model="gpt-4o",
+                tool_count=12,
+                instructions_loaded=False,
+                working_dir="/tmp",
+                is_first_run=False,
+            )
+            lines = self._printed(mc)
+            full_output = "\n".join(lines)
+            assert "Getting started:" not in full_output
+            assert "/space init" not in full_output
+            assert "Type /help for commands" in full_output
 
 
 class TestToolTicker:

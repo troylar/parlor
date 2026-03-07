@@ -1483,7 +1483,7 @@ const App = (() => {
     return {
         state, api, _handle401, _getCsrfToken, _selectModel, newConversation, loadConversation,
         loadDatabases, addDatabase, loadSpaces, refreshModels, formatTimestamp,
-        getTheme, setTheme, THEMES, openMcpModal,
+        getTheme, setTheme, THEMES, openMcpModal, openSettings,
         setPlanMode, _showPlanContent, _debugLog,
     };
 })();
