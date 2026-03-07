@@ -45,13 +45,14 @@ class ArtifactRegistry:
     # Loading
     # ------------------------------------------------------------------
 
-    def load_from_db(self, db: ThreadSafeConnection) -> None:
-        """Load all artifacts from the database, applying layer precedence.
+    def load_from_db(self, db: ThreadSafeConnection, *, space_id: str | None = None) -> None:
+        """Load artifacts from the database, applying layer precedence.
 
+        Only loads artifacts from attached packs (+ standalone artifacts).
         Artifacts are sorted by source layer so that higher-precedence
         sources overwrite lower ones when FQNs collide.
         """
-        rows = list_artifacts(db)
+        rows = list_artifacts(db, attached_only=True, space_id=space_id)
         new_artifacts: dict[str, Artifact] = {}
 
         # Sort by layer precedence so later layers overwrite earlier

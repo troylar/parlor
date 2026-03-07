@@ -510,6 +510,148 @@ class TestArtifactRegistry:
         assert ArtifactRegistry.reload is ArtifactRegistry.load_from_db
 
 
+class TestArtifactRegistryAttachmentFiltering:
+    """Verify load_from_db only loads artifacts from attached packs."""
+
+    def _install_pack(self, db: ThreadSafeConnection, ns: str, name: str) -> str:
+        """Insert a pack and return its id."""
+        import uuid
+        from datetime import datetime, timezone
+
+        pack_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO packs (id, namespace, name, version, installed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (pack_id, ns, name, "1.0.0", now, now),
+        )
+        return pack_id
+
+    def _link_artifact_to_pack(self, db: ThreadSafeConnection, pack_id: str, artifact_id: str) -> None:
+        db.execute("INSERT INTO pack_artifacts (pack_id, artifact_id) VALUES (?, ?)", (pack_id, artifact_id))
+
+    def _attach_pack(
+        self, db: ThreadSafeConnection, pack_id: str, scope: str = "global", space_id: str | None = None
+    ) -> None:
+        import uuid
+        from datetime import datetime, timezone
+
+        att_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO pack_attachments (id, pack_id, scope, space_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (att_id, pack_id, scope, space_id, now),
+        )
+
+    def test_standalone_artifacts_always_loaded(self, db: ThreadSafeConnection) -> None:
+        """Artifacts not linked to any pack are always loaded."""
+        create_artifact(db, "@a/skill/standalone", "skill", "a", "standalone", "content")
+        reg = ArtifactRegistry()
+        reg.load_from_db(db)
+        assert reg.get("@a/skill/standalone") is not None
+
+    def test_attached_pack_artifacts_loaded(self, db: ThreadSafeConnection) -> None:
+        """Artifacts from an attached pack are loaded."""
+        pack_id = self._install_pack(db, "test", "mypack")
+        art = create_artifact(db, "@test/skill/hello", "skill", "test", "hello", "content")
+        self._link_artifact_to_pack(db, pack_id, art["id"])
+        self._attach_pack(db, pack_id)
+        db.commit()
+
+        reg = ArtifactRegistry()
+        reg.load_from_db(db)
+        assert reg.get("@test/skill/hello") is not None
+
+    def test_unattached_pack_artifacts_excluded(self, db: ThreadSafeConnection) -> None:
+        """Artifacts from installed-but-not-attached packs are excluded."""
+        pack_id = self._install_pack(db, "test", "mypack")
+        art = create_artifact(db, "@test/skill/hello", "skill", "test", "hello", "content")
+        self._link_artifact_to_pack(db, pack_id, art["id"])
+        # No attach call — pack is installed but not attached
+        db.commit()
+
+        reg = ArtifactRegistry()
+        reg.load_from_db(db)
+        assert reg.get("@test/skill/hello") is None
+
+    def test_config_overlay_excluded_from_attached_only(self, db: ThreadSafeConnection) -> None:
+        """Config overlays are excluded — they load via collect_pack_overlays."""
+        pack_id = self._install_pack(db, "test", "cfgpack")
+        art = create_artifact(db, "@test/config_overlay/safety", "config_overlay", "test", "safety", "key: val")
+        self._link_artifact_to_pack(db, pack_id, art["id"])
+        self._attach_pack(db, pack_id)
+        db.commit()
+
+        reg = ArtifactRegistry()
+        reg.load_from_db(db)
+        assert reg.get("@test/config_overlay/safety") is None
+
+    def test_space_scoped_attachment_loaded(self, db: ThreadSafeConnection) -> None:
+        """Artifacts from a space-scoped attached pack are loaded when space matches."""
+        import uuid
+        from datetime import datetime, timezone
+
+        # Create a space
+        sid = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO spaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)", (sid, "TestSpace", now, now)
+        )
+
+        pack_id = self._install_pack(db, "test", "spacepk")
+        art = create_artifact(db, "@test/skill/spaced", "skill", "test", "spaced", "content")
+        self._link_artifact_to_pack(db, pack_id, art["id"])
+        self._attach_pack(db, pack_id, scope="space", space_id=sid)
+        db.commit()
+
+        reg = ArtifactRegistry()
+        reg.load_from_db(db, space_id=sid)
+        assert reg.get("@test/skill/spaced") is not None
+
+    def test_space_scoped_attachment_excluded_wrong_space(self, db: ThreadSafeConnection) -> None:
+        """Artifacts from a space-scoped pack are excluded when space doesn't match."""
+        import uuid
+        from datetime import datetime, timezone
+
+        sid = str(uuid.uuid4())
+        other_sid = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO spaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)", (sid, "Space1", now, now)
+        )
+        db.execute(
+            "INSERT INTO spaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)", (other_sid, "Space2", now, now)
+        )
+
+        pack_id = self._install_pack(db, "test", "spacepk")
+        art = create_artifact(db, "@test/skill/spaced", "skill", "test", "spaced", "content")
+        self._link_artifact_to_pack(db, pack_id, art["id"])
+        self._attach_pack(db, pack_id, scope="space", space_id=sid)
+        db.commit()
+
+        reg = ArtifactRegistry()
+        reg.load_from_db(db, space_id=other_sid)
+        assert reg.get("@test/skill/spaced") is None
+
+    def test_detach_removes_from_registry(self, db: ThreadSafeConnection) -> None:
+        """After detaching, reloading the registry excludes the pack's artifacts."""
+        pack_id = self._install_pack(db, "test", "mypk")
+        art = create_artifact(db, "@test/rule/block", "rule", "test", "block", "deny all")
+        self._link_artifact_to_pack(db, pack_id, art["id"])
+        self._attach_pack(db, pack_id)
+        db.commit()
+
+        reg = ArtifactRegistry()
+        reg.load_from_db(db)
+        assert reg.get("@test/rule/block") is not None
+
+        # Detach
+        db.execute("DELETE FROM pack_attachments WHERE pack_id = ?", (pack_id,))
+        db.commit()
+
+        reg.load_from_db(db)
+        assert reg.get("@test/rule/block") is None
+
+
 class TestArtifactFromRow:
     def test_converts_row_to_artifact(self) -> None:
         row = {

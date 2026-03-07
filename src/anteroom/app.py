@@ -257,7 +257,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from .services.artifact_registry import ArtifactRegistry
 
     artifact_registry = ArtifactRegistry()
-    artifact_registry.load_from_db(app.state.db)
+    artifact_registry.load_from_db(app.state.db)  # Web UI: loads global attachments; space-scoped per-request
     app.state.artifact_registry = artifact_registry
     if artifact_registry.count:
         logger.info("Artifact registry loaded: %d artifacts", artifact_registry.count)

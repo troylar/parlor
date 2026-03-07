@@ -126,24 +126,59 @@ def list_artifacts(
     artifact_type: str | ArtifactType | None = None,
     namespace: str | None = None,
     source: str | ArtifactSource | None = None,
+    *,
+    attached_only: bool = False,
+    space_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List artifacts with optional filtering."""
+    """List artifacts with optional filtering.
+
+    When *attached_only* is True, only returns artifacts that are either:
+    - standalone (not linked to any pack via pack_artifacts), or
+    - linked to a pack that has an active attachment (global or matching *space_id*).
+
+    Config overlay artifacts are always excluded when *attached_only* is True
+    because they have their own loading path via ``collect_pack_overlays()``.
+    """
+    # When joining, prefix columns with table alias "a." to avoid ambiguity
+    pfx = "a." if attached_only else ""
     clauses: list[str] = []
     params: list[Any] = []
     if artifact_type is not None:
-        clauses.append("type = ?")
+        clauses.append(f"{pfx}type = ?")
         params.append(ArtifactType(artifact_type).value)
     if namespace is not None:
-        clauses.append("namespace = ?")
+        clauses.append(f"{pfx}namespace = ?")
         params.append(namespace)
     if source is not None:
-        clauses.append("source = ?")
+        clauses.append(f"{pfx}source = ?")
         params.append(ArtifactSource(source).value)
 
-    sql = f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts"
+    if attached_only:
+        cols = (
+            "a.id, a.fqn, a.type, a.namespace, a.name, a.content, a.content_hash, a.source, "
+            "a.metadata, a.user_id, a.user_display_name, a.created_at, a.updated_at, "
+            "(SELECT COALESCE(MAX(version), 1) FROM artifact_versions WHERE artifact_id = a.id) AS version"
+        )
+        # Exclude config_overlay — they load via collect_pack_overlays()
+        clauses.append("a.type != 'config_overlay'")
+        # Standalone artifacts (no pack link) OR artifacts from attached packs
+        clauses.append("(pa.pack_id IS NULL OR att.id IS NOT NULL)")
+        sql = (
+            f"SELECT {cols} FROM artifacts a"
+            " LEFT JOIN pack_artifacts pa ON pa.artifact_id = a.id"
+            " LEFT JOIN pack_attachments att ON att.pack_id = pa.pack_id"
+            "   AND (att.scope = 'global'"
+            "        OR (att.scope = 'space' AND att.space_id = ?))"
+        )
+        params.append(space_id or "")
+    else:
+        sql = f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts"
+
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY updated_at DESC"
+    if attached_only:
+        sql += " GROUP BY a.id"
+    sql += f" ORDER BY {pfx}updated_at DESC"
     rows = db.execute_fetchall(sql, tuple(params))
     return [_row_to_dict(r) for r in rows]
 

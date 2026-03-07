@@ -21,7 +21,7 @@ def _reload_registries(request: Request, db: Any) -> None:
     """Reload artifact registry, rule enforcer, and skill registry after pack changes."""
     registry = getattr(request.app.state, "artifact_registry", None)
     if registry is not None:
-        registry.load_from_db(db)
+        registry.load_from_db(db)  # Web UI: reloads global attachments
     rule_enforcer = getattr(request.app.state, "rule_enforcer", None)
     if rule_enforcer is not None and registry is not None:
         from ..services.artifacts import ArtifactType
