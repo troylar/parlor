@@ -5,6 +5,30 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## March 7, 2026
+
+### v1.100.1 — Spaces Get Smarter
+
+This patch release strengthens how Anteroom manages pack artifacts and space selections — two areas where subtle bugs could cause unexpected behavior in multi-space workflows.
+
+#### Attachment-Aware Artifact Registry
+
+The artifact registry now filters by pack attachment state when loading from the database. Previously, unattached pack artifacts could leak into the active registry. Now only artifacts from attached packs (or standalone artifacts) are visible, and each space sees only its own scoped packs. (#788)
+
+See [How Packs Work](../packs/how-packs-work.md) for the full artifact lifecycle and [Spaces Concepts](../spaces/concepts.md) for space-scoped registry behavior.
+
+#### Concurrent Request Safety
+
+The web UI now passes `rule_enforcer_override` through the tool execution path instead of mutating shared state, eliminating a race condition where concurrent requests in different spaces could see each other's rule enforcers. (#788)
+
+#### Space Selection Persists Across Reloads
+
+The web UI saves your selected space to `sessionStorage` and restores it on page reload. If the saved space was deleted, the UI gracefully falls back to "All Spaces." (#745)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.100.1)
+
+---
+
 ## March 6, 2026
 
 ### v1.100.0 — Packs That Enforce
