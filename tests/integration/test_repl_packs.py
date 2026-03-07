@@ -21,6 +21,7 @@ from anteroom.db import _SCHEMA, ThreadSafeConnection
 from anteroom.services.artifact_registry import ArtifactRegistry
 from anteroom.services.artifact_storage import upsert_artifact
 from anteroom.services.artifacts import ArtifactSource, ArtifactType
+from anteroom.services.pack_attachments import attach_pack
 from anteroom.services.packs import install_pack, parse_manifest
 from anteroom.services.rule_enforcer import RuleEnforcer
 from anteroom.tools import ToolRegistry, register_default_tools
@@ -171,7 +172,8 @@ class TestReplSkillRegistryChain:
         """Install an example pack and verify its skills load into the skill registry."""
         pack_dir = packs_root / "writing-assistant"
         manifest = parse_manifest(pack_dir / "pack.yaml")
-        install_pack(db, manifest, pack_dir)
+        result = install_pack(db, manifest, pack_dir)
+        attach_pack(db, result["id"])
 
         # Simulate REPL init
         artifact_registry = ArtifactRegistry()
@@ -296,7 +298,8 @@ class TestReplFullPackInstallChain:
         """Install code-review pack, verify 2 rules + 2 skills loaded."""
         pack_dir = packs_root / "code-review"
         manifest = parse_manifest(pack_dir / "pack.yaml")
-        install_pack(db, manifest, pack_dir)
+        result = install_pack(db, manifest, pack_dir)
+        attach_pack(db, result["id"])
 
         # Bootstrap registries (REPL init path)
         artifact_registry = ArtifactRegistry()
@@ -324,15 +327,18 @@ class TestReplFullPackInstallChain:
         assert rule_enforcer.rule_count == 0
 
     def test_strict_safety_pack_config_overlay(self, db: ThreadSafeConnection, packs_root: Path) -> None:
-        """Install strict-safety pack, verify config overlay artifact exists."""
+        """Install strict-safety pack, verify config overlay artifact exists.
+
+        Config overlay artifacts are excluded from the registry (they load via
+        collect_pack_overlays), so we query storage directly.
+        """
+        from anteroom.services.artifact_storage import list_artifacts
+
         pack_dir = packs_root / "strict-safety"
         manifest = parse_manifest(pack_dir / "pack.yaml")
         install_pack(db, manifest, pack_dir)
 
-        artifact_registry = ArtifactRegistry()
-        artifact_registry.load_from_db(db)
-
-        overlays = artifact_registry.list_all(artifact_type=ArtifactType.CONFIG_OVERLAY)
+        overlays = list_artifacts(db, artifact_type=ArtifactType.CONFIG_OVERLAY)
         assert len(overlays) >= 1
-        overlay_names = [a.name for a in overlays]
+        overlay_names = [r["name"] for r in overlays]
         assert "strict-defaults" in overlay_names

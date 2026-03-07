@@ -157,6 +157,17 @@ def _install(db: ThreadSafeConnection, pack_dir: Path) -> dict[str, Any]:
     return install_pack(db, manifest, pack_dir)
 
 
+def _install_and_attach(db: ThreadSafeConnection, pack_dir: Path) -> dict[str, Any]:
+    """Parse manifest, install pack, and attach it globally.
+
+    Many tests need artifacts to be visible via ``load_from_db(attached_only=True)``.
+    This helper avoids repeating the install+attach boilerplate.
+    """
+    result = _install(db, pack_dir)
+    attach_pack(db, result["id"])
+    return result
+
+
 def _load_registries(
     db: ThreadSafeConnection,
     registry: ArtifactRegistry,
@@ -339,7 +350,7 @@ class TestArtifactRegistryFromPacks:
     def test_registry_loads_pack_artifacts(
         self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         registry.load_from_db(db)
 
         assert registry.count == 3
@@ -351,7 +362,7 @@ class TestArtifactRegistryFromPacks:
     def test_registry_reload_reflects_removals(
         self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         registry.load_from_db(db)
         assert registry.count == 3
 
@@ -360,8 +371,8 @@ class TestArtifactRegistryFromPacks:
         assert registry.count == 0
 
     def test_registry_search(self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry) -> None:
-        _install(db, _security_pack(tmp_path))
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         results = registry.search("check")
@@ -371,7 +382,7 @@ class TestArtifactRegistryFromPacks:
     def test_registry_filter_by_type(
         self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         registry.load_from_db(db)
 
         rules = registry.list_all(artifact_type=ArtifactType.RULE)
@@ -393,7 +404,7 @@ class TestRuleEnforcementEndToEnd:
         registry: ArtifactRegistry,
         enforcer: RuleEnforcer,
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         _load_registries(db, registry, enforcer)
 
         assert enforcer.rule_count == 2
@@ -410,7 +421,7 @@ class TestRuleEnforcementEndToEnd:
         registry: ArtifactRegistry,
         enforcer: RuleEnforcer,
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         _load_registries(db, registry, enforcer)
 
         blocked, reason, _ = enforcer.check_tool_call("write_file", {"path": "/app/.env"})
@@ -424,7 +435,7 @@ class TestRuleEnforcementEndToEnd:
         registry: ArtifactRegistry,
         enforcer: RuleEnforcer,
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         _load_registries(db, registry, enforcer)
 
         blocked, _, _ = enforcer.check_tool_call("bash", {"command": "git push origin main"})
@@ -437,7 +448,7 @@ class TestRuleEnforcementEndToEnd:
         registry: ArtifactRegistry,
         enforcer: RuleEnforcer,
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         _load_registries(db, registry, enforcer)
 
         blocked, _, _ = enforcer.check_tool_call("write_file", {"path": "/app/config.yaml"})
@@ -450,7 +461,7 @@ class TestRuleEnforcementEndToEnd:
         registry: ArtifactRegistry,
         enforcer: RuleEnforcer,
     ) -> None:
-        _install(db, _security_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
         _load_registries(db, registry, enforcer)
         assert enforcer.rule_count == 2
 
@@ -469,11 +480,11 @@ class TestRuleEnforcementEndToEnd:
         enforcer: RuleEnforcer,
     ) -> None:
         pack_dir = _security_pack(tmp_path)
-        _install(db, pack_dir)
+        _install_and_attach(db, pack_dir)
         _load_registries(db, registry, enforcer)
         assert enforcer.rule_count == 2
 
-        # Reinstall (update) the same pack
+        # Reinstall (update) the same pack — attachment persists
         _install(db, pack_dir)
         _load_registries(db, registry, enforcer)
         assert enforcer.rule_count == 2
@@ -961,7 +972,7 @@ class TestEdgeCases:
                 },
             },
         )
-        _install(db, pack_dir)
+        _install_and_attach(db, pack_dir)
         _load_registries(db, registry, enforcer)
 
         # Should block any tool with AWS key pattern
@@ -984,7 +995,7 @@ class TestEdgeCases:
         self, tmp_path: Path, db: ThreadSafeConnection, registry: ArtifactRegistry
     ) -> None:
         """Tampered content in DB should log a warning but still load."""
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
 
         # Tamper with content directly in DB (simulates corruption)
         db.execute("UPDATE artifacts SET content = 'TAMPERED' WHERE fqn = '@acme/skill/lint'")
@@ -1011,7 +1022,7 @@ class TestSkillRegistryFromPacks:
     ) -> None:
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1027,7 +1038,7 @@ class TestSkillRegistryFromPacks:
     ) -> None:
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1042,7 +1053,7 @@ class TestSkillRegistryFromPacks:
     ) -> None:
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1064,7 +1075,7 @@ class TestSkillRegistryFromPacks:
             namespace="test",
             skill_files={"greet": "Say hello to {args}"},
         )
-        _install(db, pack_dir)
+        _install_and_attach(db, pack_dir)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1079,7 +1090,7 @@ class TestSkillRegistryFromPacks:
     ) -> None:
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1097,7 +1108,7 @@ class TestSkillRegistryFromPacks:
         the filesystem skill takes precedence."""
         from anteroom.cli.skills import Skill, SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1121,7 +1132,7 @@ class TestSkillRegistryFromPacks:
     ) -> None:
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1139,8 +1150,8 @@ class TestSkillRegistryFromPacks:
         """Skills from multiple packs are all visible in the registry."""
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _security_pack(tmp_path))
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _security_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1158,7 +1169,7 @@ class TestSkillRegistryFromPacks:
         """After removing a pack and reloading, its skills disappear."""
         from anteroom.cli.skills import SkillRegistry
 
-        result = _install(db, _python_pack(tmp_path))
+        result = _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1191,7 +1202,7 @@ class TestSkillNamespaceResolution:
         """When a skill name is unique, bare name resolves it."""
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1221,8 +1232,8 @@ class TestSkillNamespaceResolution:
             namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
-        _install(db, pack_a)
-        _install(db, pack_b)
+        _install_and_attach(db, pack_a)
+        _install_and_attach(db, pack_b)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1254,8 +1265,8 @@ class TestSkillNamespaceResolution:
             namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
-        _install(db, pack_a)
-        _install(db, pack_b)
+        _install_and_attach(db, pack_a)
+        _install_and_attach(db, pack_b)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1283,8 +1294,8 @@ class TestSkillNamespaceResolution:
             namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
-        _install(db, pack_a)
-        _install(db, pack_b)
+        _install_and_attach(db, pack_a)
+        _install_and_attach(db, pack_b)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1303,7 +1314,7 @@ class TestSkillNamespaceResolution:
         """get_skill_descriptions returns bare name when no collision."""
         from anteroom.cli.skills import SkillRegistry
 
-        _install(db, _python_pack(tmp_path))
+        _install_and_attach(db, _python_pack(tmp_path))
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1333,8 +1344,8 @@ class TestSkillNamespaceResolution:
             namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
-        _install(db, pack_a)
-        _install(db, pack_b)
+        _install_and_attach(db, pack_a)
+        _install_and_attach(db, pack_b)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1367,8 +1378,8 @@ class TestSkillNamespaceResolution:
             namespace="team-b",
             skill_files={"deploy": "Deploy to production."},
         )
-        _install(db, pack_a)
-        _install(db, pack_b)
+        _install_and_attach(db, pack_a)
+        _install_and_attach(db, pack_b)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1398,8 +1409,8 @@ class TestSkillNamespaceResolution:
             namespace="team-b",
             skill_files={"deploy": "Deploy prod."},
         )
-        _install(db, pack_a)
-        _install(db, pack_b)
+        _install_and_attach(db, pack_a)
+        _install_and_attach(db, pack_b)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1425,7 +1436,7 @@ class TestSkillNamespaceResolution:
             namespace="team-a",
             skill_files={"lint": "Pack lint."},
         )
-        _install(db, pack)
+        _install_and_attach(db, pack)
         registry.load_from_db(db)
 
         skill_reg = SkillRegistry()
@@ -1782,8 +1793,8 @@ class TestAdditiveArtifacts:
                 }
             },
         )
-        _install(db, p1)
-        _install(db, p2)
+        _install_and_attach(db, p1)
+        _install_and_attach(db, p2)
         _load_registries(db, registry, enforcer)
 
         # Both rules should be loaded (additive)
