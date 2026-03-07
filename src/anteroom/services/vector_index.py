@@ -243,7 +243,8 @@ class VectorIndexManager:
         if self._messages:
             try:
                 rows = db.execute_fetchall(
-                    "SELECT message_id, conversation_id FROM message_embeddings WHERE status = 'embedded'"
+                    "SELECT message_id, conversation_id FROM message_embeddings WHERE status = ?",
+                    ("embedded",),
                 )
                 self._messages.rebuild_key_map([(r["message_id"], r["conversation_id"]) for r in rows])
                 logger.info("Rebuilt message vector key map: %d entries", len(rows))
