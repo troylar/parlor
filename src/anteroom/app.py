@@ -192,7 +192,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 app.state.embedding_worker = worker
                 logger.info("Embedding worker started")
             else:
-                logger.info("Embedding service available but sqlite-vec not loaded; vector search disabled")
+                logger.info("Embedding service available but usearch not installed; vector search disabled")
     else:
         if config.embeddings.enabled is False:
             logger.info("Embeddings disabled in config; vector search disabled")

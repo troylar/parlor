@@ -309,6 +309,7 @@ class EmbeddingWorker:
                     source_id,
                     embedding,
                     chunk["content_hash"],
+                    vec_index=self._vec_manager.source_chunks if self._vec_manager else None,
                 )
                 count += 1
             except Exception as e:

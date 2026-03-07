@@ -253,7 +253,10 @@ class VectorIndexManager:
 
         if self._source_chunks:
             try:
-                rows = db.execute_fetchall("SELECT chunk_id, source_id FROM source_chunk_embeddings")
+                rows = db.execute_fetchall(
+                    "SELECT chunk_id, source_id FROM source_chunk_embeddings WHERE status = ?",
+                    ("embedded",),
+                )
                 self._source_chunks.rebuild_key_map([(r["chunk_id"], r["source_id"]) for r in rows])
                 logger.info("Rebuilt source chunk vector key map: %d entries", len(rows))
             except Exception:
