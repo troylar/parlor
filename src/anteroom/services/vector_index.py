@@ -247,10 +247,12 @@ class VectorIndexManager:
                     "SELECT message_id, conversation_id FROM message_embeddings WHERE status = ?",
                     ("embedded",),
                 )
-                if rows and self._messages.count() == 0:
+                index_count = self._messages.count()
+                if rows and index_count < len(rows):
                     logger.warning(
-                        "Message usearch index is empty but %d rows claim 'embedded'. "
+                        "Message usearch index has %d vectors but %d rows claim 'embedded'. "
                         "Resetting to 'pending' for re-embedding.",
+                        index_count,
                         len(rows),
                     )
                     db.execute(
@@ -258,6 +260,7 @@ class VectorIndexManager:
                         ("pending", "embedded"),
                     )
                     db.commit()
+                    self._messages.clear()
                 else:
                     self._messages.rebuild_key_map([(r["message_id"], r["conversation_id"]) for r in rows])
                     logger.info("Rebuilt message vector key map: %d entries", len(rows))
@@ -270,10 +273,12 @@ class VectorIndexManager:
                     "SELECT chunk_id, source_id FROM source_chunk_embeddings WHERE status = ?",
                     ("embedded",),
                 )
-                if rows and self._source_chunks.count() == 0:
+                index_count = self._source_chunks.count()
+                if rows and index_count < len(rows):
                     logger.warning(
-                        "Source chunk usearch index is empty but %d rows claim 'embedded'. "
+                        "Source chunk usearch index has %d vectors but %d rows claim 'embedded'. "
                         "Resetting to 'pending' for re-embedding.",
+                        index_count,
                         len(rows),
                     )
                     db.execute(
@@ -281,6 +286,7 @@ class VectorIndexManager:
                         ("pending", "embedded"),
                     )
                     db.commit()
+                    self._source_chunks.clear()
                 else:
                     self._source_chunks.rebuild_key_map([(r["chunk_id"], r["source_id"]) for r in rows])
                     logger.info("Rebuilt source chunk vector key map: %d entries", len(rows))

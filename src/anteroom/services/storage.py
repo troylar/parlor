@@ -1383,7 +1383,16 @@ def store_embedding(
         )
 
     if vec_index is not None:
-        vec_index.add(message_id, embedding)
+        try:
+            vec_index.add(message_id, embedding)
+        except Exception:
+            # Vector add failed — reset metadata to pending so the worker retries.
+            logger.warning("Failed to add message %s to usearch index; resetting to pending", message_id, exc_info=True)
+            db.execute(
+                "UPDATE message_embeddings SET status = 'pending' WHERE message_id = ?",
+                (message_id,),
+            )
+            db.commit()
 
 
 def search_similar_messages(
@@ -1413,17 +1422,80 @@ def search_similar_messages(
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     _validate_embedding(embedding)
 
-    # Over-fetch when post-filtering to compensate for rows discarded later.
     needs_post_filter = bool(conversation_type or space_id or conversation_id)
-    vec_k = limit * 4 if needs_post_filter else limit
-    vec_k = min(vec_k, _MAX_SEARCH_LIMIT)
 
-    knn_results = vec_index.search(embedding, vec_k)
+    if not needs_post_filter:
+        knn_results = vec_index.search(embedding, limit)
+        if not knn_results:
+            return []
+        return _resolve_message_results(db, knn_results, limit)
 
-    if not knn_results:
-        return []
+    # Iterative widening: increase vec_k until we have enough filtered results
+    # or exhaust the index.
+    vec_k = limit * 4
+    seen_ids: set[str] = set()
+    results: list[dict[str, Any]] = []
 
-    # Look up message content and conversation metadata from SQLite.
+    while len(results) < limit:
+        vec_k = min(vec_k, _MAX_SEARCH_LIMIT)
+        knn_results = vec_index.search(embedding, vec_k)
+        if not knn_results:
+            break
+
+        new_ids = [r["key"] for r in knn_results if r["key"] not in seen_ids]
+        if not new_ids:
+            break  # No new candidates — index exhausted
+        seen_ids.update(new_ids)
+
+        distance_map = {r["key"]: r["distance"] for r in knn_results}
+
+        placeholders = ",".join("?" * len(new_ids))
+        rows = db.execute_fetchall(
+            f"""
+            SELECT m.id AS message_id, m.conversation_id, m.content, m.role,
+                   c.type AS conversation_type, c.space_id AS conversation_space_id
+            FROM messages m
+            LEFT JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.id IN ({placeholders})
+            """,
+            tuple(new_ids),
+        )
+
+        for r in rows:
+            d = dict(r)
+            if conversation_id and d["conversation_id"] != conversation_id:
+                continue
+            if conversation_type and d.get("conversation_type") != conversation_type:
+                continue
+            if space_id and d.get("conversation_space_id") != space_id:
+                continue
+            results.append(
+                {
+                    "message_id": d["message_id"],
+                    "conversation_id": d["conversation_id"],
+                    "content": d["content"] or "",
+                    "role": d["role"] or "user",
+                    "distance": distance_map[d["message_id"]],
+                    "conversation_type": d.get("conversation_type") or "chat",
+                }
+            )
+
+        # If we already fetched up to the max, stop.
+        if vec_k >= _MAX_SEARCH_LIMIT:
+            break
+        vec_k = min(vec_k * 2, _MAX_SEARCH_LIMIT)
+
+    # Sort by distance (closest first) and trim to limit.
+    results.sort(key=lambda x: x["distance"])
+    return results[:limit]
+
+
+def _resolve_message_results(
+    db: ThreadSafeConnection,
+    knn_results: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Look up message metadata for KNN results (no post-filtering)."""
     message_ids = [r["key"] for r in knn_results]
     distance_map = {r["key"]: r["distance"] for r in knn_results}
 
@@ -1431,7 +1503,7 @@ def search_similar_messages(
     rows = db.execute_fetchall(
         f"""
         SELECT m.id AS message_id, m.conversation_id, m.content, m.role,
-               c.type AS conversation_type, c.space_id AS conversation_space_id
+               c.type AS conversation_type
         FROM messages m
         LEFT JOIN conversations c ON c.id = m.conversation_id
         WHERE m.id IN ({placeholders})
@@ -1445,12 +1517,6 @@ def search_similar_messages(
     for msg_id in message_ids:
         d = row_map.get(msg_id)
         if d is None:
-            continue
-        if conversation_id and d["conversation_id"] != conversation_id:
-            continue
-        if conversation_type and d.get("conversation_type") != conversation_type:
-            continue
-        if space_id and d.get("conversation_space_id") != space_id:
             continue
         results.append(
             {
@@ -2342,7 +2408,15 @@ def store_source_chunk_embedding(
         )
 
     if vec_index is not None:
-        vec_index.add(chunk_id, embedding)
+        try:
+            vec_index.add(chunk_id, embedding)
+        except Exception:
+            logger.warning("Failed to add chunk %s to usearch index; resetting to pending", chunk_id, exc_info=True)
+            db.execute(
+                "UPDATE source_chunk_embeddings SET status = 'pending' WHERE chunk_id = ?",
+                (chunk_id,),
+            )
+            db.commit()
 
 
 def search_similar_source_chunks(
@@ -2368,15 +2442,77 @@ def search_similar_source_chunks(
     limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
     _validate_embedding(embedding)
 
-    # Over-fetch when post-filtering by source_id or space_id.
     needs_post_filter = bool(source_id or space_id)
-    fetch_limit = min(limit * 3, _MAX_SEARCH_LIMIT) if needs_post_filter else limit
 
-    knn_results = vec_index.search(embedding, fetch_limit)
+    if not needs_post_filter:
+        knn_results = vec_index.search(embedding, limit)
+        if not knn_results:
+            return []
+        return _resolve_chunk_results(db, knn_results, limit)
 
-    if not knn_results:
-        return []
+    # Resolve space_source_ids once if needed.
+    space_source_ids: set[str] | None = None
+    if space_id:
+        space_source_ids = {s["id"] for s in get_space_sources(db, space_id)}
 
+    # Iterative widening for scoped queries.
+    vec_k = limit * 4
+    seen_ids: set[str] = set()
+    results: list[dict[str, Any]] = []
+
+    while len(results) < limit:
+        vec_k = min(vec_k, _MAX_SEARCH_LIMIT)
+        knn_results = vec_index.search(embedding, vec_k)
+        if not knn_results:
+            break
+
+        new_ids = [r["key"] for r in knn_results if r["key"] not in seen_ids]
+        if not new_ids:
+            break
+        seen_ids.update(new_ids)
+
+        distance_map = {r["key"]: r["distance"] for r in knn_results}
+
+        placeholders = ",".join("?" * len(new_ids))
+        rows = db.execute_fetchall(
+            f"""
+            SELECT sc.id AS chunk_id, sc.source_id, sc.content, sc.chunk_index
+            FROM source_chunks sc
+            WHERE sc.id IN ({placeholders})
+            """,
+            tuple(new_ids),
+        )
+
+        for r in rows:
+            d = dict(r)
+            if source_id and d["source_id"] != source_id:
+                continue
+            if space_source_ids is not None and d["source_id"] not in space_source_ids:
+                continue
+            results.append(
+                {
+                    "chunk_id": d["chunk_id"],
+                    "source_id": d["source_id"],
+                    "content": d["content"],
+                    "chunk_index": d["chunk_index"],
+                    "distance": distance_map[d["chunk_id"]],
+                }
+            )
+
+        if vec_k >= _MAX_SEARCH_LIMIT:
+            break
+        vec_k = min(vec_k * 2, _MAX_SEARCH_LIMIT)
+
+    results.sort(key=lambda x: x["distance"])
+    return results[:limit]
+
+
+def _resolve_chunk_results(
+    db: ThreadSafeConnection,
+    knn_results: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Look up chunk metadata for KNN results (no post-filtering)."""
     chunk_ids = [r["key"] for r in knn_results]
     distance_map = {r["key"]: r["distance"] for r in knn_results}
 
@@ -2397,8 +2533,6 @@ def search_similar_source_chunks(
         d = row_map.get(cid)
         if d is None:
             continue
-        if source_id and d["source_id"] != source_id:
-            continue
         results.append(
             {
                 "chunk_id": d["chunk_id"],
@@ -2408,9 +2542,6 @@ def search_similar_source_chunks(
                 "distance": distance_map[cid],
             }
         )
-
-    if space_id:
-        space_source_ids = {s["id"] for s in get_space_sources(db, space_id)}
-        results = [r for r in results if r["source_id"] in space_source_ids]
-
-    return results[:limit]
+        if len(results) >= limit:
+            break
+    return results

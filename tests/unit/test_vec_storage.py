@@ -461,3 +461,186 @@ class TestVectorIndexManager:
         mgr.messages.add("k1", [0.1] * DIMS)
         mgr.save_all()
         assert (Path(tmp) / "vectors" / "messages.usearch").exists()
+
+
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
+class TestStoreEmbeddingRollback:
+    """Test that store_embedding resets to pending when vec_index.add() fails."""
+
+    def test_resets_to_pending_on_vec_add_failure(self) -> None:
+        db = _init_db()
+        conv_id = "conv-rollback"
+        msgs = _seed_messages(db, conv_id, count=1)
+        msg_id = msgs[0]["id"]
+
+        class _FailingIndex:
+            def add(self, key, embedding):
+                raise RuntimeError("simulated usearch failure")
+
+        emb = [0.1] * DIMS
+        store_embedding(db, msg_id, conv_id, emb, "hash1", vec_index=_FailingIndex())
+
+        row = db.execute_fetchone(
+            "SELECT status FROM message_embeddings WHERE message_id = ?", (msg_id,)
+        )
+        assert row is not None
+        assert row["status"] == "pending"
+
+    def test_metadata_committed_on_vec_add_success(self) -> None:
+        db = _init_db()
+        conv_id = "conv-success"
+        msgs = _seed_messages(db, conv_id, count=1)
+        msg_id = msgs[0]["id"]
+
+        idx = _make_vec_index()
+        emb = [0.1] * DIMS
+        store_embedding(db, msg_id, conv_id, emb, "hash1", vec_index=idx)
+
+        row = db.execute_fetchone(
+            "SELECT status FROM message_embeddings WHERE message_id = ?", (msg_id,)
+        )
+        assert row is not None
+        # Default status is 'embedded' (the column default)
+        assert row["status"] in (None, "embedded")
+        assert idx.count() == 1
+
+
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
+class TestStoreSourceChunkEmbeddingRollback:
+    def test_resets_to_pending_on_vec_add_failure(self) -> None:
+        from anteroom.services.storage import create_source, store_source_chunk_embedding
+
+        db = _init_db()
+        source = create_source(db, source_type="text", title="Test", content="test content")
+        # Insert a source chunk
+        chunk_id = "chunk-fail-1"
+        db.execute(
+            "INSERT INTO source_chunks (id, source_id, content, chunk_index, content_hash, created_at)"
+            " VALUES (?, ?, ?, ?, ?, '2025-01-01')",
+            (chunk_id, source["id"], "chunk content", 0, "abc123"),
+        )
+        db.commit()
+
+        class _FailingIndex:
+            def add(self, key, embedding):
+                raise RuntimeError("simulated failure")
+
+        emb = [0.1] * DIMS
+        store_source_chunk_embedding(db, chunk_id, source["id"], emb, "hash1", vec_index=_FailingIndex())
+
+        row = db.execute_fetchone(
+            "SELECT status FROM source_chunk_embeddings WHERE chunk_id = ?", (chunk_id,)
+        )
+        assert row is not None
+        assert row["status"] == "pending"
+
+
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
+class TestScopedSearchWidening:
+    """Test that scoped search uses iterative widening to find matching results."""
+
+    def test_conversation_filter_finds_results_beyond_initial_fetch(self) -> None:
+        """When matching messages are ranked low globally, widening should still find them."""
+        db = _init_db()
+
+        # Create two conversations with messages
+        target_conv = "conv-target"
+        other_conv = "conv-other"
+        _seed_messages(db, target_conv, count=1)
+        _seed_messages(db, other_conv, count=1)
+
+        idx = _make_vec_index()
+
+        # Add many vectors for the "other" conversation (closer to query)
+        for i in range(20):
+            key = f"other-msg-{i}"
+            emb = [0.0] * DIMS
+            emb[0] = 1.0
+            emb[1] = 0.01 * i  # Slight variation, all close to query
+            idx.add(key, emb)
+            db.execute(
+                "INSERT INTO messages (id, conversation_id, role, content, position, created_at) "
+                "VALUES (?, ?, 'user', 'other msg', ?, '2025-01-01')",
+                (key, other_conv, i + 10),
+            )
+
+        # Add one vector for the target conversation (further from query)
+        target_key = "target-msg-1"
+        target_emb = [0.0] * DIMS
+        target_emb[0] = 0.5
+        target_emb[2] = 0.5  # Different direction
+        idx.add(target_key, target_emb)
+        db.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, position, created_at) "
+            "VALUES (?, ?, 'user', 'target msg', 0, '2025-01-01')",
+            (target_key, target_conv),
+        )
+        db.commit()
+
+        # Search for messages in target_conv — the target message is ranked low
+        # globally but should still be found via widening.
+        query = [0.0] * DIMS
+        query[0] = 1.0
+        results = search_similar_messages(
+            db, query, limit=5, conversation_id=target_conv, vec_index=idx
+        )
+
+        # Should find the target message despite it being ranked below 20 others
+        target_ids = [r["message_id"] for r in results]
+        assert target_key in target_ids
+
+    def test_unfiltered_search_no_widening(self) -> None:
+        """Unfiltered search should return results without iterative widening."""
+        db = _init_db()
+        conv_id = "conv-simple"
+        msgs = _seed_messages(db, conv_id, count=3)
+        idx = _make_vec_index()
+
+        for i, msg in enumerate(msgs):
+            emb = [0.0] * DIMS
+            emb[i] = 1.0
+            idx.add(msg["id"], emb)
+
+        query = [0.0] * DIMS
+        query[0] = 1.0
+        results = search_similar_messages(db, query, limit=3, vec_index=idx)
+        assert len(results) == 3
+
+
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
+class TestRebuildPartialIndexLoss:
+    """Test that rebuild_from_db detects partial index loss."""
+
+    def test_partial_loss_resets_to_pending(self) -> None:
+        db = _init_db()
+        tmp = tempfile.mkdtemp()
+        mgr = VectorIndexManager(Path(tmp), dimensions=DIMS)
+
+        # Create a real conversation and messages for FK constraints
+        conv_id = "conv-partial"
+        msgs = _seed_messages(db, conv_id, count=5)
+        for i, msg in enumerate(msgs):
+            db.execute(
+                "INSERT OR REPLACE INTO message_embeddings "
+                "(message_id, conversation_id, chunk_index, content_hash, created_at, status) "
+                "VALUES (?, ?, 0, ?, '2025-01-01', 'embedded')",
+                (msg["id"], conv_id, f"hash-{i}"),
+            )
+        db.commit()
+
+        # Only add 2 vectors to the index
+        for i in range(2):
+            emb = [0.0] * DIMS
+            emb[i] = 1.0
+            mgr.messages.add(msgs[i]["id"], emb)
+
+        assert mgr.messages.count() == 2
+
+        # Rebuild should detect the mismatch and reset
+        mgr.rebuild_from_db(db)
+
+        rows = db.execute_fetchall(
+            "SELECT status FROM message_embeddings WHERE status = 'pending'"
+        )
+        assert len(rows) == 5  # All reset to pending
+        assert mgr.messages.count() == 0  # Index cleared
