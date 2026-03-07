@@ -277,35 +277,45 @@ Generate release notes from the PR and all referenced issues. The release notes 
 
 #### Writing the release notes
 
+Release notes should tell a **story**, not just list commits. Write for someone who uses Anteroom and wants to understand what changed and why it matters.
+
 Use this structure:
 
 ```markdown
-## New Features
+## <Theme Subtitle>
 
-### Feature Name
-User-friendly description of what this does and why they'd care.
-- Key detail with issue reference (#NN)
-- Another detail (#NN)
+<1-2 sentence narrative intro that frames the release. What's the throughline? What capability graduates or problem gets solved? Set context before diving into details.>
 
-### Another Feature
-...
+### <Feature Name>
 
-## Bug Fixes
+<1-2 paragraphs explaining what this does, why it matters, and how it works. Use concrete examples — a team pack that blocks production writes, a config key that enables a new mode. Write as if explaining to a colleague, not filing a changelog entry.> (#NN)
 
-- Description of what was broken and that it's fixed now (#NN)
-- Another fix (#NN)
+\`\`\`yaml
+# Optional: include a short config/code example if it makes the feature tangible
+\`\`\`
 
-## Other Improvements
+See [Relevant Doc Page](../path/to/page.md) for full details and [Another Page](../path/to/other.md) for related configuration.
 
-- User-visible improvements that aren't features or fixes (#NN)
+### <Another Feature>
 
-## For Developers
+<Same narrative style.> (#NN)
+
+See [Doc Page](../path/to/page.md) for usage details.
+
+### Bug Fixes
+
+- <Description of what was broken and that it's fixed> (#NN)
+- <Another fix> (#NN)
+
+See [Troubleshooting](../packs/troubleshooting.md) for common issues.
+
+### For Developers
 
 - Technical changes: new modules, API changes, schema changes
 - New environment variables or config fields
 - Test count changes
 
-## Upgrading
+### Upgrading
 
 \`\`\`bash
 pip install --upgrade anteroom
@@ -315,10 +325,14 @@ Note any manual steps needed (usually none — migrations are automatic).
 ```
 
 **Rules:**
-- EVERY bullet point that corresponds to a GitHub issue MUST include the issue reference as `(#NN)`
+- EVERY bullet point or paragraph that corresponds to a GitHub issue MUST include the issue reference as `(#NN)`
 - Omit empty sections (e.g., if no bug fixes, skip that section)
 - Lead with what users care about, put developer details at the bottom
 - Write feature descriptions in plain language, not commit-message-speak
+- Each feature section MUST end with a `See [Doc Page](../path.md)` link pointing to the most relevant documentation page(s) for that feature
+- Use relative links for doc cross-references (e.g., `../packs/how-packs-work.md`, `../cli/index.md`, `../security/tool-safety.md`)
+- Include inline code examples (YAML config, CLI commands) when they make a feature tangible — keep them under 6 lines
+- The theme subtitle should be 2-5 words that capture the release's identity (e.g., "Packs That Enforce", "Spaces Get Smarter", "The Safety Release")
 
 #### Creating the release
 
@@ -328,22 +342,16 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "<generated notes>"
 
 ### Step 7a: Update Changelog
 
-After the GitHub Release is created, update `docs/advanced/changelog.md` with a highlights entry.
+After the GitHub Release is created, update `docs/advanced/changelog.md` with a narrative changelog entry.
+
+The changelog is a **user-facing document** — it tells the story of each release, not just what changed. Use the same narrative style as the GitHub Release notes, with doc cross-links.
 
 1. Read the just-created release notes:
    ```bash
    gh release view vX.Y.Z --json body --jq '.body'
    ```
 
-2. Extract user-facing highlights from the release notes body, grouped by type:
-   - **New Features** → listed under `**New:**`
-   - **Bug Fixes** → listed under `**Fixed:**`
-   - **Other Improvements** → listed under `**Improved:**`
-   - Skip **For Developers** and **Upgrading** sections
-   - Condense to 1-3 concise bullet points per section (one line each, max ~150 chars)
-   - Omit empty sections. If no user-facing sections exist, use: `*Maintenance release — see GitHub Release for details.*`
-
-3. The changelog groups releases by date. Check if today's date already has a `## <date>` header (e.g., `## February 22, 2026`). Use the format `## Month D, YYYY`.
+2. The changelog groups releases by date. Check if today's date already has a `## <date>` header (e.g., `## February 22, 2026`). Use the format `## Month D, YYYY`.
 
    - **If today's date header exists**: Insert the new `### vX.Y.Z` entry directly after the date header (before the first existing `###` under that date).
    - **If today's date header does NOT exist**: Insert a new date section after the intro paragraph (before the first `---`):
@@ -354,25 +362,53 @@ After the GitHub Release is created, update `docs/advanced/changelog.md` with a 
 
      ```
 
-   Then add the version entry under the date header:
+3. Write the changelog entry using the **narrative format**. The entry structure mirrors the GitHub Release but is adapted for the docs site with relative doc links:
+
    ```markdown
-   ### vX.Y.Z
+   ### vX.Y.Z — <Theme Subtitle>
 
-   **New:**
+   <1-2 sentence narrative intro setting the theme of the release.>
 
-   - Feature highlight (#issue)
+   #### <Feature Name>
 
-   **Fixed:**
+   <1-2 paragraphs explaining what this does and why it matters. Include inline code examples when they make the feature tangible.> (#NN)
 
-   - Bug fix highlight (#issue)
+   See [Doc Page](../path/to/page.md) for full details.
 
-   **Improved:**
+   #### <Another Feature>
 
-   - Improvement highlight (#issue)
+   <Same narrative style.> (#NN)
+
+   See [Doc Page](../path/to/page.md) for usage details.
+
+   #### Bug Fixes
+
+   - <Fix description> (#NN)
+   - <Another fix> (#NN)
+
+   See [Troubleshooting](../packs/troubleshooting.md) for common issues.
 
    [GitHub Release](https://github.com/troylar/anteroom/releases/tag/vX.Y.Z)
 
    ```
+
+   **Changelog-specific rules:**
+   - Use `####` (H4) for feature sections within a version entry (the version title is `###` H3)
+   - Every feature section MUST end with a `See [Doc Page](../path.md)` cross-link to relevant documentation
+   - Use relative links (e.g., `../packs/how-packs-work.md`) — these resolve correctly on the docs site
+   - Include inline code examples (YAML, CLI commands) when they make a feature concrete — keep under 6 lines
+   - Bug fixes section can use bullet points (no need for full paragraphs)
+   - Skip **For Developers** and **Upgrading** sections — those belong in the GitHub Release only
+   - For patch releases with only bug fixes and no narrative theme, use a simpler format:
+     ```markdown
+     ### vX.Y.Z
+
+     **Fixed:**
+
+     - <Fix description> (#NN)
+
+     [GitHub Release](https://github.com/troylar/anteroom/releases/tag/vX.Y.Z)
+     ```
 
 4. Commit and push:
    ```bash
