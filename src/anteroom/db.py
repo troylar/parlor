@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 import stat
 import threading
@@ -325,32 +324,6 @@ CREATE TABLE IF NOT EXISTS source_chunk_embeddings (
 """
 
 
-def _make_vec_schema(dimensions: int = 384) -> str:
-    """Build vec_messages DDL with the configured embedding dimensions."""
-    if not isinstance(dimensions, int) or not (1 <= dimensions <= 4096):
-        raise ValueError(f"Invalid embedding dimensions: {dimensions!r}")
-    return f"""
-CREATE VIRTUAL TABLE IF NOT EXISTS vec_messages USING vec0(
-    embedding float[{dimensions}],
-    +message_id TEXT,
-    conversation_id TEXT
-);
-"""
-
-
-def _make_source_vec_schema(dimensions: int = 384) -> str:
-    """Build vec_source_chunks DDL with the configured embedding dimensions."""
-    if not isinstance(dimensions, int) or not (1 <= dimensions <= 4096):
-        raise ValueError(f"Invalid embedding dimensions: {dimensions!r}")
-    return f"""
-CREATE VIRTUAL TABLE IF NOT EXISTS vec_source_chunks USING vec0(
-    embedding float[{dimensions}],
-    +chunk_id TEXT,
-    source_id TEXT
-);
-"""
-
-
 _FTS_TRIGGERS = """
 CREATE TRIGGER IF NOT EXISTS fts_conversations_insert
 AFTER INSERT ON conversations
@@ -457,44 +430,6 @@ def _restrict_file_permissions(path: Path) -> None:
         pass
 
 
-def _ensure_vec_table_dimensions(
-    conn: sqlite3.Connection,
-    vec_table: str,
-    metadata_table: str,
-    dimensions: int,
-) -> None:
-    """Recreate a vec0 table if the configured dimensions differ from the existing table."""
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    if vec_table not in tables:
-        return
-    try:
-        ddl_row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (vec_table,)).fetchone()
-        if ddl_row and ddl_row[0]:
-            m = re.search(r"float\[(\d+)\]", ddl_row[0])
-            if m:
-                existing_dims = int(m.group(1))
-                if existing_dims != dimensions:
-                    logger.warning(
-                        "Embedding dimensions changed (%d -> %d). Dropping %s — "
-                        "existing embeddings will be regenerated.",
-                        existing_dims,
-                        dimensions,
-                        vec_table,
-                    )
-                    conn.execute(f"DROP TABLE {vec_table}")
-                    conn.execute(f"DELETE FROM {metadata_table}")
-    except (sqlite3.OperationalError, Exception):
-        logger.debug("Could not check %s dimensions", vec_table, exc_info=True)
-
-
-def _ensure_vec_dimensions(conn: sqlite3.Connection, dimensions: int) -> None:
-    """Recreate vec tables if the configured dimensions differ from existing tables."""
-    if not has_vec_support(conn):
-        return
-    _ensure_vec_table_dimensions(conn, "vec_messages", "message_embeddings", dimensions)
-    _ensure_vec_table_dimensions(conn, "vec_source_chunks", "source_chunk_embeddings", dimensions)
-
-
 def _create_indexes(conn: sqlite3.Connection) -> None:
     """Create all indexes.
 
@@ -548,16 +483,6 @@ def init_db(
     if is_new:
         _restrict_file_permissions(db_path)
 
-    # Load sqlite-vec extension if available
-    try:
-        import sqlite_vec
-
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
-    except (ImportError, Exception):
-        pass  # sqlite-vec not available; vector search disabled
-
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -570,20 +495,11 @@ def init_db(
     except sqlite3.OperationalError:
         pass
 
-    # Create vec tables (metadata + virtual table)
+    # Create embedding metadata tables (vectors stored in usearch file-based index)
     try:
         conn.executescript(_VEC_METADATA_SCHEMA)
     except sqlite3.OperationalError:
         pass
-    _ensure_vec_dimensions(conn, vec_dimensions)
-    try:
-        conn.executescript(_make_vec_schema(vec_dimensions))
-    except sqlite3.OperationalError:
-        pass  # sqlite-vec not loaded
-    try:
-        conn.executescript(_make_source_vec_schema(vec_dimensions))
-    except sqlite3.OperationalError:
-        pass  # sqlite-vec not loaded
 
     _run_migrations(conn, vec_dimensions=vec_dimensions)
     _create_indexes(conn)
@@ -896,12 +812,6 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
     except sqlite3.OperationalError:
         pass
 
-    # Ensure vec_messages virtual table exists (requires sqlite-vec)
-    try:
-        conn.executescript(_make_vec_schema(vec_dimensions))
-    except sqlite3.OperationalError:
-        pass
-
     # Ensure source tables exist for existing databases
     conn.execute(
         """CREATE TABLE IF NOT EXISTS sources (
@@ -981,11 +891,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             FOREIGN KEY (chunk_id) REFERENCES source_chunks(id) ON DELETE CASCADE
         )"""
     )
-    _ensure_vec_table_dimensions(conn, "vec_source_chunks", "source_chunk_embeddings", vec_dimensions)
-    try:
-        conn.executescript(_make_source_vec_schema(vec_dimensions))
-    except sqlite3.OperationalError:
-        pass
+    # vec_source_chunks virtual table no longer needed (usearch replaces sqlite-vec)
 
     # Add status column to embedding metadata tables for skip/fail tracking
     # DDL cannot use parameterized placeholders for identifiers in SQLite;
@@ -1279,13 +1185,15 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
         logger.warning("Failed to restore UNIQUE constraint on packs", exc_info=True)
 
 
-def has_vec_support(conn: sqlite3.Connection | ThreadSafeConnection) -> bool:
-    """Check if sqlite-vec extension is loaded and available."""
-    try:
-        conn.execute("SELECT vec_version()")
-        return True
-    except sqlite3.OperationalError:
-        return False
+def has_vec_support(conn: sqlite3.Connection | ThreadSafeConnection | None = None) -> bool:
+    """Check if vector search is available (usearch installed).
+
+    The *conn* parameter is accepted for backward compatibility but ignored.
+    Vector search now uses usearch (file-based) instead of sqlite-vec.
+    """
+    from .services.vector_index import has_vector_support
+
+    return has_vector_support()
 
 
 def get_db(db_path: Path) -> ThreadSafeConnection:

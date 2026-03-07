@@ -37,6 +37,7 @@ async def retrieve_context(
     current_conversation_id: str | None = None,
     *,
     space_id: str | None = None,
+    vec_manager: Any | None = None,
 ) -> list[RetrievedChunk]:
     """Embed the user query and retrieve the top-K most relevant chunks.
 
@@ -70,7 +71,13 @@ async def retrieve_context(
     # Retrieve similar messages from past conversations
     if config.include_conversations:
         try:
-            msg_results = storage.search_similar_messages(db, embedding, limit=config.max_chunks, space_id=space_id)
+            msg_results = storage.search_similar_messages(
+                db,
+                embedding,
+                limit=config.max_chunks,
+                space_id=space_id,
+                vec_index=vec_manager.messages if vec_manager else None,
+            )
             for r in msg_results:
                 if config.exclude_current and r.get("conversation_id") == current_conversation_id:
                     continue
@@ -95,7 +102,11 @@ async def retrieve_context(
     if config.include_sources:
         try:
             src_results = storage.search_similar_source_chunks(
-                db, embedding, limit=config.max_chunks, space_id=space_id
+                db,
+                embedding,
+                limit=config.max_chunks,
+                space_id=space_id,
+                vec_index=vec_manager.source_chunks if vec_manager else None,
             )
             for r in src_results:
                 if r["distance"] > config.similarity_threshold:

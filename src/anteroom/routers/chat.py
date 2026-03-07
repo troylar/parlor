@@ -440,6 +440,7 @@ async def _build_chat_system_prompt(
     skill_registry: Any = None,
     space_id: str | None = None,
     attachment_filenames: list[str] | None = None,
+    vec_manager: Any | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Assemble the extra system prompt from all context sources.
 
@@ -576,6 +577,7 @@ async def _build_chat_system_prompt(
                 config=rag_config,
                 current_conversation_id=conversation_id,
                 space_id=space_id,
+                vec_manager=vec_manager,
             )
             meta["rag_status"] = "ok" if rag_chunks else "no_results"
             meta["rag_chunks"] = len(rag_chunks)
@@ -1982,6 +1984,7 @@ async def chat(conversation_id: str, request: Request) -> Any:
         skill_registry=req_skill_reg,
         space_id=space_id,
         attachment_filenames=_att_filenames,
+        vec_manager=getattr(request.app.state, "vec_manager", None),
     )
 
     # Build per-request safety approval context

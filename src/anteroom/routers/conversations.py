@@ -229,7 +229,8 @@ async def delete_conversation(conversation_id: str, request: Request) -> None:
     data_dir = request.app.state.config.app.data_dir
     # Clean up embeddings before deleting conversation
     try:
-        storage.delete_embeddings_for_conversation(db, conversation_id)
+        _vm = getattr(request.app.state, "vec_manager", None)
+        storage.delete_embeddings_for_conversation(db, conversation_id, vec_index=_vm.messages if _vm else None)
     except Exception:
         pass  # Non-critical; table may not exist
 

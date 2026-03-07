@@ -1,12 +1,14 @@
-"""Tests for vector storage functions."""
+"""Tests for vector storage functions (usearch-based)."""
 
 from __future__ import annotations
 
 import sqlite3
+import tempfile
+from pathlib import Path
 
 import pytest
 
-from anteroom.db import _SCHEMA, _VEC_METADATA_SCHEMA, _make_vec_schema, has_vec_support
+from anteroom.db import _SCHEMA, _VEC_METADATA_SCHEMA, has_vec_support
 from anteroom.services.storage import (
     create_conversation,
     create_message,
@@ -16,24 +18,22 @@ from anteroom.services.storage import (
     search_similar_messages,
     store_embedding,
 )
+from anteroom.services.vector_index import (
+    VectorIndex,
+    VectorIndexManager,
+    _string_key_to_int,
+    _validate_embedding,
+    has_vector_support,
+)
 
 
-def _vec_available() -> bool:
-    """Check if sqlite-vec is available in this environment."""
-    try:
-        import sqlite_vec
-
-        conn = sqlite3.connect(":memory:")
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
-        conn.close()
-        return True
-    except Exception:
-        return False
+def _usearch_available() -> bool:
+    return has_vector_support()
 
 
-VEC_AVAILABLE = _vec_available()
+USEARCH_AVAILABLE = _usearch_available()
+
+DIMS = 384
 
 
 class _FakeThreadSafe:
@@ -72,19 +72,9 @@ class _FakeThreadSafe:
         return self._TxContext(self._conn)
 
 
-def _init_vec_db() -> _FakeThreadSafe:
-    """Create an in-memory db with vec support."""
+def _init_db() -> _FakeThreadSafe:
+    """Create an in-memory db with metadata tables."""
     conn = sqlite3.connect(":memory:", check_same_thread=False)
-
-    try:
-        import sqlite_vec
-
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
-    except Exception:
-        pass
-
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
@@ -92,18 +82,19 @@ def _init_vec_db() -> _FakeThreadSafe:
         conn.executescript(_VEC_METADATA_SCHEMA)
     except sqlite3.OperationalError:
         pass
-    try:
-        conn.executescript(_make_vec_schema(1536))
-    except sqlite3.OperationalError:
-        pass
     conn.commit()
     return _FakeThreadSafe(conn)
+
+
+def _make_vec_index(dims: int = DIMS) -> VectorIndex:
+    """Create a VectorIndex in a temp directory."""
+    tmp = tempfile.mkdtemp()
+    return VectorIndex(Path(tmp) / "test.usearch", dimensions=dims)
 
 
 def _seed_messages(db: _FakeThreadSafe, conv_id: str, count: int = 3) -> list[dict]:
     """Create a conversation and some messages."""
     create_conversation(db, title="Test Conv")
-    # Need to manually insert since create_conversation generates its own ID
     now = "2025-01-01T00:00:00Z"
     db.execute(
         "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
@@ -120,59 +111,158 @@ def _seed_messages(db: _FakeThreadSafe, conv_id: str, count: int = 3) -> list[di
     return msgs
 
 
-@pytest.mark.skipif(not VEC_AVAILABLE, reason="sqlite-vec not available")
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
+class TestVectorIndex:
+    def test_add_and_search(self) -> None:
+        idx = _make_vec_index()
+        emb = [0.0] * DIMS
+        emb[0] = 1.0
+        idx.add("key-1", emb)
+
+        results = idx.search(emb, limit=1)
+        assert len(results) == 1
+        assert results[0]["key"] == "key-1"
+        assert results[0]["distance"] < 0.01
+
+    def test_remove(self) -> None:
+        idx = _make_vec_index()
+        emb = [0.1] * DIMS
+        idx.add("key-1", emb)
+        assert idx.count() == 1
+
+        idx.remove("key-1")
+        results = idx.search(emb, limit=1)
+        assert len(results) == 0
+
+    def test_remove_nonexistent_noop(self) -> None:
+        idx = _make_vec_index()
+        idx.remove("nonexistent")
+
+    def test_replace_vector(self) -> None:
+        idx = _make_vec_index()
+        emb1 = [0.0] * DIMS
+        emb1[0] = 1.0
+        idx.add("key-1", emb1)
+
+        emb2 = [0.0] * DIMS
+        emb2[1] = 1.0
+        idx.add("key-1", emb2)
+
+        results = idx.search(emb2, limit=1)
+        assert results[0]["key"] == "key-1"
+        assert results[0]["distance"] < 0.01
+
+    def test_save_and_restore(self) -> None:
+        tmp = tempfile.mkdtemp()
+        path = Path(tmp) / "persist.usearch"
+        idx = VectorIndex(path, dimensions=DIMS)
+        emb = [0.1] * DIMS
+        idx.add("key-1", emb)
+        idx.save()
+
+        idx2 = VectorIndex(path, dimensions=DIMS)
+        idx2.register_key("key-1")
+        results = idx2.search(emb, limit=1)
+        assert len(results) == 1
+        assert results[0]["key"] == "key-1"
+
+    def test_clear(self) -> None:
+        idx = _make_vec_index()
+        idx.add("k1", [0.1] * DIMS)
+        idx.add("k2", [0.2] * DIMS)
+        assert idx.count() == 2
+
+        idx.clear()
+        assert idx.count() == 0
+
+    def test_rebuild_key_map(self) -> None:
+        idx = _make_vec_index()
+        emb = [0.1] * DIMS
+        idx.add("msg-abc", emb)
+
+        idx._int_to_str.clear()
+        assert idx.search(emb, limit=1) == []
+
+        idx.rebuild_key_map([("msg-abc", "conv-1")])
+        results = idx.search(emb, limit=1)
+        assert len(results) == 1
+        assert results[0]["key"] == "msg-abc"
+
+    def test_empty_search(self) -> None:
+        idx = _make_vec_index()
+        results = idx.search([0.1] * DIMS, limit=10)
+        assert results == []
+
+    def test_dimension_mismatch_raises(self) -> None:
+        idx = _make_vec_index(dims=384)
+        with pytest.raises(ValueError, match="expected 384"):
+            idx.add("k1", [0.1] * 128)
+
+
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
 class TestStoreEmbedding:
-    def test_stores_in_both_tables(self) -> None:
-        db = _init_vec_db()
+    def test_stores_in_metadata_and_index(self) -> None:
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=1)
         msg = msgs[0]
-        embedding = [0.1] * 1536
+        embedding = [0.1] * DIMS
 
-        store_embedding(db, msg["id"], "conv-1", embedding, "hash123")
+        store_embedding(db, msg["id"], "conv-1", embedding, "hash123", vec_index=vec_idx)
 
-        # Check metadata table
         row = db.execute_fetchone("SELECT * FROM message_embeddings WHERE message_id = ?", (msg["id"],))
         assert row is not None
         assert dict(row)["content_hash"] == "hash123"
 
-        # Check vec table
-        vec_row = db.execute_fetchone("SELECT * FROM vec_messages WHERE message_id = ?", (msg["id"],))
-        assert vec_row is not None
+        assert vec_idx.count() == 1
 
     def test_replaces_existing_embedding(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=1)
         msg = msgs[0]
 
-        store_embedding(db, msg["id"], "conv-1", [0.1] * 1536, "hash1")
-        store_embedding(db, msg["id"], "conv-1", [0.2] * 1536, "hash2")
+        store_embedding(db, msg["id"], "conv-1", [0.1] * DIMS, "hash1", vec_index=vec_idx)
+        store_embedding(db, msg["id"], "conv-1", [0.2] * DIMS, "hash2", vec_index=vec_idx)
 
         row = db.execute_fetchone("SELECT * FROM message_embeddings WHERE message_id = ?", (msg["id"],))
         assert dict(row)["content_hash"] == "hash2"
+        assert vec_idx.count() == 1
+
+    def test_store_without_vec_index_only_writes_metadata(self) -> None:
+        db = _init_db()
+        msgs = _seed_messages(db, "conv-1", count=1)
+        msg = msgs[0]
+
+        store_embedding(db, msg["id"], "conv-1", [0.1] * DIMS, "hash1")
+
+        row = db.execute_fetchone("SELECT * FROM message_embeddings WHERE message_id = ?", (msg["id"],))
+        assert row is not None
 
 
-@pytest.mark.skipif(not VEC_AVAILABLE, reason="sqlite-vec not available")
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
 class TestSearchSimilarMessages:
     def test_returns_nearest_neighbors(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=3)
 
         for i, msg in enumerate(msgs):
-            emb = [0.0] * 1536
+            emb = [0.0] * DIMS
             emb[i] = 1.0
-            store_embedding(db, msg["id"], "conv-1", emb, f"hash{i}")
+            store_embedding(db, msg["id"], "conv-1", emb, f"hash{i}", vec_index=vec_idx)
 
-        query = [0.0] * 1536
+        query = [0.0] * DIMS
         query[0] = 1.0
-        results = search_similar_messages(db, query, limit=2)
+        results = search_similar_messages(db, query, limit=2, vec_index=vec_idx)
 
         assert len(results) >= 1
         assert results[0]["message_id"] == msgs[0]["id"]
 
     def test_filters_by_conversation(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs1 = _seed_messages(db, "conv-1", count=1)
-        # Create second conversation
         db.execute(
             "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
             ("conv-2", "Other Conv", "2025-01-01T00:00:00Z", "2025-01-01T00:00:00Z"),
@@ -180,34 +270,41 @@ class TestSearchSimilarMessages:
         db.commit()
         msg2 = create_message(db, "conv-2", "user", "Different conversation message content here")
 
-        emb = [0.1] * 1536
-        store_embedding(db, msgs1[0]["id"], "conv-1", emb, "h1")
-        store_embedding(db, msg2["id"], "conv-2", emb, "h2")
+        emb = [0.1] * DIMS
+        store_embedding(db, msgs1[0]["id"], "conv-1", emb, "h1", vec_index=vec_idx)
+        store_embedding(db, msg2["id"], "conv-2", emb, "h2", vec_index=vec_idx)
 
-        results = search_similar_messages(db, emb, limit=10, conversation_id="conv-1")
+        results = search_similar_messages(db, emb, limit=10, conversation_id="conv-1", vec_index=vec_idx)
         conv_ids = {r["conversation_id"] for r in results}
         assert conv_ids == {"conv-1"}
 
     def test_returns_empty_when_no_data(self) -> None:
-        db = _init_vec_db()
-        results = search_similar_messages(db, [0.1] * 1536)
+        db = _init_db()
+        vec_idx = _make_vec_index()
+        results = search_similar_messages(db, [0.1] * DIMS, vec_index=vec_idx)
+        assert results == []
+
+    def test_returns_empty_without_vec_index(self) -> None:
+        db = _init_db()
+        results = search_similar_messages(db, [0.1] * DIMS)
         assert results == []
 
 
 class TestGetUnembeddedMessages:
     def test_returns_messages_without_embeddings(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
         _seed_messages(db, "conv-1", count=3)
 
         unembedded = get_unembedded_messages(db)
         assert len(unembedded) == 3
 
-    @pytest.mark.skipif(not VEC_AVAILABLE, reason="sqlite-vec not available")
+    @pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
     def test_excludes_embedded_messages(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=3)
 
-        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * 1536, "hash0")
+        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * DIMS, "hash0", vec_index=vec_idx)
 
         unembedded = get_unembedded_messages(db)
         ids = {m["id"] for m in unembedded}
@@ -215,29 +312,27 @@ class TestGetUnembeddedMessages:
         assert len(unembedded) == 2
 
 
-@pytest.mark.skipif(not VEC_AVAILABLE, reason="sqlite-vec not available")
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
 class TestDeleteEmbeddingsForConversation:
     def test_deletes_all_embeddings(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=2)
 
         for msg in msgs:
-            store_embedding(db, msg["id"], "conv-1", [0.1] * 1536, "hash")
+            store_embedding(db, msg["id"], "conv-1", [0.1] * DIMS, "hash", vec_index=vec_idx)
 
-        delete_embeddings_for_conversation(db, "conv-1")
+        delete_embeddings_for_conversation(db, "conv-1", vec_index=vec_idx)
 
         meta_count = db.execute_fetchone(
             "SELECT COUNT(*) FROM message_embeddings WHERE conversation_id = ?", ("conv-1",)
         )
         assert meta_count[0] == 0
 
-        vec_count = db.execute_fetchone("SELECT COUNT(*) FROM vec_messages WHERE conversation_id = ?", ("conv-1",))
-        assert vec_count[0] == 0
-
 
 class TestGetEmbeddingStats:
     def test_returns_accurate_counts(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
         _seed_messages(db, "conv-1", count=3)
 
         stats = get_embedding_stats(db)
@@ -245,12 +340,13 @@ class TestGetEmbeddingStats:
         assert stats["embedded_messages"] == 0
         assert stats["pending_messages"] == 3
 
-    @pytest.mark.skipif(not VEC_AVAILABLE, reason="sqlite-vec not available")
+    @pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
     def test_counts_after_embedding(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=3)
 
-        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * 1536, "hash")
+        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * DIMS, "hash", vec_index=vec_idx)
 
         stats = get_embedding_stats(db)
         assert stats["total_messages"] == 3
@@ -260,112 +356,108 @@ class TestGetEmbeddingStats:
 
 class TestValidateEmbedding:
     def test_rejects_empty_embedding(self) -> None:
-        from anteroom.services.storage import _validate_embedding
-
         with pytest.raises(ValueError, match="1-4096 dimensions"):
             _validate_embedding([])
 
     def test_rejects_oversized_embedding(self) -> None:
-        from anteroom.services.storage import _validate_embedding
-
         with pytest.raises(ValueError, match="1-4096 dimensions"):
             _validate_embedding([0.1] * 5000)
 
     def test_rejects_nan(self) -> None:
-        from anteroom.services.storage import _validate_embedding
-
         with pytest.raises(ValueError, match="not a finite number"):
             _validate_embedding([float("nan"), 0.1, 0.2])
 
     def test_rejects_inf(self) -> None:
-        from anteroom.services.storage import _validate_embedding
-
         with pytest.raises(ValueError, match="not a finite number"):
             _validate_embedding([0.1, float("inf")])
 
     def test_rejects_negative_inf(self) -> None:
-        from anteroom.services.storage import _validate_embedding
-
         with pytest.raises(ValueError, match="not a finite number"):
             _validate_embedding([float("-inf"), 0.1])
 
     def test_accepts_valid_embedding(self) -> None:
-        from anteroom.services.storage import _validate_embedding
-
-        result = _validate_embedding([0.1, 0.2, 0.3])
-        assert isinstance(result, bytes)
-        assert len(result) == 3 * 4  # 3 floats * 4 bytes each
+        _validate_embedding([0.1, 0.2, 0.3])
 
     def test_accepts_integers(self) -> None:
-        from anteroom.services.storage import _validate_embedding
-
-        result = _validate_embedding([1, 2, 3])
-        assert isinstance(result, bytes)
+        _validate_embedding([1, 2, 3])
 
 
-@pytest.mark.skipif(not VEC_AVAILABLE, reason="sqlite-vec not available")
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
 class TestSearchLimitCapping:
     def test_limit_capped_at_max(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=1)
-        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * 1536, "hash")
+        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * DIMS, "hash", vec_index=vec_idx)
 
-        # Should not error even with huge limit
-        results = search_similar_messages(db, [0.1] * 1536, limit=999999)
+        results = search_similar_messages(db, [0.1] * DIMS, limit=999999, vec_index=vec_idx)
         assert isinstance(results, list)
 
     def test_negative_limit_becomes_one(self) -> None:
-        db = _init_vec_db()
+        db = _init_db()
+        vec_idx = _make_vec_index()
         msgs = _seed_messages(db, "conv-1", count=1)
-        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * 1536, "hash")
+        store_embedding(db, msgs[0]["id"], "conv-1", [0.1] * DIMS, "hash", vec_index=vec_idx)
 
-        results = search_similar_messages(db, [0.1] * 1536, limit=-5)
+        results = search_similar_messages(db, [0.1] * DIMS, limit=-5, vec_index=vec_idx)
         assert isinstance(results, list)
 
 
 class TestHasVecSupport:
-    def test_returns_correct_value(self) -> None:
-        conn = sqlite3.connect(":memory:")
-        try:
-            import sqlite_vec
+    def test_returns_usearch_availability(self) -> None:
+        assert has_vec_support() == USEARCH_AVAILABLE
 
-            conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
-            assert has_vec_support(conn) is True
-        except Exception:
-            assert has_vec_support(conn) is False
-        conn.close()
-
-    def test_false_without_extension(self) -> None:
+    def test_accepts_conn_for_backward_compat(self) -> None:
         conn = sqlite3.connect(":memory:")
-        assert has_vec_support(conn) is False
+        result = has_vec_support(conn)
+        assert result == USEARCH_AVAILABLE
         conn.close()
 
 
 class TestGracefulDegradation:
-    def test_store_embedding_noop_without_vec(self) -> None:
-        """store_embedding should silently do nothing when vec is not loaded."""
-        conn = sqlite3.connect(":memory:", check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.executescript(_SCHEMA)
-        try:
-            conn.executescript(_VEC_METADATA_SCHEMA)
-        except sqlite3.OperationalError:
-            pass
-        conn.commit()
-        db = _FakeThreadSafe(conn)
+    def test_store_embedding_writes_metadata_without_vec_index(self) -> None:
+        """store_embedding should write metadata even without vec_index."""
+        db = _init_db()
+        msgs = _seed_messages(db, "conv-1", count=1)
+        msg = msgs[0]
 
-        # Should not raise
-        store_embedding(db, "msg-1", "conv-1", [0.1] * 1536, "hash")
+        store_embedding(db, msg["id"], "conv-1", [0.1] * DIMS, "hash")
 
-    def test_search_returns_empty_without_vec(self) -> None:
-        conn = sqlite3.connect(":memory:", check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.executescript(_SCHEMA)
-        conn.commit()
-        db = _FakeThreadSafe(conn)
+        row = db.execute_fetchone("SELECT * FROM message_embeddings WHERE message_id = ?", (msg["id"],))
+        assert row is not None
 
-        results = search_similar_messages(db, [0.1] * 1536)
+    def test_search_returns_empty_without_vec_index(self) -> None:
+        db = _init_db()
+        results = search_similar_messages(db, [0.1] * DIMS)
         assert results == []
+
+
+class TestStringKeyToInt:
+    def test_deterministic(self) -> None:
+        key = "abc-123-def"
+        assert _string_key_to_int(key) == _string_key_to_int(key)
+
+    def test_positive(self) -> None:
+        assert _string_key_to_int("test") > 0
+
+    def test_different_keys_different_ints(self) -> None:
+        a = _string_key_to_int("key-a")
+        b = _string_key_to_int("key-b")
+        assert a != b
+
+
+@pytest.mark.skipif(not USEARCH_AVAILABLE, reason="usearch not available")
+class TestVectorIndexManager:
+    def test_creates_both_indexes(self) -> None:
+        tmp = tempfile.mkdtemp()
+        mgr = VectorIndexManager(Path(tmp), dimensions=DIMS)
+        assert mgr.enabled
+        assert mgr.messages is not None
+        assert mgr.source_chunks is not None
+
+    def test_save_all(self) -> None:
+        tmp = tempfile.mkdtemp()
+        mgr = VectorIndexManager(Path(tmp), dimensions=DIMS)
+        mgr.messages.add("k1", [0.1] * DIMS)
+        mgr.save_all()
+        assert (Path(tmp) / "vectors" / "messages.usearch").exists()

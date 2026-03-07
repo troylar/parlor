@@ -24,7 +24,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from .config import AppConfig, SessionConfig, ensure_identity, load_config
-from .db import DatabaseManager, has_vec_support, init_db
+from .db import DatabaseManager, init_db
 from .services.embedding_worker import EmbeddingWorker
 from .services.embeddings import create_embedding_service, get_effective_dimensions
 from .services.event_bus import EventBus
@@ -163,9 +163,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Built-in tools: {len(tool_registry.list_tools())} registered (cwd: {working_dir})")
     _write_progress(_progress_path, "tools", "done")
 
-    # Expose vec support flag
-    raw_conn = app.state.db._conn if hasattr(app.state.db, "_conn") else None
-    app.state.vec_enabled = has_vec_support(raw_conn) if raw_conn else False
+    # Initialize vector index manager (usearch-based)
+    from .services.vector_index import VectorIndexManager
+
+    vec_manager = VectorIndexManager(config.app.data_dir, dimensions=vec_dims)
+    app.state.vec_manager = vec_manager
+    app.state.vec_enabled = vec_manager.enabled
+    if vec_manager.enabled:
+        vec_manager.rebuild_from_db(app.state.db)
 
     _write_progress(_progress_path, "embeddings", "running")
     # Start embedding service and background worker
@@ -182,7 +187,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if embedding_service:
             app.state.embedding_service = embedding_service
             if app.state.vec_enabled:
-                worker = EmbeddingWorker(app.state.db, embedding_service)
+                worker = EmbeddingWorker(app.state.db, embedding_service, vec_manager=vec_manager)
                 worker.start()
                 app.state.embedding_worker = worker
                 logger.info("Embedding worker started")
@@ -311,6 +316,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app.state.retention_worker.stop()
         if hasattr(app.state, "embedding_worker") and app.state.embedding_worker:
             app.state.embedding_worker.stop()
+        if hasattr(app.state, "vec_manager") and app.state.vec_manager:
+            app.state.vec_manager.save_all()
         if hasattr(app.state, "event_bus"):
             app.state.event_bus.stop_polling()
         if app.state.db:

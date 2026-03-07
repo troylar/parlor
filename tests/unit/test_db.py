@@ -5,8 +5,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from anteroom.db import (
     _FTS_SCHEMA,
     _FTS_TRIGGERS,
@@ -14,7 +12,6 @@ from anteroom.db import (
     _VEC_METADATA_SCHEMA,
     _create_indexes,
     _eradicate_projects,
-    _make_vec_schema,
     _run_migrations,
     has_vec_support,
     init_db,
@@ -466,40 +463,19 @@ class TestVecSupport:
         tables = _table_names(conn)
         assert "message_embeddings" in tables
 
-    def test_has_vec_support_false_without_extension(self) -> None:
+    def test_has_vec_support_checks_usearch(self) -> None:
+        """has_vec_support now checks for usearch, not sqlite-vec."""
+        from anteroom.services.vector_index import has_vector_support
+
         conn = sqlite3.connect(":memory:")
-        assert has_vec_support(conn) is False
+        assert has_vec_support(conn) == has_vector_support()
         conn.close()
 
-    def test_has_vec_support_true_with_extension(self) -> None:
-        try:
-            import sqlite_vec
+    def test_has_vec_support_accepts_none(self) -> None:
+        """has_vec_support accepts None for backward compat."""
+        from anteroom.services.vector_index import has_vector_support
 
-            conn = sqlite3.connect(":memory:")
-            conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
-            assert has_vec_support(conn) is True
-            conn.close()
-        except (ImportError, Exception):
-            pytest.skip("sqlite-vec not available")
-
-    def test_vec_messages_table_created_with_extension(self) -> None:
-        try:
-            import sqlite_vec
-
-            conn = sqlite3.connect(":memory:")
-            conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
-            conn.executescript(_make_vec_schema())
-            conn.commit()
-            # Check that vec_messages exists (virtual tables show up in sqlite_master)
-            rows = conn.execute("SELECT name FROM sqlite_master WHERE name = 'vec_messages'").fetchall()
-            assert len(rows) == 1
-            conn.close()
-        except (ImportError, Exception):
-            pytest.skip("sqlite-vec not available")
+        assert has_vec_support(None) == has_vector_support()
 
 
 class TestCreateIndexes:

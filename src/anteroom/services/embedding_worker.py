@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import storage
 from .embeddings import EmbeddingPermanentError, EmbeddingService, EmbeddingTransientError, LocalEmbeddingService
@@ -31,10 +31,12 @@ class EmbeddingWorker:
         db: ThreadSafeConnection,
         embedding_service: EmbeddingService | LocalEmbeddingService,
         batch_size: int = 50,
+        vec_manager: Any | None = None,
     ) -> None:
         self._db = db
         self._service = embedding_service
         self._batch_size = batch_size
+        self._vec_manager = vec_manager
         self._running = False
         self._disabled = False
         self._permanently_disabled = False
@@ -169,6 +171,7 @@ class EmbeddingWorker:
                     msg["conversation_id"],
                     embedding,
                     content_hash,
+                    vec_index=self._vec_manager.messages if self._vec_manager else None,
                 )
                 count += 1
                 self._store_failures.pop(msg["id"], None)
@@ -244,6 +247,7 @@ class EmbeddingWorker:
                     chunk["source_id"],
                     embedding,
                     chunk["content_hash"],
+                    vec_index=self._vec_manager.source_chunks if self._vec_manager else None,
                 )
                 count += 1
                 self._store_failures.pop(chunk["id"], None)
@@ -327,7 +331,14 @@ class EmbeddingWorker:
             return
 
         try:
-            storage.store_embedding(self._db, message_id, conversation_id, embedding, content_hash)
+            storage.store_embedding(
+                self._db,
+                message_id,
+                conversation_id,
+                embedding,
+                content_hash,
+                vec_index=self._vec_manager.messages if self._vec_manager else None,
+            )
         except Exception as e:
             logger.error("Failed to store embedding for message %s: %s", message_id, type(e).__name__)
 
@@ -350,6 +361,8 @@ class EmbeddingWorker:
                 continue
             try:
                 await self.process_pending()
+                if self._vec_manager:
+                    self._vec_manager.save_all()
                 if self._consecutive_failures > 0:
                     self._reset_backoff()
             except EmbeddingPermanentError as e:

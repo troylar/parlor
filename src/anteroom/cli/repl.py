@@ -975,6 +975,13 @@ async def run_cli(
 
     db = init_db(db_path, vec_dimensions=vec_dims, encryption_key=encryption_key)
 
+    # Initialize vector index manager (usearch-based)
+    from ..services.vector_index import VectorIndexManager
+
+    _vec_manager = VectorIndexManager(config.app.data_dir, dimensions=vec_dims)
+    if _vec_manager.enabled:
+        _vec_manager.rebuild_from_db(db)
+
     # Load space if specified via --space or auto-detect by cwd
     _space: dict[str, Any] | None = None
     _space_instructions: str | None = None
@@ -1538,8 +1545,11 @@ async def run_cli(
                 artifact_registry=_artifact_registry,
                 space=_space,
                 space_instructions=_space_instructions,
+                vec_manager=_vec_manager,
             )
     finally:
+        if _vec_manager and _vec_manager.enabled:
+            _vec_manager.save_all()
         if retention_worker:
             retention_worker.stop()
         if mcp_manager:
@@ -1842,6 +1852,7 @@ async def _run_repl(
     artifact_registry: Any = None,
     space: dict[str, Any] | None = None,
     space_instructions: str | None = None,
+    vec_manager: Any | None = None,
 ) -> None:
     """Run the interactive REPL."""
     id_kw = _identity_kwargs(config)
@@ -2994,15 +3005,14 @@ async def _run_repl(
 
                     query = search_arg
 
-                    # Try semantic search if vec is available
+                    # Try semantic search if usearch is available
                     use_semantic = False
                     if not force_keyword:
                         try:
-                            from ..db import has_vec_support as _has_vec
                             from ..services.embeddings import create_embedding_service as _create_emb
+                            from ..services.vector_index import has_vector_support as _has_vec
 
-                            raw_conn = db._conn if hasattr(db, "_conn") else None
-                            if raw_conn and _has_vec(raw_conn):
+                            if _has_vec():
                                 _emb_svc = _create_emb(config)
                                 if _emb_svc:
                                     use_semantic = True
@@ -3014,7 +3024,11 @@ async def _run_repl(
                             query_emb = await _emb_svc.embed(query)
                             if query_emb:
                                 sem_results = storage.search_similar_messages(
-                                    db, query_emb, limit=20, conversation_type=type_filter
+                                    db,
+                                    query_emb,
+                                    limit=20,
+                                    conversation_type=type_filter,
+                                    vec_index=vec_manager.messages if vec_manager and vec_manager.enabled else None,
                                 )
                                 if sem_results:
                                     renderer.console.print(f"\n[bold]Semantic search results for '{query}':[/bold]")
@@ -4270,6 +4284,7 @@ async def _run_repl(
                             config=config.rag,
                             current_conversation_id=conv["id"],
                             space_id=conv.get("space_id"),
+                            vec_manager=vec_manager,
                         )
                         if _rag_chunks:
                             extra_system_prompt += format_rag_context(_rag_chunks)

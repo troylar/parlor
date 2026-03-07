@@ -40,14 +40,22 @@ async def semantic_search(
 
     vec_enabled = getattr(request.app.state, "vec_enabled", False)
     if not vec_enabled:
-        raise HTTPException(status_code=503, detail="Vector search not available (sqlite-vec not loaded)")
+        raise HTTPException(status_code=503, detail="Vector search not available (usearch not installed)")
+
+    vec_manager = getattr(request.app.state, "vec_manager", None)
 
     query_embedding = await embedding_service.embed(q)
     if query_embedding is None:
         raise HTTPException(status_code=500, detail="Failed to generate query embedding")
 
     db = _get_db(request)
-    results = storage.search_similar_messages(db, query_embedding, limit=limit, conversation_id=conversation_id)
+    results = storage.search_similar_messages(
+        db,
+        query_embedding,
+        limit=limit,
+        conversation_id=conversation_id,
+        vec_index=vec_manager.messages if vec_manager else None,
+    )
 
     # Group by conversation
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -69,7 +77,12 @@ async def semantic_search(
         conversations.append({"conversation_id": conv_id, "title": title, "type": conv_type, "messages": messages})
 
     # Also search source chunks
-    source_results = storage.search_similar_source_chunks(db, query_embedding, limit=limit)
+    source_results = storage.search_similar_source_chunks(
+        db,
+        query_embedding,
+        limit=limit,
+        vec_index=vec_manager.source_chunks if vec_manager else None,
+    )
     source_grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in source_results:
         source_grouped[r["source_id"]].append(
@@ -114,8 +127,20 @@ async def unified_search(
     if use_semantic and embedding_service:
         query_embedding = await embedding_service.embed(q)
         if query_embedding is not None:
-            results = storage.search_similar_messages(db, query_embedding, limit=limit, conversation_type=type)
-            source_results = storage.search_similar_source_chunks(db, query_embedding, limit=limit)
+            _vec_mgr = getattr(request.app.state, "vec_manager", None)
+            results = storage.search_similar_messages(
+                db,
+                query_embedding,
+                limit=limit,
+                conversation_type=type,
+                vec_index=_vec_mgr.messages if _vec_mgr else None,
+            )
+            source_results = storage.search_similar_source_chunks(
+                db,
+                query_embedding,
+                limit=limit,
+                vec_index=_vec_mgr.source_chunks if _vec_mgr else None,
+            )
             return {
                 "mode": "semantic",
                 "results": [

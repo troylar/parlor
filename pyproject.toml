@@ -32,7 +32,8 @@ dependencies = [
     "tiktoken>=0.7.0",
     "cryptography>=46.0.5",
     "argon2-cffi>=23.1.0",
-    "sqlite-vec>=0.1.6",
+    "usearch>=2.0",
+    "numpy>=1.24.0",
     "urllib3>=2.6.3",
     # Transitive dependency floors for CVE remediation (see #194)
     "aiohttp>=3.12.14",

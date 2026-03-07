@@ -511,7 +511,7 @@ class TestRetrieveContextSpaceScoping:
             await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
 
         mock_storage.search_similar_messages.assert_called_once_with(
-            db, _fake_embedding(), limit=config.max_chunks, space_id="space-1"
+            db, _fake_embedding(), limit=config.max_chunks, space_id="space-1", vec_index=None
         )
 
     @pytest.mark.asyncio
@@ -528,7 +528,7 @@ class TestRetrieveContextSpaceScoping:
             await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
 
         mock_storage.search_similar_source_chunks.assert_called_once_with(
-            db, _fake_embedding(), limit=config.max_chunks, space_id="space-1"
+            db, _fake_embedding(), limit=config.max_chunks, space_id="space-1", vec_index=None
         )
 
     @pytest.mark.asyncio
@@ -545,10 +545,10 @@ class TestRetrieveContextSpaceScoping:
             await retrieve_context("test query text here", db, embedding_service, config)
 
         mock_storage.search_similar_messages.assert_called_once_with(
-            db, _fake_embedding(), limit=config.max_chunks, space_id=None
+            db, _fake_embedding(), limit=config.max_chunks, space_id=None, vec_index=None
         )
         mock_storage.search_similar_source_chunks.assert_called_once_with(
-            db, _fake_embedding(), limit=config.max_chunks, space_id=None
+            db, _fake_embedding(), limit=config.max_chunks, space_id=None, vec_index=None
         )
 
 
