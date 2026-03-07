@@ -344,7 +344,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'sha256-os8eBqepmojbV7o9EA/H5axJe8VOx1ngDoptqveTNpA='; "
+                "script-src 'self'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "font-src 'self'; "
                 "img-src 'self' data: blob:; "

@@ -154,6 +154,16 @@ class TestSecurityHeadersMiddleware:
         assert "default-src 'self'" in csp
         assert "frame-ancestors 'none'" in csp
 
+    def test_csp_script_src_has_no_inline_hash(self) -> None:
+        """CSP script-src should be 'self' only — no inline script hashes (#739)."""
+        app = self._make_app_with_security_headers()
+        client = TestClient(app)
+        resp = client.get("/api/data")
+        csp = resp.headers.get("content-security-policy", "")
+        assert "script-src 'self'" in csp
+        assert "sha256-" not in csp
+        assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+
     def test_hsts_when_tls_enabled(self) -> None:
         app = self._make_app_with_security_headers(tls_enabled=True)
         client = TestClient(app)
