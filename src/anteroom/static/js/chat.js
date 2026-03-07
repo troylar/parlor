@@ -68,6 +68,15 @@ const Chat = (() => {
 
         input.addEventListener('input', autoResizeInput);
 
+        document.getElementById('messages-container').addEventListener('click', (e) => {
+            const btn = e.target.closest('.welcome-action[data-action]');
+            if (!btn) return;
+            const action = btn.dataset.action;
+            if (action === 'chat') input.focus();
+            else if (action === 'settings') App.openSettings();
+            else if (action === 'space') document.getElementById('btn-space-add')?.click();
+        });
+
         initRewindModal();
     }
 
@@ -1022,13 +1031,13 @@ const Chat = (() => {
         return `${_getWelcomeLogoHtml()}<h2>Welcome to the Anteroom</h2>`
             + `<p>Your private AI gateway. What would you like to do?</p>`
             + `<div class="welcome-actions">`
-            + `<button class="welcome-action" onclick="document.getElementById('message-input').focus()">`
+            + `<button class="welcome-action" data-action="chat">`
             + `<span class="welcome-action-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></span>`
             + `<span class="welcome-action-text"><strong>Start chatting</strong><span>Ask a question or give the AI a task</span></span></button>`
-            + `<button class="welcome-action" onclick="App.openSettings()">`
+            + `<button class="welcome-action" data-action="settings">`
             + `<span class="welcome-action-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></span>`
             + `<span class="welcome-action-text"><strong>Configure your model</strong><span>Choose which LLM to talk to</span></span></button>`
-            + `<button class="welcome-action" onclick="document.getElementById('btn-space-add')?.click()">`
+            + `<button class="welcome-action" data-action="space">`
             + `<span class="welcome-action-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></span>`
             + `<span class="welcome-action-text"><strong>Create a space</strong><span>Organize conversations with custom instructions</span></span></button>`
             + `</div>`
