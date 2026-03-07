@@ -7,6 +7,14 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 7, 2026
 
+### v1.101.1
+
+**Fixed:**
+
+- CSP violation silently blocking the theme initialization script. The SHA-256 hash in `script-src` didn't match the inline script content. Moved to an external file (`theme-init.js`) so `'self'` covers it without a fragile hash. (#739)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.101.1)
+
 ### v1.101.0 — First Steps That Work
 
 New users used to land on a blank chat screen with no guidance. Now both the web UI and CLI greet them with clear, actionable next steps.
