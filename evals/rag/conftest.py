@@ -44,6 +44,9 @@ class _FakeThreadSafe:
     def commit(self) -> None:
         self._conn.commit()
 
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
     class _TxContext:
         def __init__(self, conn: sqlite3.Connection) -> None:
             self._conn = conn
@@ -119,73 +122,74 @@ def seeded_env(embedding_service: Any, dataset: dict[str, Any]) -> dict[str, Any
 
     loop = asyncio.new_event_loop()
 
-    # Seed sources and chunks
-    for source in corpus.get("sources", []):
-        src_id = source["id"]
-        db.execute(
-            "INSERT INTO sources (id, type, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (src_id, source["type"], source["title"], "", now, now),
-        )
-        db.commit()
-
-        for chunk in source.get("chunks", []):
-            chunk_id = chunk["id"]
-            content = chunk["content"]
-            content_hash = hashlib.sha256(content.encode()).hexdigest()
-            id_to_content[chunk_id] = content
-
+    try:
+        # Seed sources and chunks
+        for source in corpus.get("sources", []):
+            src_id = source["id"]
             db.execute(
-                "INSERT INTO source_chunks (id, source_id, chunk_index, content, content_hash, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (chunk_id, src_id, 0, content, content_hash, now),
+                "INSERT INTO sources (id, type, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (src_id, source["type"], source["title"], "", now, now),
             )
             db.commit()
 
-            embedding = loop.run_until_complete(embedding_service.embed(content))
-            if embedding:
-                store_source_chunk_embedding(
-                    db,
-                    chunk_id,
-                    src_id,
-                    embedding,
-                    content_hash,
-                    vec_index=vec_manager.source_chunks,
+            for chunk in source.get("chunks", []):
+                chunk_id = chunk["id"]
+                content = chunk["content"]
+                content_hash = hashlib.sha256(content.encode()).hexdigest()
+                id_to_content[chunk_id] = content
+
+                db.execute(
+                    "INSERT INTO source_chunks (id, source_id, chunk_index, content, content_hash, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (chunk_id, src_id, 0, content, content_hash, now),
                 )
+                db.commit()
 
-    # Seed conversations and messages
-    for conv in corpus.get("conversations", []):
-        conv_id = conv["id"]
-        conv_type = conv.get("type", "chat")
-        db.execute(
-            "INSERT INTO conversations (id, title, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (conv_id, conv["title"], conv_type, now, now),
-        )
-        db.commit()
+                embedding = loop.run_until_complete(embedding_service.embed(content))
+                if embedding:
+                    store_source_chunk_embedding(
+                        db,
+                        chunk_id,
+                        src_id,
+                        embedding,
+                        content_hash,
+                        vec_index=vec_manager.source_chunks,
+                    )
 
-        for msg_idx, msg in enumerate(conv.get("messages", [])):
-            msg_id = msg["id"]
-            content = msg["content"]
-            id_to_content[msg_id] = content
-
+        # Seed conversations and messages
+        for conv in corpus.get("conversations", []):
+            conv_id = conv["id"]
+            conv_type = conv.get("type", "chat")
             db.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, created_at, position)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (msg_id, conv_id, msg["role"], content, now, msg_idx),
+                "INSERT INTO conversations (id, title, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (conv_id, conv["title"], conv_type, now, now),
             )
             db.commit()
 
-            embedding = loop.run_until_complete(embedding_service.embed(content))
-            if embedding:
-                store_embedding(
-                    db,
-                    msg_id,
-                    conv_id,
-                    embedding,
-                    hashlib.sha256(content.encode()).hexdigest(),
-                    vec_index=vec_manager.messages,
-                )
+            for msg_idx, msg in enumerate(conv.get("messages", [])):
+                msg_id = msg["id"]
+                content = msg["content"]
+                id_to_content[msg_id] = content
 
-    loop.close()
+                db.execute(
+                    "INSERT INTO messages (id, conversation_id, role, content, created_at, position)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (msg_id, conv_id, msg["role"], content, now, msg_idx),
+                )
+                db.commit()
+
+                embedding = loop.run_until_complete(embedding_service.embed(content))
+                if embedding:
+                    store_embedding(
+                        db,
+                        msg_id,
+                        conv_id,
+                        embedding,
+                        hashlib.sha256(content.encode()).hexdigest(),
+                        vec_index=vec_manager.messages,
+                    )
+    finally:
+        loop.close()
 
     return {
         "db": db,

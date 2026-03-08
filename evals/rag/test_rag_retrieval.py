@@ -55,7 +55,7 @@ def _ndcg_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> flo
         return 1.0
     relevant_set = set(relevant_ids)
     gains = [1.0 if rid in relevant_set else 0.0 for rid in retrieved_ids[:k]]
-    ideal = sorted(gains, reverse=True)
+    ideal = [1.0] * min(len(relevant_ids), k) + [0.0] * max(0, k - len(relevant_ids))
     idcg = _dcg(ideal, k)
     if idcg == 0:
         return 0.0
@@ -125,35 +125,37 @@ def all_results(
     loop = asyncio.new_event_loop()
     results: list[QueryResult] = []
 
-    for q in queries:
-        chunks = loop.run_until_complete(
-            retrieve_context(
-                query=q["query"],
-                db=db,
-                embedding_service=embedding_service,
-                config=_EVAL_CONFIG,
-                vec_manager=vec_manager,
+    try:
+        for q in queries:
+            chunks = loop.run_until_complete(
+                retrieve_context(
+                    query=q["query"],
+                    db=db,
+                    embedding_service=embedding_service,
+                    config=_EVAL_CONFIG,
+                    vec_manager=vec_manager,
+                )
             )
-        )
-        retrieved_ids = _extract_ids(chunks)
-        k = q["k"]
-        relevant = q["relevant"]
+            retrieved_ids = _extract_ids(chunks)
+            k = q["k"]
+            relevant = q["relevant"]
 
-        results.append(
-            QueryResult(
-                query_id=q["id"],
-                category=q["category"],
-                query_text=q["query"],
-                relevant=relevant,
-                retrieved_ids=retrieved_ids,
-                k=k,
-                recall=_recall_at_k(retrieved_ids, relevant, k),
-                mrr=_mrr(retrieved_ids, relevant),
-                ndcg=_ndcg_at_k(retrieved_ids, relevant, k),
+            results.append(
+                QueryResult(
+                    query_id=q["id"],
+                    category=q["category"],
+                    query_text=q["query"],
+                    relevant=relevant,
+                    retrieved_ids=retrieved_ids,
+                    k=k,
+                    recall=_recall_at_k(retrieved_ids, relevant, k),
+                    mrr=_mrr(retrieved_ids, relevant),
+                    ndcg=_ndcg_at_k(retrieved_ids, relevant, k),
+                )
             )
-        )
+    finally:
+        loop.close()
 
-    loop.close()
     return results
 
 
