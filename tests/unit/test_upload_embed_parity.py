@@ -210,7 +210,8 @@ class TestRepairStaleEmbeddings:
 
         assert worker._repair_offset == 0  # cursor reset
 
-    def test_process_pending_triggers_repair_every_10th_cycle(self) -> None:
+    @pytest.mark.asyncio
+    async def test_process_pending_triggers_repair_every_10th_cycle(self) -> None:
         """_repair_stale_embeddings runs on every 10th process_pending cycle."""
         db = MagicMock()
         db.execute_fetchall = MagicMock(return_value=[])
@@ -219,21 +220,17 @@ class TestRepairStaleEmbeddings:
 
         worker = _make_worker(db=db, vec_manager=vec_manager)
 
-        import asyncio
-
-        loop = asyncio.get_event_loop()
-
         with patch("anteroom.services.embedding_worker.storage") as mock_storage:
             mock_storage.get_unembedded_messages = MagicMock(return_value=[])
             mock_storage.get_unembedded_source_chunks = MagicMock(return_value=[])
 
             # Run 9 cycles — repair should NOT fire
             for _ in range(9):
-                loop.run_until_complete(worker.process_pending())
+                await worker.process_pending()
             db.execute_fetchall.assert_not_called()
 
             # 10th cycle — repair SHOULD fire
-            loop.run_until_complete(worker.process_pending())
+            await worker.process_pending()
             db.execute_fetchall.assert_called_once()
 
 
