@@ -351,7 +351,10 @@ async def _rerank_chunks(
                 conversation_type=chunk.conversation_type,
             )
         )
-    return result if result else chunks
+    # Hard cap: never return more than top_k, even if the reranker ignores the limit
+    if result:
+        return result[: reranker_config.top_k]
+    return chunks
 
 
 def _deduplicate(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:

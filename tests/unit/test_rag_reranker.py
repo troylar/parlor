@@ -144,6 +144,20 @@ class TestRerankChunks:
         assert len(result) == 1
         assert result[0].content == "doc A"
 
+    @pytest.mark.asyncio
+    async def test_hard_cap_enforced_even_if_reranker_ignores_top_k(self) -> None:
+        """Result is truncated to top_k even if the reranker returns more items."""
+        chunks = [_make_chunk(f"doc {i}", 0.1 * i) for i in range(10)]
+        reranker = AsyncMock()
+        # Reranker ignores top_k and returns all 10 scored results
+        reranker.rerank.return_value = [(i, 0.9 - i * 0.05) for i in range(10)]
+        cfg = RerankerConfig(top_k=3, score_threshold=0.0)
+
+        result = await _rerank_chunks("query", chunks, reranker, cfg)
+
+        assert len(result) == 3
+        assert result[0].content == "doc 0"
+
 
 class TestRetrieveContextWithReranker:
     """Tests that retrieve_context passes reranker through correctly."""
@@ -287,3 +301,5 @@ class TestRetrieveContextWithReranker:
             )
             # Reranker should have been called with top_k=3 (capped to max_chunks)
             assert reranker_svc.rerank.call_args.kwargs["top_k"] == 3
+            # Final result must not exceed max_chunks, even if reranker returns more
+            assert len(result) <= 3
