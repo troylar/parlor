@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
 
 from anteroom.db import _SCHEMA, ThreadSafeConnection
+from anteroom.services.artifacts import Artifact, ArtifactSource, ArtifactType
+from anteroom.services.packs import _read_artifact_content
+from anteroom.services.rule_enforcer import parse_rule
 from anteroom.services.starter_packs import (
     get_built_in_pack_path,
     install_starter_packs,
@@ -144,3 +148,57 @@ class TestInstallStarterPacks:
             assert pack is not None
             art = db.execute("SELECT id FROM artifacts WHERE id = ?", (link["artifact_id"],)).fetchone()
             assert art is not None
+
+
+class TestSecurityBaselineRuleEnforcement:
+    """Verify security-baseline pack rules have proper metadata for hard enforcement."""
+
+    _RULE_NAMES = ("no-eval", "parameterized-queries", "no-hardcoded-secrets")
+
+    def test_rule_files_are_yaml(self) -> None:
+        pack_path = get_built_in_pack_path("security-baseline")
+        assert pack_path is not None
+        for name in self._RULE_NAMES:
+            yaml_file = pack_path / "rules" / f"{name}.yaml"
+            assert yaml_file.is_file(), f"Expected YAML rule file: {yaml_file}"
+
+    def test_rule_files_have_metadata(self) -> None:
+        pack_path = get_built_in_pack_path("security-baseline")
+        assert pack_path is not None
+        for name in self._RULE_NAMES:
+            yaml_file = pack_path / "rules" / f"{name}.yaml"
+            content, metadata = _read_artifact_content(yaml_file)
+            assert metadata, f"Rule {name} has empty metadata"
+            assert metadata.get("enforce") == "hard", f"Rule {name} is not hard-enforced"
+            assert metadata.get("matches"), f"Rule {name} has no match patterns"
+            assert metadata.get("reason"), f"Rule {name} has no reason"
+
+    def test_rule_files_parse_as_hard_rules(self) -> None:
+        pack_path = get_built_in_pack_path("security-baseline")
+        assert pack_path is not None
+        for name in self._RULE_NAMES:
+            yaml_file = pack_path / "rules" / f"{name}.yaml"
+            content, metadata = _read_artifact_content(yaml_file)
+            artifact = Artifact(
+                fqn=f"@anteroom/rule/{name}",
+                type=ArtifactType.RULE,
+                namespace="anteroom",
+                name=name,
+                content=content,
+                source=ArtifactSource.BUILT_IN,
+                metadata=metadata,
+            )
+            parsed = parse_rule(artifact)
+            assert parsed is not None, f"Rule {name} failed to parse as hard rule"
+            assert len(parsed.matches) > 0, f"Rule {name} has no valid match patterns"
+
+    def test_installed_rules_have_metadata(self, db: ThreadSafeConnection) -> None:
+        install_starter_packs(db, names=["security-baseline"])
+        for name in self._RULE_NAMES:
+            row = db.execute(
+                "SELECT metadata FROM artifacts WHERE name = ? AND namespace = 'anteroom'",
+                (name,),
+            ).fetchone()
+            assert row is not None, f"Rule {name} not found in DB"
+            meta = json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"]
+            assert meta.get("enforce") == "hard", f"Rule {name} metadata missing enforce:hard in DB"

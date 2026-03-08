@@ -377,6 +377,7 @@ prompt: |
   | aroom          | --port PORT             | Override web server port                       |
   | aroom          | --approval-mode MODE    | Override safety mode (auto/ask_for_dangerous/ask_for_writes/ask) |
   | aroom          | --allowed-tools LIST    | Pre-allow tools (comma-separated)              |
+  | aroom          | --denied-tools LIST     | Hard-block tools (comma-separated)             |
   | aroom          | --read-only             | Enable read-only mode (READ-tier tools only)   |
   | aroom          | --temperature TEMP      | Override model temperature (0.0-2.0)           |
   | aroom          | --top-p TOP_P           | Override model top_p (0.0-1.0)                 |

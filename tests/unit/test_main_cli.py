@@ -1476,6 +1476,37 @@ class TestMainDispatch:
 
         assert config.safety.allowed_tools.count("bash") == 1
 
+    def test_main_denied_tools_flag(self) -> None:
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+        ):
+            config = _make_config()
+            config.safety.denied_tools = []
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
+            with patch("sys.argv", ["aroom", "--denied-tools", "bash,run_agent"]):
+                main()
+
+        assert "bash" in config.safety.denied_tools
+        assert "run_agent" in config.safety.denied_tools
+
+    def test_main_denied_tools_deduplicates(self) -> None:
+        from anteroom.__main__ import main
+
+        with (
+            patch("anteroom.__main__._load_config_or_exit") as mock_load,
+            patch("anteroom.__main__._run_web"),
+        ):
+            config = _make_config()
+            config.safety.denied_tools = ["bash"]
+            mock_load.return_value = (Path("/tmp/config.yaml"), config, [])
+            with patch("sys.argv", ["aroom", "--denied-tools", "bash,run_agent"]):
+                main()
+
+        assert config.safety.denied_tools.count("bash") == 1
+
     def test_main_read_only_flag(self) -> None:
         from anteroom.__main__ import main
 

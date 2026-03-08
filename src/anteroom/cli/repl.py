@@ -1086,6 +1086,8 @@ async def run_cli(
             renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
             return False
 
+        await renderer.stop_thinking()
+
         async with _approval_lock:
             renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
             if verdict.details.get("command"):
@@ -1099,9 +1101,12 @@ async def run_cli(
                 answer = await _confirm_session.prompt_async(
                     "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
                 )
-                return _apply_choice(answer.strip().lower())
+                result = _apply_choice(answer.strip().lower())
+                renderer.start_thinking()
+                return result
             except (EOFError, KeyboardInterrupt):
                 renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
+                renderer.start_thinking()
                 return False
 
     def _persist_allowed_tool(tool_name: str) -> None:

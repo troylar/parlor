@@ -2334,7 +2334,13 @@ def main() -> None:
         "--allowed-tools",
         dest="allowed_tools",
         default=None,
-        help="Comma-separated list of pre-allowed tools (e.g., bash,write_file)",
+        help="Comma-separated pre-allowed tools (e.g., bash,write_file). Skips approval gate",
+    )
+    parser.add_argument(
+        "--denied-tools",
+        dest="denied_tools",
+        default=None,
+        help="Comma-separated hard-blocked tools (e.g., bash,run_agent). Blocked without prompt",
     )
     parser.add_argument(
         "--approval-mode",
@@ -2611,6 +2617,7 @@ def main() -> None:
     # Apply global safety flag overrides (work for both web UI and CLI modes)
     _approval_mode = getattr(args, "approval_mode", None)
     _allowed_tools = getattr(args, "allowed_tools", None)
+    _denied_tools = getattr(args, "denied_tools", None)
     if _approval_mode:
         if "safety.approval_mode" in enforced_fields:
             print(
@@ -2632,6 +2639,10 @@ def main() -> None:
         extra = [t.strip() for t in _allowed_tools.split(",") if t.strip()]
         existing = set(config.safety.allowed_tools)
         config.safety.allowed_tools.extend(t for t in extra if t not in existing)
+    if _denied_tools:
+        extra = [t.strip() for t in _denied_tools.split(",") if t.strip()]
+        existing = set(config.safety.denied_tools)
+        config.safety.denied_tools.extend(t for t in extra if t not in existing)
 
     _read_only = getattr(args, "read_only", False)
     if _read_only:

@@ -117,10 +117,22 @@ def parse_rule(artifact: Artifact) -> ParsedRule | None:
 
 
 def _stringify_arguments(tool_name: str, arguments: dict[str, Any]) -> str:
-    """Build a single string from tool arguments for regex matching."""
+    """Build a single string from tool arguments for regex matching.
+
+    For file-writing tools, includes both path and content so rules can match
+    dangerous code patterns in the file body (not just the path).
+    """
     if tool_name == "bash":
         return str(arguments.get("command", ""))
-    if tool_name in ("write_file", "edit_file", "read_file"):
+    if tool_name == "write_file":
+        path = str(arguments.get("path", ""))
+        content = str(arguments.get("content", ""))
+        return f"{path}\n{content}"
+    if tool_name == "edit_file":
+        path = str(arguments.get("path", ""))
+        new_text = str(arguments.get("new_text", ""))
+        return f"{path}\n{new_text}"
+    if tool_name == "read_file":
         return str(arguments.get("path", ""))
     # Generic fallback: join all string values
     parts: list[str] = []

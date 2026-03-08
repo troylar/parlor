@@ -1,0 +1,24 @@
+content: |
+  # No eval() or exec()
+
+  Never use `eval()`, `exec()`, `compile()`, or `ast.literal_eval()` with user-controlled input.
+
+  - No dynamic code execution from external sources
+  - No `pickle.loads()` on untrusted data
+  - No `yaml.load()` without `Loader=yaml.SafeLoader`
+  - Use structured parsing instead of dynamic evaluation
+
+metadata:
+  enforce: hard
+  reason: "Blocked by security-baseline: no eval/exec/compile with user input"
+  matches:
+    - tool: bash
+      pattern: "\\b(eval|exec|compile)\\s*\\("
+    - tool: bash
+      pattern: "pickle\\.loads\\s*\\("
+    - tool: bash
+      pattern: "yaml\\.load\\s*\\((?!.*SafeLoader)"
+    - tool: write_file
+      pattern: "\\b(eval|exec|compile)\\s*\\("
+    - tool: edit_file
+      pattern: "\\b(eval|exec|compile)\\s*\\("

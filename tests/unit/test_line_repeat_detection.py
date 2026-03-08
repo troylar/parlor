@@ -77,7 +77,8 @@ class TestLineRepeatDetection:
         error_events = [e for e in events if e.kind == "error"]
         assert len(error_events) == 1
         assert "Repetitive output" in error_events[0].data["message"]
-        assert "7" in error_events[0].data["message"]
+        # Inline detection triggers at exactly the threshold (5), not after all 7
+        assert "5" in error_events[0].data["message"]
 
     @pytest.mark.asyncio
     async def test_no_false_positive_on_varied_lines(self) -> None:
@@ -220,9 +221,39 @@ class TestLineRepeatDetection:
         assert len(error_events) == 1
 
     @pytest.mark.asyncio
-    async def test_tool_call_response_skips_check(self) -> None:
-        """Responses with tool calls don't get repetition-checked (tool_calls_pending is truthy)."""
-        repeated = "Proceeding...\n" * 10
+    async def test_inline_detection_stops_streaming_early(self) -> None:
+        """Inline detection breaks out of streaming before all tokens are emitted."""
+        # Simulate realistic multi-chunk streaming: each line arrives as a separate token
+        events: list[dict[str, Any]] = []
+        for _ in range(20):
+            events.append({"event": "token", "data": {"content": "Proceeding...\n"}})
+        events.append({"event": "done", "data": {}})
+
+        ai = _mock_ai_service(events)
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "start"}]
+
+        collected = await _collect_events(
+            run_agent_loop(
+                ai_service=ai,
+                messages=messages,
+                tool_executor=_executor,
+                tools_openai=None,
+                max_line_repeats=5,
+            )
+        )
+
+        # Should have error
+        error_events = [e for e in collected if e.kind == "error" and "Repetitive" in e.data.get("message", "")]
+        assert len(error_events) == 1
+
+        # Should NOT have emitted all 20 tokens — inline detection stops early
+        token_events = [e for e in collected if e.kind == "token"]
+        assert len(token_events) < 20
+
+    @pytest.mark.asyncio
+    async def test_tool_call_with_few_repeated_lines_skips_check(self) -> None:
+        """Responses with tool calls and below-threshold repetition are allowed."""
+        repeated = "Proceeding...\n" * 3  # Below threshold of 5
         stream = _make_stream_events(
             content=repeated,
             tool_calls=[{"id": "tc1", "function_name": "read_file", "arguments": {"path": "/tmp/x"}}],
@@ -243,3 +274,29 @@ class TestLineRepeatDetection:
 
         repetition_errors = [e for e in events if e.kind == "error" and "Repetitive" in e.data.get("message", "")]
         assert len(repetition_errors) == 0
+
+    @pytest.mark.asyncio
+    async def test_excessive_repetition_before_tool_call_still_triggers(self) -> None:
+        """Inline detection stops streaming even if tool calls would follow."""
+        repeated = "Proceeding...\n" * 10
+        stream = _make_stream_events(
+            content=repeated,
+            tool_calls=[{"id": "tc1", "function_name": "read_file", "arguments": {"path": "/tmp/x"}}],
+        )
+        ai = _mock_ai_service(stream)
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "start"}]
+
+        events = await _collect_events(
+            run_agent_loop(
+                ai_service=ai,
+                messages=messages,
+                tool_executor=_executor,
+                tools_openai=[{"type": "function", "function": {"name": "read_file"}}],
+                max_line_repeats=5,
+            )
+        )
+
+        # Inline detection breaks before tool call event arrives
+        repetition_errors = [e for e in events if e.kind == "error" and "Repetitive" in e.data.get("message", "")]
+        assert len(repetition_errors) == 1
