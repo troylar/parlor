@@ -563,13 +563,7 @@ async def _build_chat_system_prompt(
     _rag_uses_keyword = _rag_mode in ("keyword", "hybrid")
     # Keyword and hybrid modes can run without embeddings; dense requires both.
     _rag_has_backend = (vec_enabled and embedding_service) or _rag_uses_keyword
-    if (
-        rag_config
-        and rag_config.enabled
-        and not plan_mode
-        and _rag_has_backend
-        and message_text.strip()
-    ):
+    if rag_config and rag_config.enabled and not plan_mode and _rag_has_backend and message_text.strip():
         try:
             from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
 
