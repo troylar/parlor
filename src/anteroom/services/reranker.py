@@ -39,6 +39,7 @@ class LocalRerankerService:
             kwargs: dict[str, Any] = {"model_name": self._model_name}
             if self._cache_dir:
                 kwargs["cache_dir"] = self._cache_dir
+                kwargs["local_files_only"] = True
             self._cross_encoder = TextCrossEncoder(**kwargs)
         except Exception as e:
             error_str = str(e).lower()

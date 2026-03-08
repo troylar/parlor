@@ -381,7 +381,9 @@ class TestLocalEmbeddingService:
         service = LocalEmbeddingService(model_name="test-model", cache_dir="/custom/cache")
         with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
             service._ensure_model()
-        mock_te_class.assert_called_once_with(model_name="test-model", cache_dir="/custom/cache")
+        mock_te_class.assert_called_once_with(
+            model_name="test-model", cache_dir="/custom/cache", local_files_only=True
+        )
 
     def test_cache_dir_not_passed_when_empty(self) -> None:
         mock_fastembed = MagicMock()
