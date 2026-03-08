@@ -7,7 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from anteroom.config import RagConfig
-from anteroom.services.rag import RetrievedChunk, format_rag_context, retrieve_context, strip_rag_context
+from anteroom.services.rag import (
+    RetrievedChunk,
+    _rrf_merge_messages,
+    _rrf_merge_source_chunks,
+    format_rag_context,
+    retrieve_context,
+    strip_rag_context,
+)
 
 
 def _make_config(**overrides: object) -> RagConfig:
@@ -562,3 +569,208 @@ class TestRagConfigDefaults:
         assert config.include_sources is True
         assert config.include_conversations is True
         assert config.exclude_current is True
+
+    def test_retrieval_mode_default_dense(self) -> None:
+        config = RagConfig()
+        assert config.retrieval_mode == "dense"
+
+
+class TestRrfMergeMessages:
+    def test_merges_disjoint_results(self) -> None:
+        dense = [
+            {"message_id": "m1", "conversation_id": "c1", "content": "a", "distance": 0.1},
+        ]
+        keyword = [
+            {"message_id": "m2", "conversation_id": "c2", "content": "b", "distance": 0.0, "fts_rank": -5.0},
+        ]
+        merged = _rrf_merge_messages(dense, keyword)
+        assert len(merged) == 2
+        ids = [r["message_id"] for r in merged]
+        assert "m1" in ids
+        assert "m2" in ids
+
+    def test_overlap_boosts_score(self) -> None:
+        dense = [
+            {"message_id": "m1", "conversation_id": "c1", "content": "a", "distance": 0.1},
+            {"message_id": "m2", "conversation_id": "c2", "content": "b", "distance": 0.2},
+        ]
+        keyword = [
+            {"message_id": "m2", "conversation_id": "c2", "content": "b", "distance": 0.0, "fts_rank": -5.0},
+            {"message_id": "m3", "conversation_id": "c3", "content": "c", "distance": 0.0, "fts_rank": -3.0},
+        ]
+        merged = _rrf_merge_messages(dense, keyword)
+        ids = [r["message_id"] for r in merged]
+        # m2 appears in both lists so should rank first
+        assert ids[0] == "m2"
+
+    def test_empty_inputs(self) -> None:
+        assert _rrf_merge_messages([], []) == []
+
+    def test_single_source_only(self) -> None:
+        dense = [{"message_id": "m1", "conversation_id": "c1", "content": "a", "distance": 0.1}]
+        merged = _rrf_merge_messages(dense, [])
+        assert len(merged) == 1
+        assert merged[0]["message_id"] == "m1"
+
+    def test_synthetic_distance_is_bounded(self) -> None:
+        dense = [{"message_id": "m1", "conversation_id": "c1", "content": "a", "distance": 0.1}]
+        keyword = [{"message_id": "m1", "conversation_id": "c1", "content": "a", "distance": 0.0, "fts_rank": -5.0}]
+        merged = _rrf_merge_messages(dense, keyword)
+        assert merged[0]["distance"] >= 0.0
+        assert merged[0]["distance"] <= 1.0
+
+
+class TestRrfMergeSourceChunks:
+    def test_merges_disjoint_results(self) -> None:
+        dense = [{"chunk_id": "c1", "source_id": "s1", "content": "a", "distance": 0.1}]
+        keyword = [{"chunk_id": "c2", "source_id": "s2", "content": "b", "distance": 0.0, "fts_rank": -5.0}]
+        merged = _rrf_merge_source_chunks(dense, keyword)
+        assert len(merged) == 2
+
+    def test_overlap_boosts_score(self) -> None:
+        dense = [
+            {"chunk_id": "c1", "source_id": "s1", "content": "a", "distance": 0.1},
+            {"chunk_id": "c2", "source_id": "s2", "content": "b", "distance": 0.2},
+        ]
+        keyword = [
+            {"chunk_id": "c2", "source_id": "s2", "content": "b", "distance": 0.0, "fts_rank": -5.0},
+        ]
+        merged = _rrf_merge_source_chunks(dense, keyword)
+        assert merged[0]["chunk_id"] == "c2"
+
+
+class TestRetrieveContextHybridMode:
+    @pytest.mark.asyncio
+    async def test_hybrid_mode_calls_both_search_types(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config(retrieval_mode="hybrid")
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+            mock_storage.search_keyword_messages = MagicMock(return_value=[])
+            mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
+
+            await retrieve_context("test query text here", db, embedding_service, config)
+
+        mock_storage.search_similar_messages.assert_called_once()
+        mock_storage.search_similar_source_chunks.assert_called_once()
+        mock_storage.search_keyword_messages.assert_called_once()
+        mock_storage.search_keyword_source_chunks.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_keyword_mode_skips_dense_search(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config(retrieval_mode="keyword")
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_keyword_messages = MagicMock(return_value=[])
+            mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
+
+            await retrieve_context("test query text here", db, embedding_service, config)
+
+        mock_storage.search_keyword_messages.assert_called_once()
+        mock_storage.search_keyword_source_chunks.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dense_mode_skips_keyword_search(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config(retrieval_mode="dense")
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+            mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
+
+            await retrieve_context("test query text here", db, embedding_service, config)
+
+        mock_storage.search_similar_messages.assert_called_once()
+        mock_storage.search_similar_source_chunks.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_keyword_mode_skips_threshold_filter(self) -> None:
+        """Keyword-only mode should not filter by similarity_threshold."""
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config(retrieval_mode="keyword", similarity_threshold=0.1)
+
+        msg_results = [
+            {
+                "message_id": "m1",
+                "conversation_id": "c1",
+                "content": "keyword match",
+                "role": "user",
+                "distance": 0.9,
+                "fts_rank": -5.0,
+            },
+        ]
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_keyword_messages = MagicMock(return_value=msg_results)
+            mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
+            mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
+
+            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+
+        # distance 0.9 > threshold 0.1, but keyword mode should not apply threshold
+        assert len(chunks) == 1
+        assert chunks[0].content == "keyword match"
+
+    @pytest.mark.asyncio
+    async def test_hybrid_mode_returns_merged_results(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config(retrieval_mode="hybrid", similarity_threshold=1.0)
+
+        dense_msg = [
+            {"message_id": "m1", "conversation_id": "c1", "content": "dense only", "role": "user", "distance": 0.1},
+        ]
+        kw_msg = [
+            {
+                "message_id": "m2",
+                "conversation_id": "c2",
+                "content": "keyword only",
+                "role": "user",
+                "distance": 0.0,
+                "fts_rank": -5.0,
+            },
+        ]
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=dense_msg)
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+            mock_storage.search_keyword_messages = MagicMock(return_value=kw_msg)
+            mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
+            mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
+
+            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+
+        assert len(chunks) == 2
+        contents = {c.content for c in chunks}
+        assert "dense only" in contents
+        assert "keyword only" in contents
+
+    @pytest.mark.asyncio
+    async def test_keyword_search_failure_graceful(self) -> None:
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        db = MagicMock()
+        config = _make_config(retrieval_mode="hybrid")
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+            mock_storage.search_keyword_messages = MagicMock(side_effect=RuntimeError("FTS5 error"))
+            mock_storage.search_keyword_source_chunks = MagicMock(side_effect=RuntimeError("FTS5 error"))
+
+            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+
+        assert chunks == []

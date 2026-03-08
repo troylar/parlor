@@ -300,6 +300,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts USING fts5(
     content,
     tokenize='porter unicode61'
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    message_id UNINDEXED,
+    conversation_id UNINDEXED,
+    content,
+    tokenize='porter unicode61'
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS source_chunks_fts USING fts5(
+    chunk_id UNINDEXED,
+    source_id UNINDEXED,
+    content,
+    tokenize='porter unicode61'
+);
 """
 
 _VEC_METADATA_SCHEMA = """
@@ -362,6 +376,32 @@ BEGIN
         FROM messages WHERE conversation_id = OLD.conversation_id
     )
     WHERE conversation_id = OLD.conversation_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS fts_messages_insert_msg
+AFTER INSERT ON messages
+BEGIN
+    INSERT INTO messages_fts(message_id, conversation_id, content)
+    VALUES (NEW.id, NEW.conversation_id, NEW.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS fts_messages_delete_msg
+AFTER DELETE ON messages
+BEGIN
+    DELETE FROM messages_fts WHERE message_id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS fts_source_chunks_insert
+AFTER INSERT ON source_chunks
+BEGIN
+    INSERT INTO source_chunks_fts(chunk_id, source_id, content)
+    VALUES (NEW.id, NEW.source_id, NEW.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS fts_source_chunks_delete
+AFTER DELETE ON source_chunks
+BEGIN
+    DELETE FROM source_chunks_fts WHERE chunk_id = OLD.id;
 END;
 """
 
@@ -1183,6 +1223,41 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                 raise
     except sqlite3.OperationalError:
         logger.warning("Failed to restore UNIQUE constraint on packs", exc_info=True)
+
+    # Add message-level and source-chunk-level FTS5 tables for hybrid search (#810)
+    try:
+        fts_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "messages_fts" not in fts_tables:
+            conn.execute(
+                """CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                    message_id UNINDEXED,
+                    conversation_id UNINDEXED,
+                    content,
+                    tokenize='porter unicode61'
+                )"""
+            )
+            # Backfill from existing messages
+            conn.execute(
+                "INSERT INTO messages_fts(message_id, conversation_id, content)"
+                " SELECT id, conversation_id, content FROM messages"
+            )
+        if "source_chunks_fts" not in fts_tables:
+            conn.execute(
+                """CREATE VIRTUAL TABLE IF NOT EXISTS source_chunks_fts USING fts5(
+                    chunk_id UNINDEXED,
+                    source_id UNINDEXED,
+                    content,
+                    tokenize='porter unicode61'
+                )"""
+            )
+            # Backfill from existing source chunks
+            conn.execute(
+                "INSERT INTO source_chunks_fts(chunk_id, source_id, content)"
+                " SELECT id, source_id, content FROM source_chunks"
+            )
+        conn.commit()
+    except sqlite3.OperationalError:
+        logger.warning("Failed to create message/chunk FTS tables", exc_info=True)
 
 
 def has_vec_support(conn: sqlite3.Connection | ThreadSafeConnection | None = None) -> bool:

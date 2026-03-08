@@ -362,6 +362,110 @@ def _sanitize_fts_query(query: str) -> str:
     return f'"{safe}"'
 
 
+def search_keyword_messages(
+    db: ThreadSafeConnection,
+    query: str,
+    limit: int = 20,
+    space_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Keyword search over individual messages via FTS5.
+
+    Returns results in the same dict format as search_similar_messages()
+    for compatibility with the hybrid merge layer.
+    """
+    if not query or len(query.strip()) < 2:
+        return []
+
+    safe_query = _sanitize_fts_query(query)
+    try:
+        if space_id:
+            rows = db.execute_fetchall(
+                "SELECT f.message_id, f.conversation_id, f.content,"
+                " rank AS fts_rank, c.type AS conversation_type"
+                " FROM messages_fts f"
+                " JOIN conversations c ON c.id = f.conversation_id"
+                " WHERE messages_fts MATCH ? AND c.space_id = ?"
+                " ORDER BY rank LIMIT ?",
+                (safe_query, space_id, limit),
+            )
+        else:
+            rows = db.execute_fetchall(
+                "SELECT f.message_id, f.conversation_id, f.content,"
+                " rank AS fts_rank, c.type AS conversation_type"
+                " FROM messages_fts f"
+                " JOIN conversations c ON c.id = f.conversation_id"
+                " WHERE messages_fts MATCH ?"
+                " ORDER BY rank LIMIT ?",
+                (safe_query, limit),
+            )
+    except Exception:
+        return []
+
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        results.append(
+            {
+                "message_id": row["message_id"],
+                "conversation_id": row["conversation_id"],
+                "content": row["content"],
+                "role": "unknown",
+                "distance": 0.0,
+                "conversation_type": row["conversation_type"] or "chat",
+                "fts_rank": row["fts_rank"],
+            }
+        )
+    return results
+
+
+def search_keyword_source_chunks(
+    db: ThreadSafeConnection,
+    query: str,
+    limit: int = 20,
+    space_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Keyword search over source chunks via FTS5.
+
+    Returns results in the same dict format as search_similar_source_chunks()
+    for compatibility with the hybrid merge layer.
+    """
+    if not query or len(query.strip()) < 2:
+        return []
+
+    safe_query = _sanitize_fts_query(query)
+
+    # Pre-resolve space sources if scoped
+    space_source_ids: set[str] | None = None
+    if space_id:
+        space_source_ids = {s["id"] for s in get_space_sources(db, space_id)}
+
+    try:
+        rows = db.execute_fetchall(
+            "SELECT f.chunk_id, f.source_id, f.content, rank AS fts_rank"
+            " FROM source_chunks_fts f"
+            " WHERE source_chunks_fts MATCH ?"
+            " ORDER BY rank LIMIT ?",
+            (safe_query, limit),
+        )
+    except Exception:
+        return []
+
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        if space_source_ids is not None and row["source_id"] not in space_source_ids:
+            continue
+        results.append(
+            {
+                "chunk_id": row["chunk_id"],
+                "source_id": row["source_id"],
+                "content": row["content"],
+                "chunk_index": 0,
+                "distance": 0.0,
+                "fts_rank": row["fts_rank"],
+            }
+        )
+    return results
+
+
 DEFAULT_PAGE_LIMIT = 100
 
 

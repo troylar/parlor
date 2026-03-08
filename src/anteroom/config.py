@@ -605,6 +605,7 @@ class RagConfig:
     include_sources: bool = True  # search source chunks
     include_conversations: bool = True  # search past conversation messages
     exclude_current: bool = True  # exclude current conversation from results
+    retrieval_mode: str = "dense"  # "dense", "keyword", or "hybrid"
 
 
 @dataclass

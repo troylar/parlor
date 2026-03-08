@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 import yaml
 
-from anteroom.db import _SCHEMA, _VEC_METADATA_SCHEMA
+from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, _VEC_METADATA_SCHEMA
 from anteroom.services.storage import (
     store_embedding,
     store_source_chunk_embedding,
@@ -72,6 +72,11 @@ def _init_db() -> _FakeThreadSafe:
     conn.executescript(_SCHEMA)
     try:
         conn.executescript(_VEC_METADATA_SCHEMA)
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.executescript(_FTS_SCHEMA)
+        conn.executescript(_FTS_TRIGGERS)
     except sqlite3.OperationalError:
         pass
     conn.commit()
