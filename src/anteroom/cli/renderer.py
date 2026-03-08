@@ -1878,6 +1878,25 @@ def render_subagent_end(agent_id: str, elapsed: float, tool_calls: list[str], er
         )
 
 
+def render_rag_sources(chunks: list[Any]) -> None:
+    """Render a muted line listing which sources contributed RAG context."""
+    if not chunks:
+        return
+    seen: set[str] = set()
+    parts: list[str] = []
+    for c in chunks:
+        label = getattr(c, "source_label", None) or "?"
+        stype = getattr(c, "source_type", None) or "?"
+        key = f"{stype}:{label}"
+        if key in seen:
+            continue
+        seen.add(key)
+        badge = "source" if stype == "source_chunk" else "message"
+        parts.append(f'"{escape(label)}" ({badge})')
+    if parts:
+        console.print(f"  [{MUTED}]Sources: {', '.join(parts)}[/{MUTED}]")
+
+
 def render_context_footer(
     current_tokens: int,
     auto_compact_threshold: int,

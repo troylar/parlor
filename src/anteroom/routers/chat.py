@@ -581,12 +581,16 @@ async def _build_chat_system_prompt(
             )
             meta["rag_status"] = "ok" if rag_chunks else "no_results"
             meta["rag_chunks"] = len(rag_chunks)
+            meta["rag_sources"] = [
+                {"label": c.source_label, "type": c.source_type, "source_id": c.source_id} for c in rag_chunks
+            ]
             if rag_chunks:
                 extra += format_rag_context(rag_chunks)
         except Exception:
             logger.debug("RAG retrieval failed, continuing without context", exc_info=True)
             meta["rag_status"] = "failed"
             meta["rag_chunks"] = 0
+            meta["rag_sources"] = []
     else:
         # Capture the reason RAG was skipped so prompt_meta is always consistent
         if not rag_config:
@@ -602,6 +606,7 @@ async def _build_chat_system_prompt(
         else:
             meta["rag_status"] = "skipped"
         meta["rag_chunks"] = 0
+        meta["rag_sources"] = []
 
     # Codebase index
     try:

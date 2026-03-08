@@ -11,6 +11,7 @@ const Chat = (() => {
     let _pendingUserMessages = [];  // FIFO queue of {el, text} for SSE correlation
     let _streamAbortController = null;  // AbortController for current SSE fetch
     let _conversationType = 'chat';
+    let _currentRagSources = [];  // per-response RAG source provenance from prompt_meta
     const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
     // Remote collaboration state
@@ -416,6 +417,7 @@ const Chat = (() => {
                 } else if (data.rag_status === 'failed') {
                     showToast('RAG: retrieval failed');
                 }
+                _currentRagSources = Array.isArray(data.rag_sources) ? data.rag_sources : [];
                 break;
             case 'budget_warning':
                 showToast(data.message || 'Token budget warning');
@@ -456,9 +458,44 @@ const Chat = (() => {
             msgData = { id: doneData.assistant_message_id, position: doneData.assistant_message_position };
         }
         addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent, msgData, { isLast: true });
+        if (_currentRagSources.length > 0) {
+            _addRagSourcesFooter(currentAssistantEl, _currentRagSources);
+            _currentRagSources = [];
+        }
         currentAssistantEl = null;
         currentAssistantContent = '';
         scrollToBottom();
+    }
+
+    function _addRagSourcesFooter(msgEl, sources) {
+        if (!msgEl || !sources || sources.length === 0) return;
+        const details = document.createElement('details');
+        details.className = 'rag-sources';
+        const list = document.createElement('ul');
+        list.className = 'rag-sources-list';
+        const seen = new Set();
+        for (const src of sources) {
+            const key = `${src.type}:${src.label}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const li = document.createElement('li');
+            const badge = document.createElement('span');
+            badge.className = 'source-badge source-badge--' + (src.type === 'source_chunk' ? 'source' : 'message');
+            badge.textContent = src.type === 'source_chunk' ? 'source' : 'message';
+            const label = document.createElement('span');
+            label.className = 'source-label';
+            label.textContent = src.label;
+            li.appendChild(badge);
+            li.appendChild(label);
+            list.appendChild(li);
+        }
+        const uniqueCount = seen.size;
+        if (uniqueCount === 0) return;
+        const summary = document.createElement('summary');
+        summary.textContent = `${uniqueCount} source${uniqueCount !== 1 ? 's' : ''} used`;
+        details.appendChild(summary);
+        details.appendChild(list);
+        msgEl.appendChild(details);
     }
 
     function renderMarkdown(text) {

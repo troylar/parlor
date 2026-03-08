@@ -4268,6 +4268,7 @@ async def _run_repl(
             renderer.render_newline()
 
             # RAG: retrieve relevant context from knowledge base
+            _rag_chunks: list[Any] = []
             if config.rag.enabled and not _plan_active[0]:
                 try:
                     from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
@@ -4582,6 +4583,8 @@ async def _run_repl(
                             if not cancel_event.is_set():
                                 renderer.save_turn_history()
                                 renderer.render_response_end()
+                                if _rag_chunks:
+                                    renderer.render_rag_sources(_rag_chunks)
                                 renderer.render_newline()
                                 context_tokens = _estimate_tokens(ai_messages)
                                 renderer.render_context_footer(

@@ -1594,6 +1594,59 @@ body {
 
 
 /* ============================================================
+   RAG SOURCE PROVENANCE
+   ============================================================ */
+
+.rag-sources {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+}
+.rag-sources summary {
+    cursor: pointer;
+    user-select: none;
+    opacity: 0.6;
+    transition: opacity var(--transition-speed) var(--easing);
+}
+.rag-sources summary:hover {
+    opacity: 1;
+}
+.rag-sources-list {
+    list-style: none;
+    padding: 4px 0 0 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.rag-sources-list li {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.source-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 500;
+}
+.source-badge--source {
+    background: rgba(59, 130, 246, 0.15);
+    color: #6ea8fe;
+}
+.source-badge--message {
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+}
+.source-label {
+    opacity: 0.8;
+}
+
+/* ============================================================
    MESSAGE EDIT
    ============================================================ */
 
