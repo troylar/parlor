@@ -22,6 +22,8 @@ This is **Retrieval-Augmented Generation (RAG)**: the AI doesn't just respond fr
 | **Embedding** | A vector representation of text, used for similarity search |
 | **Vector index** | The search index (usearch) that enables fast nearest-neighbor lookup |
 | **RAG retrieval** | The process of finding relevant context and injecting it into the AI's prompt |
+| **Retrieval mode** | How chunks are found: `dense` (vector similarity), `keyword` (FTS5 text search), or `hybrid` (both, merged with RRF) |
+| **Reranking** | Optional second stage: a cross-encoder model re-scores retrieved chunks for improved relevance |
 | **Embedding worker** | A background process that embeds new content asynchronously |
 
 ## How It Works
@@ -47,10 +49,12 @@ Data enters the system
          |
          v (on each new message)
    RAG retrieval
-   - Embed the query
-   - Search both indexes
+   - Embed the query (dense) / tokenize (keyword) / both (hybrid)
+   - Search indexes (vector, FTS5, or both)
+   - Merge via Reciprocal Rank Fusion (hybrid mode)
    - Filter by space/conversation
    - Deduplicate
+   - Rerank with cross-encoder (optional)
    - Trim to token budget
          |
          v

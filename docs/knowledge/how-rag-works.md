@@ -154,36 +154,88 @@ This handles full index loss (file deleted), partial loss (crash mid-write), and
 
 When you send a message, RAG retrieval runs before the AI sees it.
 
-### Step 1: Embed the Query
+### Retrieval Modes
 
-Your message text is embedded using the same provider that embedded the stored content.
+Anteroom supports three retrieval modes, configured via `rag.retrieval_mode`:
 
-### Step 2: Search Both Indexes
+| Mode | How It Works | Best For |
+|------|-------------|----------|
+| **`dense`** (default) | Vector similarity search using embeddings | Semantic matching --- finds conceptually related content even with different wording |
+| **`keyword`** | FTS5 full-text search on SQLite | Exact term matching --- finds content with specific words, works without embeddings |
+| **`hybrid`** | Both dense and keyword, merged via Reciprocal Rank Fusion (RRF) | Best of both --- catches both semantic and exact matches |
 
-Two parallel searches run:
+```yaml title="~/.anteroom/config.yaml"
+rag:
+  retrieval_mode: "hybrid"  # "dense", "keyword", or "hybrid"
+```
 
-- **Message search**: Find past messages similar to your query
-- **Source chunk search**: Find knowledge source chunks similar to your query
+**Keyword fallback**: In `dense` or `hybrid` mode, if the embedding service is unavailable (e.g., fastembed not installed, API down), Anteroom silently falls back to keyword-only retrieval when keyword is part of the mode. In pure `dense` mode with no embedding service, RAG returns no results.
 
-Each search returns up to `max_chunks` results (default: 10) sorted by cosine distance.
+### Step 1: Embed the Query (Dense/Hybrid)
 
-### Step 3: Filter Results
+Your message text is embedded using the same provider that embedded the stored content. In `keyword` mode, this step is skipped.
+
+### Step 2: Search Indexes
+
+Depending on the retrieval mode:
+
+- **Dense**: Two parallel vector searches (messages index + source chunks index), returning up to `max_chunks` results sorted by cosine distance
+- **Keyword**: Two parallel FTS5 searches against SQLite, returning results ranked by BM25
+- **Hybrid**: All four searches run in parallel
+
+When reranking is enabled, the search limit is widened to `max_chunks * candidate_multiplier` (default: 3x) to give the reranker more candidates to choose from.
+
+### Step 3: Merge Results (Hybrid Mode)
+
+In `hybrid` mode, dense and keyword results are merged using **Reciprocal Rank Fusion (RRF)**:
+
+```
+RRF_score(doc) = 1/(k + rank_dense) + 1/(k + rank_keyword)
+```
+
+where `k = 60` (standard RRF constant). Documents found by both methods get a boost; documents found by only one method still appear. The merged list is sorted by combined RRF score.
+
+In `dense` or `keyword` mode, this step is skipped --- results come directly from the single retrieval method.
+
+### Step 4: Filter Results
 
 Results are filtered based on context:
 
 | Filter | When Applied | Effect |
 |--------|-------------|--------|
-| **Similarity threshold** | Always | Drop results with distance > 0.5 (configurable) |
+| **Similarity threshold** | Dense mode only | Drop results with distance > 0.5 (configurable). Not applied in hybrid mode (RRF scores are not comparable to cosine distances) or keyword mode |
 | **Current conversation** | By default | Exclude messages from the current conversation (you already have that context) |
 | **Space scoping** | When in a space | Only return messages from conversations in the same space, and source chunks from sources linked to the space |
 | **Conversation type** | When specified | Filter by conversation type (chat, note, doc) |
 
-### Step 4: Deduplicate
+### Step 5: Deduplicate
 
 - Multiple chunks from the same conversation collapse to the best match
 - Multiple chunks from the same source collapse to the best match
 
-### Step 5: Trim to Token Budget
+### Step 6: Rerank (Optional)
+
+When reranking is enabled, a cross-encoder model re-scores each retrieved chunk against the original query. Unlike embedding similarity (which compares vectors independently), cross-encoders process the query and document together for more accurate relevance scoring.
+
+The reranker:
+
+1. Scores each query-document pair with the cross-encoder model
+2. Filters out chunks below `score_threshold` (cross-encoder logits; can be negative)
+3. Keeps the top `top_k` results (capped to `rag.max_chunks`)
+4. If reranking fails, falls back to the original chunk order
+
+```yaml title="~/.anteroom/config.yaml"
+reranker:
+  enabled: true                       # null=auto-detect, true=force, false=disable
+  model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_k: 5                            # Keep top-K after reranking
+  score_threshold: 0.0                 # Minimum score (0 = no threshold)
+  candidate_multiplier: 3             # Widen initial retrieval by this factor
+```
+
+See [Configuration Reference](config-reference.md#reranker) for all reranker config options.
+
+### Step 7: Trim to Token Budget
 
 Results are trimmed to fit within `max_tokens` (default: 2000 tokens, estimated as characters / 4). This prevents RAG context from overwhelming the prompt.
 

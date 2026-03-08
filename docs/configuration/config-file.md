@@ -154,7 +154,17 @@ embeddings:
   base_url: ""
   api_key: ""
   api_key_command: ""
-  cache_dir: ""                        # Custom fastembed model cache directory (default: ~/.cache/fastembed/)
+  cache_dir: ""                        # Custom model cache directory; enables local_files_only when set
+
+rag:
+  enabled: true                        # Master toggle for RAG (default: true)
+  max_chunks: 10                       # Maximum chunks to retrieve per query (default: 10)
+  max_tokens: 2000                     # Token budget for RAG context (default: 2000)
+  similarity_threshold: 0.5            # Maximum cosine distance; lower = stricter (default: 0.5)
+  include_sources: true                # Search knowledge source chunks (default: true)
+  include_conversations: true          # Search past conversation messages (default: true)
+  exclude_current: true                # Exclude current conversation from results (default: true)
+  retrieval_mode: "dense"              # "dense", "keyword", or "hybrid" (default: "dense")
 
 reranker:
   enabled: null                        # null = auto-detect (use if fastembed available)
@@ -163,7 +173,7 @@ reranker:
   top_k: 5                            # Keep top-K chunks after reranking
   score_threshold: 0.0                 # Minimum relevance score (0 = no threshold)
   candidate_multiplier: 3             # Fetch top_k * multiplier candidates before reranking
-  cache_dir: ""                        # Custom fastembed model cache directory (default: ~/.cache/fastembed/)
+  cache_dir: ""                        # Custom model cache directory; enables local_files_only when set
 
 dlp:
   enabled: false                       # Set true to enable DLP scanning
@@ -485,7 +495,22 @@ Controls vector embeddings for semantic search. Requires an OpenAI-compatible em
 | `base_url` | string | `""` | Embedding API endpoint (falls back to `ai.base_url` if empty) |
 | `api_key` | string | `""` | API key for the embedding endpoint |
 | `api_key_command` | string | `""` | External command to obtain the embedding API key dynamically |
-| `cache_dir` | string | `""` | Custom fastembed model cache directory; useful for air-gapped environments where models are pre-downloaded; env: `AI_CHAT_EMBEDDINGS_CACHE_DIR` |
+| `cache_dir` | string | `""` | Custom fastembed model cache directory; when set, enables `local_files_only` mode to prevent network requests; env: `AI_CHAT_EMBEDDINGS_CACHE_DIR` |
+
+### rag
+
+Controls the RAG retrieval pipeline --- what gets searched, how many results, filtering thresholds, and retrieval strategy.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Master toggle; `false` disables RAG entirely; env: `AI_CHAT_RAG_ENABLED` |
+| `max_chunks` | integer | `10` | Maximum chunks to retrieve per query; env: `AI_CHAT_RAG_MAX_CHUNKS` |
+| `max_tokens` | integer | `2000` | Token budget for injected RAG context (estimated as chars / 4); env: `AI_CHAT_RAG_MAX_TOKENS` |
+| `similarity_threshold` | float | `0.5` | Maximum cosine distance; only applies in `dense` mode; env: `AI_CHAT_RAG_SIMILARITY_THRESHOLD` |
+| `include_sources` | boolean | `true` | Search knowledge source chunks |
+| `include_conversations` | boolean | `true` | Search past conversation messages |
+| `exclude_current` | boolean | `true` | Exclude current conversation from message search |
+| `retrieval_mode` | string | `dense` | Retrieval strategy: `dense` (vector similarity), `keyword` (FTS5), or `hybrid` (both via RRF); env: `AI_CHAT_RAG_RETRIEVAL_MODE` |
 
 ### reranker
 
@@ -499,7 +524,7 @@ Controls cross-encoder reranking of RAG results. When enabled, retrieved chunks 
 | `top_k` | integer | `5` | Keep top-K chunks after reranking (capped to `rag.max_chunks` at runtime); env: `AI_CHAT_RERANKER_TOP_K` |
 | `score_threshold` | float | `0.0` | Minimum relevance score; cross-encoder logits can be negative; env: `AI_CHAT_RERANKER_SCORE_THRESHOLD` |
 | `candidate_multiplier` | integer | `3` | Fetch `top_k * candidate_multiplier` candidates before reranking; env: `AI_CHAT_RERANKER_CANDIDATE_MULTIPLIER` |
-| `cache_dir` | string | `""` | Custom fastembed model cache directory; useful for air-gapped environments where models are pre-downloaded; env: `AI_CHAT_RERANKER_CACHE_DIR` |
+| `cache_dir` | string | `""` | Custom fastembed model cache directory; when set, enables `local_files_only` mode to prevent network requests; env: `AI_CHAT_RERANKER_CACHE_DIR` |
 
 ### dlp
 
