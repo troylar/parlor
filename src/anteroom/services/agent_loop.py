@@ -348,6 +348,10 @@ async def run_agent_loop(
         yield AgentEvent(kind="thinking", data={})
 
         _dlp_blocked = False
+        _line_repeat_detected = False
+        _line_buf = ""  # accumulates partial lines for inline repeat detection
+        _prev_line = ""
+        _line_run = 0
         _ai_call_start = time.monotonic()
         _first_token_logged = False
         logger.debug("agent_loop ai_call_start iteration=%d", iteration)
@@ -393,6 +397,23 @@ async def run_agent_loop(
                         break
                 assistant_content += chunk
                 yield AgentEvent(kind="token", data={"content": chunk})
+                # Inline line repetition detection: check as lines complete
+                if max_line_repeats > 0:
+                    _line_buf += chunk
+                    while "\n" in _line_buf:
+                        line, _line_buf = _line_buf.split("\n", 1)
+                        stripped = line.strip()
+                        if stripped:
+                            if stripped == _prev_line:
+                                _line_run += 1
+                            else:
+                                _prev_line = stripped
+                                _line_run = 1
+                            if _line_run >= max_line_repeats:
+                                _line_repeat_detected = True
+                                break
+                    if _line_repeat_detected:
+                        break
             elif etype == "tool_call":
                 tool_calls_pending.append(event["data"])
                 yield AgentEvent(
@@ -426,6 +447,22 @@ async def run_agent_loop(
 
         if _dlp_blocked:
             return
+
+        # Inline repetition detection may have broken us out of the stream early.
+        # Only act on it for text-only responses (tool call responses often have
+        # repeated patterns in arguments and shouldn't be penalised).
+        if _line_repeat_detected and not tool_calls_pending:
+            yield AgentEvent(
+                kind="error",
+                data={
+                    "message": (
+                        f"Repetitive output detected: same line repeated {_line_run} times "
+                        "during streaming. Stopping degenerate LLM output."
+                    )
+                },
+            )
+            return
+        _line_repeat_detected = False  # Reset for tool-call responses
 
         if got_context_error:
             context_recovery_attempts += 1
