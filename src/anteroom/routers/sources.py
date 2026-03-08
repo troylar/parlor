@@ -75,6 +75,8 @@ async def list_sources(
         limit=limit,
         offset=offset,
     )
+    for s in sources:
+        s["embedding_status"] = storage.get_source_embedding_status(db, s["id"])
     return {"sources": sources}
 
 
@@ -148,6 +150,7 @@ async def get_source(request: Request, source_id: str) -> dict[str, Any]:
     source = storage.get_source(db, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
+    source["embedding_status"] = storage.get_source_embedding_status(db, source_id)
     return source
 
 

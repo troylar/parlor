@@ -142,8 +142,8 @@ class TestReplDisambiguationFlow:
         """When two sources share the same title, the REPL prints candidates with IDs."""
         db = _make_db(tmp_path)
         sp = _seed_space(db)
-        s1 = create_source(db, source_type="text", title="Quarterly Report", content="v1")
-        s2 = create_source(db, source_type="text", title="Quarterly Report", content="v2")
+        s1, _ = create_source(db, source_type="text", title="Quarterly Report", content="v1")
+        s2, _ = create_source(db, source_type="text", title="Quarterly Report", content="v2")
         config = _make_config(tmp_path)
 
         output = await _run_repl_with_commands(
@@ -162,7 +162,7 @@ class TestReplDisambiguationFlow:
         """After disambiguation, using the source ID links successfully."""
         db = _make_db(tmp_path)
         sp = _seed_space(db)
-        s1 = create_source(db, source_type="text", title="Quarterly Report", content="v1")
+        s1, _ = create_source(db, source_type="text", title="Quarterly Report", content="v1")
         create_source(db, source_type="text", title="Quarterly Report", content="v2")
         config = _make_config(tmp_path)
 
@@ -235,8 +235,8 @@ class TestReplDisambiguationFlow:
 
         db = _make_db(tmp_path)
         sp = _seed_space(db)
-        s1 = create_source(db, source_type="text", title="Status Report", content="v1")
-        s2 = create_source(db, source_type="text", title="Status Report", content="v2")
+        s1, _ = create_source(db, source_type="text", title="Status Report", content="v1")
+        s2, _ = create_source(db, source_type="text", title="Status Report", content="v2")
         link_source_to_space(db, sp["id"], source_id=s1["id"])
         link_source_to_space(db, sp["id"], source_id=s2["id"])
         config = _make_config(tmp_path)

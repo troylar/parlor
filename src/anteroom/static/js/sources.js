@@ -276,6 +276,7 @@ const Sources = (() => {
             <div class="source-detail-info">
                 <span class="source-detail-date">${created}</span>
                 ${chunksCount > 0 ? `<span class="source-detail-chunks">${chunksCount} chunks</span>` : ''}
+                ${source.embedding_status ? `<span class="source-detail-embedding-status">${source.embedding_status}</span>` : ''}
             </div>
             <div class="source-detail-tags" id="source-detail-tags">
                 ${tagsHtml}
@@ -285,6 +286,7 @@ const Sources = (() => {
             <div class="source-detail-actions">
                 <button class="btn-modal-save source-attach-btn" id="source-attach-btn">${isAttached ? 'Detach from chat' : 'Attach to chat'}</button>
                 <button class="btn-modal-save source-edit-btn" id="source-edit-btn">Edit</button>
+                <button class="btn-modal-save source-reprocess-btn" id="source-reprocess-btn">Reprocess</button>
                 <button class="btn-modal-cancel source-delete-btn" id="source-delete-btn">Delete</button>
             </div>
         `;
@@ -309,6 +311,22 @@ const Sources = (() => {
         // Edit button
         document.getElementById('source-edit-btn').addEventListener('click', () => {
             _showEditForm(source);
+        });
+
+        // Reprocess button
+        document.getElementById('source-reprocess-btn').addEventListener('click', async () => {
+            if (!confirm('Re-extract text and rebuild chunks for this source?')) return;
+            try {
+                const result = await App.api(`/api/sources/${encodeURIComponent(source.id)}/reprocess`, { method: 'POST' });
+                if (result.warnings && result.warnings.length > 0) {
+                    Chat.showToast('Reprocessed with warnings: ' + result.warnings.join('; '));
+                } else {
+                    Chat.showToast('Source reprocessed successfully');
+                }
+                await showDetailView(source.id);
+            } catch (err) {
+                alert('Failed to reprocess: ' + err.message);
+            }
         });
 
         // Delete button
