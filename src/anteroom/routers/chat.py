@@ -590,6 +590,7 @@ async def _build_chat_system_prompt(
             logger.debug("RAG retrieval failed, continuing without context", exc_info=True)
             meta["rag_status"] = "failed"
             meta["rag_chunks"] = 0
+            meta["rag_sources"] = []
     else:
         # Capture the reason RAG was skipped so prompt_meta is always consistent
         if not rag_config:

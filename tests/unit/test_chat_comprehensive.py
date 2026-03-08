@@ -843,6 +843,12 @@ class TestBuildChatSystemPrompt:
 
         assert meta["rag_status"] == "ok"
         assert meta["rag_chunks"] == 2
+        assert "rag_sources" in meta
+        assert len(meta["rag_sources"]) == 2
+        for src in meta["rag_sources"]:
+            assert "label" in src
+            assert "type" in src
+            assert "source_id" in src
 
     @pytest.mark.asyncio
     async def test_rag_meta_no_results(self) -> None:

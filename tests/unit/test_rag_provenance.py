@@ -153,3 +153,25 @@ class TestRenderRagSources:
         output = self._capture(chunks)
         assert "source" in output
         assert "manual.pdf" in output
+
+    def test_handles_missing_attributes_gracefully(self) -> None:
+        """Chunks with missing attributes should fall back to '?'."""
+
+        class _BareChunk:
+            pass
+
+        output = self._capture([_BareChunk()])  # type: ignore[arg-type]
+        assert "?" in output
+
+    def test_special_characters_in_label(self) -> None:
+        chunks = [
+            _FakeChunk(
+                content="c1",
+                source_type="source_chunk",
+                source_label='Report "Q3" <2024>',
+                distance=0.2,
+                source_id="s1",
+            ),
+        ]
+        output = self._capture(chunks)
+        assert "Report" in output
