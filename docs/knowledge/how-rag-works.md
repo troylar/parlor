@@ -381,7 +381,7 @@ Possible `rag_status` values:
 
 ### Source Provenance
 
-RAG source provenance is persisted with each assistant message as metadata. This means:
+When RAG context contributes to a response, the source provenance is persisted with the assistant message as metadata. This means:
 
 - **CLI**: When you resume a conversation (`-r`, `/last`, `/resume`), RAG sources that contributed to each response are displayed alongside the conversation history
 - **Web UI**: When loading a conversation, source labels are shown beneath each assistant message that used RAG context
