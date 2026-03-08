@@ -471,10 +471,6 @@ const Chat = (() => {
         if (!msgEl || !sources || sources.length === 0) return;
         const details = document.createElement('details');
         details.className = 'rag-sources';
-        const summary = document.createElement('summary');
-        const count = sources.length;
-        summary.textContent = `${count} source${count !== 1 ? 's' : ''} used`;
-        details.appendChild(summary);
         const list = document.createElement('ul');
         list.className = 'rag-sources-list';
         const seen = new Set();
@@ -493,6 +489,11 @@ const Chat = (() => {
             li.appendChild(label);
             list.appendChild(li);
         }
+        const uniqueCount = seen.size;
+        if (uniqueCount === 0) return;
+        const summary = document.createElement('summary');
+        summary.textContent = `${uniqueCount} source${uniqueCount !== 1 ? 's' : ''} used`;
+        details.appendChild(summary);
         details.appendChild(list);
         msgEl.appendChild(details);
     }
