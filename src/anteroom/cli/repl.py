@@ -2573,6 +2573,24 @@ async def _run_repl(
                 logger.debug("RAG: failed to create embedding service", exc_info=True)
                 return None
 
+        _embedding_worker: list[Any] = [None]
+
+        async def _get_embedding_worker() -> Any:
+            """Lazily create an EmbeddingWorker for inline embedding after uploads."""
+            if _embedding_worker[0] is not None:
+                return _embedding_worker[0]
+            svc = await _get_rag_embedding_service()
+            if svc is None:
+                return None
+            try:
+                from ..services.embedding_worker import EmbeddingWorker
+
+                _embedding_worker[0] = EmbeddingWorker(db, svc, vec_manager=vec_manager)
+                return _embedding_worker[0]
+            except Exception:
+                logger.debug("Failed to create embedding worker for CLI", exc_info=True)
+                return None
+
         _rag_reranker_service: list[Any] = [None]
         _reranker_checked: list[bool] = [False]
 
@@ -2851,6 +2869,14 @@ async def _run_repl(
                             renderer.console.print(
                                 f"  [{MUTED}]{mime}, {len(source['content']):,} chars extracted[/{MUTED}]"
                             )
+                            worker = await _get_embedding_worker()
+                            if worker:
+                                try:
+                                    n = await worker.embed_source(source["id"])
+                                    if n:
+                                        renderer.console.print(f"  [{MUTED}]{n} chunk(s) embedded for search[/{MUTED}]")
+                                except Exception:
+                                    pass  # will be picked up by background worker
                         else:
                             renderer.console.print(f"  [{MUTED}]{mime}, stored (no text extracted)[/{MUTED}]")
                         renderer.console.print()
