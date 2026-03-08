@@ -376,6 +376,5 @@ Possible `rag_status` values:
 | `failed` | Embedding or search failed (logged, non-fatal) |
 | `no_config` | No embedding service or config available |
 | `skipped_plan_mode` | RAG skipped because planning mode is active |
-| `no_vec_support` | Vector search library (usearch) not installed |
-| `no_embedding_service` | Embedding service not initialized |
+| `no_vec_support` | No usable retrieval backend for the configured mode (e.g., dense mode without embeddings, or no usearch installed) |
 | `skipped` | RAG skipped for another reason (e.g., no query text) |
