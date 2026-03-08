@@ -378,3 +378,12 @@ Possible `rag_status` values:
 | `skipped_plan_mode` | RAG skipped because planning mode is active |
 | `no_vec_support` | No usable retrieval backend for the configured mode (e.g., dense mode without embeddings, or no usearch installed) |
 | `skipped` | RAG skipped for another reason (e.g., no query text) |
+
+### Source Provenance
+
+RAG source provenance is persisted with each assistant message as metadata. This means:
+
+- **CLI**: When you resume a conversation (`-r`, `/last`, `/resume`), RAG sources that contributed to each response are displayed alongside the conversation history
+- **Web UI**: When loading a conversation, source labels are shown beneath each assistant message that used RAG context
+
+Source provenance is stored in the `metadata` JSON column of the `messages` table. Each entry includes the source label, type, and source ID. Malformed metadata is silently ignored.
