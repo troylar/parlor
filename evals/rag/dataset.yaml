@@ -362,6 +362,7 @@ queries:
   - id: "q-space-backend-auth"
     query: "How should passwords be hashed in our backend?"
     relevant: ["chunk-sec-auth"]
+    excluded: ["chunk-fe-components", "chunk-fe-state"]
     k: 5
     category: "space_scoping"
     space_id: "space-backend"
@@ -369,6 +370,7 @@ queries:
   - id: "q-space-backend-docker"
     query: "How do I deploy the backend with Docker?"
     relevant: ["chunk-deploy-docker"]
+    excluded: ["chunk-fe-components", "chunk-fe-state"]
     k: 5
     category: "space_scoping"
     space_id: "space-backend"
@@ -376,6 +378,7 @@ queries:
   - id: "q-space-backend-migration"
     query: "How are database migrations handled?"
     relevant: ["msg-migration-a1"]
+    excluded: ["chunk-fe-components", "chunk-fe-state"]
     k: 5
     category: "space_scoping"
     space_id: "space-backend"
