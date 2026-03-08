@@ -2255,6 +2255,14 @@ async def _run_repl(
             is_first_message = False
             working_dir = _restore_working_dir(conv, tool_registry, working_dir)
             _pending_resume_info = True
+            # Render persisted RAG source provenance from stored metadata
+            _resume_msgs = storage.list_messages(db, resume_conversation_id)
+            for _rmsg in _resume_msgs:
+                if _rmsg.get("role") == "assistant" and _rmsg.get("metadata"):
+                    _rmeta = _rmsg["metadata"]
+                    _rsources = _rmeta.get("rag_sources") if isinstance(_rmeta, dict) else None
+                    if _rsources:
+                        renderer.render_rag_sources(_rsources)
             # Load space from resumed conversation
             if not space and conv.get("space_id"):
                 from ..services.space_storage import get_space as _get_resumed_space
