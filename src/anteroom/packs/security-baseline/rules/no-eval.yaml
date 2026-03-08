@@ -17,7 +17,7 @@ metadata:
     - tool: bash
       pattern: "pickle\\.loads\\s*\\("
     - tool: bash
-      pattern: "yaml\\.load\\s*\\((?!.*Loader)"
+      pattern: "yaml\\.load\\s*\\((?!.*SafeLoader)"
     - tool: write_file
       pattern: "\\b(eval|exec|compile)\\s*\\("
     - tool: edit_file

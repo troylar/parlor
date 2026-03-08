@@ -81,7 +81,7 @@ class TestParseRule:
         art = _make_rule_artifact(
             matches=[
                 {"tool": "bash", "pattern": r"git\s+push\s+--force"},
-                {"tool": "write_file", "pattern": r"\.env$"},
+                {"tool": "write_file", "pattern": r"\.env(\n|$)"},
             ]
         )
         result = parse_rule(art)
@@ -187,7 +187,7 @@ class TestCheckRule:
         rule = ParsedRule(
             fqn="@test/rule/r",
             reason="no .env writes",
-            matches=(RuleMatch(tool="write_file", pattern=re.compile(r"\.env$")),),
+            matches=(RuleMatch(tool="write_file", pattern=re.compile(r"\.env(\n|$)")),),
         )
         assert check_rule(rule, "write_file", {"path": "/app/.env"})
         assert not check_rule(rule, "write_file", {"path": "/app/config.yaml"})
@@ -243,7 +243,7 @@ class TestRuleEnforcer:
         r1 = _make_rule_artifact(name="no-force-push")
         r2 = _make_rule_artifact(
             name="no-env-write",
-            matches=[{"tool": "write_file", "pattern": r"\.env$"}],
+            matches=[{"tool": "write_file", "pattern": r"\.env(\n|$)"}],
             reason="No .env writes",
         )
         enforcer.load_rules([r1, r2])
@@ -310,3 +310,135 @@ class TestRuleEnforcerEdgeCases:
         result = parse_rule(art)
         assert result is not None
         assert len(result.matches) == 1
+
+
+class TestStringifyWriteFileContent:
+    """Verify _stringify_arguments includes file content for write/edit tools."""
+
+    def test_write_file_includes_content(self) -> None:
+        import re
+
+        rule = ParsedRule(
+            fqn="@test/rule/r",
+            reason="no eval",
+            matches=(RuleMatch(tool="write_file", pattern=re.compile(r"\beval\s*\(")),),
+        )
+        assert check_rule(rule, "write_file", {"path": "app.py", "content": "result = eval(user_input)"})
+
+    def test_write_file_content_no_match(self) -> None:
+        import re
+
+        rule = ParsedRule(
+            fqn="@test/rule/r",
+            reason="no eval",
+            matches=(RuleMatch(tool="write_file", pattern=re.compile(r"\beval\s*\(")),),
+        )
+        assert not check_rule(rule, "write_file", {"path": "app.py", "content": "result = safe_parse(data)"})
+
+    def test_edit_file_includes_new_text(self) -> None:
+        import re
+
+        rule = ParsedRule(
+            fqn="@test/rule/r",
+            reason="no sql concat",
+            matches=(RuleMatch(tool="edit_file", pattern=re.compile(r'\.execute\s*\(\s*f["\']')),),
+        )
+        assert check_rule(
+            rule,
+            "edit_file",
+            {"path": "db.py", "old_text": "safe()", "new_text": 'conn.execute(f"SELECT * FROM {table}")'},
+        )
+
+    def test_edit_file_old_text_not_matched(self) -> None:
+        """Only new_text is checked, not old_text."""
+        import re
+
+        rule = ParsedRule(
+            fqn="@test/rule/r",
+            reason="no eval",
+            matches=(RuleMatch(tool="edit_file", pattern=re.compile(r"\beval\s*\(")),),
+        )
+        # old_text has eval but new_text does not — should NOT block
+        assert not check_rule(
+            rule,
+            "edit_file",
+            {"path": "app.py", "old_text": "eval(x)", "new_text": "safe_parse(x)"},
+        )
+
+    def test_write_file_path_still_matches(self) -> None:
+        """Path-matching patterns work with path\\ncontent format."""
+        import re
+
+        rule = ParsedRule(
+            fqn="@test/rule/r",
+            reason="no .env writes",
+            matches=(RuleMatch(tool="write_file", pattern=re.compile(r"\.env(\n|$)")),),
+        )
+        assert check_rule(rule, "write_file", {"path": "/app/.env", "content": "API_KEY=abc"})
+        # Also works without content
+        assert check_rule(rule, "write_file", {"path": "/app/.env"})
+
+    def test_write_file_hardcoded_secret_in_content(self) -> None:
+        import re
+
+        rule = ParsedRule(
+            fqn="@test/rule/r",
+            reason="no hardcoded secrets",
+            matches=(
+                RuleMatch(
+                    tool="write_file",
+                    pattern=re.compile(r'(api_key|secret_key|password|token)\s*=\s*["\'][^"\']{8,}'),
+                ),
+            ),
+        )
+        assert check_rule(
+            rule,
+            "write_file",
+            {"path": "config.py", "content": 'api_key = "supersecret123"'},
+        )
+
+    def test_read_file_still_path_only(self) -> None:
+        """read_file should only match against path, not other args."""
+        import re
+
+        rule = ParsedRule(
+            fqn="@test/rule/r",
+            reason="test",
+            matches=(RuleMatch(tool="read_file", pattern=re.compile(r"secret")),),
+        )
+        assert check_rule(rule, "read_file", {"path": "/tmp/secret.txt"})
+        assert not check_rule(rule, "read_file", {"path": "/tmp/safe.txt"})
+
+
+class TestYamlLoadRulePattern:
+    """Verify the yaml.load rule blocks unsafe loaders but allows SafeLoader."""
+
+    def _make_yaml_rule(self) -> ParsedRule:
+        import re
+
+        return ParsedRule(
+            fqn="@test/rule/no-eval",
+            reason="no unsafe yaml.load",
+            matches=(RuleMatch(tool="bash", pattern=re.compile(r"yaml\.load\s*\((?!.*SafeLoader)")),),
+        )
+
+    def test_blocks_no_loader(self) -> None:
+        rule = self._make_yaml_rule()
+        assert check_rule(rule, "bash", {"command": "python -c 'yaml.load(data)'"})
+
+    def test_blocks_unsafe_loader(self) -> None:
+        rule = self._make_yaml_rule()
+        assert check_rule(rule, "bash", {"command": "python -c 'yaml.load(data, Loader=yaml.Loader)'"})
+
+    def test_blocks_unsafeloader(self) -> None:
+        rule = self._make_yaml_rule()
+        assert check_rule(rule, "bash", {"command": "python -c 'yaml.load(data, Loader=UnsafeLoader)'"})
+
+    def test_allows_safe_loader(self) -> None:
+        rule = self._make_yaml_rule()
+        assert not check_rule(rule, "bash", {"command": "python -c 'yaml.load(data, Loader=yaml.SafeLoader)'"})
+
+    def test_allows_safe_load_function(self) -> None:
+        """yaml.safe_load() is a different function and should not be matched."""
+        rule = self._make_yaml_rule()
+        assert not check_rule(rule, "bash", {"command": "python -c 'yaml.safe_load(data)'"})
