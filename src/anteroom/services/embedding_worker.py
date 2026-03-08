@@ -46,6 +46,7 @@ class EmbeddingWorker:
         self._base_interval = DEFAULT_INTERVAL
         self._task: asyncio.Task[None] | None = None
         self._store_failures: dict[str, int] = {}
+        self._cycle_count = 0
 
     @property
     def disabled(self) -> bool:
@@ -124,7 +125,9 @@ class EmbeddingWorker:
         """Process unembedded messages and source chunks. Returns total count embedded."""
         count = await self._process_pending_messages()
         count += await self._process_pending_source_chunks()
-        self._repair_stale_embeddings()
+        self._cycle_count += 1
+        if self._cycle_count % 10 == 0:
+            self._repair_stale_embeddings()
         return count
 
     def _repair_stale_embeddings(self, limit: int = 100) -> None:
@@ -357,7 +360,12 @@ class EmbeddingWorker:
         return count
 
     async def embed_message(self, message_id: str, content: str, conversation_id: str) -> None:
-        """Embed a single message (called inline after message creation)."""
+        """Embed a single message (called inline after message creation).
+
+        Unlike ``embed_source()``, this does NOT call ``save_all()`` because it
+        is only invoked from within the background worker cycle where
+        ``run_forever()`` handles flushing after ``process_pending()``.
+        """
         if len(content) < MIN_CONTENT_LENGTH:
             return
 

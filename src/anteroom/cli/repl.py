@@ -2876,7 +2876,9 @@ async def _run_repl(
                                     if n:
                                         renderer.console.print(f"  [{MUTED}]{n} chunk(s) embedded for search[/{MUTED}]")
                                 except Exception:
-                                    pass  # will be picked up by background worker
+                                    logger.debug(
+                                        "Inline embed failed for upload; background worker will retry", exc_info=True
+                                    )
                         else:
                             renderer.console.print(f"  [{MUTED}]{mime}, stored (no text extracted)[/{MUTED}]")
                         renderer.console.print()
