@@ -20,6 +20,7 @@ from .slug import generate_slug
 
 if TYPE_CHECKING:
     from ..db import ThreadSafeConnection
+    from .document_extractor import ExtractionResult
 
 logger = logging.getLogger(__name__)
 
@@ -1791,9 +1792,15 @@ def create_source(
     content_hash: str | None = None,
     user_id: str | None = None,
     user_display_name: str | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[str]]:
+    """Create a source record.
+
+    Returns (source_dict, warnings) where warnings contains any pipeline
+    feedback messages (e.g. empty chunks).
+    """
     if source_type not in ("file", "text", "url"):
         raise ValueError(f"Invalid source type: {source_type!r}")
+    warnings: list[str] = []
     sid = _uuid()
     now = _now()
     if content and not content_hash:
@@ -1824,6 +1831,16 @@ def create_source(
     )
     db.commit()
 
+    # Auto-chunk text content
+    chunk_count = 0
+    if content:
+        chunks = chunk_text(content)
+        if chunks:
+            create_source_chunks(db, sid, chunks)
+            chunk_count = len(chunks)
+        elif content.strip():
+            warnings.append("Source has 0 chunks — content too short for RAG")
+
     source = {
         "id": sid,
         "type": source_type,
@@ -1839,15 +1856,9 @@ def create_source(
         "user_display_name": user_display_name,
         "created_at": now,
         "updated_at": now,
+        "chunk_count": chunk_count,
     }
-
-    # Auto-chunk text content
-    if content:
-        chunks = chunk_text(content)
-        if chunks:
-            create_source_chunks(db, sid, chunks)
-
-    return source
+    return source, warnings
 
 
 def get_source(db: ThreadSafeConnection, source_id: str) -> dict[str, Any] | None:
@@ -1998,14 +2009,20 @@ def save_source_file(
     data_dir: Path,
     user_id: str | None = None,
     user_display_name: str | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[str]]:
     """Save a file as a source with MIME validation.
 
     Deduplicates by content hash — returns existing source if identical content
-    was already uploaded. File write and DB insert are atomic: if DB insert fails,
-    the file is cleaned up.
+    was already uploaded. When a hash match has no extracted content, re-attempts
+    extraction in case the required dependency is now available.
+
+    File write and DB insert are atomic: if DB insert fails, the file is cleaned up.
+
+    Returns (source_dict, warnings) where warnings contains any extraction or
+    pipeline feedback messages.
     """
     _validate_upload(mime_type, data, filename)
+    warnings: list[str] = []
 
     import hashlib
 
@@ -2017,7 +2034,39 @@ def save_source_file(
         (content_hash,),
     ).fetchone()
     if existing:
-        return dict(existing)
+        existing_dict = dict(existing)
+        # Re-attempt extraction if the existing source has no content
+        if existing_dict.get("content") is None:
+            extraction_result = _try_extract(data, mime_type)
+            warnings.extend(extraction_result.warnings)
+            if extraction_result.text:
+                # Extraction now succeeds — update existing source
+                db.execute(
+                    "UPDATE sources SET content = ?, updated_at = ? WHERE id = ?",
+                    (extraction_result.text, _now(), existing_dict["id"]),
+                )
+                db.commit()
+                existing_dict["content"] = extraction_result.text
+                # Re-chunk
+                db.execute("DELETE FROM source_chunks WHERE source_id = ?", (existing_dict["id"],))
+                db.commit()
+                chunks = chunk_text(extraction_result.text)
+                chunk_count = 0
+                if chunks:
+                    create_source_chunks(db, existing_dict["id"], chunks)
+                    chunk_count = len(chunks)
+                existing_dict["chunk_count"] = chunk_count
+            else:
+                existing_dict["chunk_count"] = 0
+                if not warnings:
+                    warnings.append("Source stored but will not appear in RAG — no text extracted")
+        else:
+            # Existing source has content — count chunks
+            chunk_rows = db.execute(
+                "SELECT COUNT(*) FROM source_chunks WHERE source_id = ?", (existing_dict["id"],)
+            ).fetchone()
+            existing_dict["chunk_count"] = chunk_rows[0] if chunk_rows else 0
+        return existing_dict, warnings
 
     safe_filename = _sanitize_filename(filename)
     sid = _uuid()
@@ -2030,25 +2079,14 @@ def save_source_file(
         raise ValueError("Invalid filename")
     full_path.write_bytes(data)
 
-    # Extract text content for text-based files
-    content = None
-    if mime_type.startswith("text/") or mime_type in (
-        "application/json",
-        "application/javascript",
-        "application/x-yaml",
-        "application/yaml",
-        "application/x-python-code",
-    ):
-        try:
-            content = data.decode("utf-8")
-        except UnicodeDecodeError:
-            pass
+    # Extract text content
+    extraction_result = _try_extract(data, mime_type)
+    content = extraction_result.text
+    warnings.extend(extraction_result.warnings)
 
-    # Try binary document extraction (PDF, DOCX) if text decode didn't apply
-    if content is None:
-        from anteroom.services.document_extractor import extract_text
-
-        content = extract_text(data, mime_type)
+    if content is None and mime_type in _extractable_mime_types():
+        if not warnings:
+            warnings.append("Source stored but will not appear in RAG — no text extracted")
 
     now = _now()
     try:
@@ -2083,12 +2121,16 @@ def save_source_file(
         raise
 
     # Auto-chunk text content
+    chunk_count = 0
     if content:
         chunks = chunk_text(content)
         if chunks:
             create_source_chunks(db, sid, chunks)
+            chunk_count = len(chunks)
+        elif content.strip():
+            warnings.append("Source has 0 chunks — content too short for RAG")
 
-    return {
+    source = {
         "id": sid,
         "type": "file",
         "title": title,
@@ -2102,7 +2144,39 @@ def save_source_file(
         "user_display_name": user_display_name,
         "created_at": now,
         "updated_at": now,
+        "chunk_count": chunk_count,
     }
+    return source, warnings
+
+
+def _try_extract(data: bytes, mime_type: str) -> "ExtractionResult":
+    """Try text extraction — UTF-8 decode for text types, then binary extraction."""
+    from anteroom.services.document_extractor import ExtractionResult
+
+    # Text-based files: try UTF-8 decode first
+    if mime_type.startswith("text/") or mime_type in (
+        "application/json",
+        "application/javascript",
+        "application/x-yaml",
+        "application/yaml",
+        "application/x-python-code",
+    ):
+        try:
+            return ExtractionResult(text=data.decode("utf-8"))
+        except UnicodeDecodeError:
+            pass
+
+    # Binary document extraction (PDF, DOCX, etc.)
+    from anteroom.services.document_extractor import extract_text
+
+    return extract_text(data, mime_type)
+
+
+def _extractable_mime_types() -> frozenset[str]:
+    """Return the set of MIME types we can potentially extract text from."""
+    from anteroom.services.document_extractor import EXTRACTABLE_MIME_TYPES
+
+    return EXTRACTABLE_MIME_TYPES
 
 
 # --- Source Chunks ---
@@ -2449,32 +2523,20 @@ def create_source_from_attachment(
 
     import hashlib
 
-    # Read file content for text-based files
+    # Extract text content
     content = None
     full_path = data_dir / att["storage_path"]
     if full_path.exists():
         mime = att["mime_type"]
-        if mime.startswith("text/") or mime in (
-            "application/json",
-            "application/javascript",
-            "application/x-yaml",
-            "application/yaml",
-            "application/x-python-code",
-        ):
-            try:
-                content = full_path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                pass
-
-        # Try binary document extraction (PDF, DOCX) if text decode didn't apply
-        if content is None:
-            try:
-                from anteroom.services.document_extractor import extract_text
-
-                file_data = full_path.read_bytes()
-                content = extract_text(file_data, mime)
-            except OSError:
-                pass
+        try:
+            file_data = full_path.read_bytes()
+            extraction_result = _try_extract(file_data, mime)
+            content = extraction_result.text
+            # Log warnings from extraction (attachment path has its own feedback)
+            for w in extraction_result.warnings:
+                logger.info("Attachment extraction warning for %s: %s", att["filename"], w)
+        except OSError:
+            pass
 
     # Always hash raw bytes for consistency with save_source_file (enables
     # cross-path deduplication between uploads and attachment promotion).
@@ -2484,7 +2546,7 @@ def create_source_from_attachment(
     except OSError:
         pass
 
-    source = create_source(
+    source, _warnings = create_source(
         db,
         source_type="file",
         title=att["filename"],
@@ -2674,3 +2736,77 @@ def _resolve_chunk_results(
         if len(results) >= limit:
             break
     return results
+
+
+def reprocess_source(
+    db: ThreadSafeConnection,
+    source_id: str,
+    data_dir: Path,
+) -> tuple[dict[str, Any], list[str]]:
+    """Re-extract text from a source's stored file and rebuild chunks.
+
+    Returns (source_dict, warnings). Useful after installing missing extractors.
+    """
+    warnings: list[str] = []
+    row = db.execute_fetchone("SELECT * FROM sources WHERE id = ?", (source_id,))
+    if not row:
+        return {}, ["Source not found"]
+
+    source = dict(row)
+    storage_path = source.get("storage_path")
+    if not storage_path:
+        return source, ["Source has no stored file — cannot reprocess"]
+
+    full_path = safe_resolve_pathlib(data_dir / storage_path)
+    if not full_path or not full_path.is_file():
+        return source, ["Original file not found — cannot reprocess"]
+
+    mime_type = source.get("mime_type", "application/octet-stream")
+    file_data = full_path.read_bytes()
+    extraction_result = _try_extract(file_data, mime_type)
+    warnings.extend(extraction_result.warnings)
+
+    if extraction_result.text:
+        db.execute(
+            "UPDATE sources SET content = ?, updated_at = ? WHERE id = ?",
+            (extraction_result.text, _now(), source_id),
+        )
+        db.commit()
+        source["content"] = extraction_result.text
+
+        # Rebuild chunks
+        db.execute("DELETE FROM source_chunks WHERE source_id = ?", (source_id,))
+        db.commit()
+        chunks = chunk_text(extraction_result.text)
+        chunk_count = 0
+        if chunks:
+            create_source_chunks(db, source_id, chunks)
+            chunk_count = len(chunks)
+        source["chunk_count"] = chunk_count
+    else:
+        if not warnings:
+            warnings.append("Re-extraction produced no text")
+        source["chunk_count"] = 0
+
+    return source, warnings
+
+
+def get_source_embedding_status(db: ThreadSafeConnection, source_id: str) -> str:
+    """Return embedding status for a source: 'embedded', 'partial', 'pending', or 'no_chunks'."""
+    chunk_rows = db.execute_fetchall("SELECT id FROM source_chunks WHERE source_id = ?", (source_id,))
+    if not chunk_rows:
+        return "no_chunks"
+
+    chunk_ids = [dict(r)["id"] for r in chunk_rows]
+    placeholders = ",".join("?" * len(chunk_ids))
+    embedded_rows = db.execute_fetchall(
+        f"SELECT chunk_id FROM source_chunk_embeddings WHERE chunk_id IN ({placeholders})",
+        tuple(chunk_ids),
+    )
+    embedded_count = len(embedded_rows)
+
+    if embedded_count == 0:
+        return "pending"
+    if embedded_count < len(chunk_ids):
+        return "partial"
+    return "embedded"

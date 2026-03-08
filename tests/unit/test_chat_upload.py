@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from anteroom.routers.chat import router
+from anteroom.services.document_extractor import ExtractionResult
 
 
 def _make_app() -> FastAPI:
@@ -189,7 +190,7 @@ class TestAttachmentContentBuilding:
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="extracted PDF text",
+                return_value=ExtractionResult(text="extracted PDF text"),
             ) as mock_extract,
         ):
             _setup_storage(mock_storage, conv_id, msg_id)
@@ -214,7 +215,7 @@ class TestAttachmentContentBuilding:
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="extracted DOCX text",
+                return_value=ExtractionResult(text="extracted DOCX text"),
             ) as mock_extract,
         ):
             _setup_storage(mock_storage, conv_id, msg_id)
@@ -236,7 +237,7 @@ class TestAttachmentContentBuilding:
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value=None,
+                return_value=ExtractionResult(text=None),
             ),
         ):
             _setup_storage(mock_storage, conv_id, msg_id)
@@ -294,7 +295,7 @@ class TestAttachmentContentBuilding:
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value=long_text,
+                return_value=ExtractionResult(text=long_text),
             ),
         ):
             _setup_storage(mock_storage, conv_id, msg_id)
@@ -316,7 +317,7 @@ class TestAttachmentContentBuilding:
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="from validated mime",
+                return_value=ExtractionResult(text="from validated mime"),
             ) as mock_extract,
         ):
             _setup_storage(mock_storage, conv_id, msg_id)
@@ -339,7 +340,7 @@ class TestAttachmentContentBuilding:
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="slide content here",
+                return_value=ExtractionResult(text="slide content here"),
             ) as mock_extract,
         ):
             _setup_storage(mock_storage, conv_id, msg_id)
@@ -362,7 +363,7 @@ class TestAttachmentContentBuilding:
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="sheet data here",
+                return_value=ExtractionResult(text="sheet data here"),
             ) as mock_extract,
         ):
             _setup_storage(mock_storage, conv_id, msg_id)

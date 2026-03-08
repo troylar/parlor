@@ -40,21 +40,23 @@ async def retrieve_context(
     vec_manager: Any | None = None,
     reranker_service: Any | None = None,
     reranker_config: RerankerConfig | None = None,
-) -> list[RetrievedChunk]:
+) -> tuple[list[RetrievedChunk], str | None]:
     """Embed the user query and retrieve the top-K most relevant chunks.
 
     When *space_id* is given, message results are filtered to conversations
     belonging to that space, and source results are filtered to sources
     linked to that space.
 
-    Returns an empty list (never raises) when embeddings are unavailable,
-    the query is too short, or any transient error occurs.
+    Returns ``(chunks, reason)`` where *reason* is ``None`` on success or a
+    human-readable string explaining why no results were returned.  Never
+    raises when embeddings are unavailable, the query is too short, or any
+    transient error occurs.
     """
     if not config.enabled:
-        return []
+        return [], "RAG disabled"
 
     if len(query.strip()) < 10:
-        return []
+        return [], "Query too short for retrieval"
 
     mode = getattr(config, "retrieval_mode", "dense")
     use_dense = mode in ("dense", "hybrid")
@@ -71,7 +73,7 @@ async def retrieve_context(
     if use_dense:
         if not embedding_service:
             if not use_keyword:
-                return []
+                return [], "Embedding service unavailable"
             use_dense = False
         else:
             try:
@@ -79,16 +81,16 @@ async def retrieve_context(
             except Exception:
                 logger.debug("RAG: embedding failed, skipping retrieval", exc_info=True)
                 if not use_keyword:
-                    return []
+                    return [], "Embedding failed"
                 use_dense = False
 
             if not embedding:
                 if not use_keyword:
-                    return []
+                    return [], "Embedding service returned empty result"
                 use_dense = False
     elif not use_keyword:
         # Neither dense nor keyword — nothing to do
-        return []
+        return [], "No retrieval mode configured"
 
     dense_msg: list[dict[str, Any]] = []
     dense_src: list[dict[str, Any]] = []
@@ -228,7 +230,8 @@ async def retrieve_context(
         trimmed.append(chunk)
         total_chars += chunk_chars
 
-    return trimmed
+    reason = None if trimmed else "No matching results found"
+    return trimmed, reason
 
 
 def format_rag_context(chunks: list[RetrievedChunk]) -> str:

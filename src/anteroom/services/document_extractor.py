@@ -8,9 +8,19 @@ extraction gracefully returns None when they are not installed.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    """Result of a text extraction attempt, with optional warnings."""
+
+    text: str | None = None
+    warnings: list[str] = field(default_factory=list)
+
 
 # MIME types we can extract text from (when the library is available).
 _PDF_TYPES = frozenset({"application/pdf"})
@@ -33,11 +43,11 @@ _XLSX_TYPES = frozenset(
 EXTRACTABLE_MIME_TYPES = _PDF_TYPES | _DOCX_TYPES | _PPTX_TYPES | _XLSX_TYPES
 
 
-def extract_text(data: bytes, mime_type: str) -> str | None:
+def extract_text(data: bytes, mime_type: str) -> ExtractionResult:
     """Extract text content from binary document bytes.
 
-    Returns the extracted text, or None if extraction is not possible
-    (unsupported format, missing library, corrupt file).
+    Returns an ExtractionResult with the extracted text and any warnings
+    (e.g. missing library, corrupt file).
     """
     if mime_type in _PDF_TYPES:
         return _extract_pdf(data)
@@ -47,17 +57,16 @@ def extract_text(data: bytes, mime_type: str) -> str | None:
         return _extract_pptx(data)
     if mime_type in _XLSX_TYPES:
         return _extract_xlsx(data)
-    return None
+    return ExtractionResult()
 
 
-def _extract_pdf(data: bytes) -> str | None:
+def _extract_pdf(data: bytes) -> ExtractionResult:
     try:
         from pypdf import PdfReader
     except ImportError:
-        logger.warning(
-            "pypdf not installed — PDF text extraction unavailable. Install with: pip install anteroom[docs]"
-        )
-        return None
+        msg = "pypdf not installed — PDF text extraction unavailable. Install with: pip install anteroom[docs]"
+        logger.warning(msg)
+        return ExtractionResult(warnings=[msg])
     try:
         reader = PdfReader(BytesIO(data))
         pages = []
@@ -66,38 +75,38 @@ def _extract_pdf(data: bytes) -> str | None:
             if text:
                 pages.append(text)
         result = "\n\n".join(pages).strip()
-        return result if result else None
-    except Exception:
-        logger.warning("Failed to extract text from PDF", exc_info=True)
-        return None
+        return ExtractionResult(text=result if result else None)
+    except Exception as exc:
+        msg = f"Failed to extract text from PDF: {exc}"
+        logger.warning(msg, exc_info=True)
+        return ExtractionResult(warnings=[msg])
 
 
-def _extract_docx(data: bytes) -> str | None:
+def _extract_docx(data: bytes) -> ExtractionResult:
     try:
         from docx import Document
     except ImportError:
-        logger.warning(
-            "python-docx not installed — DOCX text extraction unavailable. Install with: pip install anteroom[docs]"
-        )
-        return None
+        msg = "python-docx not installed — DOCX text extraction unavailable. Install with: pip install anteroom[docs]"
+        logger.warning(msg)
+        return ExtractionResult(warnings=[msg])
     try:
         doc = Document(BytesIO(data))
         paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
         result = "\n\n".join(paragraphs).strip()
-        return result if result else None
-    except Exception:
-        logger.warning("Failed to extract text from DOCX", exc_info=True)
-        return None
+        return ExtractionResult(text=result if result else None)
+    except Exception as exc:
+        msg = f"Failed to extract text from DOCX: {exc}"
+        logger.warning(msg, exc_info=True)
+        return ExtractionResult(warnings=[msg])
 
 
-def _extract_pptx(data: bytes) -> str | None:
+def _extract_pptx(data: bytes) -> ExtractionResult:
     try:
         from pptx import Presentation
     except ImportError:
-        logger.warning(
-            "python-pptx not installed — PPTX text extraction unavailable. Install with: pip install anteroom[office]"
-        )
-        return None
+        msg = "python-pptx not installed — PPTX text extraction unavailable. Install with: pip install anteroom[office]"
+        logger.warning(msg)
+        return ExtractionResult(warnings=[msg])
     try:
         prs = Presentation(BytesIO(data))
         slides: list[str] = []
@@ -115,20 +124,20 @@ def _extract_pptx(data: bytes) -> str | None:
             if parts:
                 slides.append(f"--- Slide {i} ---\n" + "\n".join(parts))
         result = "\n\n".join(slides).strip()
-        return result if result else None
-    except Exception:
-        logger.warning("Failed to extract text from PPTX", exc_info=True)
-        return None
+        return ExtractionResult(text=result if result else None)
+    except Exception as exc:
+        msg = f"Failed to extract text from PPTX: {exc}"
+        logger.warning(msg, exc_info=True)
+        return ExtractionResult(warnings=[msg])
 
 
-def _extract_xlsx(data: bytes) -> str | None:
+def _extract_xlsx(data: bytes) -> ExtractionResult:
     try:
         from openpyxl import load_workbook
     except ImportError:
-        logger.warning(
-            "openpyxl not installed — XLSX text extraction unavailable. Install with: pip install anteroom[office]"
-        )
-        return None
+        msg = "openpyxl not installed — XLSX text extraction unavailable. Install with: pip install anteroom[office]"
+        logger.warning(msg)
+        return ExtractionResult(warnings=[msg])
     try:
         wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
         sheets: list[str] = []
@@ -142,7 +151,8 @@ def _extract_xlsx(data: bytes) -> str | None:
                 sheets.append(f"## Sheet: {ws.title}\n" + "\n".join(rows))
         wb.close()
         result = "\n\n".join(sheets).strip()
-        return result if result else None
-    except Exception:
-        logger.warning("Failed to extract text from XLSX", exc_info=True)
-        return None
+        return ExtractionResult(text=result if result else None)
+    except Exception as exc:
+        msg = f"Failed to extract text from XLSX: {exc}"
+        logger.warning(msg, exc_info=True)
+        return ExtractionResult(warnings=[msg])

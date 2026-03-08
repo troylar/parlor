@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from anteroom.services.document_extractor import (
     EXTRACTABLE_MIME_TYPES,
+    ExtractionResult,
     _extract_docx,
     _extract_pdf,
     _extract_pptx,
@@ -16,11 +17,15 @@ from anteroom.services.document_extractor import (
 
 
 class TestExtractText:
-    def test_unsupported_mime_returns_none(self) -> None:
-        assert extract_text(b"data", "image/png") is None
+    def test_unsupported_mime_returns_no_text(self) -> None:
+        result = extract_text(b"data", "image/png")
+        assert result.text is None
+        assert result.warnings == []
 
-    def test_unknown_mime_returns_none(self) -> None:
-        assert extract_text(b"data", "application/octet-stream") is None
+    def test_unknown_mime_returns_no_text(self) -> None:
+        result = extract_text(b"data", "application/octet-stream")
+        assert result.text is None
+        assert result.warnings == []
 
     def test_extractable_mime_types_contains_pdf(self) -> None:
         assert "application/pdf" in EXTRACTABLE_MIME_TYPES
@@ -36,29 +41,33 @@ class TestExtractText:
 
     def test_dispatches_to_pptx(self) -> None:
         pptx_mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        with patch("anteroom.services.document_extractor._extract_pptx", return_value="pptx text") as mock:
+        mock_result = ExtractionResult(text="pptx text")
+        with patch("anteroom.services.document_extractor._extract_pptx", return_value=mock_result) as mock:
             result = extract_text(b"data", pptx_mime)
-            assert result == "pptx text"
+            assert result.text == "pptx text"
             mock.assert_called_once_with(b"data")
 
     def test_dispatches_to_xlsx(self) -> None:
         xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        with patch("anteroom.services.document_extractor._extract_xlsx", return_value="xlsx text") as mock:
+        mock_result = ExtractionResult(text="xlsx text")
+        with patch("anteroom.services.document_extractor._extract_xlsx", return_value=mock_result) as mock:
             result = extract_text(b"data", xlsx_mime)
-            assert result == "xlsx text"
+            assert result.text == "xlsx text"
             mock.assert_called_once_with(b"data")
 
     def test_dispatches_to_pdf(self) -> None:
-        with patch("anteroom.services.document_extractor._extract_pdf", return_value="pdf text") as mock:
+        mock_result = ExtractionResult(text="pdf text")
+        with patch("anteroom.services.document_extractor._extract_pdf", return_value=mock_result) as mock:
             result = extract_text(b"data", "application/pdf")
-            assert result == "pdf text"
+            assert result.text == "pdf text"
             mock.assert_called_once_with(b"data")
 
     def test_dispatches_to_docx(self) -> None:
         docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        with patch("anteroom.services.document_extractor._extract_docx", return_value="docx text") as mock:
+        mock_result = ExtractionResult(text="docx text")
+        with patch("anteroom.services.document_extractor._extract_docx", return_value=mock_result) as mock:
             result = extract_text(b"data", docx_mime)
-            assert result == "docx text"
+            assert result.text == "docx text"
             mock.assert_called_once_with(b"data")
 
 
@@ -85,7 +94,8 @@ class TestPdfExtraction:
 
         with patch.dict(sys.modules, {"pypdf": _make_pypdf_mock(mock_reader)}):
             result = _extract_pdf(b"fake-pdf-bytes")
-            assert result == "Hello from PDF"
+            assert result.text == "Hello from PDF"
+            assert result.warnings == []
 
     def test_multi_page_pdf(self) -> None:
         pages = []
@@ -98,9 +108,9 @@ class TestPdfExtraction:
 
         with patch.dict(sys.modules, {"pypdf": _make_pypdf_mock(mock_reader)}):
             result = _extract_pdf(b"fake-pdf")
-            assert result == "Page one.\n\nPage two."
+            assert result.text == "Page one.\n\nPage two."
 
-    def test_empty_pdf_returns_none(self) -> None:
+    def test_empty_pdf_returns_no_text(self) -> None:
         mock_page = MagicMock()
         mock_page.extract_text.return_value = ""
         mock_reader = MagicMock()
@@ -108,7 +118,8 @@ class TestPdfExtraction:
 
         with patch.dict(sys.modules, {"pypdf": _make_pypdf_mock(mock_reader)}):
             result = _extract_pdf(b"fake-pdf")
-            assert result is None
+            assert result.text is None
+            assert result.warnings == []
 
     def test_pages_with_none_text_skipped(self) -> None:
         p1 = MagicMock()
@@ -120,19 +131,23 @@ class TestPdfExtraction:
 
         with patch.dict(sys.modules, {"pypdf": _make_pypdf_mock(mock_reader)}):
             result = _extract_pdf(b"fake-pdf")
-            assert result == "Good page"
+            assert result.text == "Good page"
 
-    def test_missing_pypdf_returns_none(self) -> None:
+    def test_missing_pypdf_returns_warning(self) -> None:
         with patch.dict(sys.modules, {"pypdf": None}):
             result = _extract_pdf(b"fake-pdf")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "pypdf not installed" in result.warnings[0]
 
-    def test_corrupt_pdf_returns_none(self) -> None:
+    def test_corrupt_pdf_returns_warning(self) -> None:
         mock_mod = MagicMock()
         mock_mod.PdfReader.side_effect = Exception("Corrupt PDF")
         with patch.dict(sys.modules, {"pypdf": mock_mod}):
             result = _extract_pdf(b"corrupt-data")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "Failed to extract text from PDF" in result.warnings[0]
 
 
 class TestDocxExtraction:
@@ -146,7 +161,7 @@ class TestDocxExtraction:
 
         with patch.dict(sys.modules, {"docx": _make_docx_mock(mock_doc)}):
             result = _extract_docx(b"fake-docx-bytes")
-            assert result == "First paragraph\n\nSecond paragraph"
+            assert result.text == "First paragraph\n\nSecond paragraph"
 
     def test_skips_empty_paragraphs(self) -> None:
         paras = []
@@ -159,27 +174,31 @@ class TestDocxExtraction:
 
         with patch.dict(sys.modules, {"docx": _make_docx_mock(mock_doc)}):
             result = _extract_docx(b"fake-docx")
-            assert result == "Content\n\nMore content"
+            assert result.text == "Content\n\nMore content"
 
-    def test_empty_docx_returns_none(self) -> None:
+    def test_empty_docx_returns_no_text(self) -> None:
         mock_doc = MagicMock()
         mock_doc.paragraphs = []
 
         with patch.dict(sys.modules, {"docx": _make_docx_mock(mock_doc)}):
             result = _extract_docx(b"fake-docx")
-            assert result is None
+            assert result.text is None
 
-    def test_missing_python_docx_returns_none(self) -> None:
+    def test_missing_python_docx_returns_warning(self) -> None:
         with patch.dict(sys.modules, {"docx": None}):
             result = _extract_docx(b"fake-docx")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "python-docx not installed" in result.warnings[0]
 
-    def test_corrupt_docx_returns_none(self) -> None:
+    def test_corrupt_docx_returns_warning(self) -> None:
         mock_mod = MagicMock()
         mock_mod.Document.side_effect = Exception("Corrupt DOCX")
         with patch.dict(sys.modules, {"docx": mock_mod}):
             result = _extract_docx(b"corrupt-data")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "Failed to extract text from DOCX" in result.warnings[0]
 
 
 def _make_pptx_mock(presentation_instance: MagicMock) -> MagicMock:
@@ -209,9 +228,9 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result is not None
-            assert "Slide title" in result
-            assert "Slide 1" in result
+            assert result.text is not None
+            assert "Slide title" in result.text
+            assert "Slide 1" in result.text
 
     def test_extracts_notes(self) -> None:
         mock_shape = MagicMock()
@@ -226,8 +245,8 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result is not None
-            assert "Speaker notes: Speaker note here" in result
+            assert result.text is not None
+            assert "Speaker notes: Speaker note here" in result.text
 
     def test_multi_slide(self) -> None:
         slides = []
@@ -244,19 +263,19 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result is not None
-            assert "Slide 1" in result
-            assert "Slide 2" in result
-            assert "First slide" in result
-            assert "Second slide" in result
+            assert result.text is not None
+            assert "Slide 1" in result.text
+            assert "Slide 2" in result.text
+            assert "First slide" in result.text
+            assert "Second slide" in result.text
 
-    def test_empty_presentation_returns_none(self) -> None:
+    def test_empty_presentation_returns_no_text(self) -> None:
         mock_prs = MagicMock()
         mock_prs.slides = []
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result is None
+            assert result.text is None
 
     def test_shapes_without_text_skipped(self) -> None:
         mock_shape = MagicMock()
@@ -269,19 +288,23 @@ class TestPptxExtraction:
 
         with patch.dict(sys.modules, {"pptx": _make_pptx_mock(mock_prs)}):
             result = _extract_pptx(b"fake-pptx")
-            assert result is None
+            assert result.text is None
 
-    def test_missing_python_pptx_returns_none(self) -> None:
+    def test_missing_python_pptx_returns_warning(self) -> None:
         with patch.dict(sys.modules, {"pptx": None}):
             result = _extract_pptx(b"fake-pptx")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "python-pptx not installed" in result.warnings[0]
 
-    def test_corrupt_pptx_returns_none(self) -> None:
+    def test_corrupt_pptx_returns_warning(self) -> None:
         mock_mod = MagicMock()
         mock_mod.Presentation.side_effect = Exception("Corrupt PPTX")
         with patch.dict(sys.modules, {"pptx": mock_mod}):
             result = _extract_pptx(b"corrupt-data")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "Failed to extract text from PPTX" in result.warnings[0]
 
 
 class TestXlsxExtraction:
@@ -294,10 +317,10 @@ class TestXlsxExtraction:
 
         with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
             result = _extract_xlsx(b"fake-xlsx")
-            assert result is not None
-            assert "Sheet1" in result
-            assert "Name" in result
-            assert "Alice" in result
+            assert result.text is not None
+            assert "Sheet1" in result.text
+            assert "Name" in result.text
+            assert "Alice" in result.text
 
     def test_multi_sheet(self) -> None:
         ws1 = MagicMock()
@@ -311,17 +334,17 @@ class TestXlsxExtraction:
 
         with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
             result = _extract_xlsx(b"fake-xlsx")
-            assert result is not None
-            assert "Data" in result
-            assert "Summary" in result
+            assert result.text is not None
+            assert "Data" in result.text
+            assert "Summary" in result.text
 
-    def test_empty_workbook_returns_none(self) -> None:
+    def test_empty_workbook_returns_no_text(self) -> None:
         mock_wb = MagicMock()
         mock_wb.worksheets = []
 
         with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
             result = _extract_xlsx(b"fake-xlsx")
-            assert result is None
+            assert result.text is None
 
     def test_none_cells_become_empty_string(self) -> None:
         mock_ws = MagicMock()
@@ -332,9 +355,9 @@ class TestXlsxExtraction:
 
         with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
             result = _extract_xlsx(b"fake-xlsx")
-            assert result is not None
-            assert "val" in result
-            assert "other" in result
+            assert result.text is not None
+            assert "val" in result.text
+            assert "other" in result.text
 
     def test_all_none_rows_skipped(self) -> None:
         mock_ws = MagicMock()
@@ -345,17 +368,21 @@ class TestXlsxExtraction:
 
         with patch.dict(sys.modules, {"openpyxl": _make_openpyxl_mock(mock_wb)}):
             result = _extract_xlsx(b"fake-xlsx")
-            assert result is not None
-            assert "data" in result
+            assert result.text is not None
+            assert "data" in result.text
 
-    def test_missing_openpyxl_returns_none(self) -> None:
+    def test_missing_openpyxl_returns_warning(self) -> None:
         with patch.dict(sys.modules, {"openpyxl": None}):
             result = _extract_xlsx(b"fake-xlsx")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "openpyxl not installed" in result.warnings[0]
 
-    def test_corrupt_xlsx_returns_none(self) -> None:
+    def test_corrupt_xlsx_returns_warning(self) -> None:
         mock_mod = MagicMock()
         mock_mod.load_workbook.side_effect = Exception("Corrupt XLSX")
         with patch.dict(sys.modules, {"openpyxl": mock_mod}):
             result = _extract_xlsx(b"corrupt-data")
-            assert result is None
+            assert result.text is None
+            assert len(result.warnings) == 1
+            assert "Failed to extract text from XLSX" in result.warnings[0]

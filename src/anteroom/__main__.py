@@ -322,6 +322,31 @@ async def _validate_ai_connection(config: AppConfig) -> None:
         print("  The app will start, but chat may not work until the AI service is reachable.", file=sys.stderr)
 
 
+def _check_knowledge_deps() -> None:
+    """Check availability of optional knowledge pipeline dependencies."""
+    deps = [
+        ("fastembed", "Local embeddings (default)", "pip install fastembed"),
+        ("pypdf", "PDF text extraction", "pip install anteroom[docs]"),
+        ("docx", "DOCX text extraction", "pip install anteroom[docs]"),
+        ("pptx", "PPTX text extraction", "pip install anteroom[docs]"),
+        ("openpyxl", "XLSX text extraction", "pip install anteroom[docs]"),
+        ("usearch", "Vector similarity search", "pip install usearch"),
+    ]
+    all_ok = True
+    for module, description, install_hint in deps:
+        try:
+            __import__(module)
+            print(f"   OK - {description}")
+        except ImportError:
+            print(f"   MISSING - {description} — install with: {install_hint}")
+            all_ok = False
+    if all_ok:
+        print("   All knowledge pipeline dependencies available.")
+    else:
+        print("   Some optional dependencies are missing (knowledge features will degrade gracefully).")
+    print("\nAll checks passed.")
+
+
 async def _test_connection(config: AppConfig) -> None:
     from .services.ai_service import create_ai_service
 
@@ -359,7 +384,8 @@ async def _test_connection(config: AppConfig) -> None:
         print(f"   FAILED - {e}")
         sys.exit(1)
 
-    print("\nAll checks passed.")
+    print("\n3. Checking knowledge pipeline dependencies...")
+    _check_knowledge_deps()
 
 
 def _run_db(args: argparse.Namespace) -> None:

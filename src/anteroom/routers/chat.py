@@ -569,7 +569,7 @@ async def _build_chat_system_prompt(
 
             extra = strip_rag_context(extra)
             _reranker_cfg = getattr(config, "reranker", None)
-            rag_chunks = await retrieve_context(
+            rag_chunks, rag_reason = await retrieve_context(
                 query=message_text,
                 db=db,
                 embedding_service=embedding_service,
@@ -582,6 +582,8 @@ async def _build_chat_system_prompt(
             )
             meta["rag_status"] = "ok" if rag_chunks else "no_results"
             meta["rag_chunks"] = len(rag_chunks)
+            if rag_reason:
+                meta["rag_reason"] = rag_reason
             meta["rag_sources"] = [
                 {"label": c.source_label, "type": c.source_type, "source_id": c.source_id} for c in rag_chunks
             ]
@@ -1863,7 +1865,7 @@ async def chat(conversation_id: str, request: Request) -> Any:
                             validated_mime = att.get("mime_type") or f.content_type
                             extracted = None
                             if validated_mime and validated_mime in EXTRACTABLE_MIME_TYPES:
-                                extracted = extract_text(file_data, validated_mime)
+                                extracted = extract_text(file_data, validated_mime).text
                             if extracted:
                                 max_chars = 50_000
                                 if len(extracted) > max_chars:

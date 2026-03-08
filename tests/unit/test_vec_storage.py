@@ -564,7 +564,7 @@ class TestStoreSourceChunkEmbeddingRollback:
         from anteroom.services.storage import create_source, store_source_chunk_embedding
 
         db = _init_db()
-        source = create_source(db, source_type="text", title="Test", content="test content")
+        source, _ = create_source(db, source_type="text", title="Test", content="test content")
         # Insert a source chunk
         chunk_id = "chunk-fail-1"
         db.execute(

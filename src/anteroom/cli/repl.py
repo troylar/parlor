@@ -583,7 +583,7 @@ def _expand_file_references(text: str, working_dir: str, file_max_chars: int = 1
 
                     if mime in EXTRACTABLE_MIME_TYPES:
                         file_data = resolved.read_bytes()
-                        extracted = extract_text(file_data, mime)
+                        extracted = extract_text(file_data, mime).text
                         if extracted:
                             if len(extracted) > file_max_chars:
                                 extracted = extracted[:file_max_chars] + "\n... (truncated)"
@@ -2047,6 +2047,7 @@ async def _run_repl(
         "model",
         "plan",
         "upload",
+        "reprocess",
         "usage",
         "verbose",
         "detail",
@@ -2869,7 +2870,7 @@ async def _run_repl(
                         file_data = upload_path.read_bytes()
                         guess = _ft.guess(file_data)
                         mime = guess.mime if guess else (mimetypes.guess_type(str(upload_path))[0] or "text/plain")
-                        source = storage.save_source_file(
+                        source, upload_warnings = storage.save_source_file(
                             db,
                             title=upload_path.name,
                             filename=upload_path.name,
@@ -2893,10 +2894,55 @@ async def _run_repl(
                                 renderer.console.print(f"  [{MUTED}]{n} chunk(s) embedded for search[/{MUTED}]")
                         else:
                             renderer.console.print(f"  [{MUTED}]{mime}, stored (no text extracted)[/{MUTED}]")
+                        for w in upload_warnings:
+                            renderer.console.print(f"  [yellow]{w}[/yellow]")
                         renderer.console.print()
                     except Exception:
                         logger.error("CLI upload failed", exc_info=True)
                         renderer.console.print(f"[{CHROME}]Upload failed[/{CHROME}]\n")
+                    continue
+                elif cmd == "/reprocess":
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) < 2 or not parts[1].strip():
+                        renderer.console.print(
+                            f"[{CHROME}]Usage: /reprocess <source_id> or /reprocess all[/{CHROME}]\n"
+                        )
+                        continue
+                    arg = parts[1].strip()
+                    data_dir = config.app.data_dir
+                    if arg.lower() == "all":
+                        rows = db.execute_fetchall(
+                            "SELECT id, title FROM sources WHERE content IS NULL AND storage_path IS NOT NULL"
+                        )
+                        if not rows:
+                            renderer.console.print(f"[{CHROME}]No sources need reprocessing.[/{CHROME}]\n")
+                            continue
+                        renderer.console.print(f"[{CHROME}]Reprocessing {len(rows)} source(s)...[/{CHROME}]")
+                        for r in rows:
+                            rd = dict(r)
+                            src, warns = storage.reprocess_source(db, rd["id"], data_dir)
+                            title = rd.get("title", rd["id"][:8])
+                            if src.get("content"):
+                                cc = src.get("chunk_count", 0)
+                                renderer.console.print(f"  [{MUTED}]{title} — {cc} chunk(s)[/{MUTED}]")
+                            else:
+                                renderer.console.print(f"  [{MUTED}]{title} — no text[/{MUTED}]")
+                            for w in warns:
+                                renderer.console.print(f"  [yellow]{w}[/yellow]")
+                        renderer.console.print()
+                    else:
+                        src, warns = storage.reprocess_source(db, arg, data_dir)
+                        if not src:
+                            renderer.console.print(f"[{CHROME}]Source not found.[/{CHROME}]\n")
+                        else:
+                            if src.get("content"):
+                                cc = src.get("chunk_count", 0)
+                                renderer.console.print(f"[{CHROME}]Reprocessed — {cc} chunk(s)[/{CHROME}]")
+                            else:
+                                renderer.console.print(f"[{CHROME}]Reprocessed — no text extracted[/{CHROME}]")
+                            for w in warns:
+                                renderer.console.print(f"  [yellow]{w}[/yellow]")
+                            renderer.console.print()
                     continue
                 elif cmd == "/usage":
                     _show_usage_stats(db, config)
@@ -4492,7 +4538,7 @@ async def _run_repl(
                     _rag_uses_keyword = _rag_mode in ("keyword", "hybrid")
                     if _rag_emb or _rag_uses_keyword:
                         _rag_reranker = await _get_rag_reranker_service()
-                        _rag_chunks = await retrieve_context(
+                        _rag_chunks, _rag_reason = await retrieve_context(
                             query=expanded,
                             db=db,
                             embedding_service=_rag_emb,
@@ -4509,7 +4555,8 @@ async def _run_repl(
                                 f"  [{MUTED}][RAG: {len(_rag_chunks)} relevant chunk(s) retrieved][/{MUTED}]"
                             )
                         else:
-                            renderer.console.print(f"  [{MUTED}][RAG: no relevant context found][/{MUTED}]")
+                            _reason_suffix = f" — {_rag_reason}" if _rag_reason else ""
+                            renderer.console.print(f"  [{MUTED}][RAG: no results{_reason_suffix}][/{MUTED}]")
                     else:
                         renderer.console.print(f"  [{MUTED}][RAG: embedding service unavailable][/{MUTED}]")
                 except Exception:

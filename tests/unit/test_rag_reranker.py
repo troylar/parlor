@@ -177,7 +177,7 @@ class TestRetrieveContextWithReranker:
             mock_storage.get_conversation.return_value = {"title": "Test Conv"}
 
             db = MagicMock()
-            result = await retrieve_context(
+            result, _ = await retrieve_context(
                 "test query text",
                 db,
                 embedding_svc,
@@ -205,7 +205,7 @@ class TestRetrieveContextWithReranker:
             mock_storage.get_conversation.return_value = {"title": "Test Conv"}
 
             db = MagicMock()
-            result = await retrieve_context(
+            result, _ = await retrieve_context(
                 "test query text",
                 db,
                 embedding_svc,
@@ -233,7 +233,7 @@ class TestRetrieveContextWithReranker:
             mock_storage.get_conversation.return_value = {"title": "Test Conv"}
 
             db = MagicMock()
-            await retrieve_context(
+            _, _ = await retrieve_context(
                 "test query text",
                 db,
                 embedding_svc,
@@ -258,7 +258,7 @@ class TestRetrieveContextWithReranker:
             mock_storage.search_similar_source_chunks.return_value = []
 
             db = MagicMock()
-            await retrieve_context(
+            _, _ = await retrieve_context(
                 "test query text",
                 db,
                 embedding_svc,
@@ -291,7 +291,7 @@ class TestRetrieveContextWithReranker:
             mock_storage.get_conversation.return_value = {"title": "Test Conv"}
 
             db = MagicMock()
-            result = await retrieve_context(
+            result, _ = await retrieve_context(
                 "test query text",
                 db,
                 embedding_svc,

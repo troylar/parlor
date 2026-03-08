@@ -85,7 +85,7 @@ async def create_source(request: Request) -> dict[str, Any]:
     data = _parse_body(SourceCreate, body)
     db = _get_db(request)
     user_id, display_name = _get_identity(request)
-    source = storage.create_source(
+    source, warnings = storage.create_source(
         db,
         source_type=data.type,
         title=data.title,
@@ -103,7 +103,7 @@ async def create_source(request: Request) -> dict[str, Any]:
         except Exception:
             pass  # Will be picked up by background worker
 
-    return source
+    return {**source, "warnings": warnings}
 
 
 @router.post("/sources/upload", status_code=201)
@@ -118,7 +118,7 @@ async def upload_source(
 
     file_data = await file.read()
     try:
-        source = storage.save_source_file(
+        source, warnings = storage.save_source_file(
             db,
             title=title or file.filename or "Untitled",
             filename=file.filename or "unnamed",
@@ -138,7 +138,7 @@ async def upload_source(
         except Exception:
             pass
 
-    return source
+    return {**source, "warnings": warnings}
 
 
 @router.get("/sources/{source_id}")
@@ -190,6 +190,25 @@ async def delete_source(request: Request, source_id: str) -> dict[str, Any]:
     if not storage.delete_source(db, source_id, data_dir=data_dir, vec_index=_vm.source_chunks if _vm else None):
         raise HTTPException(status_code=404, detail="Source not found")
     return {"status": "deleted"}
+
+
+@router.post("/sources/{source_id}/reprocess")
+async def reprocess_source(request: Request, source_id: str) -> dict[str, Any]:
+    _validate_uuid(source_id, "source_id")
+    db = _get_db(request)
+    data_dir = request.app.state.config.app.data_dir
+    source, warnings = storage.reprocess_source(db, source_id, data_dir)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    worker = getattr(request.app.state, "embedding_worker", None)
+    if worker and source.get("content"):
+        try:
+            await worker.embed_source(source_id)
+        except Exception:
+            pass
+
+    return {**source, "warnings": warnings}
 
 
 # --- Source Tags ---
