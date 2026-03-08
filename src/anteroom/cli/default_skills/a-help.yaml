@@ -263,6 +263,7 @@ prompt: |
   | similarity_threshold | float | 0.5     | AI_CHAT_RAG_SIMILARITY_THRESHOLD|
   | include_sources      | bool  | true    | —                               |
   | include_conversations| bool  | true    | —                               |
+  | retrieval_mode       | str   | dense   | AI_CHAT_RAG_RETRIEVAL_MODE      |
 
   #### Codebase Index (codebase_index section)
 
@@ -553,7 +554,7 @@ prompt: |
   `AI_CHAT_EMBEDDINGS_MODEL`, `AI_CHAT_EMBEDDINGS_LOCAL_MODEL`, `AI_CHAT_EMBEDDINGS_DIMENSIONS`,
   `AI_CHAT_EMBEDDINGS_BASE_URL`, `AI_CHAT_EMBEDDINGS_API_KEY`,
   `AI_CHAT_RAG_ENABLED`, `AI_CHAT_RAG_MAX_CHUNKS`, `AI_CHAT_RAG_MAX_TOKENS`,
-  `AI_CHAT_RAG_SIMILARITY_THRESHOLD`
+  `AI_CHAT_RAG_SIMILARITY_THRESHOLD`, `AI_CHAT_RAG_RETRIEVAL_MODE`
 
   **Storage/Session**: `AI_CHAT_STORAGE_RETENTION_DAYS`, `AI_CHAT_STORAGE_CHECK_INTERVAL`,
   `AI_CHAT_STORAGE_PURGE_ATTACHMENTS`, `AI_CHAT_STORAGE_PURGE_EMBEDDINGS`,

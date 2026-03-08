@@ -605,6 +605,7 @@ class RagConfig:
     include_sources: bool = True  # search source chunks
     include_conversations: bool = True  # search past conversation messages
     exclude_current: bool = True  # exclude current conversation from results
+    retrieval_mode: str = "dense"  # "dense", "keyword", or "hybrid"
 
 
 @dataclass
@@ -1745,6 +1746,10 @@ def load_config(
     rag_include_sources = str(rag_raw.get("include_sources", "true")).lower() not in ("false", "0", "no")
     rag_include_conversations = str(rag_raw.get("include_conversations", "true")).lower() not in ("false", "0", "no")
     rag_exclude_current = str(rag_raw.get("exclude_current", "true")).lower() not in ("false", "0", "no")
+    _raw_retrieval_mode = str(
+        rag_raw.get("retrieval_mode", os.environ.get("AI_CHAT_RAG_RETRIEVAL_MODE", "dense"))
+    ).lower()
+    rag_retrieval_mode = _raw_retrieval_mode if _raw_retrieval_mode in ("dense", "keyword", "hybrid") else "dense"
     rag_config = RagConfig(
         enabled=rag_enabled,
         max_chunks=rag_max_chunks,
@@ -1753,6 +1758,7 @@ def load_config(
         include_sources=rag_include_sources,
         include_conversations=rag_include_conversations,
         exclude_current=rag_exclude_current,
+        retrieval_mode=rag_retrieval_mode,
     )
 
     # Proxy config

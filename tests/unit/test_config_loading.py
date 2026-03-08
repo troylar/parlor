@@ -1535,6 +1535,39 @@ class TestRagConfig:
         assert config.rag.include_conversations is False
         assert config.rag.exclude_current is False
 
+    def test_rag_retrieval_mode_default(self, tmp_path: Path) -> None:
+        cfg = _minimal(tmp_path)
+        config, _ = load_config(cfg)
+        assert config.rag.retrieval_mode == "dense"
+
+    def test_rag_retrieval_mode_yaml(self, tmp_path: Path) -> None:
+        cfg = _write_config(
+            tmp_path,
+            {
+                "ai": {"base_url": "http://t", "api_key": "k"},
+                "rag": {"retrieval_mode": "hybrid"},
+            },
+        )
+        config, _ = load_config(cfg)
+        assert config.rag.retrieval_mode == "hybrid"
+
+    def test_rag_retrieval_mode_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AI_CHAT_RAG_RETRIEVAL_MODE", "keyword")
+        cfg = _minimal(tmp_path)
+        config, _ = load_config(cfg)
+        assert config.rag.retrieval_mode == "keyword"
+
+    def test_rag_retrieval_mode_invalid_falls_back(self, tmp_path: Path) -> None:
+        cfg = _write_config(
+            tmp_path,
+            {
+                "ai": {"base_url": "http://t", "api_key": "k"},
+                "rag": {"retrieval_mode": "bogus"},
+            },
+        )
+        config, _ = load_config(cfg)
+        assert config.rag.retrieval_mode == "dense"
+
 
 # ---------------------------------------------------------------------------
 # Proxy config (lines 1672-1694)

@@ -237,6 +237,7 @@ _KNOWN_KEYS: dict[str, set[str]] = {
         "include_sources",
         "include_conversations",
         "exclude_current",
+        "retrieval_mode",
     },
     "codebase_index": {"enabled", "map_tokens", "languages", "exclude_dirs"},
     "session": {
