@@ -81,7 +81,7 @@ reranker:
 
 Runs locally via fastembed's `TextCrossEncoder` — no external API needed. Auto-detects on startup and degrades gracefully.
 
-See [Configuration Reference](../configuration/config-file.md) for all reranker settings.
+See [Configuration Reference](../knowledge/config-reference.md) for all reranker settings.
 
 [GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.104.0)
 
