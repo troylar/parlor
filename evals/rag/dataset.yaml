@@ -1,0 +1,283 @@
+version: 1
+
+# Corpus: seeded into DB before eval queries run.
+# Every ID is deterministic so ground-truth annotations are stable.
+corpus:
+  sources:
+    - id: "src-python-guide"
+      title: "Python Best Practices Guide"
+      type: "text"
+      chunks:
+        - id: "chunk-py-typing"
+          content: "Always use type hints in Python 3.10+. Use built-in generics like list[str] instead of typing.List[str]. Function signatures should include return type annotations."
+        - id: "chunk-py-testing"
+          content: "Use pytest as the test framework. Target 80% code coverage minimum. Use fixtures instead of setUp and tearDown. Mark async tests with @pytest.mark.asyncio."
+        - id: "chunk-py-formatting"
+          content: "Use Black for formatting with 120 character line length. Use ruff for linting with rules E, F, I, N, W. Run ruff check before every commit."
+
+    - id: "src-security-policy"
+      title: "Security Policy"
+      type: "text"
+      chunks:
+        - id: "chunk-sec-sql"
+          content: "All database queries must use parameterized placeholders. Never concatenate user input into SQL strings. Use allowlists for column names."
+        - id: "chunk-sec-auth"
+          content: "Passwords must be hashed with Argon2id or bcrypt with cost >= 12. Never use MD5 or SHA-1 for password hashing. Support MFA/TOTP for all user accounts."
+        - id: "chunk-sec-sessions"
+          content: "Session IDs must have at least 128 bits of entropy from CSPRNG. Set cookies with HttpOnly, Secure, and SameSite=Strict flags. Regenerate session IDs after authentication."
+
+    - id: "src-deployment-guide"
+      title: "Deployment Guide"
+      type: "text"
+      chunks:
+        - id: "chunk-deploy-docker"
+          content: "Build the Docker image with docker build -t anteroom . then run with docker run -p 8080:8080 anteroom. Use docker-compose for multi-service deployments."
+        - id: "chunk-deploy-k8s"
+          content: "For Kubernetes deployment, use the provided Helm chart. Set resource limits to 512Mi memory and 500m CPU. Configure horizontal pod autoscaling for production."
+        - id: "chunk-deploy-env"
+          content: "Configuration is loaded from environment variables with AI_CHAT_ prefix. Set AI_CHAT_API_KEY for the LLM endpoint. Use AI_CHAT_BASE_URL to point to your OpenAI-compatible API."
+
+    - id: "src-api-docs"
+      title: "API Documentation"
+      type: "text"
+      chunks:
+        - id: "chunk-api-chat"
+          content: "POST /api/chat sends a message and streams the AI response via Server-Sent Events. The request body includes message content, conversation_id, and optional source_ids for RAG context."
+        - id: "chunk-api-sources"
+          content: "GET /api/sources lists all knowledge sources. POST /api/sources creates a new source. Sources can be of type text, url, or file. File uploads use multipart/form-data."
+        - id: "chunk-api-search"
+          content: "GET /api/search/semantic performs vector similarity search across messages and source chunks. GET /api/search provides unified search with auto, keyword, and semantic modes."
+
+    - id: "src-database-schema"
+      title: "Database Schema Reference"
+      type: "text"
+      chunks:
+        - id: "chunk-db-conversations"
+          content: "The conversations table stores id, title, type (chat/note/document), slug, space_id, working_dir, created_at, and updated_at. Each conversation has many messages."
+        - id: "chunk-db-messages"
+          content: "The messages table stores id, conversation_id, role (user/assistant/system), content, token counts (prompt_tokens, completion_tokens), and timestamps."
+        - id: "chunk-db-sources"
+          content: "The sources table stores knowledge documents with id, type (text/url/file), title, content, url, filename, and content_hash. Source chunks link to sources via source_id."
+
+  conversations:
+    - id: "conv-migration"
+      title: "Database Migration Discussion"
+      type: "chat"
+      messages:
+        - id: "msg-migration-q1"
+          role: "user"
+          content: "How do I run database migrations when upgrading Anteroom to a new version?"
+        - id: "msg-migration-a1"
+          role: "assistant"
+          content: "Anteroom handles database migrations automatically on startup. The init_db function checks the current schema version and applies any needed changes. Just upgrade the package and restart."
+
+    - id: "conv-rate-limiting"
+      title: "Rate Limiting Configuration"
+      type: "chat"
+      messages:
+        - id: "msg-ratelimit-q1"
+          role: "user"
+          content: "How do I configure rate limiting for the web API endpoints?"
+        - id: "msg-ratelimit-a1"
+          role: "assistant"
+          content: "Set rate_limit.max_requests to control the sliding window limit. Default is 120 requests per 60 seconds. The /api/events SSE endpoint is exempt by default. Returns 429 when exceeded."
+
+    - id: "conv-embeddings"
+      title: "Embedding Provider Setup"
+      type: "chat"
+      messages:
+        - id: "msg-embed-q1"
+          role: "user"
+          content: "What embedding models does Anteroom support and how do I switch between them?"
+        - id: "msg-embed-a1"
+          role: "assistant"
+          content: "Anteroom supports two embedding providers. The local provider uses fastembed with BAAI/bge-small-en-v1.5 by default, running entirely on your machine. The API provider works with any OpenAI-compatible endpoint. Set embeddings.provider to local or api in config.yaml."
+
+    - id: "conv-spaces"
+      title: "Workspace Setup"
+      type: "chat"
+      messages:
+        - id: "msg-spaces-q1"
+          role: "user"
+          content: "How do spaces work in Anteroom? Can I scope RAG results to a specific project?"
+        - id: "msg-spaces-a1"
+          role: "assistant"
+          content: "Spaces are workspaces that scope conversations and RAG results to a project. Use aroom space init to create one from your current directory. When in a space, RAG only retrieves from sources linked to that space and messages from conversations in that space."
+
+# Eval queries with ground truth.
+# Each query lists the IDs that should appear in the top-k results.
+# Empty relevant list = expect no results (negative query).
+queries:
+  # -- Source chunk retrieval --
+  - id: "q-type-hints"
+    query: "How should I annotate types in Python function signatures?"
+    relevant: ["chunk-py-typing"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-test-framework"
+    query: "What testing framework should we use and what coverage target?"
+    relevant: ["chunk-py-testing"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-code-formatting"
+    query: "What tools do we use for code formatting and linting?"
+    relevant: ["chunk-py-formatting"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-sql-injection"
+    query: "How do we prevent SQL injection in database queries?"
+    relevant: ["chunk-sec-sql"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-password-hashing"
+    query: "What algorithm should be used for hashing user passwords?"
+    relevant: ["chunk-sec-auth"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-session-security"
+    query: "What are the requirements for secure session cookie configuration?"
+    relevant: ["chunk-sec-sessions"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-docker-deploy"
+    query: "How do I deploy the application using Docker containers?"
+    relevant: ["chunk-deploy-docker"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-kubernetes"
+    query: "How do I set up Kubernetes deployment with resource limits?"
+    relevant: ["chunk-deploy-k8s"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-env-config"
+    query: "What environment variables configure the AI endpoint and API key?"
+    relevant: ["chunk-deploy-env"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-chat-endpoint"
+    query: "What is the API endpoint for sending chat messages?"
+    relevant: ["chunk-api-chat"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-source-api"
+    query: "How do I create and list knowledge sources via the REST API?"
+    relevant: ["chunk-api-sources"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-search-api"
+    query: "How does semantic search work in the API?"
+    relevant: ["chunk-api-search"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-conversations-schema"
+    query: "What columns does the conversations database table have?"
+    relevant: ["chunk-db-conversations"]
+    k: 5
+    category: "source_chunks"
+
+  - id: "q-messages-schema"
+    query: "What is the schema for the messages table?"
+    relevant: ["chunk-db-messages"]
+    k: 5
+    category: "source_chunks"
+
+  # -- Message retrieval --
+  - id: "q-db-migration"
+    query: "How are database schema changes handled during upgrades?"
+    relevant: ["msg-migration-a1"]
+    k: 5
+    category: "messages"
+
+  - id: "q-rate-limit-config"
+    query: "How do I set rate limits on the API?"
+    relevant: ["msg-ratelimit-a1"]
+    k: 5
+    category: "messages"
+
+  - id: "q-embedding-providers"
+    query: "What embedding models are available and how to configure them?"
+    relevant: ["msg-embed-a1"]
+    k: 5
+    category: "messages"
+
+  - id: "q-space-scoping"
+    query: "How do I restrict RAG results to a specific workspace or project?"
+    relevant: ["msg-spaces-a1"]
+    k: 5
+    category: "messages"
+
+  # -- Cross-type queries (relevant in both sources and messages) --
+  - id: "q-rag-overview"
+    query: "How does RAG retrieval work with spaces and source linking?"
+    relevant: ["msg-spaces-a1", "chunk-api-search"]
+    k: 10
+    category: "cross"
+
+  - id: "q-security-overview"
+    query: "What security controls protect authentication and database access?"
+    relevant: ["chunk-sec-sql", "chunk-sec-auth", "chunk-sec-sessions"]
+    k: 10
+    category: "cross"
+
+  # -- Paraphrase queries (same intent, different wording) --
+  - id: "q-paraphrase-docker"
+    query: "I need to containerize the app, what are the steps?"
+    relevant: ["chunk-deploy-docker"]
+    k: 5
+    category: "paraphrase"
+
+  - id: "q-paraphrase-testing"
+    query: "Tell me about the project's automated testing approach"
+    relevant: ["chunk-py-testing"]
+    k: 5
+    category: "paraphrase"
+
+  - id: "q-paraphrase-passwords"
+    query: "What crypto functions should hash credentials?"
+    relevant: ["chunk-sec-auth"]
+    k: 5
+    category: "paraphrase"
+
+  # -- Vague / broad queries --
+  - id: "q-vague-security"
+    query: "Tell me about the security requirements"
+    relevant: ["chunk-sec-sql", "chunk-sec-auth", "chunk-sec-sessions"]
+    k: 10
+    category: "vague"
+
+  - id: "q-vague-deployment"
+    query: "How do I deploy this thing?"
+    relevant: ["chunk-deploy-docker", "chunk-deploy-k8s"]
+    k: 10
+    category: "vague"
+
+  # -- Negative queries (no relevant content) --
+  - id: "q-neg-capital"
+    query: "What is the capital of France and its population?"
+    relevant: []
+    k: 5
+    category: "negative"
+
+  - id: "q-neg-recipe"
+    query: "Give me a recipe for chocolate chip cookies"
+    relevant: []
+    k: 5
+    category: "negative"
+
+  - id: "q-neg-weather"
+    query: "What will the weather be like tomorrow in New York?"
+    relevant: []
+    k: 5
+    category: "negative"
