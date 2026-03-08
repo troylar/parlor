@@ -606,6 +606,7 @@ async def _build_chat_system_prompt(
         else:
             meta["rag_status"] = "skipped"
         meta["rag_chunks"] = 0
+        meta["rag_sources"] = []
 
     # Codebase index
     try:

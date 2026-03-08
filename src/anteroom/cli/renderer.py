@@ -1885,8 +1885,8 @@ def render_rag_sources(chunks: list[Any]) -> None:
     seen: set[str] = set()
     parts: list[str] = []
     for c in chunks:
-        label = getattr(c, "source_label", "?")
-        stype = getattr(c, "source_type", "?")
+        label = getattr(c, "source_label", None) or "?"
+        stype = getattr(c, "source_type", None) or "?"
         key = f"{stype}:{label}"
         if key in seen:
             continue
