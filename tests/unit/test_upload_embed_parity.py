@@ -198,66 +198,53 @@ class TestRepairStaleEmbeddings:
 
 
 class TestCliUploadEmbedWiring:
-    """CLI /upload must call embed_source() after saving — the core parity fix for #834."""
+    """CLI /upload must call _embed_after_upload() after saving — the core parity fix for #834.
+
+    These tests exercise the actual extracted function from repl.py, not
+    EmbeddingWorker in isolation. If _embed_after_upload() is removed or
+    stops calling embed_source(), these tests fail.
+    """
 
     @pytest.mark.asyncio
-    async def test_get_embedding_worker_creates_worker_with_service(self) -> None:
-        """_get_embedding_worker() returns an EmbeddingWorker when embedding service is available."""
-        mock_service = AsyncMock()
-        mock_db = MagicMock()
-        mock_vec_manager = MagicMock()
+    async def test_embed_after_upload_calls_embed_source(self) -> None:
+        """_embed_after_upload() gets a worker and calls embed_source()."""
+        from anteroom.cli.repl import _embed_after_upload
 
-        # Simulate the lazy closure pattern from repl.py
-        from anteroom.services.embedding_worker import EmbeddingWorker
+        mock_worker = AsyncMock()
+        mock_worker.embed_source = AsyncMock(return_value=3)
 
-        worker = EmbeddingWorker(mock_db, mock_service, vec_manager=mock_vec_manager)
-        assert worker._service is mock_service
-        assert worker._vec_manager is mock_vec_manager
+        async def get_worker() -> AsyncMock:
+            return mock_worker
 
-    @pytest.mark.asyncio
-    async def test_cli_upload_calls_embed_source_after_save(self) -> None:
-        """Simulates the CLI upload flow: save_source_file → embed_source → user sees chunk count."""
-        service = AsyncMock()
-        service.embed_batch = AsyncMock(return_value=[[0.1, 0.2]])
-        vec_manager = MagicMock()
-        vec_manager.source_chunks = MagicMock()
+        result = await _embed_after_upload(get_worker, "src-42")
 
-        with patch("anteroom.services.embedding_worker.storage") as mock_storage:
-            mock_storage.list_source_chunks = MagicMock(
-                return_value=[{"id": "c1", "content": "Long enough content for embed", "content_hash": "h1"}]
-            )
-            mock_storage.store_source_chunk_embedding = MagicMock()
-
-            # This replicates the CLI upload path:
-            # 1. save_source_file() returns source dict with content
-            # 2. _get_embedding_worker() returns a worker
-            # 3. worker.embed_source(source["id"]) embeds and flushes
-            worker = _make_worker(service=service, vec_manager=vec_manager)
-            source = {"id": "test-source-id", "content": "some extracted text"}
-            n = await worker.embed_source(source["id"])
-
-        assert n == 1
-        vec_manager.save_all.assert_called_once()
-        mock_storage.list_source_chunks.assert_called_once_with(worker._db, "test-source-id")
+        assert result == 3
+        mock_worker.embed_source.assert_called_once_with("src-42")
 
     @pytest.mark.asyncio
-    async def test_cli_upload_graceful_when_no_embedding_service(self) -> None:
-        """When embedding service is unavailable, upload should not fail."""
-        # This tests the path where _get_embedding_worker() returns None
-        # The upload should succeed without embedding
-        service = AsyncMock()
-        service.embed_batch = AsyncMock(side_effect=Exception("no model"))
+    async def test_embed_after_upload_returns_none_when_no_worker(self) -> None:
+        """When embedding service is unavailable, returns None (upload not blocked)."""
+        from anteroom.cli.repl import _embed_after_upload
 
-        with patch("anteroom.services.embedding_worker.storage") as mock_storage:
-            mock_storage.list_source_chunks = MagicMock(
-                return_value=[{"id": "c1", "content": "Long enough content for embed", "content_hash": "h1"}]
-            )
+        async def get_worker() -> None:
+            return None
 
-            worker = _make_worker(service=service, vec_manager=None)
-            # embed_source catches the exception and returns 0
-            from anteroom.services.embeddings import EmbeddingTransientError
+        result = await _embed_after_upload(get_worker, "src-42")
 
-            service.embed_batch = AsyncMock(side_effect=EmbeddingTransientError("unavailable"))
-            count = await worker.embed_source("src-1")
+        assert result is None
 
-        assert count == 0
+    @pytest.mark.asyncio
+    async def test_embed_after_upload_handles_embed_failure(self) -> None:
+        """embed_source() exception is caught — upload succeeds without embedding."""
+        from anteroom.cli.repl import _embed_after_upload
+
+        mock_worker = AsyncMock()
+        mock_worker.embed_source = AsyncMock(side_effect=RuntimeError("model crashed"))
+
+        async def get_worker() -> AsyncMock:
+            return mock_worker
+
+        result = await _embed_after_upload(get_worker, "src-42")
+
+        assert result is None
+        mock_worker.embed_source.assert_called_once_with("src-42")
