@@ -200,6 +200,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Embedding service not configured; vector search disabled")
     _write_progress(_progress_path, "embeddings", "done")
 
+    # Start reranker service (optional, for RAG quality improvement)
+    app.state.reranker_service = None
+    from .services.reranker import create_reranker_service
+
+    reranker_service = create_reranker_service(config)
+    if reranker_service:
+        if config.reranker.enabled is None:
+            probe_ok = await reranker_service.probe()
+            if not probe_ok:
+                logger.info("Reranker model unavailable; reranking disabled")
+                reranker_service = None
+        if reranker_service:
+            app.state.reranker_service = reranker_service
+            logger.info("Reranker service started (model: %s)", reranker_service.model)
+
     # Initialize audit writer
     from .services.audit import create_audit_writer
 

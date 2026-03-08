@@ -435,6 +435,7 @@ async def _build_chat_system_prompt(
     source_group_id: str | None,
     vec_enabled: bool = False,
     embedding_service: Any = None,
+    reranker_service: Any = None,
     injection_detector: Any = None,
     artifact_registry: Any = None,
     skill_registry: Any = None,
@@ -570,6 +571,7 @@ async def _build_chat_system_prompt(
             from ..services.rag import format_rag_context, retrieve_context, strip_rag_context
 
             extra = strip_rag_context(extra)
+            _reranker_cfg = getattr(config, "reranker", None)
             rag_chunks = await retrieve_context(
                 query=message_text,
                 db=db,
@@ -578,6 +580,8 @@ async def _build_chat_system_prompt(
                 current_conversation_id=conversation_id,
                 space_id=space_id,
                 vec_manager=vec_manager,
+                reranker_service=reranker_service,
+                reranker_config=_reranker_cfg,
             )
             meta["rag_status"] = "ok" if rag_chunks else "no_results"
             meta["rag_chunks"] = len(rag_chunks)
@@ -1984,6 +1988,7 @@ async def chat(conversation_id: str, request: Request) -> Any:
         source_group_id=source_group_id,
         vec_enabled=getattr(request.app.state, "vec_enabled", False),
         embedding_service=getattr(request.app.state, "embedding_service", None),
+        reranker_service=getattr(request.app.state, "reranker_service", None),
         injection_detector=getattr(request.app.state, "injection_detector", None),
         artifact_registry=req_art_reg,
         skill_registry=req_skill_reg,

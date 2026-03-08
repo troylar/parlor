@@ -609,6 +609,20 @@ class RagConfig:
 
 
 @dataclass
+class RerankerConfig:
+    """Cross-encoder reranker settings."""
+
+    enabled: bool | None = None  # None = auto-detect (use if fastembed available)
+    provider: str = "local"  # "local" (fastembed TextCrossEncoder) or "api"
+    model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    top_k: int = 5  # keep top-K after reranking
+    score_threshold: float = 0.0  # minimum relevance score (0-1); 0 = no threshold
+    candidate_multiplier: int = 3  # fetch top_k * multiplier candidates before reranking
+    base_url: str = ""  # API base URL (api provider only)
+    api_key: str = ""  # API key (api provider only)
+
+
+@dataclass
 class CodebaseIndexConfig:
     """Tree-sitter codebase index settings."""
 
@@ -791,6 +805,7 @@ class AppConfig:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
     rag: RagConfig = field(default_factory=RagConfig)
+    reranker: RerankerConfig = field(default_factory=RerankerConfig)
     codebase_index: CodebaseIndexConfig = field(default_factory=CodebaseIndexConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
@@ -1761,6 +1776,56 @@ def load_config(
         retrieval_mode=rag_retrieval_mode,
     )
 
+    # Reranker config
+    reranker_raw = raw.get("reranker", {})
+    if not isinstance(reranker_raw, dict):
+        reranker_raw = {}
+    _raw_reranker_enabled = reranker_raw.get("enabled", os.environ.get("AI_CHAT_RERANKER_ENABLED", ""))
+    if _raw_reranker_enabled == "" or _raw_reranker_enabled is None:
+        reranker_enabled: bool | None = None  # auto-detect
+    else:
+        reranker_enabled = str(_raw_reranker_enabled).lower() in ("true", "1", "yes")
+    _raw_reranker_provider = str(
+        reranker_raw.get("provider", os.environ.get("AI_CHAT_RERANKER_PROVIDER", "local"))
+    ).lower()
+    reranker_provider = _raw_reranker_provider if _raw_reranker_provider in ("local", "api") else "local"
+    reranker_model = str(
+        reranker_raw.get("model", os.environ.get("AI_CHAT_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"))
+    )
+    try:
+        reranker_top_k = max(1, min(50, int(reranker_raw.get("top_k", os.environ.get("AI_CHAT_RERANKER_TOP_K", 5)))))
+    except (ValueError, TypeError):
+        reranker_top_k = 5
+    try:
+        _raw_score_threshold = reranker_raw.get(
+            "score_threshold", os.environ.get("AI_CHAT_RERANKER_SCORE_THRESHOLD", 0.0)
+        )
+        reranker_score_threshold = max(0.0, min(1.0, float(_raw_score_threshold)))
+    except (ValueError, TypeError):
+        reranker_score_threshold = 0.0
+    try:
+        reranker_candidate_multiplier = max(
+            1,
+            min(
+                10,
+                int(
+                    reranker_raw.get("candidate_multiplier", os.environ.get("AI_CHAT_RERANKER_CANDIDATE_MULTIPLIER", 3))
+                ),
+            ),
+        )
+    except (ValueError, TypeError):
+        reranker_candidate_multiplier = 3
+    reranker_config = RerankerConfig(
+        enabled=reranker_enabled,
+        provider=reranker_provider,
+        model=reranker_model,
+        top_k=reranker_top_k,
+        score_threshold=reranker_score_threshold,
+        candidate_multiplier=reranker_candidate_multiplier,
+        base_url=str(reranker_raw.get("base_url", os.environ.get("AI_CHAT_RERANKER_BASE_URL", ""))),
+        api_key=str(reranker_raw.get("api_key", os.environ.get("AI_CHAT_RERANKER_API_KEY", ""))),
+    )
+
     # Proxy config
     proxy_raw = raw.get("proxy", {})
     if not isinstance(proxy_raw, dict):
@@ -2078,6 +2143,7 @@ def load_config(
             safety=safety_config,
             proxy=proxy_config,
             rag=rag_config,
+            reranker=reranker_config,
             references=refs_config,
             codebase_index=ci_config,
             storage=storage_config,

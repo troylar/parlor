@@ -2568,6 +2568,29 @@ async def _run_repl(
                 logger.debug("RAG: failed to create embedding service", exc_info=True)
                 return None
 
+        _rag_reranker_service: list[Any] = [None]
+        _reranker_checked: list[bool] = [False]
+
+        async def _get_rag_reranker_service() -> Any:
+            """Lazily create reranker service for RAG reranking, with auto-detect probe."""
+            if _reranker_checked[0]:
+                return _rag_reranker_service[0]
+            _reranker_checked[0] = True
+            try:
+                from ..services.reranker import create_reranker_service
+
+                svc = create_reranker_service(config)
+                if svc and config.reranker.enabled is None:
+                    probe_ok = await svc.probe()
+                    if not probe_ok:
+                        logger.info("Reranker model unavailable; reranking disabled")
+                        svc = None
+                _rag_reranker_service[0] = svc
+                return svc
+            except Exception:
+                logger.debug("RAG: failed to create reranker service", exc_info=True)
+                return None
+
         def _apply_plan_mode(conv_id: str) -> None:
             nonlocal tools_openai, extra_system_prompt
             plan_path = get_plan_file_path(config.app.data_dir, conv_id)
@@ -4279,6 +4302,7 @@ async def _run_repl(
 
                     _rag_emb = await _get_rag_embedding_service()
                     if _rag_emb:
+                        _rag_reranker = await _get_rag_reranker_service()
                         _rag_chunks = await retrieve_context(
                             query=expanded,
                             db=db,
@@ -4287,6 +4311,8 @@ async def _run_repl(
                             current_conversation_id=conv["id"],
                             space_id=conv.get("space_id"),
                             vec_manager=vec_manager,
+                            reranker_service=_rag_reranker,
+                            reranker_config=config.reranker,
                         )
                         if _rag_chunks:
                             extra_system_prompt += format_rag_context(_rag_chunks)

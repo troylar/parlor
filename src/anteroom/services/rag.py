@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ..config import RagConfig
+from ..config import RagConfig, RerankerConfig
 from . import storage
 from .context_trust import wrap_untrusted
 
@@ -38,6 +38,8 @@ async def retrieve_context(
     *,
     space_id: str | None = None,
     vec_manager: Any | None = None,
+    reranker_service: Any | None = None,
+    reranker_config: RerankerConfig | None = None,
 ) -> list[RetrievedChunk]:
     """Embed the user query and retrieve the top-K most relevant chunks.
 
@@ -57,6 +59,12 @@ async def retrieve_context(
     mode = getattr(config, "retrieval_mode", "dense")
     use_dense = mode in ("dense", "hybrid")
     use_keyword = mode in ("keyword", "hybrid")
+
+    # Widen candidate pool when reranker is active
+    use_reranker = reranker_service is not None and reranker_config is not None and reranker_config.enabled is not False
+    retrieval_limit = config.max_chunks
+    if use_reranker and reranker_config is not None:
+        retrieval_limit = config.max_chunks * reranker_config.candidate_multiplier
 
     # Dense retrieval requires an embedding service; keyword-only does not.
     embedding: list[float] | None = None
@@ -94,7 +102,7 @@ async def retrieve_context(
                 dense_msg = storage.search_similar_messages(
                     db,
                     embedding,
-                    limit=config.max_chunks,
+                    limit=retrieval_limit,
                     space_id=space_id,
                     vec_index=vec_manager.messages if vec_manager else None,
                 )
@@ -106,7 +114,7 @@ async def retrieve_context(
                 dense_src = storage.search_similar_source_chunks(
                     db,
                     embedding,
-                    limit=config.max_chunks,
+                    limit=retrieval_limit,
                     space_id=space_id,
                     vec_index=vec_manager.source_chunks if vec_manager else None,
                 )
@@ -120,7 +128,7 @@ async def retrieve_context(
                 kw_msg = storage.search_keyword_messages(
                     db,
                     query,
-                    limit=config.max_chunks,
+                    limit=retrieval_limit,
                     space_id=space_id,
                 )
             except Exception:
@@ -131,7 +139,7 @@ async def retrieve_context(
                 kw_src = storage.search_keyword_source_chunks(
                     db,
                     query,
-                    limit=config.max_chunks,
+                    limit=retrieval_limit,
                     space_id=space_id,
                 )
             except Exception:
@@ -194,6 +202,10 @@ async def retrieve_context(
     # Sort by distance (most similar first) and deduplicate
     chunks.sort(key=lambda c: c.distance)
     chunks = _deduplicate(chunks)
+
+    # Cross-encoder reranking (optional second stage)
+    if reranker_service and reranker_config and reranker_config.enabled is not False and chunks:
+        chunks = await _rerank_chunks(query, chunks, reranker_service, reranker_config)
 
     # Trim to token budget (chars/4 estimate)
     max_chars = config.max_tokens * 4
@@ -292,6 +304,42 @@ def _rrf_merge_source_chunks(dense: list[dict[str, Any]], keyword: list[dict[str
         entry["distance"] = max(0.0, 1.0 - score * _RRF_K)
         results.append(entry)
     return results
+
+
+async def _rerank_chunks(
+    query: str,
+    chunks: list[RetrievedChunk],
+    reranker_service: Any,
+    reranker_config: RerankerConfig,
+) -> list[RetrievedChunk]:
+    """Re-score chunks with a cross-encoder and return the top results."""
+    documents = [c.content for c in chunks]
+    try:
+        scored = await reranker_service.rerank(query, documents, top_k=reranker_config.top_k)
+    except Exception:
+        logger.debug("RAG: reranking failed, returning unranked results", exc_info=True)
+        return chunks
+
+    result: list[RetrievedChunk] = []
+    for idx, score in scored:
+        if score < reranker_config.score_threshold:
+            continue
+        chunk = chunks[idx]
+        # Replace distance with reranker score (inverted: higher score = lower distance)
+        result.append(
+            RetrievedChunk(
+                content=chunk.content,
+                source_type=chunk.source_type,
+                source_label=chunk.source_label,
+                distance=max(0.0, 1.0 - score),
+                conversation_id=chunk.conversation_id,
+                message_id=chunk.message_id,
+                source_id=chunk.source_id,
+                chunk_id=chunk.chunk_id,
+                conversation_type=chunk.conversation_type,
+            )
+        )
+    return result if result else chunks
 
 
 def _deduplicate(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
