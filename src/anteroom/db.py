@@ -1077,7 +1077,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                     user_display_name TEXT DEFAULT NULL, created_at TEXT NOT NULL,
                     position INTEGER NOT NULL, prompt_tokens INTEGER DEFAULT NULL,
                     completion_tokens INTEGER DEFAULT NULL, total_tokens INTEGER DEFAULT NULL,
-                    model TEXT DEFAULT NULL,
+                    model TEXT DEFAULT NULL, metadata TEXT DEFAULT NULL,
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
                 )"""
             )

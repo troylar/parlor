@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, ThreadSafeConnection
+from anteroom.db import _FTS_SCHEMA, _FTS_TRIGGERS, _SCHEMA, ThreadSafeConnection, _run_migrations
 from anteroom.services.storage import (
     copy_conversation_to_db,
     create_conversation,
@@ -177,3 +177,46 @@ class TestCopyConversationMetadata:
         assert copied is not None
         copied_msgs = list_messages(target_db, copied["id"])
         assert copied_msgs[0]["metadata"] is None
+
+
+class TestFkRepairPreservesMetadata:
+    def test_messages_repaired_includes_metadata_column(self, db: ThreadSafeConnection) -> None:
+        """Regression: messages_repaired table must include the metadata column.
+
+        The broken-FK repair path rebuilds the messages table via CREATE TABLE
+        messages_repaired ... INSERT INTO messages_repaired SELECT * FROM messages.
+        If messages_repaired is missing the metadata column, this fails with
+        'table messages_repaired has N columns but N+1 values were supplied'.
+        """
+        conv = create_conversation(db, title="test")
+        meta = {"rag_sources": [{"label": "doc.pdf", "type": "source_chunk", "source_id": "s1"}]}
+        create_message(db, conv["id"], "assistant", "hello", metadata=meta)
+
+        # Simulate the broken-FK state by rewriting the messages DDL to reference
+        # a bogus table name, which triggers the repair path in _run_migrations.
+        raw = db._conn
+        ddl_row = raw.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'").fetchone()
+        original_ddl = ddl_row[0] if isinstance(ddl_row, tuple) else ddl_row["sql"]
+
+        # Inject "_conversations_old" into the FK to trigger repair detection
+        broken_ddl = original_ddl.replace('REFERENCES "conversations"', 'REFERENCES "_conversations_old"')
+        if broken_ddl == original_ddl:
+            broken_ddl = original_ddl.replace("REFERENCES conversations", "REFERENCES _conversations_old")
+
+        # Only proceed if we successfully injected the broken FK
+        if broken_ddl != original_ddl:
+            raw.execute("PRAGMA foreign_keys=OFF")
+            raw.execute("ALTER TABLE messages RENAME TO _messages_backup")
+            raw.execute(broken_ddl)
+            raw.execute("INSERT INTO messages SELECT * FROM _messages_backup")
+            raw.execute("DROP TABLE _messages_backup")
+            raw.execute("PRAGMA foreign_keys=ON")
+            raw.commit()
+
+            # Run migrations — should repair without error
+            _run_migrations(raw, 384)
+
+            # Verify metadata survived the repair
+            messages = list_messages(db, conv["id"])
+            assert len(messages) == 1
+            assert messages[0]["metadata"] == meta

@@ -421,11 +421,18 @@ def _restore_working_dir(
 
 
 def _show_resume_info(db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]) -> None:
-    """Display resume header with last exchange context."""
+    """Display resume header with last exchange context and persisted RAG sources."""
     stored = storage.list_messages(db, conv["id"])
     title = conv.get("title", "Untitled")
     renderer.console.print(f"[{CHROME}]Resumed: {title} ({len(ai_messages)} messages)[/{CHROME}]")
     renderer.render_conversation_recap(stored)
+    # Render persisted RAG source provenance from stored metadata
+    for msg in stored:
+        if msg.get("role") == "assistant" and msg.get("metadata"):
+            meta = msg["metadata"]
+            sources = meta.get("rag_sources") if isinstance(meta, dict) else None
+            if sources:
+                renderer.render_rag_sources(sources)
 
 
 def _show_usage_stats(db: Any, config: Any) -> None:
@@ -2255,17 +2262,10 @@ async def _run_repl(
         conv_data = storage.get_conversation(db, resume_conversation_id)
         if conv_data:
             conv = conv_data
-            ai_messages, _resume_msgs = _load_conversation_messages(db, resume_conversation_id)
+            ai_messages, _ = _load_conversation_messages(db, resume_conversation_id)
             is_first_message = False
             working_dir = _restore_working_dir(conv, tool_registry, working_dir)
             _pending_resume_info = True
-            # Render persisted RAG source provenance from stored metadata
-            for _rmsg in _resume_msgs:
-                if _rmsg.get("role") == "assistant" and _rmsg.get("metadata"):
-                    _rmeta = _rmsg["metadata"]
-                    _rsources = _rmeta.get("rag_sources") if isinstance(_rmeta, dict) else None
-                    if _rsources:
-                        renderer.render_rag_sources(_rsources)
             # Load space from resumed conversation
             if not space and conv.get("space_id"):
                 from ..services.space_storage import get_space as _get_resumed_space
