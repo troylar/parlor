@@ -64,6 +64,17 @@ def use_stdout_console() -> None:
     _repl_mode = True
 
 
+def write_raw(text: str) -> None:
+    """Write text directly to the real terminal fd, bypassing patch_stdout.
+
+    Used for sub-prompt text (approval prompts, ask_user) that must be
+    visible immediately without buffering through prompt_toolkit's proxy.
+    """
+    if _stdout:
+        _stdout.write(text)
+        _stdout.flush()
+
+
 def configure_thresholds(
     esc_hint_delay: float | None = None,
     stall_display: float | None = None,
