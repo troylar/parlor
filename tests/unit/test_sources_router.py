@@ -46,7 +46,7 @@ class TestListSources:
         app = _make_app()
         with patch("anteroom.routers.sources.storage") as mock_storage:
             mock_storage.list_sources.return_value = [{"id": "s1", "title": "Test"}]
-            mock_storage.get_source_embedding_status.return_value = "pending"
+            mock_storage.get_source_embedding_statuses.return_value = {"s1": "pending"}
             client = TestClient(app)
             resp = client.get("/api/sources?type=text&search=test")
             assert resp.status_code == 200
@@ -62,14 +62,40 @@ class TestListSources:
                 {"id": "s1", "title": "A"},
                 {"id": "s2", "title": "B"},
             ]
-            mock_storage.get_source_embedding_status.side_effect = ["embedded", "pending"]
+            mock_storage.get_source_embedding_statuses.return_value = {"s1": "embedded", "s2": "pending"}
             client = TestClient(app)
             resp = client.get("/api/sources")
             assert resp.status_code == 200
             sources = resp.json()["sources"]
             assert sources[0]["embedding_status"] == "embedded"
             assert sources[1]["embedding_status"] == "pending"
-            assert mock_storage.get_source_embedding_status.call_count == 2
+            mock_storage.get_source_embedding_statuses.assert_called_once()
+
+    def test_list_sources_embedding_status_error_graceful(self) -> None:
+        import sqlite3
+
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.list_sources.return_value = [
+                {"id": "s1", "title": "A"},
+                {"id": "s2", "title": "B"},
+            ]
+            mock_storage.get_source_embedding_statuses.side_effect = sqlite3.OperationalError("too many variables")
+            client = TestClient(app)
+            resp = client.get("/api/sources")
+            assert resp.status_code == 200
+            sources = resp.json()["sources"]
+            assert sources[0]["embedding_status"] == "unknown"
+            assert sources[1]["embedding_status"] == "unknown"
+
+    def test_list_sources_empty_no_batch_call(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.list_sources.return_value = []
+            client = TestClient(app)
+            resp = client.get("/api/sources")
+            assert resp.status_code == 200
+            assert resp.json()["sources"] == []
 
 
 class TestCreateSource:

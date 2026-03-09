@@ -2796,22 +2796,55 @@ def reprocess_source(
     return source, warnings
 
 
-def get_source_embedding_status(db: ThreadSafeConnection, source_id: str) -> str:
-    """Return embedding status for a source: 'embedded', 'partial', 'pending', or 'no_chunks'."""
-    chunk_rows = db.execute_fetchall("SELECT id FROM source_chunks WHERE source_id = ?", (source_id,))
-    if not chunk_rows:
+def _derive_embedding_status(chunk_count: int, embedded_count: int) -> str:
+    """Derive embedding status from chunk and embedded counts."""
+    if chunk_count == 0:
         return "no_chunks"
-
-    chunk_ids = [dict(r)["id"] for r in chunk_rows]
-    placeholders = ",".join("?" * len(chunk_ids))
-    embedded_rows = db.execute_fetchall(
-        f"SELECT chunk_id FROM source_chunk_embeddings WHERE chunk_id IN ({placeholders})",
-        tuple(chunk_ids),
-    )
-    embedded_count = len(embedded_rows)
-
     if embedded_count == 0:
         return "pending"
-    if embedded_count < len(chunk_ids):
+    if embedded_count < chunk_count:
         return "partial"
     return "embedded"
+
+
+def get_source_embedding_statuses(db: ThreadSafeConnection, source_ids: list[str]) -> dict[str, str]:
+    """Return embedding statuses for multiple sources in batch.
+
+    Returns ``{source_id: status}`` where status is one of
+    ``'embedded'``, ``'partial'``, ``'pending'``, or ``'no_chunks'``.
+    Only rows with ``status = 'embedded'`` in ``source_chunk_embeddings``
+    are counted — ``skipped``, ``failed``, and ``pending`` rows are excluded.
+    """
+    if not source_ids:
+        return {}
+
+    chunk_counts: dict[str, int] = {}
+    embedded_counts: dict[str, int] = {}
+    batch_size = 500
+
+    for i in range(0, len(source_ids), batch_size):
+        batch = source_ids[i : i + batch_size]
+        placeholders, params = _in_clause(batch)
+
+        for row in db.execute_fetchall(
+            f"SELECT source_id, COUNT(*) as cnt FROM source_chunks "
+            f"WHERE source_id IN {placeholders} GROUP BY source_id",
+            tuple(params),
+        ):
+            r = dict(row)
+            chunk_counts[r["source_id"]] = r["cnt"]
+
+        for row in db.execute_fetchall(
+            f"SELECT source_id, COUNT(*) as cnt FROM source_chunk_embeddings "
+            f"WHERE source_id IN {placeholders} AND status = 'embedded' GROUP BY source_id",
+            tuple(params),
+        ):
+            r = dict(row)
+            embedded_counts[r["source_id"]] = r["cnt"]
+
+    return {sid: _derive_embedding_status(chunk_counts.get(sid, 0), embedded_counts.get(sid, 0)) for sid in source_ids}
+
+
+def get_source_embedding_status(db: ThreadSafeConnection, source_id: str) -> str:
+    """Return embedding status for a source: 'embedded', 'partial', 'pending', or 'no_chunks'."""
+    return get_source_embedding_statuses(db, [source_id]).get(source_id, "no_chunks")
