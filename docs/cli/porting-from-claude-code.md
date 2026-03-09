@@ -113,10 +113,7 @@ prompt: |
 
   ## Steps
 
-  1. Fetch the PR details:
-     ```bash
-     gh pr view {args} --json title,body,files
-     ```
+  1. Fetch the PR details with `gh pr view {args} --json title,body,files`.
 
   2. Use the `run_agent` tool to analyze these tasks in parallel.
      Each sub-agent prompt must be self-contained.
@@ -136,21 +133,22 @@ prompt: |
 2. **`allowed-tools`**: Removed — Anteroom doesn't support per-skill tool restrictions
 3. **"Agent A (Haiku)"**: Replaced with explicit `run_agent` language and self-contained prompts
 4. **Model names**: Removed "Haiku" — sub-agents inherit the parent model (or specify a real model ID)
-5. **`{args}`**: Works the same — user arguments replace the placeholder
+5. **`{args}`**: Works the same — user arguments replace the placeholder (but see the code-fence gotcha below)
 
 !!! warning "Gotchas"
-    **These are the three things that silently fail when porting without changes:**
+    **These are the four things that silently fail when porting without changes:**
 
     1. **`allowed-tools` frontmatter is ignored.** Anteroom's skill loader reads `name`, `description`, and `prompt` — nothing else. Extra frontmatter fields are silently discarded.
     2. **Model family names don't resolve.** `run_agent(model="haiku")` will fail at the API level. Use real model IDs like `gpt-4o-mini` or omit `model` to inherit the parent's model.
     3. **Sub-agent prompts must be self-contained.** Unlike Claude Code where agents share some context, Anteroom sub-agents see *only* their prompt. Include file paths, PR numbers, search terms — everything the sub-agent needs.
+    4. **`{args}` inside fenced code blocks is not expanded.** Anteroom's `{args}` expansion skips content inside `` ``` ... ``` `` fences. If your Claude Code command has `{args}` inside bash fences, move the command to inline code (`` `command {args}` ``) or plain prose when porting.
 
 ## What Just Works
 
 Not everything needs changing. These patterns translate directly:
 
 - **Bash commands** (`gh`, `git`, `pytest`, `ruff`) — same shell, same tools
-- **`{args}` placeholder** — same expansion behavior
+- **`{args}` placeholder** — same expansion behavior (but not inside fenced code blocks — use inline code instead)
 - **Multi-step workflows** — the AI follows numbered steps naturally
 - **File reading/writing** — tool names differ but the AI maps intent correctly
 - **Checklists and review criteria** — the AI interprets markdown checklists as instructions

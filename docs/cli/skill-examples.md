@@ -14,21 +14,9 @@ description: Summarize a pull request with file changes and test impact
 prompt: |
   Summarize pull request #{args}.
 
-  1. Fetch PR metadata:
-     ```bash
-     gh pr view {args} --json title,body,author,labels,files
-     ```
-
-  2. Get the diff stats:
-     ```bash
-     gh pr diff {args} --stat
-     ```
-
-  3. Check CI status:
-     ```bash
-     gh pr checks {args} --json name,state,conclusion
-     ```
-
+  1. Fetch PR metadata with `gh pr view {args} --json title,body,author,labels,files`
+  2. Get the diff stats with `gh pr diff {args} --stat`
+  3. Check CI status with `gh pr checks {args} --json name,state,conclusion`
   4. Write a concise summary:
      - Title and author
      - What changed (group by area: src, tests, docs, config)
@@ -40,6 +28,9 @@ prompt: |
 
 !!! tip
     The `{args}` placeholder is replaced with whatever follows the skill name. If the user types `/pr-summary 85`, every `{args}` becomes `85`.
+
+!!! warning "Keep `{args}` outside fenced code blocks"
+    Anteroom's `{args}` expansion **skips fenced code blocks** (`` ``` ... ``` ``). If you put `{args}` inside a bash fence, it stays as literal text. Use inline code (`` `command {args}` ``) or plain prose instead. The AI will still recognize and execute the commands.
 
 ---
 
@@ -57,11 +48,8 @@ prompt: |
 
   ## Step 1: Gather context
 
-  Run these commands to understand the PR:
-  ```bash
-  gh pr view {args} --json title,body,author,files
-  gh pr diff {args} --stat
-  ```
+  Run `gh pr view {args} --json title,body,author,files` and
+  `gh pr diff {args} --stat` to understand the PR.
 
   ## Step 2: Parallel review
 
@@ -269,7 +257,7 @@ prompt: |
 - **Be explicit about tools.** Instead of "search the codebase", write "use `grep` to search" or "use `glob_files` to find".
 - **Number your steps.** The AI follows numbered workflows more reliably than prose paragraphs.
 - **Include example commands.** Bash commands in fenced code blocks are executed more reliably than described commands.
-- **Use `{args}` for user input.** It's cleaner than asking the AI to parse the user's message.
+- **Use `{args}` for user input.** It's cleaner than asking the AI to parse the user's message. Keep `{args}` outside fenced code blocks — expansion skips fenced content.
 
 ### Sub-Agent Tips
 
