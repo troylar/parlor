@@ -1902,10 +1902,24 @@ def render_rag_sources(chunks: list[Any]) -> None:
         if key in seen:
             continue
         seen.add(key)
-        badge = "source" if stype == "source_chunk" else "message"
+        badge = "knowledge" if stype == "source_chunk" else "conversation"
         parts.append(f'"{escape(label)}" ({badge})')
     if parts:
         console.print(f"  [{MUTED}]Sources: {', '.join(parts)}[/{MUTED}]")
+
+
+def render_rag_status(status: str, chunk_count: int = 0, reason: str | None = None) -> None:
+    """Render RAG retrieval status with consistent formatting."""
+    if status == "ok" and chunk_count > 0:
+        console.print(f"  [{MUTED}][RAG: {chunk_count} relevant chunk(s) retrieved][/{MUTED}]")
+    elif status == "no_results":
+        suffix = f" — {reason}" if reason else ""
+        console.print(f"  [{MUTED}][RAG: no results{suffix}][/{MUTED}]")
+    elif status == "failed":
+        console.print(f"  [{MUTED}][RAG: retrieval failed][/{MUTED}]")
+    elif status == "no_vec_support":
+        console.print(f"  [{MUTED}][RAG: embedding service unavailable][/{MUTED}]")
+    # Silent for: disabled, no_config, skipped_plan_mode, skipped
 
 
 def render_context_footer(

@@ -1915,6 +1915,21 @@ def list_sources(
     return [dict(r) for r in rows]
 
 
+def get_source_tag_ids_bulk(db: ThreadSafeConnection, source_ids: list[str]) -> dict[str, list[str]]:
+    """Return {source_id: [tag_id, ...]} for the given sources."""
+    if not source_ids:
+        return {}
+    placeholders = ",".join("?" for _ in source_ids)
+    rows = db.execute_fetchall(
+        f"SELECT source_id, tag_id FROM source_tags WHERE source_id IN ({placeholders})",  # noqa: S608
+        tuple(source_ids),
+    )
+    result: dict[str, list[str]] = {}
+    for row in rows:
+        result.setdefault(row["source_id"], []).append(row["tag_id"])
+    return result
+
+
 def update_source(
     db: ThreadSafeConnection,
     source_id: str,
