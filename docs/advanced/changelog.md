@@ -7,6 +7,15 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 8, 2026
 
+### v1.106.2
+
+**Fixed:**
+
+- RAG vector index sync race on upload — newly uploaded sources were invisible to semantic search until restart because `embed_source()` never flushed vectors to disk. Now centralizes `save_all()` inside `embed_source()` for all callers. Mid-session repair sweeps metadata to re-queue any stale entries. (#834)
+- CLI `/upload` now embeds inline, matching the web UI's behavior. Extracted `_embed_after_upload()` helper fails gracefully with background worker retry. (#834)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.106.2)
+
 ### v1.106.1
 
 **Fixed:**
