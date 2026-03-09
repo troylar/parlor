@@ -21,8 +21,9 @@ from __future__ import annotations
 import sys
 import textwrap
 
-import pexpect
 import pytest
+
+pexpect = pytest.importorskip("pexpect", reason="pexpect required for PTY tests")
 
 _PYTHON = sys.executable
 
