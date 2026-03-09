@@ -1086,6 +1086,26 @@ async def run_cli(
 
     _approval_lock = asyncio.Lock()
 
+    async def _sub_prompt_async(prompt_text: str) -> str | None:
+        """Read input with the main prompt suspended.
+
+        Uses prompt_toolkit's ``in_terminal()`` to properly suspend the
+        main PromptSession, restore cooked terminal mode, and read
+        input without competing for stdin.
+
+        Returns the stripped input, or ``None`` on EOF/interrupt.
+        """
+        from prompt_toolkit.application.run_in_terminal import in_terminal
+
+        try:
+            async with in_terminal():
+                renderer.write_raw(prompt_text)
+                loop = asyncio.get_event_loop()
+                answer = await loop.run_in_executor(None, sys.stdin.readline)
+                return answer.strip() if answer else None
+        except (EOFError, KeyboardInterrupt):
+            return None
+
     async def _confirm_destructive(verdict: SafetyVerdict) -> bool:
         from rich.markup import escape
 
@@ -1113,20 +1133,14 @@ async def run_cli(
                 renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
             elif verdict.details.get("path"):
                 renderer.console.print(f"  Path: [{MUTED}]{verdict.details['path']}[/{MUTED}]")
-            try:
-                from prompt_toolkit import PromptSession as _ConfirmSession
-
-                _confirm_session: Any = _ConfirmSession()
-                answer = await _confirm_session.prompt_async(
-                    "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
-                )
-                result = _apply_choice(answer.strip().lower())
-                renderer.start_thinking()
-                return result
-            except (EOFError, KeyboardInterrupt):
+            answer = await _sub_prompt_async("  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: ")
+            if answer is None:
                 renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
                 renderer.start_thinking()
                 return False
+            result = _apply_choice(answer.lower())
+            renderer.start_thinking()
+            return result
 
     def _persist_allowed_tool(tool_name: str) -> None:
         """Append a tool to safety.allowed_tools in the config file."""
@@ -1153,30 +1167,27 @@ async def run_cli(
         await renderer.stop_thinking()
 
         renderer.console.print(f"\n[yellow bold]Question:[/yellow bold] {question}")
-        try:
-            from prompt_toolkit import PromptSession as _AskSession
+        if options:
+            for i, opt in enumerate(options, 1):
+                renderer.console.print(f"  [{MUTED}]{i}.[/{MUTED}] {opt}")
+            hint = "(enter number to select, or type a custom answer; esc to cancel)"
+            renderer.console.print(f"  [{MUTED}]{hint}[/{MUTED}]")
+            answer = await _sub_prompt_async("  Choice: ")
+        else:
+            renderer.console.print(f"  [{MUTED}](esc to cancel)[/{MUTED}]")
+            answer = await _sub_prompt_async("  Answer: ")
 
-            _ask_session: Any = _AskSession()
-
-            if options:
-                for i, opt in enumerate(options, 1):
-                    renderer.console.print(f"  [{MUTED}]{i}.[/{MUTED}] {opt}")
-                hint = "(enter number to select, or type a custom answer; esc to cancel)"
-                renderer.console.print(f"  [{MUTED}]{hint}[/{MUTED}]")
-                answer = await _ask_session.prompt_async("  Choice: ")
-                answer = _resolve_choice(answer.strip(), options)
-            else:
-                renderer.console.print(f"  [{MUTED}](esc to cancel)[/{MUTED}]")
-                answer = await _ask_session.prompt_async("  Answer: ")
-                answer = answer.strip()
-
-            renderer.console.print()
-            renderer.start_thinking()
-            return str(answer)
-        except (EOFError, KeyboardInterrupt):
+        if answer is None:
             renderer.console.print(f"  [{MUTED}](cancelled)[/{MUTED}]\n")
             renderer.start_thinking()
             return ""
+
+        if options:
+            answer = _resolve_choice(answer, options)
+
+        renderer.console.print()
+        renderer.start_thinking()
+        return str(answer)
 
     # Build unified tool executor
     _subagent_counter = 0
