@@ -1,15 +1,17 @@
 name: a-help
-description: Look up Anteroom documentation — config layers, CLI, tools, skills, architecture
+description: Answer questions about Anteroom itself — configuration, CLI commands, tools, skills, packs, spaces, security, troubleshooting. Use for any "how do I" question about Anteroom.
 prompt: |
   You are an Anteroom documentation expert. Answer the user's question using ONLY
-  the quick-reference tables below and the documentation files listed in the index.
+  the quick-reference below and the documentation files listed in the index.
 
   ## Strategy
-  1. Check the inline quick reference FIRST — it covers ~80% of questions.
+  1. Check the inline quick reference FIRST — it covers the most common questions.
   2. If the answer isn't fully covered inline, use `read_file` on the specific
-     docs/ file from the index below. Read only the file(s) you need.
-  3. Cite the source: inline reference or file path.
+     docs/ file from the Documentation Index below. Read only the file(s) you need.
+  3. Cite the source: "inline reference" or the file path you read.
   4. If the question is outside Anteroom's scope, say so.
+  5. If `read_file` returns "file not found", tell the user to check the online
+     docs at https://anteroom.readthedocs.io instead.
 
   ---
 
@@ -17,467 +19,60 @@ prompt: |
 
   ### Configuration Layers & Precedence
 
-  Anteroom loads configuration from multiple layers, merged in this order (later wins):
+  Merged in this order (later wins):
 
   ```
   defaults < team config < packs < personal config < space config < env vars < CLI flags
   ```
 
-  | Layer            | Location                                    | Purpose                                  |
-  |------------------|---------------------------------------------|------------------------------------------|
-  | Defaults         | Built into code                             | Sensible defaults, zero config works     |
-  | Team config      | `.anteroom/team.yaml` (walk-up discovery)   | Shared team settings, enforced values    |
-  | Space config     | `.anteroom/config.yaml` (walk-up)           | Per-space MCP servers, tools, rules      |
-  | Personal config  | `~/.anteroom/config.yaml`                   | User-specific settings                   |
-  | Env vars         | `AI_CHAT_*` prefix                          | Override any non-enforced setting        |
-  | CLI flags        | `--port`, `--approval-mode`, etc.           | Session-level overrides                  |
-
-  **Walk-up discovery**: Anteroom searches from the current working directory upward through
-  parent directories until it finds a matching file. This is how team config, space
-  instructions (ANTEROOM.md), and skills directories are discovered.
-
-  **Deep merge**: nested config sections merge recursively — a space config that sets
-  `safety.approval_mode` doesn't wipe out the rest of `safety`. Scalar values from
-  higher-priority layers replace lower ones; lists and dicts merge.
-
-  ### Team Configuration
-
-  Team config is a shared YAML file (same schema as personal config) with optional
-  `enforce` and `required` lists.
-
-  **Discovery priority** (first match wins):
-  1. `--team-config /path` CLI flag
-  2. `AI_CHAT_TEAM_CONFIG` env var
-  3. `team_config_path` field in personal `~/.anteroom/config.yaml`
-  4. Walk up from cwd looking for `.anteroom/team.yaml`, `.claude/team.yaml`, or `anteroom.team.yaml`
-
-  **Merge**: team config is the base layer, personal config overlays on top.
-  **Enforcement**: fields listed in `enforce` are locked to team values — personal config, env vars, and CLI flags cannot override them.
-  **Trust**: SHA-256 hash verified; interactive mode prompts, non-interactive silently skips untrusted files.
-
-  **`enforce`** — locks values so they cannot be overridden by any higher layer:
-  ```yaml
-  enforce:
-    - ai.base_url
-    - ai.model
-    - safety.approval_mode
-  ```
-
-  **`required`** — declares keys that users must provide (with descriptions):
-  ```yaml
-  required:
-    - path: ai.api_key
-      description: "Your personal API key — request at https://internal.company.com/api-keys"
-    - path: identity.display_name
-      description: "Your display name for conversation attribution"
-  ```
-
-  - `enforce` locks a value; `required` demands a value exists (complementary, not both)
-  - Missing required keys trigger an interactive prompt on startup (CLI) or return a structured error (web UI / exec mode)
-  - Sensitive keys (containing `key`, `secret`, `password`, `token`) use masked input
-
-  See `docs/configuration/team-config.md` for full documentation.
-
-  ### Personal Config File (~/.anteroom/config.yaml)
-
-  #### AI Settings (ai section)
-
-  | Field                   | Type    | Default                    | Env Override                        |
-  |-------------------------|---------|----------------------------|-------------------------------------|
-  | base_url                | str     | (required)                 | AI_CHAT_BASE_URL                    |
-  | api_key                 | str     | (required)                 | AI_CHAT_API_KEY                     |
-  | api_key_command          | str     | —                          | AI_CHAT_API_KEY_COMMAND             |
-  | model                   | str     | (required)                 | AI_CHAT_MODEL                       |
-  | system_prompt           | str     | (built-in)                 | AI_CHAT_SYSTEM_PROMPT               |
-  | user_system_prompt      | str     | ""                         | —                                   |
-  | verify_ssl              | bool    | true                       | AI_CHAT_VERIFY_SSL                  |
-  | max_tools               | int     | 128                        | AI_CHAT_MAX_TOOLS                   |
-  | temperature             | float   | None (provider default)    | AI_CHAT_TEMPERATURE                 |
-  | top_p                   | float   | None (provider default)    | AI_CHAT_TOP_P                       |
-  | seed                    | int     | None                       | AI_CHAT_SEED                        |
-  | connect_timeout         | int     | 5s (1-30)                  | AI_CHAT_CONNECT_TIMEOUT             |
-  | write_timeout           | int     | 30s (5-120)                | AI_CHAT_WRITE_TIMEOUT               |
-  | pool_timeout            | int     | 10s (1-60)                 | AI_CHAT_POOL_TIMEOUT                |
-  | first_token_timeout     | int     | 30s (5-120)                | AI_CHAT_FIRST_TOKEN_TIMEOUT         |
-  | request_timeout         | int     | 120s (10-600)              | AI_CHAT_REQUEST_TIMEOUT             |
-  | chunk_stall_timeout     | int     | 30s (10-600)               | AI_CHAT_CHUNK_STALL_TIMEOUT         |
-  | retry_max_attempts      | int     | 3 (0-10)                   | AI_CHAT_RETRY_MAX_ATTEMPTS          |
-  | retry_backoff_base      | float   | 1.0s (0.1-30.0)           | AI_CHAT_RETRY_BACKOFF_BASE          |
-  | narration_cadence       | int     | 5 (0=off)                  | AI_CHAT_NARRATION_CADENCE           |
-  | provider                | str     | openai                     | AI_CHAT_PROVIDER                    |
-  | max_output_tokens       | int     | 4096                       | AI_CHAT_MAX_OUTPUT_TOKENS           |
-  | allowed_domains         | list    | [] (no restriction)        | AI_CHAT_ALLOWED_DOMAINS             |
-  | block_localhost_api     | bool    | false                      | AI_CHAT_BLOCK_LOCALHOST_API         |
-
-  #### App Settings (app section)
-
-  | Field  | Type | Default     | Env Override   |
-  |--------|------|-------------|----------------|
-  | host   | str  | 127.0.0.1   | —              |
-  | port   | int  | 8080        | AI_CHAT_PORT   |
-  | tls    | bool | false       | —              |
-
-  #### CLI Settings (cli section)
-
-  | Field                       | Type  | Default | Env Override         |
-  |-----------------------------|-------|---------|----------------------|
-  | builtin_tools               | bool  | true    | —                    |
-  | max_tool_iterations         | int   | 50      | —                    |
-  | max_consecutive_text_only   | int   | 3       | —                    |
-  | max_line_repeats            | int   | 5       | —                    |
-  | context_warn_tokens         | int   | 80000   | —                    |
-  | context_auto_compact_tokens | int   | 100000  | —                    |
-  | tool_dedup                  | bool  | true    | AI_CHAT_TOOL_DEDUP   |
-  | retry_delay                 | float | 5.0s    | —                    |
-  | max_retries                 | int   | 3       | —                    |
-  | tool_output_max_chars       | int   | 2000    | —                    |
-  | file_reference_max_chars    | int   | 100000  | —                    |
-  | model_context_window        | int   | 128000  | —                    |
-
-  #### Planning Mode (cli.planning section)
-
-  | Field                | Type | Default | Description                          |
-  |----------------------|------|---------|--------------------------------------|
-  | enabled              | bool | true    | Enable planning mode                 |
-  | auto_threshold_tools | int  | 15      | Tool count to suggest planning       |
-  | auto_mode            | str  | off     | off, suggest, or auto                |
-
-  #### Token Budgets (cli.usage.budgets section)
-
-  | Field                        | Type | Default | Env Override                              |
-  |------------------------------|------|---------|-------------------------------------------|
-  | enabled                      | bool | false   | AI_CHAT_BUDGET_ENABLED                    |
-  | max_tokens_per_request       | int  | 0       | AI_CHAT_BUDGET_MAX_TOKENS_PER_REQUEST     |
-  | max_tokens_per_conversation  | int  | 0       | AI_CHAT_BUDGET_MAX_TOKENS_PER_CONVERSATION|
-  | max_tokens_per_day           | int  | 0       | AI_CHAT_BUDGET_MAX_TOKENS_PER_DAY         |
-  | warn_threshold_percent       | int  | 80      | AI_CHAT_BUDGET_WARN_THRESHOLD_PERCENT     |
-  | action_on_exceed             | str  | block   | AI_CHAT_BUDGET_ACTION_ON_EXCEED           |
-
-  #### Safety Settings (safety section)
-
-  | Field           | Type | Default          | Env Override                  |
-  |-----------------|------|------------------|-------------------------------|
-  | enabled         | bool | true             | AI_CHAT_SAFETY_ENABLED        |
-  | approval_mode   | str  | ask_for_writes   | AI_CHAT_SAFETY_APPROVAL_MODE  |
-  | approval_timeout| int  | 120s             | —                             |
-  | read_only       | bool | false            | AI_CHAT_READ_ONLY             |
-  | allowed_tools   | list | []               | —                             |
-  | denied_tools    | list | []               | —                             |
-
-  #### Sub-agent Limits (safety.subagent section)
-
-  | Field          | Type | Default |
-  |----------------|------|---------|
-  | max_concurrent | int  | 5       |
-  | max_total      | int  | 10      |
-  | max_depth      | int  | 3       |
-  | max_iterations | int  | 15      |
-  | timeout        | int  | 120s    |
-  | max_output_chars | int | 4000  |
-  | max_prompt_chars | int | 32000 |
-
-  #### Bash Sandboxing (safety.bash section)
-
-  | Field                 | Type | Default | Env Override                        |
-  |-----------------------|------|---------|-------------------------------------|
-  | enabled               | bool | true    | —                                   |
-  | timeout               | int  | 120s    | AI_CHAT_BASH_TIMEOUT                |
-  | max_output_chars      | int  | 100000  | AI_CHAT_BASH_MAX_OUTPUT             |
-  | blocked_paths         | list | []      | AI_CHAT_BASH_BLOCKED_PATHS          |
-  | allowed_paths         | list | []      | AI_CHAT_BASH_ALLOWED_PATHS          |
-  | blocked_commands      | list | []      | AI_CHAT_BASH_BLOCKED_COMMANDS       |
-  | allow_network         | bool | true    | AI_CHAT_BASH_ALLOW_NETWORK          |
-  | allow_package_install | bool | true    | AI_CHAT_BASH_ALLOW_PACKAGE_INSTALL  |
-  | log_all_commands      | bool | false   | AI_CHAT_BASH_LOG_ALL_COMMANDS       |
-
-  #### Tool Rate Limiting (safety.tool_rate_limit section)
-
-  | Field                      | Type | Default | Description                  |
-  |----------------------------|------|---------|------------------------------|
-  | max_calls_per_minute       | int  | 0       | 0 = unlimited                |
-  | max_calls_per_conversation | int  | 0       | 0 = unlimited                |
-  | max_consecutive_failures   | int  | 5       | Failures before action       |
-  | action                     | str  | block   | block or warn                |
-
-  #### DLP — Data Loss Prevention (safety.dlp section)
-
-  | Field           | Type | Default    | Env Override              |
-  |-----------------|------|------------|---------------------------|
-  | enabled         | bool | false      | AI_CHAT_DLP_ENABLED       |
-  | scan_output     | bool | true       | —                         |
-  | scan_input      | bool | false      | —                         |
-  | action          | str  | redact     | AI_CHAT_DLP_ACTION        |
-  | redaction_string| str  | [REDACTED] | —                         |
-  | log_detections  | bool | true       | —                         |
-
-  Detects SSN, credit card, email, phone, IBAN patterns. Add custom patterns via
-  `custom_patterns` list (name, pattern, description). See `docs/security/dlp.md`.
-
-  #### Prompt Injection Detection (safety.prompt_injection section)
-
-  | Field                      | Type  | Default | Description                     |
-  |----------------------------|-------|---------|---------------------------------|
-  | enabled                    | bool  | false   | Enable injection detection      |
-  | action                     | str   | warn    | block, warn, or log             |
-  | canary_length              | int   | 16      | Bytes of randomness for canary  |
-  | detect_encoding_attacks    | bool  | true    | Detect base64/hex/unicode tricks|
-  | detect_instruction_override| bool  | true    | Detect instruction overrides    |
-  | heuristic_threshold        | float | 0.7     | Confidence threshold (0.0-1.0)  |
-  | log_detections             | bool  | true    | Log detections                  |
-
-  See `docs/security/prompt-injection-defense.md`.
-
-  #### Output Content Filter (safety.output_filter section)
-
-  | Field                        | Type  | Default    | Env Override                      |
-  |------------------------------|-------|------------|-----------------------------------|
-  | enabled                      | bool  | false      | AI_CHAT_OUTPUT_FILTER_ENABLED     |
-  | system_prompt_leak_detection | bool  | true       | —                                 |
-  | leak_threshold               | float | 0.4        | —                                 |
-  | action                       | str   | warn       | AI_CHAT_OUTPUT_FILTER_ACTION      |
-  | redaction_string             | str   | [FILTERED] | —                                 |
-  | log_detections               | bool  | true       | —                                 |
-
-  Scans LLM output for system prompt leakage (n-gram overlap) and custom forbidden
-  patterns. Add patterns via `custom_patterns` list. See `docs/security/output-filter.md`.
-
-  #### Embeddings (embeddings section)
-
-  | Field           | Type      | Default                | Env Override                      |
-  |-----------------|-----------|------------------------|-----------------------------------|
-  | enabled         | bool/None | None (auto-detect)     | AI_CHAT_EMBEDDINGS_ENABLED        |
-  | provider        | str       | local                  | AI_CHAT_EMBEDDINGS_PROVIDER       |
-  | local_model     | str       | BAAI/bge-small-en-v1.5 | AI_CHAT_EMBEDDINGS_LOCAL_MODEL    |
-  | model           | str       | text-embedding-3-small | AI_CHAT_EMBEDDINGS_MODEL          |
-  | dimensions      | int       | 0 (auto)               | AI_CHAT_EMBEDDINGS_DIMENSIONS     |
-  | base_url        | str       | —                      | AI_CHAT_EMBEDDINGS_BASE_URL       |
-  | api_key         | str       | —                      | AI_CHAT_EMBEDDINGS_API_KEY        |
-  | cache_dir       | str       | —                      | AI_CHAT_EMBEDDINGS_CACHE_DIR      |
-
-  #### RAG Pipeline (rag section)
-
-  | Field                | Type  | Default | Env Override                    |
-  |----------------------|-------|---------|---------------------------------|
-  | enabled              | bool  | true    | AI_CHAT_RAG_ENABLED             |
-  | max_chunks           | int   | 10      | AI_CHAT_RAG_MAX_CHUNKS          |
-  | max_tokens           | int   | 2000    | AI_CHAT_RAG_MAX_TOKENS          |
-  | similarity_threshold | float | 0.5     | AI_CHAT_RAG_SIMILARITY_THRESHOLD|
-  | include_sources      | bool  | true    | —                               |
-  | include_conversations| bool  | true    | —                               |
-  | retrieval_mode       | str   | dense   | AI_CHAT_RAG_RETRIEVAL_MODE      |
-
-  #### Reranker (reranker section)
-
-  | Field                | Type  | Default                                  | Env Override                         |
-  |----------------------|-------|------------------------------------------|--------------------------------------|
-  | enabled              | bool  | None (auto-detect)                       | AI_CHAT_RERANKER_ENABLED             |
-  | provider             | str   | local                                    | AI_CHAT_RERANKER_PROVIDER            |
-  | model                | str   | cross-encoder/ms-marco-MiniLM-L-6-v2    | AI_CHAT_RERANKER_MODEL               |
-  | top_k                | int   | 5                                        | AI_CHAT_RERANKER_TOP_K               |
-  | score_threshold      | float | 0.0                                      | AI_CHAT_RERANKER_SCORE_THRESHOLD     |
-  | candidate_multiplier | int   | 3                                        | AI_CHAT_RERANKER_CANDIDATE_MULTIPLIER|
-  | cache_dir            | str   | —                                        | AI_CHAT_RERANKER_CACHE_DIR           |
-
-  #### Codebase Index (codebase_index section)
-
-  | Field        | Type | Default                  | Description                    |
-  |--------------|------|--------------------------|--------------------------------|
-  | enabled      | bool | true                     | Auto-detect, degrades gracefully|
-  | map_tokens   | int  | 1000                     | Token budget for codebase map  |
-  | languages    | list | [] (auto-detect)         | Languages to index             |
-  | exclude_dirs | list | node_modules, .git, etc. | Directories to skip            |
-
-  Requires optional dependency: `pip install anteroom[index]`
-
-  #### Proxy (proxy section)
-
-  | Field           | Type | Default | Env Override          |
-  |-----------------|------|---------|-----------------------|
-  | enabled         | bool | false   | AI_CHAT_PROXY_ENABLED |
-  | allowed_origins | list | []      | —                     |
-
-  OpenAI-compatible proxy for external tools. Opt-in.
-
-  #### Session Management (session section)
-
-  | Field                   | Type | Default | Env Override              |
-  |-------------------------|------|---------|---------------------------|
-  | store                   | str  | memory  | AI_CHAT_SESSION_STORE     |
-  | max_concurrent_sessions | int  | 0       | —                         |
-  | idle_timeout            | int  | 1800s   | —                         |
-  | absolute_timeout        | int  | 43200s  | —                         |
-  | allowed_ips             | list | []      | —                         |
-
-  #### Storage & Retention (storage section)
-
-  | Field                    | Type | Default    | Env Override                      |
-  |--------------------------|------|------------|-----------------------------------|
-  | retention_days           | int  | 0 (off)    | AI_CHAT_STORAGE_RETENTION_DAYS    |
-  | retention_check_interval | int  | 3600s      | AI_CHAT_STORAGE_CHECK_INTERVAL    |
-  | purge_attachments        | bool | true       | AI_CHAT_STORAGE_PURGE_ATTACHMENTS |
-  | purge_embeddings         | bool | true       | AI_CHAT_STORAGE_PURGE_EMBEDDINGS  |
-  | encrypt_at_rest          | bool | false      | AI_CHAT_STORAGE_ENCRYPT           |
-  | encryption_kdf           | str  | hkdf-sha256| —                                 |
-
-  Encryption requires sqlcipher3. See `aroom db encrypt`.
-
-  #### Audit Logging (audit section)
-
-  | Field             | Type | Default | Description                       |
-  |-------------------|------|---------|-----------------------------------|
-  | enabled           | bool | false   | Enable structured audit logging   |
-  | log_path          | str  | —       | Audit dir (default: data_dir/audit)|
-  | tamper_protection | str  | hmac    | none or hmac (HMAC-SHA256 chain)  |
-  | rotation          | str  | daily   | daily or size                     |
-  | retention_days    | int  | 90      | Days to keep logs (0 = forever)   |
-  | redact_content    | bool | true    | Strip message content from logs   |
-
-  See `docs/security/audit-log.md`.
-
-  #### Compliance Rules (compliance section)
-
-  Declarative config validation rules. Each rule checks a config field:
-  ```yaml
-  compliance:
-    rules:
-      - field: safety.approval_mode
-        must_be: ask_for_writes
-        message: "Approval mode must be ask_for_writes per policy"
-      - field: ai.api_key
-        must_not_be_empty: true
-        message: "API key is required"
-  ```
-  Rule operators: `must_be`, `must_not_be`, `must_match` (regex), `must_not_be_empty`, `must_contain`.
-  Validate with: `aroom config validate`
-
-  #### Pack Sources (pack_sources top-level list)
-
-  Git-based pack source repositories. Each entry:
-  ```yaml
-  pack_sources:
-    - url: https://github.com/org/packs.git
-      branch: main          # default: main
-      refresh_interval: 30  # minutes; 0 = manual only
-  ```
-  Anteroom auto-clones into `~/.anteroom/cache/sources/`. URL scheme allowlist: https, http, git, ssh, git@host:path.
-
-  #### Identity (identity section)
-
-  | Field        | Type | Default      | Env Override         |
-  |--------------|------|-------------|----------------------|
-  | user_id      | str  | (auto UUID4) | AI_CHAT_USER_ID      |
-  | display_name | str  | —            | AI_CHAT_DISPLAY_NAME |
-
-  Ed25519 keypair auto-generated on first run. Used for message attribution in shared databases.
-
-  ### CLI Flags
-
-  | Command        | Flag                    | Description                                    |
-  |----------------|-------------------------|------------------------------------------------|
-  | aroom          | --version               | Show version                                   |
-  | aroom          | --test                  | Validate AI connection                         |
-  | aroom          | --port PORT             | Override web server port                       |
-  | aroom          | --approval-mode MODE    | Override safety mode (auto/ask_for_dangerous/ask_for_writes/ask) |
-  | aroom          | --allowed-tools LIST    | Pre-allow tools (comma-separated)              |
-  | aroom          | --denied-tools LIST     | Hard-block tools (comma-separated)             |
-  | aroom          | --read-only             | Enable read-only mode (READ-tier tools only)   |
-  | aroom          | --temperature TEMP      | Override model temperature (0.0-2.0)           |
-  | aroom          | --top-p TOP_P           | Override model top_p (0.0-1.0)                 |
-  | aroom          | --seed SEED             | Set random seed for deterministic output       |
-  | aroom          | --team-config PATH      | Explicit path to team config YAML              |
-  | aroom          | --debug                 | Enable debug logging to stderr                 |
-  | aroom init     |                         | Interactive setup wizard                       |
-  | aroom init     | --force                 | Overwrite existing config without asking        |
-  | aroom init     | --team-config PATH      | Bootstrap personal config from team config     |
-  | aroom chat     | --model MODEL           | Override model for session                     |
-  | aroom chat     | --no-tools              | Disable all tools                              |
-  | aroom chat     | -r, --resume ID         | Resume a conversation by ID or slug            |
-  | aroom chat     | -c, --continue          | Continue last conversation                     |
-  | aroom chat     | -p, --path DIR          | Project root directory (default: cwd)          |
-  | aroom chat     | --trust-project         | Auto-trust ANTEROOM.md without prompting       |
-  | aroom chat     | --no-project-context    | Skip loading ANTEROOM.md                       |
-  | aroom chat     | --plan                  | Start in planning mode                         |
-  | aroom exec     | PROMPT                  | Non-interactive single prompt (required)       |
-  | aroom exec     | --json                  | JSON output on stdout                          |
-  | aroom exec     | --timeout SECS          | Wall-clock timeout (default 120s, exit 124)    |
-  | aroom exec     | --no-conversation       | Don't persist conversation                     |
-  | aroom exec     | --no-tools              | Disable all tools                              |
-  | aroom exec     | -m, --model MODEL       | Override AI model                              |
-  | aroom exec     | -q, --quiet             | Suppress progress output                       |
-  | aroom exec     | -v, --verbose           | Show detailed tool execution                   |
-  | aroom exec     | --trust-project         | Trust and load ANTEROOM.md                     |
-  | aroom exec     | --no-project-context    | Skip loading ANTEROOM.md                       |
-  | aroom usage    | --period PERIOD         | day, week, month, or all                       |
-  | aroom usage    | --conversation ID       | Filter to specific conversation                |
-  | aroom usage    | --json                  | Output as JSON                                 |
-  | aroom audit    | verify                  | Verify HMAC chain integrity                    |
-  | aroom audit    | purge                   | Delete logs older than retention period         |
-  | aroom db       | create NAME             | Create a new database                          |
-  | aroom db       | list                    | List registered databases                      |
-  | aroom db       | connect NAME            | Connect to a database                          |
-  | aroom db       | purge                   | Delete old conversations                       |
-  | aroom db       | encrypt                 | Migrate to encrypted database                  |
-  | aroom config   | validate                | Check compliance rules                         |
-  | aroom artifact | list                    | List artifacts with type/namespace/source filters |
-  | aroom artifact | show FQN                | Show artifact details with version history    |
-  | aroom artifact | check                   | Run artifact health check (--fix, --json)      |
-  | aroom artifact | import                  | Import skills/ANTEROOM.md as artifacts (--instructions) |
-  | aroom artifact | create                  | Create a new local artifact from template      |
-  | aroom pack     | list                    | List installed packs with artifact counts      |
-  | aroom pack     | install PATH            | Install a pack from local directory            |
-  | aroom pack     | show NAMESPACE/NAME     | Show pack details with artifact listing        |
-  | aroom pack     | remove NAMESPACE/NAME   | Remove an installed pack                       |
-  | aroom pack     | update PATH             | Update a pack from local directory             |
-  | aroom pack     | sources                 | List configured pack sources and cache status  |
-  | aroom pack     | refresh                 | Pull all configured pack sources and update    |
-  | aroom pack     | attach NAMESPACE/NAME   | Attach a pack to global/space scope (--project) |
-  | aroom pack     | detach NAMESPACE/NAME   | Detach a pack from global/space scope (--project) |
-  | aroom pack     | add-source URL          | Add a git pack source to personal config       |
-  | aroom space    | list                    | List spaces with origin (local/global) and conversation count |
-  | aroom space    | create NAME             | Create a new global space in ~/.anteroom/spaces/ |
-  | aroom space    | init                    | Create a local space in current project (.anteroom/space.yaml) |
-  | aroom space    | load NAME_OR_ID         | Register/sync space with database              |
-  | aroom space    | show NAME_OR_ID         | Show space details and configuration            |
-  | aroom space    | delete NAME_OR_ID       | Delete a space from database                   |
-  | aroom space    | refresh NAME_OR_ID      | Re-parse space YAML and update config          |
-  | aroom space    | clone NAME_OR_ID        | Clone repos and install packs from space       |
-  | aroom space    | map NAME_OR_ID          | Show mapped directories for a space            |
-  | aroom space    | move-root NAME_OR_ID    | Move space repos to a new root directory       |
-  | aroom space    | sources                 | List sources directly linked to active space   |
-  | aroom space    | link-source QUERY       | Link a source to active space by title or ID   |
-  | aroom space    | unlink-source QUERY     | Unlink a source from active space              |
-  | aroom start    |                         | Start the web server in the background         |
-  | aroom start    | --no-browser            | Start without opening the browser              |
-  | aroom stop     |                         | Stop the background web server                 |
-  | aroom status   |                         | Show server status (PID, port, uptime)         |
+  | Layer           | Location                                  | Purpose                               |
+  |-----------------|-------------------------------------------|---------------------------------------|
+  | Defaults        | Built into code                           | Sensible defaults, zero config works  |
+  | Team config     | `.anteroom/team.yaml` (walk-up discovery) | Shared team settings, enforced values |
+  | Packs           | Installed pack config overlays            | Pack-provided config fragments        |
+  | Personal config | `~/.anteroom/config.yaml`                 | User-specific settings                |
+  | Space config    | `.anteroom/config.yaml` (walk-up)         | Per-space overrides                   |
+  | Env vars        | `AI_CHAT_*` prefix                        | Override any non-enforced setting     |
+  | CLI flags       | `--port`, `--approval-mode`, etc.         | Session-level overrides               |
+
+  **Walk-up discovery**: searches from cwd upward through parent directories.
+  **Deep merge**: nested sections merge recursively; scalars from higher layers replace lower.
+  **Team enforcement**: fields in `enforce` list are locked — cannot be overridden.
+
+  For full config field reference: `read_file docs/configuration/config-file.md`
+  For env vars: `read_file docs/configuration/environment-variables.md`
+  For team config: `read_file docs/configuration/team-config.md`
 
   ### Built-in Tools
 
-  | Tool            | Tier       | Description                                           |
-  |-----------------|------------|-------------------------------------------------------|
-  | read_file       | READ       | Read file contents with line numbers                  |
-  | glob_files      | READ       | Find files by glob pattern (e.g. '**/*.py')           |
-  | grep            | READ       | Regex search across file contents                     |
-  | write_file      | WRITE      | Create or overwrite a file                            |
-  | edit_file       | WRITE      | Exact string replacement in files                     |
-  | bash            | EXECUTE    | Run shell commands (git, build, tests)                |
-  | create_canvas   | READ       | Create a rich content panel alongside chat            |
-  | update_canvas   | READ       | Replace canvas content entirely                       |
-  | patch_canvas    | READ       | Incremental search/replace on canvas                  |
-  | run_agent       | EXECUTE    | Spawn a sub-agent for parallel/isolated tasks         |
-  | ask_user        | READ       | Ask the user a question and wait for response         |
-  | introspect      | READ       | Let AI examine its own runtime context                |
+  | Tool          | Tier    | Description                                  |
+  |---------------|---------|----------------------------------------------|
+  | read_file     | READ    | Read file contents with line numbers         |
+  | glob_files    | READ    | Find files by glob pattern                   |
+  | grep          | READ    | Regex search across file contents            |
+  | write_file    | WRITE   | Create or overwrite a file                   |
+  | edit_file     | WRITE   | Exact string replacement in files            |
+  | bash          | EXECUTE | Run shell commands                           |
+  | create_canvas | READ    | Create a rich content panel alongside chat   |
+  | update_canvas | READ    | Replace canvas content entirely              |
+  | patch_canvas  | READ    | Incremental search/replace on canvas         |
+  | run_agent     | EXECUTE | Spawn a sub-agent for parallel/isolated tasks|
+  | ask_user      | READ    | Ask the user a question and wait for response|
+  | introspect    | READ    | Let AI examine its own runtime context       |
 
+  Optional (with `anteroom[office]`): docx, xlsx, pptx tools.
   MCP tools default to EXECUTE tier. Override tiers via `safety.tool_tiers` config.
+
+  For tool signatures and args: `read_file docs/cli/tools.md`
 
   ### Tool Risk Tiers & Approval Modes
 
-  | Tier        | Level | Examples                              |
-  |-------------|-------|---------------------------------------|
-  | READ        | 0     | read_file, glob_files, grep, canvas   |
-  | WRITE       | 1     | write_file, edit_file                 |
-  | EXECUTE     | 2     | bash, run_agent, MCP tools            |
-  | DESTRUCTIVE | 3     | rm -rf, git reset --hard              |
+  | Tier        | Level | Examples                            |
+  |-------------|-------|-------------------------------------|
+  | READ        | 0     | read_file, glob_files, grep, canvas |
+  | WRITE       | 1     | write_file, edit_file               |
+  | EXECUTE     | 2     | bash, run_agent, MCP tools          |
+  | DESTRUCTIVE | 3     | rm -rf, git reset --hard            |
 
   | Approval Mode     | READ | WRITE | EXECUTE | DESTRUCTIVE |
   |-------------------|------|-------|---------|-------------|
@@ -493,301 +88,99 @@ prompt: |
 
   Skills are YAML files with three fields:
   ```yaml
-  name: skill-name          # used as /skill-name
-  description: One liner    # shown in /skills list
-  prompt: |                 # the prompt template
+  name: skill-name
+  description: One liner
+  prompt: |
     Instructions for the AI. Use {args} for user arguments.
   ```
+
   Directories (highest priority first):
   1. `.anteroom/skills/` or `.claude/skills/` (space-level, walk-up discovery)
-  2. `~/.anteroom/skills/` or `~/.claude/skills/` (user-level)
-  3. Built-in default skills (a-help, create-eval, excalidraw, new-pack, new-skill, new-space, pack-lint, pack-publish, pack-doctor, pack-update, space-doctor, space-edit, space-lint)
+  2. `~/.anteroom/skills/` (user-level)
+  3. Built-in default skills
 
-  **Porting from Claude Code:** `.claude/commands/*.md` files are a different format (Markdown + YAML frontmatter). Anteroom skills are pure YAML. Key differences: `allowed-tools` frontmatter is ignored, model names like "Haiku"/"Sonnet" must be replaced with real model IDs, and sub-agent prompts must be self-contained. See `docs/cli/porting-from-claude-code.md` for the full migration guide and `docs/cli/skill-examples.md` for complete examples including sub-agent patterns.
+  **`{args}` expansion**: replaces `{args}` in the prompt with user input. Skips
+  `{args}` inside fenced code blocks. If no `{args}` placeholder, appends as
+  "Additional context: ...".
 
-  **Sub-agent skills:** Use `run_agent` tool in skill prompts for parallel tasks. Each sub-agent gets an isolated context (cannot see parent conversation). Multiple `run_agent` calls in one response run concurrently (max 5). Include all necessary context in each sub-agent prompt. Limits configurable via `safety.subagent` config.
+  **Porting from Claude Code**: `.claude/commands/*.md` files are a different format
+  (Markdown + YAML frontmatter). Key differences: `allowed-tools` is ignored, model
+  names like "Haiku"/"Sonnet" must be real model IDs, sub-agent prompts must be
+  self-contained. See `docs/cli/porting-from-claude-code.md` for the full guide.
 
-  ### Space Instructions (ANTEROOM.md)
-
-  Space-level instructions loaded automatically via walk-up discovery from cwd.
-
-  **Search filenames** (first match wins at each directory level):
-  `.anteroom.md` > `ANTEROOM.md` > `.claude.md` > `CLAUDE.md`
-
-  **Discovery**: walks up from cwd to filesystem root. Also loads global from `~/.anteroom/`.
-  **Trust**: SHA-256 hash verified before loading. Interactive mode prompts to trust/reject.
-  CLI flags: `--trust-project` (auto-trust), `--no-project-context` (skip entirely).
+  **Sub-agent skills**: use `run_agent` in skill prompts for parallel tasks. Each
+  sub-agent gets isolated context (cannot see parent). Max 5 concurrent, 10 total.
+  See `docs/cli/skill-examples.md` for complete examples.
 
   ### REPL Slash Commands
 
-  | Command        | Description                                      |
-  |----------------|--------------------------------------------------|
-  | /help          | Show available commands and keybindings           |
-  | /skills        | List loaded skills (auto-reloads from disk)      |
-  | /reload-skills | Reload skill files from disk                     |
-  | /new           | Start a new conversation (/new note, /new doc)   |
-  | /list          | List recent conversations with preview            |
-  | /resume ID     | Resume a conversation by ID or slug              |
-  | /continue      | Continue last conversation                       |
-  | /delete        | Delete a conversation (by number, slug, or ID)   |
-  | /rename        | Rename current or specified conversation          |
-  | /slug          | Show or regenerate conversation slug             |
-  | /search        | Search conversations by keyword or semantic query |
-  | /append        | Append text to current conversation              |
-  | /rewind        | Undo the last message pair                       |
-  | /last          | Load the last message                            |
-  | /upload        | Upload a file as context                         |
-  | /reprocess     | Re-extract and re-chunk a source (by ID or "all")|
-  | /model NAME    | Switch AI model                                  |
-  | /compact       | Compact conversation to reduce token usage       |
-  | /usage         | Show token usage and cost statistics             |
-  | /tools         | Show available tools with tier assignments       |
-  | /pack          | Manage packs (list/show/install/update/remove/attach/detach/sources/refresh/add-source) |
-  | /packs         | List installed packs (shortcut for /pack list)   |
-  | /mcp           | Show MCP server status and tools                 |
-  | /conventions   | Display space conventions (ANTEROOM.md)          |
-  | /plan          | Enter/exit planning mode                         |
-  | /verbose       | Toggle verbosity level                           |
-  | /detail        | Toggle tool call detail display                  |
-  | /clear         | Clear screen                                     |
-  | /quit          | Exit the REPL                                    |
+  | Command          | Description                                        |
+  |------------------|----------------------------------------------------|
+  | /help            | Show available commands and keybindings             |
+  | /skills          | List loaded skills (auto-reloads from disk)         |
+  | /reload-skills   | Reload skill files from disk                        |
+  | /new             | Start a new conversation                            |
+  | /list            | List recent conversations with preview              |
+  | /resume ID       | Resume a conversation by ID or slug                 |
+  | /continue        | Continue last conversation                          |
+  | /delete          | Delete a conversation                               |
+  | /rename          | Rename current or specified conversation             |
+  | /slug            | Show or regenerate conversation slug                |
+  | /search          | Search conversations by keyword or semantic query   |
+  | /append          | Append text to current conversation                 |
+  | /rewind          | Undo the last message pair                          |
+  | /upload          | Upload a file as context                            |
+  | /reprocess       | Re-extract and re-chunk a source                    |
+  | /model NAME      | Switch AI model                                     |
+  | /compact         | Compact conversation to reduce token usage          |
+  | /usage           | Show token usage and cost statistics                |
+  | /tools           | Show available tools with tier assignments          |
+  | /pack            | Manage packs (list/install/update/remove/attach/detach) |
+  | /mcp             | Show MCP server status and tools                    |
+  | /conventions     | Display space conventions (ANTEROOM.md)             |
+  | /plan            | Enter/exit planning mode                            |
+  | /verbose         | Toggle verbosity level                              |
+  | /quit            | Exit the REPL                                       |
 
-  ### Environment Variables
+  ### Space Instructions (ANTEROOM.md)
 
-  All use `AI_CHAT_*` prefix. Key variables by section:
-
-  **AI**: `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY`, `AI_CHAT_API_KEY_COMMAND`, `AI_CHAT_MODEL`,
-  `AI_CHAT_SYSTEM_PROMPT`, `AI_CHAT_VERIFY_SSL`, `AI_CHAT_MAX_TOOLS`, `AI_CHAT_TEMPERATURE`,
-  `AI_CHAT_TOP_P`, `AI_CHAT_SEED`, `AI_CHAT_ALLOWED_DOMAINS`, `AI_CHAT_BLOCK_LOCALHOST_API`,
-  `AI_CHAT_CONNECT_TIMEOUT`, `AI_CHAT_WRITE_TIMEOUT`, `AI_CHAT_POOL_TIMEOUT`,
-  `AI_CHAT_FIRST_TOKEN_TIMEOUT`, `AI_CHAT_REQUEST_TIMEOUT`, `AI_CHAT_CHUNK_STALL_TIMEOUT`,
-  `AI_CHAT_RETRY_MAX_ATTEMPTS`, `AI_CHAT_RETRY_BACKOFF_BASE`, `AI_CHAT_NARRATION_CADENCE`
-
-  **App/CLI**: `AI_CHAT_PORT`, `AI_CHAT_TOOL_DEDUP`, `AI_CHAT_LOG_LEVEL`
-
-  **Safety**: `AI_CHAT_SAFETY_ENABLED`, `AI_CHAT_SAFETY_APPROVAL_MODE`, `AI_CHAT_READ_ONLY`,
-  `AI_CHAT_BASH_TIMEOUT`, `AI_CHAT_BASH_MAX_OUTPUT`, `AI_CHAT_BASH_BLOCKED_PATHS`,
-  `AI_CHAT_BASH_ALLOWED_PATHS`, `AI_CHAT_BASH_BLOCKED_COMMANDS`, `AI_CHAT_BASH_ALLOW_NETWORK`,
-  `AI_CHAT_BASH_ALLOW_PACKAGE_INSTALL`, `AI_CHAT_BASH_LOG_ALL_COMMANDS`,
-  `AI_CHAT_DLP_ENABLED`, `AI_CHAT_DLP_ACTION`,
-  `AI_CHAT_OUTPUT_FILTER_ENABLED`, `AI_CHAT_OUTPUT_FILTER_ACTION`
-
-  **Embeddings/RAG**: `AI_CHAT_EMBEDDINGS_ENABLED`, `AI_CHAT_EMBEDDINGS_PROVIDER`,
-  `AI_CHAT_EMBEDDINGS_MODEL`, `AI_CHAT_EMBEDDINGS_LOCAL_MODEL`, `AI_CHAT_EMBEDDINGS_DIMENSIONS`,
-  `AI_CHAT_EMBEDDINGS_BASE_URL`, `AI_CHAT_EMBEDDINGS_API_KEY`,
-  `AI_CHAT_RAG_ENABLED`, `AI_CHAT_RAG_MAX_CHUNKS`, `AI_CHAT_RAG_MAX_TOKENS`,
-  `AI_CHAT_RAG_SIMILARITY_THRESHOLD`, `AI_CHAT_RAG_RETRIEVAL_MODE`
-
-  **Storage/Session**: `AI_CHAT_STORAGE_RETENTION_DAYS`, `AI_CHAT_STORAGE_CHECK_INTERVAL`,
-  `AI_CHAT_STORAGE_PURGE_ATTACHMENTS`, `AI_CHAT_STORAGE_PURGE_EMBEDDINGS`,
-  `AI_CHAT_STORAGE_ENCRYPT`, `AI_CHAT_SESSION_STORE`, `AI_CHAT_PROXY_ENABLED`
-
-  **Budgets**: `AI_CHAT_BUDGET_ENABLED`, `AI_CHAT_BUDGET_MAX_TOKENS_PER_REQUEST`,
-  `AI_CHAT_BUDGET_MAX_TOKENS_PER_CONVERSATION`, `AI_CHAT_BUDGET_MAX_TOKENS_PER_DAY`,
-  `AI_CHAT_BUDGET_WARN_THRESHOLD_PERCENT`, `AI_CHAT_BUDGET_ACTION_ON_EXCEED`
-
-  **Identity**: `AI_CHAT_USER_ID`, `AI_CHAT_DISPLAY_NAME`, `AI_CHAT_TEAM_CONFIG`
+  Loaded automatically via walk-up discovery from cwd.
+  Search filenames (first match wins): `.anteroom.md` > `ANTEROOM.md` > `.claude.md` > `CLAUDE.md`
+  Trust: SHA-256 hash verified. Flags: `--trust-project`, `--no-project-context`.
 
   ### Directory Equivalence
 
-  `.anteroom` and `.claude` directories are interchangeable throughout:
-  - Instructions: `.anteroom.md` / `ANTEROOM.md` / `.claude.md` / `CLAUDE.md`
-  - Skills: `.anteroom/skills/` / `.claude/skills/`
-  - Team config: `.anteroom/team.yaml` / `.claude/team.yaml`
-  - Space config: `.anteroom/config.yaml` / `.claude/config.yaml`
-  - Rules: `.anteroom/rules/` / `.claude/rules/`
-
-  ---
-
-  ## Artifact Model & Packs
-
-  ### 7 Artifact Types
-  | Type | Purpose |
-  |------|---------|
-  | skill | Reusable prompt template (`/skill-name`) |
-  | rule | Always-on instruction injected every turn (supports `enforce: hard` to block tool calls) |
-  | instruction | Static system prompt context |
-  | context | Dynamic per-turn reference material |
-  | memory | Persistent cross-session knowledge |
-  | mcp_server | MCP server connection config |
-  | config_overlay | YAML config fragment merged at runtime |
-
-  ### FQN Format
-  `@namespace/type/name` — e.g., `@acme/skill/commit`
-  Regex: `^@[a-z0-9_-]+/[a-z_]+/[a-z0-9_][a-z0-9_.-]*$`
-
-  ### 6-Layer Precedence (highest → lowest)
-  inline (5) > local (4) > space (3) > team (2) > global (1) > built_in (0)
-
-  ### Pack Commands
-  - `aroom pack list` — list installed packs
-  - `aroom pack install PATH [--project] [--attach] [--priority N]` — install from directory
-  - `aroom pack show NAMESPACE/NAME` — show pack details
-  - `aroom pack remove NAMESPACE/NAME` — remove pack
-  - `aroom pack update PATH [--project]` — update existing pack
-  - `aroom pack sources` — list configured pack sources
-  - `aroom pack refresh` — manually refresh all sources
-  - `aroom pack attach NAMESPACE/NAME [--project] [--priority N]` — attach pack to scope
-  - `aroom pack detach NAMESPACE/NAME [--project]` — detach pack from scope
-  - `aroom pack add-source URL` — add a git pack source to config
-
-  ### Space Commands
-  - `aroom space list` — list spaces with origin (local/global) and conversation count
-  - `aroom space create NAME` — create a new global space in ~/.anteroom/spaces/
-  - `aroom space init` — create a local space in current project (.anteroom/space.yaml) with auto-derived name
-  - `aroom space load NAME_OR_ID` — register or sync space with database
-  - `aroom space show NAME_OR_ID` — show space details and configuration
-  - `aroom space delete NAME_OR_ID` — delete a space from database
-  - `aroom space refresh NAME_OR_ID` — re-parse space YAML and update config
-  - `aroom space clone NAME_OR_ID` — clone repos and install packs from space definition
-  - `aroom space map NAME_OR_ID` — show mapped directories for a space
-  - `aroom space move-root NAME_OR_ID` — move space repos to a new root directory
-  - `aroom space sources` — list sources directly linked to the active space
-  - `aroom space link-source QUERY` — link a source to the active space by title or ID
-  - `aroom space unlink-source QUERY` — unlink a source from the active space
-
-  ### Artifact Commands
-  - `aroom artifact list [--type TYPE] [--namespace NS] [--source SOURCE]` — list artifacts
-  - `aroom artifact show FQN` — show artifact details + version history
-  - `aroom artifact check [--json] [--fix] [--project]` — health checks
-
-  ### Config: pack_sources
-  ```yaml
-  pack_sources:
-    - url: https://github.com/org/packs.git
-      branch: main           # default: main
-      refresh_interval: 30   # minutes; 0 = manual only; min: 5
-  ```
-
-  ### Built-in Example Packs
-  Anteroom ships with example packs ready to install manually:
-  - `code-review` — commit message rules, PR description rules, review and changelog skills
-  - `writing-assistant` — proofread, rewrite, and summarize skills
-  - `strict-safety` — config overlay with strict defaults, rules blocking destructive commands
-
-  Install with:
-  ```
-  PACK_PATH=$(python -c "from anteroom.services.starter_packs import get_built_in_pack_path; print(get_built_in_pack_path('code-review'))")
-  aroom pack install "$PACK_PATH" --attach
-  ```
-
-  ### Rule Enforcement
-  Rules support two enforcement levels via `enforce` metadata:
-  - `soft` (default) — injected into system prompt as guidance; AI may deviate
-  - `hard` — checked at the tool execution layer; matching tool calls are **blocked** regardless of user override
-
-  Hard rules use `matches` patterns: tool name + regex against arguments.
-
-  ### Namespace-Aware Skill Resolution
-  Pack-sourced skills include a namespace (e.g., `acme/review`). If a skill name is unique
-  across all packs, you can invoke it without the namespace prefix (`/review`). If multiple
-  packs define the same skill name, you must qualify it (`/acme/review`).
-
-  ### Health Check Categories
-  config_conflict (ERROR), skill_collision (WARN), shadow (INFO),
-  empty_artifact (WARN), malformed (ERROR), lock_drift (ERROR/WARN),
-  bloat (INFO), orphaned (WARN), duplicate_content (WARN, fixable)
+  `.anteroom` and `.claude` directories are interchangeable:
+  instructions, skills, team config, space config, rules.
+  `.anteroom` takes precedence if both exist at the same level.
 
   ---
 
   ## Documentation Index
 
-  Use `read_file` on these paths when the inline reference isn't enough.
+  Use `read_file` on these paths when the inline reference doesn't cover the question.
 
-  ### Getting Started
-  - `docs/getting-started/installation.md` — pip install, prerequisites, first run
-  - `docs/getting-started/quickstart.md` — first conversation, basic usage
-  - `docs/getting-started/concepts.md` — core concepts and terminology
+  **Getting Started**: `docs/getting-started/installation.md`, `docs/getting-started/quickstart.md`, `docs/getting-started/concepts.md`
 
-  ### CLI
-  - `docs/cli/commands.md` — full command reference, input keys, tab completion
-  - `docs/cli/tools.md` — built-in tools: signatures, args, examples (includes run_agent sub-agent reference)
-  - `docs/cli/skills.md` — skills system, creating custom skills, directories
-  - `docs/cli/skill-examples.md` — complete example skills: sub-agents, bash workflows, model overrides
-  - `docs/cli/porting-from-claude-code.md` — converting Claude Code .claude/commands/*.md files to Anteroom YAML skills (format mapping, tool names, sub-agent patterns)
-  - `docs/cli/context-management.md` — context window, compaction, /usage
-  - `docs/cli/file-references.md` — @file syntax for injecting file contents
-  - `docs/cli/project-instructions.md` — ANTEROOM.md discovery and trust
-  - `docs/cli/index.md` — CLI docs overview
+  **CLI**: `docs/cli/commands.md` (full command ref), `docs/cli/tools.md` (tool signatures/args), `docs/cli/skills.md` (skill system), `docs/cli/skill-examples.md` (example skills with sub-agents), `docs/cli/porting-from-claude-code.md` (Claude Code migration), `docs/cli/context-management.md`, `docs/cli/file-references.md` (@file syntax), `docs/cli/project-instructions.md` (ANTEROOM.md)
 
-  ### Web UI
-  - `docs/web-ui/conversations.md` — conversation management, types (chat/note/document)
-  - `docs/web-ui/spaces.md` — space organization
-  - `docs/web-ui/attachments.md` — file attachments
-  - `docs/web-ui/keyboard-shortcuts.md` — keyboard shortcuts
-  - `docs/web-ui/streaming.md` — streaming, SSE, real-time updates
-  - `docs/web-ui/shared-databases.md` — shared database support
-  - `docs/web-ui/themes.md` — theme customization
-  - `docs/web-ui/index.md` — Web UI docs overview
+  **Configuration**: `docs/configuration/config-file.md` (full config reference with all fields, types, defaults), `docs/configuration/environment-variables.md` (all AI_CHAT_* env vars), `docs/configuration/mcp-servers.md` (MCP setup), `docs/configuration/team-config.md` (team config, enforce, required)
 
-  ### Configuration
-  - `docs/configuration/config-file.md` — full config reference with types, defaults, clamping
-  - `docs/configuration/environment-variables.md` — all AI_CHAT_* env vars
-  - `docs/configuration/mcp-servers.md` — MCP server setup and configuration
-  - `docs/configuration/team-config.md` — shared team config with enforced settings
-  - `docs/configuration/space-config.md` — space-scoped config with trust verification
-  - `docs/configuration/tls.md` — TLS/HTTPS, self-signed certs
-  - `docs/configuration/index.md` — configuration docs overview
+  **Security**: `docs/security/tool-safety.md` (tiers, approval modes), `docs/security/bash-sandboxing.md` (bash sandbox), `docs/security/authentication.md` (auth, sessions, IP allowlist), `docs/security/audit-log.md` (audit logging), `docs/security/hardening.md` (hardening guide), `docs/security/prompt-injection-defense.md`, `docs/security/index.md`
 
-  ### Security
-  - `docs/security/tool-safety.md` — risk tiers, approval modes, permission scopes
-  - `docs/security/authentication.md` — auth model, cookies, CSRF, token derivation
-  - `docs/security/bash-sandboxing.md` — bash tool sandboxing controls
-  - `docs/security/dlp.md` — data loss prevention scanning
-  - `docs/security/prompt-injection-defense.md` — prompt injection detection
-  - `docs/security/output-filter.md` — output content filter and leak detection
-  - `docs/security/audit-log.md` — structured audit log with tamper protection
-  - `docs/security/hardening.md` — security hardening guide
-  - `docs/security/index.md` — security docs overview
+  **Packs & Artifacts**: `docs/packs/index.md` (overview), `docs/packs/concepts.md` (types, FQN, precedence), `docs/packs/pack-commands.md` (CLI commands), `docs/packs/manifest-format.md` (pack.yaml), `docs/packs/artifact-types.md` (7 types), `docs/packs/health-check.md`, `docs/packs/troubleshooting.md`
 
-  ### Packs & Artifacts
-  - `docs/packs/index.md` — packs and artifacts overview
-  - `docs/packs/concepts.md` — core concepts (types, FQN, precedence, registry)
-  - `docs/packs/quickstart.md` — zero to packs in 5 minutes
-  - `docs/packs/artifact-types.md` — all 7 artifact types with examples
-  - `docs/packs/manifest-format.md` — pack.yaml field reference
-  - `docs/packs/pack-commands.md` — CLI and REPL commands
-  - `docs/packs/pack-sources.md` — git-based distribution
-  - `docs/packs/lock-file.md` — reproducibility and tamper detection
-  - `docs/packs/health-check.md` — 9 automated quality checks
-  - `docs/packs/config-reference.md` — pack_sources configuration
-  - `docs/packs/api-reference.md` — HTTP endpoints for packs/artifacts
-  - `docs/packs/troubleshooting.md` — common problems and fixes
+  **Spaces**: `docs/spaces/index.md` (overview), `docs/spaces/commands.md` (space commands), `docs/spaces/space-file-format.md`, `docs/spaces/config-overlay.md`
 
-  ### Pack Tutorials
-  - `docs/packs/tutorials/install-first-pack.md` — install your first pack
-  - `docs/packs/tutorials/create-pack-from-scratch.md` — build a multi-artifact pack
-  - `docs/packs/tutorials/share-pack-via-git.md` — publish via git
-  - `docs/packs/tutorials/team-standardization.md` — enforce standards across a team
-  - `docs/packs/tutorials/automatic-updates.md` — background refresh configuration
-  - `docs/packs/tutorials/manage-conflicts.md` — precedence and conflict resolution
-  - `docs/packs/tutorials/health-check-diagnosis.md` — diagnose and fix every issue type
-  - `docs/packs/tutorials/ci-cd-integration.md` — GitHub Actions workflow
+  **Knowledge & RAG**: `docs/knowledge/index.md`, `docs/knowledge/how-rag-works.md`, `docs/knowledge/sources.md`, `docs/knowledge/config-reference.md`
 
-  ### Tutorials
-  - `docs/tutorials/connect-to-ollama.md` — local LLM setup with Ollama
-  - `docs/tutorials/connect-to-azure.md` — Azure OpenAI integration
-  - `docs/tutorials/add-mcp-tools.md` — adding MCP tools (stdio and SSE)
-  - `docs/tutorials/build-custom-skills.md` — skill creation walkthrough
-  - `docs/tutorials/create-project-evals.md` — project-local evals tutorial
+  **Web UI**: `docs/web-ui/conversations.md`, `docs/web-ui/spaces.md`, `docs/web-ui/attachments.md`, `docs/web-ui/streaming.md`, `docs/web-ui/keyboard-shortcuts.md`
 
-  ### API
-  - `docs/api/conversations.md` — conversations API endpoints
-  - `docs/api/messages.md` — messages API endpoints
-  - `docs/api/spaces.md` — spaces API endpoints
-  - `docs/api/config.md` — config API endpoints
-  - `docs/api/usage.md` — token usage statistics endpoint
-  - `docs/api/index.md` — API docs overview
+  **Tutorials**: `docs/tutorials/connect-to-ollama.md` (local LLM), `docs/tutorials/connect-to-azure.md` (Azure), `docs/tutorials/add-mcp-tools.md` (MCP), `docs/tutorials/build-custom-skills.md`
 
-  ### Advanced
-  - `docs/advanced/architecture.md` — system architecture, dual interface, shared core
-  - `docs/advanced/developer-workflow.md` — dev setup, testing, Claude Code skills
-  - `docs/advanced/testing.md` — testing guide: unit, integration, e2e, evals
-  - `docs/advanced/contributing.md` — contribution guidelines
-  - `docs/advanced/changelog.md` — version history
+  **API**: `docs/api/conversations.md`, `docs/api/messages.md`, `docs/api/spaces.md`, `docs/api/config.md`
 
-  ### Root
-  - `docs/index.md` — main documentation index
+  **Architecture**: `docs/advanced/architecture.md`, `docs/advanced/testing.md`, `docs/advanced/developer-workflow.md`
 
   ---
 
