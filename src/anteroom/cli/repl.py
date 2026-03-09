@@ -1096,14 +1096,12 @@ async def run_cli(
 
         Returns the stripped input, or ``None`` on EOF/interrupt.
         """
-        from typing import Any as _Any
-
         from prompt_toolkit import PromptSession as _SubSession
 
         try:
-            _sub: _Any = _SubSession()
+            _sub: Any = _SubSession()
             answer = await _sub.prompt_async(prompt_text)
-            return answer.strip() if answer else None
+            return answer.strip() if answer is not None else None
         except (EOFError, KeyboardInterrupt):
             return None
 

@@ -100,9 +100,27 @@ class TestSubPromptAsyncUnit:
 
             sub = PromptSession()
             raw = await sub.prompt_async("  > ")
-            answer = raw.strip() if raw else None
+            answer = raw.strip() if raw is not None else None
 
         assert answer == "y"
+
+    @pytest.mark.asyncio
+    async def test_nested_session_empty_returns_empty_string(self) -> None:
+        """Pressing Enter with no text returns empty string, not None."""
+        mock_session_cls = MagicMock()
+        mock_instance = MagicMock()
+        mock_instance.prompt_async = AsyncMock(return_value="")
+        mock_session_cls.return_value = mock_instance
+
+        with patch("prompt_toolkit.PromptSession", mock_session_cls):
+            from prompt_toolkit import PromptSession
+
+            sub = PromptSession()
+            raw = await sub.prompt_async("  > ")
+            answer = raw.strip() if raw is not None else None
+
+        assert answer == ""
+        assert answer is not None
 
     @pytest.mark.asyncio
     async def test_nested_session_eof_raises(self) -> None:
