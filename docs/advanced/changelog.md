@@ -7,6 +7,32 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 8, 2026
 
+### v1.107.0 — Knowledge Pipeline That Tells You What Went Wrong
+
+Anteroom's knowledge source pipeline used to fail silently. This release makes it fail loudly, surface warnings, and support recovery.
+
+#### Source Pipeline Warning Propagation
+
+Every text extractor now returns an `ExtractionResult` with both text and warnings. Missing dependency? The warning tells you what to install. Warnings flow through the entire pipeline to both web UI and CLI. (#832)
+
+#### Source Recovery with `/reprocess`
+
+Install a missing dependency after uploading? No need to re-upload. Use `/reprocess <source_id>` or `/reprocess all` in the CLI, or click "Reprocess" in the web UI source detail view. Re-extracts text, rebuilds chunks, and kicks off embedding. (#832)
+
+#### Embedding Status Visibility
+
+Sources API now includes `embedding_status` on every source (`embedded`, `partial`, `pending`, or `no_chunks`). Displayed in the web UI source detail view. (#832)
+
+#### RAG Diagnostics
+
+`retrieve_context()` returns a reason string when no results are found. CLI shows `[RAG: no results — <reason>]`, web UI includes it in prompt metadata. (#832)
+
+#### Knowledge Dependency Health Check
+
+`aroom --test` checks for optional knowledge pipeline dependencies and reports which are missing with correct install commands. (#832)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.107.0)
+
 ### v1.106.2
 
 **Fixed:**
