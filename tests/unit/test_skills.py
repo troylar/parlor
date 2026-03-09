@@ -858,16 +858,7 @@ class TestAHelpSizeBudget:
     """Ensure a-help stays within the 15KB budget."""
 
     def test_a_help_under_budget(self) -> None:
-        path = (
-            Path(__file__).parent.parent.parent
-            / "src"
-            / "anteroom"
-            / "cli"
-            / "default_skills"
-            / "a-help.yaml"
-        )
+        path = Path(__file__).parent.parent.parent / "src" / "anteroom" / "cli" / "default_skills" / "a-help.yaml"
         assert path.exists(), f"a-help.yaml not found at {path}"
         size = path.stat().st_size
-        assert size < 15_000, (
-            f"a-help.yaml is {size} bytes, budget is 15,000 bytes"
-        )
+        assert size < 15_000, f"a-help.yaml is {size} bytes, budget is 15,000 bytes"
