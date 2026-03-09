@@ -98,6 +98,8 @@ nav:
     - cli/index.md
     - cli/tools.md
     - cli/skills.md
+    - cli/skill-examples.md
+    - cli/porting-from-claude-code.md
     - cli/file-references.md
     - cli/context-management.md
     - cli/commands.md

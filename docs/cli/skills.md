@@ -64,6 +64,9 @@ The `.anteroom` and `.claude` directories are interchangeable for skills. Antero
 
 If both exist at the same directory level, `.anteroom/skills/` takes precedence (first match wins). The legacy `.parlor/skills/` directory is also supported for backward compatibility.
 
+!!! note "Claude Code command files are a different format"
+    The `.claude/skills/` directory works with Anteroom, but Claude Code's `.claude/commands/*.md` files are **not** the same format as Anteroom skills. Claude Code commands use Markdown with YAML frontmatter; Anteroom skills are pure YAML. See [Porting from Claude Code](porting-from-claude-code.md) for a migration guide.
+
 ### Discovery
 
 Project-level skills use **walk-up discovery**: Anteroom starts at the current working directory and walks up the directory tree, checking each level for a skills directory. The first match wins — it does not merge skills from multiple directory levels.
@@ -249,3 +252,9 @@ The `.anteroom` and `.claude` directories are fully interchangeable for skills:
 - A project using `.anteroom/skills/` follows the same behavior
 - Walk-up discovery checks both `.anteroom/skills/` and `.claude/skills/` at each directory level
 - `.anteroom/skills/` takes precedence over `.claude/skills/` if both exist at the same level
+
+## See Also
+
+- [Porting from Claude Code](porting-from-claude-code.md) — converting Claude Code command files to Anteroom skills
+- [Skill Examples](skill-examples.md) — complete example skills with sub-agents, bash workflows, and more
+- [Built-in Tools: run_agent](tools.md#run_agent) — sub-agent tool reference for advanced skills

@@ -503,6 +503,10 @@ prompt: |
   2. `~/.anteroom/skills/` or `~/.claude/skills/` (user-level)
   3. Built-in default skills (a-help, create-eval, excalidraw, new-pack, new-skill, new-space, pack-lint, pack-publish, pack-doctor, pack-update, space-doctor, space-edit, space-lint)
 
+  **Porting from Claude Code:** `.claude/commands/*.md` files are a different format (Markdown + YAML frontmatter). Anteroom skills are pure YAML. Key differences: `allowed-tools` frontmatter is ignored, model names like "Haiku"/"Sonnet" must be replaced with real model IDs, and sub-agent prompts must be self-contained. See `docs/cli/porting-from-claude-code.md` for the full migration guide and `docs/cli/skill-examples.md` for complete examples including sub-agent patterns.
+
+  **Sub-agent skills:** Use `run_agent` tool in skill prompts for parallel tasks. Each sub-agent gets an isolated context (cannot see parent conversation). Multiple `run_agent` calls in one response run concurrently (max 5). Include all necessary context in each sub-agent prompt. Limits configurable via `safety.subagent` config.
+
   ### Space Instructions (ANTEROOM.md)
 
   Space-level instructions loaded automatically via walk-up discovery from cwd.
@@ -697,8 +701,10 @@ prompt: |
 
   ### CLI
   - `docs/cli/commands.md` — full command reference, input keys, tab completion
-  - `docs/cli/tools.md` — built-in tools: signatures, args, examples
+  - `docs/cli/tools.md` — built-in tools: signatures, args, examples (includes run_agent sub-agent reference)
   - `docs/cli/skills.md` — skills system, creating custom skills, directories
+  - `docs/cli/skill-examples.md` — complete example skills: sub-agents, bash workflows, model overrides
+  - `docs/cli/porting-from-claude-code.md` — converting Claude Code .claude/commands/*.md files to Anteroom YAML skills (format mapping, tool names, sub-agent patterns)
   - `docs/cli/context-management.md` — context window, compaction, /usage
   - `docs/cli/file-references.md` — @file syntax for injecting file contents
   - `docs/cli/project-instructions.md` — ANTEROOM.md discovery and trust
