@@ -153,7 +153,7 @@ CLI (cli/)         ──┘         │
 - **`cli/pickers.py`** — Conversation picker helpers: `picker_relative_time()`, `picker_type_badge()`, `picker_format_preview()`, `resolve_conversation()`, `show_resume_info()`, `show_resume_picker()` (interactive prompt_toolkit picker with preview panel)
 - **`cli/completer.py`** — `AnteroomCompleter`: tab completion for /commands, @file paths, and conversation slugs
 - **`cli/dialogs.py`** — Help dialog rendering
-- **`cli/renderer.py`** — Rich terminal output: thinking spinner, plan checklist, inline diffs, tool call dedup, subagent rendering. `use_stdout_console()` for REPL-compatible mode via raw stderr fd
+- **`cli/renderer.py`** — Rich terminal output: thinking spinner, plan checklist, inline diffs, tool call dedup, subagent rendering. `use_stdout_console()` for REPL-compatible mode via raw stderr fd. `write_raw()` for direct terminal fd writes bypassing patch_stdout (used by approval/ask_user sub-prompts)
 - **`cli/exec_mode.py`** — Non-interactive mode for scripting/CI. JSON output, timeout, fail-closed approval. Exit codes: 0/1/124
 - **`cli/plan.py`** — Planning mode helpers: `PLAN_MODE_ALLOWED_TOOLS`, plan file I/O, plan command parsing, `enter_plan_mode()`, `leave_plan_mode()`
 - **`cli/instructions.py`** — ANTEROOM.md discovery (`.anteroom.md` > `ANTEROOM.md`, walk-up from cwd), global instructions, token estimation
