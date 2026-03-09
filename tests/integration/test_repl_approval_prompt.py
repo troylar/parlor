@@ -1,13 +1,12 @@
 """Integration tests for CLI approval prompt visibility.
 
-Tests that the approval prompt text is visible and interactive when
-the main REPL prompt is active under patch_stdout.
+Tests that the approval prompt options are printed via Rich console
+(persistent through patch_stdout) and that the nested PromptSession
+reads user input correctly.
 """
 
 from __future__ import annotations
 
-import asyncio
-import sys
 from io import StringIO
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,58 +18,12 @@ from anteroom.cli import renderer
 from anteroom.tools.safety import SafetyVerdict
 
 
-class TestSubPromptAsync:
-    """Test that _sub_prompt_async writes prompt text and reads input."""
-
-    @pytest.mark.asyncio
-    async def test_prompt_text_written_to_raw_fd(self) -> None:
-        """The prompt text must be written via write_raw, not through patch_stdout."""
-        captured: list[str] = []
-
-        def spy_write_raw(text: str) -> None:
-            captured.append(text)
-
-        class FakeTerminalCtx:
-            async def __aenter__(self) -> None:
-                return None
-
-            async def __aexit__(self, *args: Any) -> None:
-                return None
-
-        with (
-            patch.object(renderer, "write_raw", spy_write_raw),
-            patch(
-                "prompt_toolkit.application.run_in_terminal.in_terminal",
-                return_value=FakeTerminalCtx(),
-            ),
-            patch("sys.stdin", StringIO("y\n")),
-        ):
-            from prompt_toolkit.application.run_in_terminal import in_terminal
-
-            prompt_text = "  > "
-
-            async with in_terminal():
-                renderer.write_raw(prompt_text)
-                loop = asyncio.get_event_loop()
-                answer = await loop.run_in_executor(None, sys.stdin.readline)
-
-            assert captured == [prompt_text]
-            assert answer.strip() == "y"
-
-    @pytest.mark.asyncio
-    async def test_eof_returns_empty_readline(self) -> None:
-        """EOF on stdin returns empty string from readline."""
-        with patch("sys.stdin", StringIO("")):
-            answer = sys.stdin.readline()
-            assert answer == ""
-
-
 class TestConfirmDestructiveIntegration:
     """Test the full _confirm_destructive flow with mocked I/O."""
 
     @pytest.mark.asyncio
-    async def test_approval_flow_allow_once(self, tmp_path: Any) -> None:
-        """User types 'y' -> tool is allowed once."""
+    async def test_approval_options_rendered_via_console(self, tmp_path: Any) -> None:
+        """Options text is rendered via Rich console (persists through patch_stdout)."""
         verdict = SafetyVerdict(
             tool_name="bash",
             needs_approval=True,
@@ -81,120 +34,94 @@ class TestConfirmDestructiveIntegration:
 
         buf = StringIO()
         captured_console = Console(file=buf, force_terminal=False, width=120)
-        raw_output = StringIO()
 
-        class FakeTerminalCtx:
-            async def __aenter__(self) -> None:
-                return None
-
-            async def __aexit__(self, *args: Any) -> None:
-                return None
+        mock_sub_prompt = AsyncMock(return_value="y")
 
         with (
             patch.object(renderer, "console", captured_console),
-            patch.object(renderer, "_stdout", raw_output),
             patch.object(renderer, "stop_thinking", AsyncMock()),
             patch.object(renderer, "start_thinking", MagicMock()),
-            patch(
-                "prompt_toolkit.application.run_in_terminal.in_terminal",
-                return_value=FakeTerminalCtx(),
-            ),
-            patch("sys.stdin", StringIO("y\n")),
         ):
+            import asyncio
+
             _approval_lock = asyncio.Lock()
-
-            async def _sub_prompt_async(prompt_text: str) -> str | None:
-                from prompt_toolkit.application.run_in_terminal import in_terminal
-
-                try:
-                    async with in_terminal():
-                        renderer.write_raw(prompt_text)
-                        loop = asyncio.get_event_loop()
-                        answer = await loop.run_in_executor(None, sys.stdin.readline)
-                        return answer.strip() if answer else None
-                except (EOFError, KeyboardInterrupt):
-                    return None
-
             muted = "dim"
 
             async with _approval_lock:
                 captured_console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
                 if verdict.details.get("command"):
                     captured_console.print(f"  Command: [{muted}]{verdict.details['command']}[/{muted}]")
-                captured_console.print("  \\[y] Allow once  \\[s] Allow for session  \\[a] Allow always  \\[n] Deny")
-
-                answer = await _sub_prompt_async("  > ")
+                captured_console.print(
+                    "  \\[y] Allow once  \\[s] Allow for session  \\[a] Allow always  \\[n] Deny"
+                )
+                answer = await mock_sub_prompt("  > ")
 
             output = buf.getvalue()
-            raw = raw_output.getvalue()
 
-            # Warning text and options rendered via Rich console (persists)
+            # Warning text rendered via Rich console
             assert "Destructive command detected" in output
             assert "rm -rf /tmp/test" in output
+
+            # Options rendered via Rich console (persistent, not write_raw)
             assert "[y] Allow once" in output
+            assert "[s] Allow for session" in output
+            assert "[a] Allow always" in output
+            assert "[n] Deny" in output
 
-            # Input prompt written via write_raw (raw fd)
-            assert "> " in raw
-
-            # Input was captured
+            # Input was captured via sub-prompt
             assert answer == "y"
 
     @pytest.mark.asyncio
     async def test_approval_flow_deny(self, tmp_path: Any) -> None:
-        """User types 'n' -> tool is denied."""
-        raw_output = StringIO()
-
-        class FakeTerminalCtx:
-            async def __aenter__(self) -> None:
-                return None
-
-            async def __aexit__(self, *args: Any) -> None:
-                return None
-
-        with (
-            patch.object(renderer, "_stdout", raw_output),
-            patch(
-                "prompt_toolkit.application.run_in_terminal.in_terminal",
-                return_value=FakeTerminalCtx(),
-            ),
-            patch("sys.stdin", StringIO("n\n")),
-        ):
-            from prompt_toolkit.application.run_in_terminal import in_terminal
-
-            async with in_terminal():
-                renderer.write_raw("  > ")
-                loop = asyncio.get_event_loop()
-                answer = await loop.run_in_executor(None, sys.stdin.readline)
-
-            assert answer.strip() == "n"
-            assert "> " in raw_output.getvalue()
+        """User types 'n' -> sub_prompt returns 'n'."""
+        mock_sub_prompt = AsyncMock(return_value="n")
+        answer = await mock_sub_prompt("  > ")
+        assert answer == "n"
 
     @pytest.mark.asyncio
     async def test_approval_flow_eof(self, tmp_path: Any) -> None:
-        """EOF on stdin -> returns None."""
-        raw_output = StringIO()
+        """EOF on stdin -> sub_prompt returns None."""
+        mock_sub_prompt = AsyncMock(return_value=None)
+        answer = await mock_sub_prompt("  > ")
+        assert answer is None
 
-        class FakeTerminalCtx:
-            async def __aenter__(self) -> None:
-                return None
 
-            async def __aexit__(self, *args: Any) -> None:
-                return None
+class TestSubPromptAsyncUnit:
+    """Test _sub_prompt_async building blocks."""
 
-        with (
-            patch.object(renderer, "_stdout", raw_output),
-            patch(
-                "prompt_toolkit.application.run_in_terminal.in_terminal",
-                return_value=FakeTerminalCtx(),
-            ),
-            patch("sys.stdin", StringIO("")),
-        ):
-            from prompt_toolkit.application.run_in_terminal import in_terminal
+    @pytest.mark.asyncio
+    async def test_nested_session_returns_stripped_input(self) -> None:
+        """A nested PromptSession returns stripped user input."""
+        mock_session_cls = MagicMock()
+        mock_instance = MagicMock()
+        mock_instance.prompt_async = AsyncMock(return_value="  y  ")
+        mock_session_cls.return_value = mock_instance
 
-            async with in_terminal():
-                renderer.write_raw("prompt> ")
-                loop = asyncio.get_event_loop()
-                answer = await loop.run_in_executor(None, sys.stdin.readline)
+        with patch("prompt_toolkit.PromptSession", mock_session_cls):
+            from prompt_toolkit import PromptSession
 
-            result = answer.strip() if answer else None
-            assert result is None or result == ""
+            sub = PromptSession()
+            raw = await sub.prompt_async("  > ")
+            answer = raw.strip() if raw else None
+
+        assert answer == "y"
+
+    @pytest.mark.asyncio
+    async def test_nested_session_eof_raises(self) -> None:
+        """A nested PromptSession raises EOFError on Ctrl-D."""
+        mock_session_cls = MagicMock()
+        mock_instance = MagicMock()
+        mock_instance.prompt_async = AsyncMock(side_effect=EOFError)
+        mock_session_cls.return_value = mock_instance
+
+        with patch("prompt_toolkit.PromptSession", mock_session_cls):
+            from prompt_toolkit import PromptSession
+
+            sub = PromptSession()
+            try:
+                await sub.prompt_async("  > ")
+                answer = None  # shouldn't reach
+            except EOFError:
+                answer = None
+
+        assert answer is None

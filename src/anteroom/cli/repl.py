@@ -1087,22 +1087,23 @@ async def run_cli(
     _approval_lock = asyncio.Lock()
 
     async def _sub_prompt_async(prompt_text: str) -> str | None:
-        """Read input with the main prompt suspended.
+        """Read one line of input using a nested PromptSession.
 
-        Uses prompt_toolkit's ``in_terminal()`` to properly suspend the
-        main PromptSession, restore cooked terminal mode, and read
-        input without competing for stdin.
+        The caller must print any context (options, warnings) via
+        ``renderer.console.print()`` *before* calling this, so the text
+        persists through patch_stdout.  This function only shows a
+        minimal prompt (e.g. ``"> "``) via the nested session.
 
         Returns the stripped input, or ``None`` on EOF/interrupt.
         """
-        from prompt_toolkit.application.run_in_terminal import in_terminal
+        from typing import Any as _Any
+
+        from prompt_toolkit import PromptSession as _SubSession
 
         try:
-            async with in_terminal():
-                renderer.write_raw(prompt_text)
-                loop = asyncio.get_running_loop()
-                answer = await loop.run_in_executor(None, sys.stdin.readline)
-                return answer.strip() if answer else None
+            _sub: _Any = _SubSession()
+            answer = await _sub.prompt_async(prompt_text)
+            return answer.strip() if answer else None
         except (EOFError, KeyboardInterrupt):
             return None
 
