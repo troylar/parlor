@@ -7,6 +7,24 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 9, 2026
 
+### v1.108.0 — Leaner Help, Smarter Matching
+
+The built-in `/a-help` skill gets a major diet and learns to answer questions without being asked directly.
+
+#### Slimmed Help Skill
+
+The `a-help` skill prompt dropped from 48KB to 11KB — a 77% reduction. High-frequency quick-reference tables stay inline; detailed reference delegates to docs pages via `read_file`. A 15KB size budget test prevents future bloat. (#845)
+
+See [Skills](../cli/skills.md) for how built-in skills work.
+
+#### Auto-Invocation for Anteroom Questions
+
+The skill description was broadened so the AI automatically recognizes natural Anteroom questions and invokes `a-help` without requiring the explicit `/a-help` prefix. Works through the existing `invoke_skill` auto-invocation mechanism — no shared code changes. (#845)
+
+See [Skills](../cli/skills.md) for details on skill auto-invocation.
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.108.0)
+
 ### v1.107.2 — Porting Docs for Claude Code Users
 
 Clear guidance for users bringing Claude Code command files into Anteroom skills — format differences, tool name mapping, sub-agent migration patterns, and common gotchas.
