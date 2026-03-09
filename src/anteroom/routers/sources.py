@@ -88,6 +88,16 @@ async def list_sources(
         logger.warning("Failed to fetch embedding statuses", exc_info=True)
         for s in sources:
             s["embedding_status"] = "unknown"
+    # Enrich with tag IDs for client-side scope computation (#853)
+    try:
+        source_ids = [s["id"] for s in sources]
+        tag_map = storage.get_source_tag_ids_bulk(db, source_ids)
+        for s in sources:
+            s["tag_ids"] = tag_map.get(s["id"], [])
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        logger.warning("Failed to fetch source tag IDs", exc_info=True)
+        for s in sources:
+            s["tag_ids"] = []
     return {"sources": sources}
 
 

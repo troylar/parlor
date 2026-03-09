@@ -295,6 +295,17 @@ def _get_request_registries(request: Request, db: Any, space_id: str | None) -> 
     return art_reg, skill_reg, rule_enf
 
 
+@dataclass(frozen=True)
+class SourceResolutionResult:
+    """Result of resolving source references with space-scope tracking."""
+
+    content: str
+    excluded_ids: list[str]
+    included: list[dict[str, str]]
+    requested_count: int
+    truncated: bool
+
+
 def _resolve_sources(
     db: Any,
     source_ids: list[str],
@@ -303,8 +314,8 @@ def _resolve_sources(
     limit: int = 50_000,
     *,
     space_id: str | None = None,
-) -> str:
-    """Resolve source references and return XML-delimited source content string.
+) -> SourceResolutionResult:
+    """Resolve source references and return content with exclusion metadata.
 
     When *space_id* is given, only sources linked to that space are included.
     Sources auto-injected by the space resolution layer always pass this check;
@@ -318,9 +329,13 @@ def _resolve_sources(
         _allowed_ids.update(s["id"] for s in storage.get_space_sources(db, space_id))
 
     _referenced_sources: list[dict[str, Any]] = []
+    _excluded_set: set[str] = set()
+    _requested_count = 0
     if source_ids:
         for sid in source_ids[:20]:
+            _requested_count += 1
             if _allowed_ids is not None and sid not in _allowed_ids:
+                _excluded_set.add(sid)
                 continue
             src = storage.get_source(db, sid)
             if src and src.get("content"):
@@ -328,7 +343,9 @@ def _resolve_sources(
     if source_tag:
         tagged = storage.list_sources(db, tag_id=source_tag, limit=20)
         for src in tagged:
+            _requested_count += 1
             if _allowed_ids is not None and src["id"] not in _allowed_ids:
+                _excluded_set.add(src["id"])
                 continue
             if src.get("content") and src["id"] not in {s["id"] for s in _referenced_sources}:
                 full = storage.get_source(db, src["id"])
@@ -337,36 +354,58 @@ def _resolve_sources(
     if source_group_id:
         grouped = storage.list_sources(db, group_id=source_group_id, limit=20)
         for src in grouped:
+            _requested_count += 1
             if _allowed_ids is not None and src["id"] not in _allowed_ids:
+                _excluded_set.add(src["id"])
                 continue
             if src.get("content") and src["id"] not in {s["id"] for s in _referenced_sources}:
                 full = storage.get_source(db, src["id"])
                 if full and full.get("content"):
                     _referenced_sources.append(full)
+    _excluded_ids: list[str] = sorted(_excluded_set)
 
     if not _referenced_sources:
-        return ""
+        return SourceResolutionResult(
+            content="",
+            excluded_ids=_excluded_ids,
+            included=[],
+            requested_count=_requested_count,
+            truncated=False,
+        )
 
     source_parts: list[str] = []
     total_chars = 0
+    _truncated = False
+    _included_sources: list[dict[str, str]] = []
     for src in _referenced_sources:
         content = src.get("content", "")
         remaining = limit - total_chars
         if remaining <= 0:
+            _truncated = True
             break
         if len(content) > remaining:
             content = content[:remaining] + "\n[...truncated...]"
+            _truncated = True
         safe_title = str(src.get("title", ""))[:200]
         src_id = src["id"]
         source_parts.append(f"### {safe_title}\n" + wrap_untrusted(content, f"source:{src_id}", "reference"))
         total_chars += len(content)
+        _included_sources.append({"id": src_id, "title": safe_title, "type": src.get("type", "text")})
+
+    _content = ""
     if source_parts:
-        return (
+        _content = (
             "\n\n## Referenced Knowledge Sources\n"
             "The user has attached the following sources as context for this conversation.\n"
             + "\n\n".join(source_parts)
         )
-    return ""
+    return SourceResolutionResult(
+        content=_content,
+        excluded_ids=_excluded_ids,
+        included=_included_sources,
+        requested_count=_requested_count,
+        truncated=_truncated,
+    )
 
 
 def _build_tool_list(
@@ -552,10 +591,13 @@ async def _build_chat_system_prompt(
         extra += canvas_context
 
     # Source references
-    source_content = _resolve_sources(db, source_ids, source_tag, source_group_id, space_id=space_id)
-    if source_content:
-        extra += source_content
-        meta["sources_truncated"] = "[...truncated...]" in source_content
+    source_result = _resolve_sources(db, source_ids, source_tag, source_group_id, space_id=space_id)
+    if source_result.content:
+        extra += source_result.content
+    meta["sources_truncated"] = source_result.truncated
+    if source_result.excluded_ids:
+        meta["sources_excluded_count"] = len(source_result.excluded_ids)
+    meta["sources_attached"] = source_result.included
 
     # RAG context (skip in plan mode)
     rag_config = getattr(config, "rag", None)

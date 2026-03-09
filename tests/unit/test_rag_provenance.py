@@ -117,9 +117,9 @@ class TestRenderRagSources:
         ]
         output = self._capture(chunks)
         assert "Q3 Report" in output
-        assert "source" in output
+        assert "knowledge" in output
         assert "earlier chat" in output
-        assert "message" in output
+        assert "conversation" in output
 
     def test_noop_on_empty_list(self) -> None:
         assert self._capture([]) == ""
@@ -137,7 +137,7 @@ class TestRenderRagSources:
             _FakeChunk(content="c1", source_type="message", source_label="old convo", distance=0.3),
         ]
         output = self._capture(chunks)
-        assert "message" in output
+        assert "conversation" in output
         assert "old convo" in output
 
     def test_source_chunk_type_badge(self) -> None:
@@ -151,7 +151,7 @@ class TestRenderRagSources:
             ),
         ]
         output = self._capture(chunks)
-        assert "source" in output
+        assert "knowledge" in output
         assert "manual.pdf" in output
 
     def test_handles_missing_attributes_gracefully(self) -> None:

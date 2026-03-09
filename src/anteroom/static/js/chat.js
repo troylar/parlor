@@ -12,6 +12,7 @@ const Chat = (() => {
     let _streamAbortController = null;  // AbortController for current SSE fetch
     let _conversationType = 'chat';
     let _currentRagSources = [];  // per-response RAG source provenance from prompt_meta
+    let _currentAttachedSources = [];  // per-response attached source labels from prompt_meta
     const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
     // Remote collaboration state
@@ -407,17 +408,17 @@ const Chat = (() => {
                 finalizeAssistant(data);
                 break;
             case 'prompt_meta':
+                // Source exclusion feedback (#853)
+                if (data.sources_excluded_count > 0) {
+                    showToast(`${data.sources_excluded_count} source(s) excluded \u2014 not linked to active space`, 'warn');
+                }
                 if (data.sources_truncated) {
-                    showToast('Source content was truncated to fit the 50KB limit.');
+                    showToast('Source content truncated to fit 50KB limit', 'info');
                 }
-                if (data.rag_status === 'ok' && data.rag_chunks > 0) {
-                    showToast(`RAG: ${data.rag_chunks} relevant chunk(s) retrieved`);
-                } else if (data.rag_status === 'no_results') {
-                    showToast('RAG: no relevant context found');
-                } else if (data.rag_status === 'failed') {
-                    showToast('RAG: retrieval failed');
-                }
+                // RAG status feedback (#854) — all 8 states
+                _showRagStatusToast(data.rag_status, data.rag_chunks, data.rag_reason);
                 _currentRagSources = Array.isArray(data.rag_sources) ? data.rag_sources : [];
+                _currentAttachedSources = Array.isArray(data.sources_attached) ? data.sources_attached : [];
                 break;
             case 'budget_warning':
                 showToast(data.message || 'Token budget warning');
@@ -458,30 +459,59 @@ const Chat = (() => {
             msgData = { id: doneData.assistant_message_id, position: doneData.assistant_message_position };
         }
         addMessageActions(currentAssistantEl, 'assistant', currentAssistantContent, msgData, { isLast: true });
-        if (_currentRagSources.length > 0) {
-            _addRagSourcesFooter(currentAssistantEl, _currentRagSources);
+        if (_currentRagSources.length > 0 || _currentAttachedSources.length > 0) {
+            _addRagSourcesFooter(currentAssistantEl, _currentRagSources, _currentAttachedSources);
             _currentRagSources = [];
+            _currentAttachedSources = [];
         }
         currentAssistantEl = null;
         currentAssistantContent = '';
         scrollToBottom();
     }
 
-    function _addRagSourcesFooter(msgEl, sources) {
-        if (!msgEl || !sources || sources.length === 0) return;
+    function _addRagSourcesFooter(msgEl, ragSources, attachedSources) {
+        if (!msgEl) return;
+        ragSources = ragSources || [];
+        attachedSources = attachedSources || [];
+        if (ragSources.length === 0 && attachedSources.length === 0) return;
+
         const details = document.createElement('details');
         details.className = 'rag-sources';
         const list = document.createElement('ul');
         list.className = 'rag-sources-list';
         const seen = new Set();
-        for (const src of sources) {
+
+        // Collect attached source IDs for dedup against RAG
+        const attachedIds = new Set(attachedSources.map(s => s.id));
+
+        // Render attached sources first
+        for (const src of attachedSources) {
+            const key = `attached:${src.id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const li = document.createElement('li');
+            const badge = document.createElement('span');
+            badge.className = 'source-badge source-badge--attached';
+            badge.textContent = 'attached';
+            const label = document.createElement('span');
+            label.className = 'source-label';
+            label.textContent = src.title || src.id;
+            li.appendChild(badge);
+            li.appendChild(label);
+            list.appendChild(li);
+        }
+
+        // Render RAG sources (skip if already shown as attached)
+        for (const src of ragSources) {
+            if (src.source_id && attachedIds.has(src.source_id)) continue;
             const key = `${src.type}:${src.label}`;
             if (seen.has(key)) continue;
             seen.add(key);
             const li = document.createElement('li');
             const badge = document.createElement('span');
-            badge.className = 'source-badge source-badge--' + (src.type === 'source_chunk' ? 'source' : 'message');
-            badge.textContent = src.type === 'source_chunk' ? 'source' : 'message';
+            const badgeType = src.type === 'source_chunk' ? 'knowledge' : 'conversation';
+            badge.className = 'source-badge source-badge--' + badgeType;
+            badge.textContent = badgeType;
             const label = document.createElement('span');
             label.className = 'source-label';
             label.textContent = src.label;
@@ -489,6 +519,7 @@ const Chat = (() => {
             li.appendChild(label);
             list.appendChild(li);
         }
+
         const uniqueCount = seen.size;
         if (uniqueCount === 0) return;
         const summary = document.createElement('summary');
@@ -753,7 +784,26 @@ const Chat = (() => {
         }
     }
 
-    function showToast(message) {
+    function _showRagStatusToast(status, chunks, reason) {
+        // Silent states: expected operational states that don't need user feedback
+        if (!status || status === 'disabled' || status === 'no_config'
+            || status === 'skipped_plan_mode' || status === 'skipped') {
+            return;
+        }
+        if (status === 'ok' && chunks > 0) {
+            showToast(`${chunks} knowledge chunk(s) retrieved`, 'info');
+        } else if (status === 'no_results') {
+            const suffix = reason ? ': ' + reason : '';
+            showToast('No matching knowledge found' + suffix, 'info');
+        } else if (status === 'failed') {
+            const suffix = reason ? ': ' + reason : '';
+            showToast('Knowledge retrieval failed' + suffix, 'warn');
+        } else if (status === 'no_vec_support') {
+            showToast('Semantic search unavailable \u2014 install fastembed for knowledge retrieval', 'info');
+        }
+    }
+
+    function showToast(message, level) {
         let container = document.getElementById('toast-container');
         if (!container) {
             container = document.createElement('div');
@@ -762,6 +812,8 @@ const Chat = (() => {
         }
         const toast = document.createElement('div');
         toast.className = 'toast';
+        if (level === 'warn') toast.classList.add('toast-warn');
+        else if (level === 'error') toast.classList.add('toast-error');
         toast.textContent = message;
         container.appendChild(toast);
         setTimeout(() => {

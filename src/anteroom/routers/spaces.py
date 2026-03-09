@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
@@ -25,10 +27,13 @@ from ..services.space_storage import (
 from ..services.spaces import is_local_space
 from ..services.storage import (
     get_direct_space_source_links,
+    get_source_tag_ids_bulk,
     get_space_sources,
     link_source_to_space,
     unlink_source_from_space,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["spaces"])
 
@@ -289,7 +294,18 @@ async def api_get_space_sources(request: Request, space_id: str, link_type: str 
         raise HTTPException(status_code=404, detail="Space not found")
     if link_type == "direct":
         return get_direct_space_source_links(db, space_id)
-    return get_space_sources(db, space_id)
+    sources = get_space_sources(db, space_id)
+    # Enrich with tag IDs for client-side scope computation (#853)
+    try:
+        source_ids = [s["id"] for s in sources]
+        tag_map = get_source_tag_ids_bulk(db, source_ids)
+        for s in sources:
+            s["tag_ids"] = tag_map.get(s["id"], [])
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        logger.warning("Failed to fetch source tag IDs for space sources", exc_info=True)
+        for s in sources:
+            s["tag_ids"] = []
+    return sources
 
 
 @router.post("/spaces/{space_id}/sources", status_code=201)

@@ -1634,13 +1634,17 @@ body {
     letter-spacing: 0.03em;
     font-weight: 500;
 }
-.source-badge--source {
+.source-badge--source, .source-badge--knowledge {
     background: rgba(59, 130, 246, 0.15);
     color: #6ea8fe;
 }
-.source-badge--message {
+.source-badge--message, .source-badge--conversation {
     background: rgba(139, 92, 246, 0.15);
     color: #a78bfa;
+}
+.source-badge--attached {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
 }
 .source-label {
     opacity: 0.8;
@@ -4243,6 +4247,21 @@ body {
 .source-type-text { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 .source-type-file { background: rgba(168, 85, 247, 0.1); color: #a855f7; }
 .source-type-url { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+
+/* Source scope indicators (#853) */
+.source-out-of-scope {
+    opacity: 0.5;
+}
+.source-scope-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--warning, #eab308);
+    margin-left: 4px;
+}
+.source-scope-warn {
+    color: var(--warning, #eab308);
+    font-size: 12px;
+}
 .source-type-group { background: rgba(168, 85, 247, 0.1); color: #a855f7; }
 
 /* Source detail view */
@@ -4729,6 +4748,12 @@ body {
     pointer-events: auto;
 }
 
+.toast-warn {
+    border-color: var(--warning, #eab308);
+}
+.toast-error {
+    border-color: var(--error, #ef4444);
+}
 .toast-fade-out {
     animation: toastOut 0.3s var(--easing) forwards;
 }
