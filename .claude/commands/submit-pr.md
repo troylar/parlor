@@ -657,6 +657,7 @@ gh pr view --json number,url,title
 
 ────────────────────────────────────────────
   🔍 Running code review automatically...
+  ⏳ CI checks will be verified after code review + bug hunter
 ────────────────────────────────────────────
 ```
 
@@ -757,11 +758,32 @@ If the Bug Hunter finds nothing in round 1, report:
 🔍 Bug Hunter:   ✅ clean — no issues found
 ```
 
-### Step 15: Final Summary
+### Step 15: Wait for CI
+
+After all local checks, code review, and bug hunter are complete, wait for GitHub Actions CI to finish before declaring the PR ready.
+
+Poll every 15 seconds, up to 10 minutes:
+```bash
+gh pr checks <PR> --json name,state,conclusion
+```
+
+Parse the JSON output. Check until all checks have resolved (no `PENDING`, `QUEUED`, or `IN_PROGRESS` states remain).
+
+**Evaluate results:**
+- **All checks pass**: proceed to Final Summary with CI ✅
+- **Some checks fail**: report which checks failed with links. The PR is NOT READY.
+- **Timeout (10 minutes)**: report which checks are still pending. Show as ⚠️ with a note to check back.
+
+If any required checks fail, display the failure details:
+```bash
+gh pr checks <PR> --json name,state,conclusion,detailsUrl --jq '.[] | select(.conclusion == "FAILURE") | "\(.name): \(.detailsUrl)"'
+```
+
+### Step 16: Final Summary
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ✅ PR Ready for Review
+  ✅ PR Ready for Review  /  ❌ PR NOT Ready
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   🔗 PR:          #<N> — <title>
@@ -769,9 +791,20 @@ If the Bug Hunter finds nothing in round 1, report:
   🔍 Code Review: ✅ clean / ⚠️ N issues remaining
   🔍 Bug Hunter:  ✅ clean / 🔧 N issues fixed in M rounds
   🔄 Fix Rounds:  <0-2> code review + <0-2> bug hunter
+  🧪 CI:          ✅ all checks passed / ❌ N checks failed / ⚠️ N checks still pending
+
+<If CI failed:>
+  Failed checks:
+    - <check name>: <details URL>
+    - <check name>: <details URL>
 
 ────────────────────────────────────────────
-  👉 Next: wait for CI, or request human review
+<If all passed:>
+  👉 Next: /senior-review <N> for sign-off, then /deploy
+<If CI failed:>
+  👉 Next: fix CI failures, push, then re-check with /pr-check
+<If CI timed out:>
+  👉 Next: check CI status with: gh pr checks <PR>
 ────────────────────────────────────────────
 ```
 
