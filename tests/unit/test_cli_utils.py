@@ -15,6 +15,7 @@ from anteroom.cli.repl import (
     _estimate_tokens,
     _expand_file_references,
 )
+from anteroom.services.document_extractor import ExtractionResult
 
 
 class TestExpandFileReferences:
@@ -59,7 +60,7 @@ class TestExpandFileReferences:
             test_file.write_bytes(b"PK fake pptx data")
             with patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="Extracted slide content",
+                return_value=ExtractionResult(text="Extracted slide content"),
             ):
                 result = _expand_file_references("check @deck.pptx", tmpdir)
                 assert "Extracted slide content" in result
@@ -71,7 +72,7 @@ class TestExpandFileReferences:
             test_file.write_bytes(b"PK fake pptx data")
             with patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value=None,
+                return_value=ExtractionResult(text=None),
             ):
                 result = _expand_file_references("check @deck.pptx", tmpdir)
                 assert "Binary file" in result
@@ -91,7 +92,7 @@ class TestExpandFileReferences:
             test_file.write_bytes(b"PK fake xlsx data")
             with patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="Sheet1 data",
+                return_value=ExtractionResult(text="Sheet1 data"),
             ):
                 result = _expand_file_references("check @data.xlsx", tmpdir)
                 assert "Sheet1 data" in result
@@ -103,7 +104,7 @@ class TestExpandFileReferences:
             test_file.write_bytes(b"%PDF-1.4 fake pdf")
             with patch(
                 "anteroom.services.document_extractor.extract_text",
-                return_value="PDF content here",
+                return_value=ExtractionResult(text="PDF content here"),
             ):
                 result = _expand_file_references("check @report.pdf", tmpdir)
                 assert "PDF content here" in result

@@ -1,10 +1,8 @@
-"""Integration tests for CLI /space link-source disambiguation via the real REPL.
+"""Integration tests for the CLI /reprocess command via the real REPL.
 
 Drives the actual REPL code path in src/anteroom/cli/repl.py by mocking
 PromptSession.prompt_async to feed commands, and capturing renderer.console
-output to verify disambiguation messages appear in the terminal.
-
-This tests the real REPL loop — not a duplicated matching function.
+output to verify /reprocess behavior in the terminal.
 """
 
 from __future__ import annotations
@@ -87,7 +85,6 @@ async def _run_repl_with_commands(
     command_iter = iter([*commands, "/exit"])
 
     async def fake_prompt(*args: Any, **kwargs: Any) -> str:
-        # Yield control so _agent_runner can process between commands
         await asyncio.sleep(0.05)
         try:
             return next(command_iter)
@@ -107,9 +104,7 @@ async def _run_repl_with_commands(
         patch("anteroom.cli.repl.renderer.console", captured_console),
         patch("anteroom.cli.repl.renderer.render_error", lambda msg: captured_console.print(f"Error: {msg}")),
         patch("anteroom.cli.repl.renderer.render_conversation_recap", lambda *a, **k: None),
-        # Prevent use_stdout_console from overwriting our captured_console
         patch("anteroom.cli.renderer.use_stdout_console", lambda: None),
-        # Replace patch_stdout with a no-op context manager
         patch("anteroom.cli.repl._patch_stdout", _noop_patch_stdout, create=True),
         patch("prompt_toolkit.patch_stdout.patch_stdout", _noop_patch_stdout),
         patch("prompt_toolkit.PromptSession") as mock_session_cls,
@@ -135,119 +130,70 @@ async def _run_repl_with_commands(
 
 
 @pytest.mark.asyncio
-class TestReplDisambiguationFlow:
-    """Drive the real REPL and verify disambiguation output."""
+class TestReplReprocess:
+    """Drive the real REPL and verify /reprocess command output."""
 
-    async def test_link_source_duplicate_title_shows_disambiguation(self, tmp_path: Any) -> None:
-        """When two sources share the same title, the REPL prints candidates with IDs."""
+    async def test_reprocess_no_args_shows_usage(self, tmp_path: Any) -> None:
+        """/reprocess with no argument prints usage instructions."""
         db = _make_db(tmp_path)
         sp = _seed_space(db)
-        s1, _ = create_source(db, source_type="text", title="Quarterly Report", content="v1")
-        s2, _ = create_source(db, source_type="text", title="Quarterly Report", content="v2")
         config = _make_config(tmp_path)
 
         output = await _run_repl_with_commands(
-            ["/space link-source Quarterly Report"],
+            ["/reprocess"],
             config,
             db,
             sp,
         )
 
-        assert "Multiple sources named" in output, f"Expected disambiguation message, got: {output}"
-        assert s1["id"][:8] in output, f"Expected truncated ID {s1['id'][:8]} in output"
-        assert s2["id"][:8] in output, f"Expected truncated ID {s2['id'][:8]} in output"
-        assert "Use the source ID to disambiguate" in output
+        assert "Usage:" in output, f"Expected usage message, got: {output}"
+        assert "/reprocess" in output
 
-    async def test_link_source_by_id_after_disambiguation(self, tmp_path: Any) -> None:
-        """After disambiguation, using the source ID links successfully."""
+    async def test_reprocess_nonexistent_source(self, tmp_path: Any) -> None:
+        """/reprocess with a fake ID prints 'Source not found.'."""
         db = _make_db(tmp_path)
         sp = _seed_space(db)
-        s1, _ = create_source(db, source_type="text", title="Quarterly Report", content="v1")
-        create_source(db, source_type="text", title="Quarterly Report", content="v2")
         config = _make_config(tmp_path)
 
         output = await _run_repl_with_commands(
-            [f"/space link-source {s1['id']}"],
+            ["/reprocess some-fake-id"],
             config,
             db,
             sp,
         )
 
-        assert "Linked" in output, f"Expected link confirmation, got: {output}"
-        assert "Quarterly Report" in output
+        assert "Source not found" in output, f"Expected 'Source not found', got: {output}"
 
-    async def test_link_source_partial_match_multiple_shows_candidates(self, tmp_path: Any) -> None:
-        """Partial title matching multiple sources shows disambiguation."""
+    async def test_reprocess_existing_text_source(self, tmp_path: Any) -> None:
+        """/reprocess on a text source with content shows 'Reprocessed' and chunk count."""
         db = _make_db(tmp_path)
         sp = _seed_space(db)
-        create_source(db, source_type="text", title="Q1 Report", content="c1")
-        create_source(db, source_type="text", title="Q2 Report", content="c2")
-        create_source(db, source_type="text", title="Budget Plan", content="c3")
+        src, _ = create_source(db, source_type="text", title="My Notes", content="Some important notes here.")
         config = _make_config(tmp_path)
 
         output = await _run_repl_with_commands(
-            ["/space link-source report"],
+            [f"/reprocess {src['id']}"],
             config,
             db,
             sp,
         )
 
-        assert "Multiple sources match" in output, f"Expected partial disambiguation, got: {output}"
-        assert "Be more specific or use the source ID" in output
+        assert "Reprocessed" in output, f"Expected 'Reprocessed' message, got: {output}"
+        assert "chunk(s)" in output, f"Expected chunk count in output, got: {output}"
 
-    async def test_link_source_unique_title_links_directly(self, tmp_path: Any) -> None:
-        """A unique title match links without disambiguation."""
+    async def test_reprocess_all_no_sources_needing_reprocess(self, tmp_path: Any) -> None:
+        """/reprocess all with only text sources (which have content) prints 'No sources need reprocessing.'."""
         db = _make_db(tmp_path)
         sp = _seed_space(db)
-        create_source(db, source_type="text", title="Unique Doc", content="c1")
-        create_source(db, source_type="text", title="Other Doc", content="c2")
+        create_source(db, source_type="text", title="Doc A", content="Content A")
+        create_source(db, source_type="text", title="Doc B", content="Content B")
         config = _make_config(tmp_path)
 
         output = await _run_repl_with_commands(
-            ["/space link-source Unique Doc"],
+            ["/reprocess all"],
             config,
             db,
             sp,
         )
 
-        assert "Linked" in output, f"Expected link confirmation, got: {output}"
-        assert "Multiple" not in output, "Should not show disambiguation"
-
-    async def test_link_source_not_found(self, tmp_path: Any) -> None:
-        """Non-matching query shows 'not found' error."""
-        db = _make_db(tmp_path)
-        sp = _seed_space(db)
-        create_source(db, source_type="text", title="Alpha", content="c1")
-        config = _make_config(tmp_path)
-
-        output = await _run_repl_with_commands(
-            ["/space link-source nonexistent"],
-            config,
-            db,
-            sp,
-        )
-
-        assert "not found" in output.lower(), f"Expected 'not found', got: {output}"
-
-    async def test_unlink_source_duplicate_title_shows_disambiguation(self, tmp_path: Any) -> None:
-        """Unlink with duplicate titles also shows disambiguation."""
-        from anteroom.services.storage import link_source_to_space
-
-        db = _make_db(tmp_path)
-        sp = _seed_space(db)
-        s1, _ = create_source(db, source_type="text", title="Status Report", content="v1")
-        s2, _ = create_source(db, source_type="text", title="Status Report", content="v2")
-        link_source_to_space(db, sp["id"], source_id=s1["id"])
-        link_source_to_space(db, sp["id"], source_id=s2["id"])
-        config = _make_config(tmp_path)
-
-        output = await _run_repl_with_commands(
-            ["/space unlink-source Status Report"],
-            config,
-            db,
-            sp,
-        )
-
-        assert "Multiple sources named" in output, f"Expected disambiguation, got: {output}"
-        assert s1["id"][:8] in output
-        assert s2["id"][:8] in output
+        assert "No sources need reprocessing" in output, f"Expected no-op message, got: {output}"

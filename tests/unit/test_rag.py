@@ -59,7 +59,7 @@ class TestRetrieveContext:
             mock_storage.get_conversation = MagicMock(return_value={"title": "Test Conv"})
             mock_storage.get_source = MagicMock(return_value={"title": "Test Source"})
 
-            chunks = await retrieve_context("what is the meaning of life", db, embedding_service, config)
+            chunks, _ = await retrieve_context("what is the meaning of life", db, embedding_service, config)
 
         assert len(chunks) == 3
         # Should be sorted by distance
@@ -89,7 +89,7 @@ class TestRetrieveContext:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         # Should only include the first chunk since the second exceeds the budget
         assert len(chunks) == 1
@@ -112,7 +112,7 @@ class TestRetrieveContext:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert len(chunks) == 1
         assert chunks[0].content == "close match"
@@ -146,7 +146,7 @@ class TestRetrieveContext:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context(
+            chunks, _ = await retrieve_context(
                 "test query text here", db, embedding_service, config, current_conversation_id="current-conv"
             )
 
@@ -171,7 +171,7 @@ class TestRetrieveContext:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         # Should keep only one message per conversation (the best match)
         assert len(chunks) == 2
@@ -183,7 +183,7 @@ class TestRetrieveContext:
         db = MagicMock()
         config = _make_config()
 
-        chunks = await retrieve_context("test query text here", db, None, config)
+        chunks, _ = await retrieve_context("test query text here", db, None, config)
         assert chunks == []
 
     @pytest.mark.asyncio
@@ -193,7 +193,7 @@ class TestRetrieveContext:
         db = MagicMock()
         config = _make_config()
 
-        chunks = await retrieve_context("test query text here", db, embedding_service, config)
+        chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
         assert chunks == []
 
     @pytest.mark.asyncio
@@ -202,7 +202,7 @@ class TestRetrieveContext:
         db = MagicMock()
         config = _make_config(enabled=False)
 
-        chunks = await retrieve_context("test query text here", db, embedding_service, config)
+        chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
         assert chunks == []
         embedding_service.embed.assert_not_called()
 
@@ -212,7 +212,7 @@ class TestRetrieveContext:
         db = MagicMock()
         config = _make_config()
 
-        chunks = await retrieve_context("hi", db, embedding_service, config)
+        chunks, _ = await retrieve_context("hi", db, embedding_service, config)
         assert chunks == []
         embedding_service.embed.assert_not_called()
 
@@ -231,7 +231,7 @@ class TestRetrieveContext:
             mock_storage.search_similar_messages = MagicMock(return_value=msg_results)
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert len(chunks) == 1
         mock_storage.search_similar_source_chunks.assert_not_called()
@@ -251,10 +251,78 @@ class TestRetrieveContext:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=src_results)
             mock_storage.get_source = MagicMock(return_value={"title": "Source"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert len(chunks) == 1
         mock_storage.search_similar_messages.assert_not_called()
+
+
+class TestRetrieveContextReason:
+    """Tests for the reason string returned by retrieve_context()."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_returns_reason(self) -> None:
+        config = _make_config(enabled=False)
+        chunks, reason = await retrieve_context("test query text here", MagicMock(), None, config)
+        assert chunks == []
+        assert reason == "RAG disabled"
+
+    @pytest.mark.asyncio
+    async def test_short_query_returns_reason(self) -> None:
+        config = _make_config()
+        chunks, reason = await retrieve_context("short", MagicMock(), None, config)
+        assert chunks == []
+        assert reason == "Query too short for retrieval"
+
+    @pytest.mark.asyncio
+    async def test_no_embedding_service_returns_reason(self) -> None:
+        config = _make_config()
+        chunks, reason = await retrieve_context("test query text here", MagicMock(), None, config)
+        assert chunks == []
+        assert reason == "Embedding service unavailable"
+
+    @pytest.mark.asyncio
+    async def test_success_returns_none_reason(self) -> None:
+        db = MagicMock()
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        config = _make_config()
+
+        msg_results = [
+            {
+                "message_id": "m1",
+                "conversation_id": "c1",
+                "content": "relevant text",
+                "distance": 0.2,
+                "conversation_type": "chat",
+            }
+        ]
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=msg_results)
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+            mock_storage.get_conversation = MagicMock(return_value={"title": "Test"})
+
+            chunks, reason = await retrieve_context("test query text here", db, embedding_service, config)
+
+        assert len(chunks) == 1
+        assert reason is None
+
+    @pytest.mark.asyncio
+    async def test_no_results_returns_reason(self) -> None:
+        db = MagicMock()
+        embedding_service = AsyncMock()
+        embedding_service.embed = AsyncMock(return_value=_fake_embedding())
+        config = _make_config()
+
+        with patch("anteroom.services.rag.storage") as mock_storage:
+            mock_storage.search_similar_messages = MagicMock(return_value=[])
+            mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
+
+            chunks, reason = await retrieve_context("test query text here", db, embedding_service, config)
+
+        assert chunks == []
+        assert reason == "No matching results found"
 
 
 class TestFormatRagContext:
@@ -389,7 +457,7 @@ class TestRetrievedChunkConversationType:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert len(chunks) == 2
         assert chunks[0].conversation_type == "note"
@@ -417,7 +485,7 @@ class TestRetrievedChunkConversationType:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert len(chunks) == 1
         assert chunks[0].conversation_type == "chat"
@@ -515,7 +583,7 @@ class TestRetrieveContextSpaceScoping:
             mock_storage.search_similar_messages = MagicMock(return_value=[])
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
 
-            await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
+            _, _ = await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
 
         mock_storage.search_similar_messages.assert_called_once_with(
             db, _fake_embedding(), limit=config.max_chunks, space_id="space-1", vec_index=None
@@ -532,7 +600,7 @@ class TestRetrieveContextSpaceScoping:
             mock_storage.search_similar_messages = MagicMock(return_value=[])
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
 
-            await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
+            _, _ = await retrieve_context("test query text here", db, embedding_service, config, space_id="space-1")
 
         mock_storage.search_similar_source_chunks.assert_called_once_with(
             db, _fake_embedding(), limit=config.max_chunks, space_id="space-1", vec_index=None
@@ -549,7 +617,7 @@ class TestRetrieveContextSpaceScoping:
             mock_storage.search_similar_messages = MagicMock(return_value=[])
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
 
-            await retrieve_context("test query text here", db, embedding_service, config)
+            _, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         mock_storage.search_similar_messages.assert_called_once_with(
             db, _fake_embedding(), limit=config.max_chunks, space_id=None, vec_index=None
@@ -653,7 +721,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_messages = MagicMock(return_value=[])
             mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
 
-            await retrieve_context("test query text here", db, embedding_service, config)
+            _, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         mock_storage.search_similar_messages.assert_called_once()
         mock_storage.search_similar_source_chunks.assert_called_once()
@@ -671,7 +739,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_messages = MagicMock(return_value=[])
             mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
 
-            await retrieve_context("test query text here", db, embedding_service, config)
+            _, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         mock_storage.search_keyword_messages.assert_called_once()
         mock_storage.search_keyword_source_chunks.assert_called_once()
@@ -688,7 +756,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_similar_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            await retrieve_context("test query text here", db, embedding_service, config)
+            _, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         mock_storage.search_similar_messages.assert_called_once()
         mock_storage.search_similar_source_chunks.assert_called_once()
@@ -717,7 +785,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         # distance 0.9 > threshold 0.1, but keyword mode should not apply threshold
         assert len(chunks) == 1
@@ -751,7 +819,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert len(chunks) == 2
         contents = {c.content for c in chunks}
@@ -771,7 +839,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_messages = MagicMock(side_effect=RuntimeError("FTS5 error"))
             mock_storage.search_keyword_source_chunks = MagicMock(side_effect=RuntimeError("FTS5 error"))
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert chunks == []
 
@@ -797,7 +865,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, None, config)
+            chunks, _ = await retrieve_context("test query text here", db, None, config)
 
         assert len(chunks) == 1
         assert chunks[0].content == "keyword result"
@@ -826,7 +894,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         assert len(chunks) == 1
         assert chunks[0].content == "keyword fallback"
@@ -861,7 +929,7 @@ class TestRetrieveContextHybridMode:
             mock_storage.search_keyword_source_chunks = MagicMock(return_value=[])
             mock_storage.get_conversation = MagicMock(return_value={"title": "Conv"})
 
-            chunks = await retrieve_context("test query text here", db, embedding_service, config)
+            chunks, _ = await retrieve_context("test query text here", db, embedding_service, config)
 
         # Both results should survive — threshold should not apply in hybrid mode
         assert len(chunks) == 2

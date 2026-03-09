@@ -818,7 +818,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.routers.chat.load_instructions", return_value=None),
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
-            patch("anteroom.services.rag.retrieve_context", return_value=fake_chunks),
+            patch("anteroom.services.rag.retrieve_context", return_value=(fake_chunks, None)),
             patch("anteroom.services.rag.strip_rag_context", side_effect=lambda x: x),
             patch("anteroom.services.rag.format_rag_context", return_value="\nRAG CONTEXT"),
         ):
@@ -872,7 +872,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.routers.chat.load_instructions", return_value=None),
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
-            patch("anteroom.services.rag.retrieve_context", return_value=[]),
+            patch("anteroom.services.rag.retrieve_context", return_value=([], None)),
             patch("anteroom.services.rag.strip_rag_context", side_effect=lambda x: x),
         ):
             mock_storage.get_canvas_for_conversation.return_value = None
@@ -1013,7 +1013,7 @@ class TestBuildChatSystemPrompt:
             patch("anteroom.routers.chat.load_instructions", return_value=None),
             patch("anteroom.routers.chat.storage") as mock_storage,
             patch("anteroom.services.codebase_index.create_index_service", return_value=None),
-            patch("anteroom.services.rag.retrieve_context", return_value=fake_chunks),
+            patch("anteroom.services.rag.retrieve_context", return_value=(fake_chunks, None)),
             patch("anteroom.services.rag.strip_rag_context", side_effect=lambda x: x),
             patch("anteroom.services.rag.format_rag_context", return_value="\nRAG KW"),
         ):

@@ -533,6 +533,7 @@ prompt: |
   | /rewind        | Undo the last message pair                       |
   | /last          | Load the last message                            |
   | /upload        | Upload a file as context                         |
+  | /reprocess     | Re-extract and re-chunk a source (by ID or "all")|
   | /model NAME    | Switch AI model                                  |
   | /compact       | Compact conversation to reduce token usage       |
   | /usage         | Show token usage and cost statistics             |

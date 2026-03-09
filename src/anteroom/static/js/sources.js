@@ -276,6 +276,7 @@ const Sources = (() => {
             <div class="source-detail-info">
                 <span class="source-detail-date">${created}</span>
                 ${chunksCount > 0 ? `<span class="source-detail-chunks">${chunksCount} chunks</span>` : ''}
+                ${source.embedding_status ? `<span class="source-detail-embedding-status">${source.embedding_status}</span>` : ''}
             </div>
             <div class="source-detail-tags" id="source-detail-tags">
                 ${tagsHtml}
@@ -285,6 +286,7 @@ const Sources = (() => {
             <div class="source-detail-actions">
                 <button class="btn-modal-save source-attach-btn" id="source-attach-btn">${isAttached ? 'Detach from chat' : 'Attach to chat'}</button>
                 <button class="btn-modal-save source-edit-btn" id="source-edit-btn">Edit</button>
+                <button class="btn-modal-save source-reprocess-btn" id="source-reprocess-btn">Reprocess</button>
                 <button class="btn-modal-cancel source-delete-btn" id="source-delete-btn">Delete</button>
             </div>
         `;
@@ -309,6 +311,22 @@ const Sources = (() => {
         // Edit button
         document.getElementById('source-edit-btn').addEventListener('click', () => {
             _showEditForm(source);
+        });
+
+        // Reprocess button
+        document.getElementById('source-reprocess-btn').addEventListener('click', async () => {
+            if (!confirm('Re-extract text and rebuild chunks for this source?')) return;
+            try {
+                const result = await App.api(`/api/sources/${encodeURIComponent(source.id)}/reprocess`, { method: 'POST' });
+                if (result.warnings && result.warnings.length > 0) {
+                    Chat.showToast('Reprocessed with warnings: ' + result.warnings.join('; '));
+                } else {
+                    Chat.showToast('Source reprocessed successfully');
+                }
+                await showDetailView(source.id);
+            } catch (err) {
+                alert('Failed to reprocess: ' + err.message);
+            }
         });
 
         // Delete button
@@ -628,23 +646,36 @@ const Sources = (() => {
             if (_createType === 'file') {
                 if (_selectedFiles.length > 0) {
                     // Multi-file batch upload: use filename as title for each
+                    const allWarnings = [];
                     for (const file of _selectedFiles) {
                         const formData = new FormData();
                         formData.append('file', file);
                         formData.append('title', file.name);
-                        await App.api('/api/sources/upload', {
+                        const resp = await App.api('/api/sources/upload', {
                             method: 'POST',
                             body: formData,
                         });
+                        if (resp && resp.warnings && resp.warnings.length > 0) {
+                            allWarnings.push({ file: file.name, warnings: resp.warnings });
+                        }
+                    }
+                    if (allWarnings.length > 0) {
+                        const msg = allWarnings.map(w =>
+                            `${w.file}: ${w.warnings.join('; ')}`
+                        ).join('\n');
+                        Chat.showToast('Upload warnings:\n' + msg);
                     }
                 } else if (_selectedFile) {
                     const formData = new FormData();
                     formData.append('file', _selectedFile);
                     formData.append('title', title);
-                    await App.api('/api/sources/upload', {
+                    const resp = await App.api('/api/sources/upload', {
                         method: 'POST',
                         body: formData,
                     });
+                    if (resp && resp.warnings && resp.warnings.length > 0) {
+                        Chat.showToast(resp.warnings.join('\n'));
+                    }
                 } else {
                     alert('Please select a file.');
                     return;

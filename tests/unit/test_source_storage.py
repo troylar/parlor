@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from anteroom.db import _SCHEMA, _VEC_METADATA_SCHEMA, ThreadSafeConnection
+from anteroom.services.document_extractor import ExtractionResult
 from anteroom.services.storage import (
     _validate_upload,
     add_source_to_group,
@@ -23,6 +24,7 @@ from anteroom.services.storage import (
     delete_source,
     delete_source_group,
     get_source,
+    get_source_embedding_status,
     get_source_group,
     get_source_tags,
     get_unembedded_source_chunks,
@@ -31,6 +33,7 @@ from anteroom.services.storage import (
     list_sources,
     remove_source_from_group,
     remove_tag_from_source,
+    reprocess_source,
     save_attachment,
     save_source_file,
     update_source,
@@ -77,14 +80,14 @@ class TestChunkText:
 
 class TestSourceCRUD:
     def test_create_text_source(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Test Note", content="Some content here.")
+        source, _ = create_source(db, source_type="text", title="Test Note", content="Some content here.")
         assert source["type"] == "text"
         assert source["title"] == "Test Note"
         assert source["content"] == "Some content here."
         assert source["content_hash"] is not None
 
     def test_create_url_source(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="url", title="Link", url="https://example.com")
+        source, _ = create_source(db, source_type="url", title="Link", url="https://example.com")
         assert source["type"] == "url"
         assert source["url"] == "https://example.com"
 
@@ -93,7 +96,7 @@ class TestSourceCRUD:
             create_source(db, source_type="invalid", title="Bad")
 
     def test_get_source(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Test", content="Content here for testing.")
+        source, _ = create_source(db, source_type="text", title="Test", content="Content here for testing.")
         fetched = get_source(db, source["id"])
         assert fetched is not None
         assert fetched["id"] == source["id"]
@@ -121,13 +124,13 @@ class TestSourceCRUD:
         assert result[0]["type"] == "text"
 
     def test_update_source_title(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Old", content="Content here for update.")
+        source, _ = create_source(db, source_type="text", title="Old", content="Content here for update.")
         updated = update_source(db, source["id"], title="New")
         assert updated is not None
         assert updated["title"] == "New"
 
     def test_update_source_content_rechunks(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Note", content="Original content here.")
+        source, _ = create_source(db, source_type="text", title="Note", content="Original content here.")
         update_source(db, source["id"], content="Updated content with new text here.")
         new_chunks = list_source_chunks(db, source["id"])
         assert new_chunks[0]["content"] == "Updated content with new text here."
@@ -136,7 +139,7 @@ class TestSourceCRUD:
         assert update_source(db, "nonexistent", title="New") is None
 
     def test_delete_source(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Delete me", content="Content.")
+        source, _ = create_source(db, source_type="text", title="Delete me", content="Content.")
         assert delete_source(db, source["id"]) is True
         assert get_source(db, source["id"]) is None
 
@@ -146,7 +149,7 @@ class TestSourceCRUD:
 
 class TestSourceChunks:
     def test_create_and_list_chunks(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Test", content="Short.")
+        source, _ = create_source(db, source_type="text", title="Test", content="Short.")
         chunks = create_source_chunks(db, source["id"], ["chunk 1", "chunk 2"])
         assert len(chunks) == 2
         assert chunks[0]["chunk_index"] == 0
@@ -157,12 +160,14 @@ class TestSourceChunks:
 
     def test_auto_chunking_on_create(self, db: ThreadSafeConnection) -> None:
         long_text = "First sentence. " * 100
-        source = create_source(db, source_type="text", title="Long", content=long_text)
+        source, _ = create_source(db, source_type="text", title="Long", content=long_text)
         chunks = list_source_chunks(db, source["id"])
         assert len(chunks) > 1
 
     def test_get_unembedded_source_chunks(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Test", content="Long enough content for embedding test.")
+        source, _ = create_source(
+            db, source_type="text", title="Test", content="Long enough content for embedding test."
+        )
         unembedded = get_unembedded_source_chunks(db)
         assert len(unembedded) > 0
         assert unembedded[0]["source_id"] == source["id"]
@@ -170,7 +175,7 @@ class TestSourceChunks:
 
 class TestSourceTags:
     def test_add_and_get_tags(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Test", content="Content.")
+        source, _ = create_source(db, source_type="text", title="Test", content="Content.")
         tag = create_tag(db, name="important")
         assert add_tag_to_source(db, source["id"], tag["id"]) is True
         tags = get_source_tags(db, source["id"])
@@ -178,7 +183,7 @@ class TestSourceTags:
         assert tags[0]["name"] == "important"
 
     def test_remove_tag(self, db: ThreadSafeConnection) -> None:
-        source = create_source(db, source_type="text", title="Test", content="Content.")
+        source, _ = create_source(db, source_type="text", title="Test", content="Content.")
         tag = create_tag(db, name="temp")
         add_tag_to_source(db, source["id"], tag["id"])
         remove_tag_from_source(db, source["id"], tag["id"])
@@ -186,7 +191,7 @@ class TestSourceTags:
         assert len(tags) == 0
 
     def test_list_sources_by_tag(self, db: ThreadSafeConnection) -> None:
-        s1 = create_source(db, source_type="text", title="Tagged", content="Content.")
+        s1, _ = create_source(db, source_type="text", title="Tagged", content="Content.")
         create_source(db, source_type="text", title="Not tagged", content="Content.")
         tag = create_tag(db, name="filter-tag")
         add_tag_to_source(db, s1["id"], tag["id"])
@@ -218,7 +223,7 @@ class TestSourceGroups:
 
     def test_add_remove_source_from_group(self, db: ThreadSafeConnection) -> None:
         group = create_source_group(db, name="Group")
-        source = create_source(db, source_type="text", title="S1", content="Content.")
+        source, _ = create_source(db, source_type="text", title="S1", content="Content.")
         assert add_source_to_group(db, group["id"], source["id"]) is True
 
         result = list_sources(db, group_id=group["id"])
@@ -259,7 +264,7 @@ class TestDualCitizenship:
 
 class TestSaveSourceFile:
     def test_save_text_file(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
-        source = save_source_file(
+        source, _ = save_source_file(
             db,
             title="readme",
             filename="README.md",
@@ -298,7 +303,7 @@ class TestSaveSourceFile:
         # but the declared MIME is application/vnd.openxmlformats-...
         # Use minimal ZIP header to simulate a .docx
         zip_header = b"PK\x03\x04" + b"\x00" * 26
-        source = save_source_file(
+        source, _ = save_source_file(
             db,
             title="Document",
             filename="report.docx",
@@ -310,7 +315,7 @@ class TestSaveSourceFile:
         assert source["filename"] == "report.docx"
 
     def test_save_json_file(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
-        source = save_source_file(
+        source, _ = save_source_file(
             db,
             title="Config",
             filename="config.json",
@@ -322,7 +327,7 @@ class TestSaveSourceFile:
         assert source["content"] == '{"key": "value"}'
 
     def test_save_yaml_file(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
-        source = save_source_file(
+        source, _ = save_source_file(
             db,
             title="Config",
             filename="config.yaml",
@@ -464,11 +469,14 @@ class TestSaveSourceFileExtraction:
         pdf_data = b"%PDF-1.4 " + b"\x00" * 100
 
         with patch("anteroom.services.storage._validate_upload"):
-            with patch("anteroom.services.document_extractor.extract_text", return_value="Extracted PDF text"):
-                source = save_source_file(db, "test.pdf", "test.pdf", "application/pdf", pdf_data, tmp_path)
+            with patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value=ExtractionResult(text="Extracted PDF text"),
+            ):
+                source, warnings = save_source_file(db, "test.pdf", "test.pdf", "application/pdf", pdf_data, tmp_path)
 
         assert source["content"] == "Extracted PDF text"
-        # Verify chunks were created from the extracted content
+        assert warnings == []
         chunks = list_source_chunks(db, source["id"])
         assert len(chunks) >= 1
         assert chunks[0]["content"] == "Extracted PDF text"
@@ -480,8 +488,11 @@ class TestSaveSourceFileExtraction:
         docx_data = b"PK\x03\x04" + b"\x00" * 100
 
         with patch("anteroom.services.storage._validate_upload"):
-            with patch("anteroom.services.document_extractor.extract_text", return_value="DOCX content here"):
-                source = save_source_file(db, "doc.docx", "doc.docx", docx_mime, docx_data, tmp_path)
+            with patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value=ExtractionResult(text="DOCX content here"),
+            ):
+                source, _ = save_source_file(db, "doc.docx", "doc.docx", docx_mime, docx_data, tmp_path)
 
         assert source["content"] == "DOCX content here"
         chunks = list_source_chunks(db, source["id"])
@@ -493,12 +504,16 @@ class TestSaveSourceFileExtraction:
         pdf_data = b"%PDF-1.4 " + b"\x00" * 100
 
         with patch("anteroom.services.storage._validate_upload"):
-            with patch("anteroom.services.document_extractor.extract_text", return_value=None):
-                source = save_source_file(db, "empty.pdf", "empty.pdf", "application/pdf", pdf_data, tmp_path)
+            with patch(
+                "anteroom.services.document_extractor.extract_text",
+                return_value=ExtractionResult(text=None),
+            ):
+                source, warnings = save_source_file(db, "empty.pdf", "empty.pdf", "application/pdf", pdf_data, tmp_path)
 
         assert source["content"] is None
         chunks = list_source_chunks(db, source["id"])
         assert len(chunks) == 0
+        assert any("no text extracted" in w.lower() for w in warnings)
 
     def test_text_files_still_decoded_directly(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
         """Text files should still use UTF-8 decode, not the document extractor."""
@@ -508,7 +523,7 @@ class TestSaveSourceFileExtraction:
 
         with patch("anteroom.services.storage._validate_upload"):
             with patch("anteroom.services.document_extractor.extract_text") as mock_extract:
-                source = save_source_file(db, "readme.txt", "readme.txt", "text/plain", text_data, tmp_path)
+                source, _ = save_source_file(db, "readme.txt", "readme.txt", "text/plain", text_data, tmp_path)
 
         # extract_text should NOT have been called because UTF-8 decode succeeded
         mock_extract.assert_not_called()
@@ -518,17 +533,17 @@ class TestSaveSourceFileExtraction:
 class TestSaveSourceFileDedup:
     def test_duplicate_content_returns_existing(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
         data = b"# Hello\n\nWorld content here"
-        source1 = save_source_file(
+        source1, _ = save_source_file(
             db, title="first", filename="a.md", mime_type="text/markdown", data=data, data_dir=tmp_path
         )
-        source2 = save_source_file(
+        source2, _ = save_source_file(
             db, title="second", filename="b.md", mime_type="text/markdown", data=data, data_dir=tmp_path
         )
         assert source1["id"] == source2["id"]
         assert source1["content_hash"] == source2["content_hash"]
 
     def test_different_content_creates_new(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
-        source1 = save_source_file(
+        source1, _ = save_source_file(
             db,
             title="first",
             filename="a.md",
@@ -536,7 +551,7 @@ class TestSaveSourceFileDedup:
             data=b"content A long enough",
             data_dir=tmp_path,
         )
-        source2 = save_source_file(
+        source2, _ = save_source_file(
             db,
             title="second",
             filename="b.md",
@@ -574,3 +589,182 @@ class TestSaveSourceFileAtomicCleanup:
         if sources_dir.exists():
             remaining = list(sources_dir.iterdir())
             assert remaining == []
+
+
+class TestReprocessSource:
+    def test_not_found(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        source, warnings = reprocess_source(db, "nonexistent-id", tmp_path)
+        assert source == {}
+        assert any("not found" in w.lower() for w in warnings)
+
+    def test_no_storage_path(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello")
+        result, warnings = reprocess_source(db, source["id"], tmp_path)
+        assert result["id"] == source["id"]
+        assert any("no stored file" in w.lower() for w in warnings)
+
+    def test_file_missing_on_disk(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        source, _ = save_source_file(
+            db,
+            title="test.txt",
+            filename="test.txt",
+            mime_type="text/plain",
+            data=b"hello world",
+            data_dir=tmp_path,
+        )
+        # Delete the file on disk
+        storage_path = source["storage_path"]
+        (tmp_path / storage_path).unlink()
+        result, warnings = reprocess_source(db, source["id"], tmp_path)
+        assert any("not found" in w.lower() for w in warnings)
+
+    def test_successful_reprocess(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        source, _ = save_source_file(
+            db,
+            title="test.txt",
+            filename="test.txt",
+            mime_type="text/plain",
+            data=b"hello world",
+            data_dir=tmp_path,
+        )
+        # Clear content to simulate failed initial extraction
+        db.execute("UPDATE sources SET content = NULL WHERE id = ?", (source["id"],))
+        db.commit()
+
+        with patch(
+            "anteroom.services.storage._try_extract",
+            return_value=ExtractionResult(text="reprocessed text"),
+        ):
+            result, warnings = reprocess_source(db, source["id"], tmp_path)
+
+        assert result["content"] == "reprocessed text"
+        assert result["chunk_count"] > 0
+        assert warnings == []
+
+    def test_reprocess_rebuilds_chunks(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        source, _ = save_source_file(
+            db,
+            title="test.txt",
+            filename="test.txt",
+            mime_type="text/plain",
+            data=b"hello world",
+            data_dir=tmp_path,
+        )
+        old_chunks = list_source_chunks(db, source["id"])
+
+        with patch(
+            "anteroom.services.storage._try_extract",
+            return_value=ExtractionResult(text="completely different content for reprocessing"),
+        ):
+            result, _ = reprocess_source(db, source["id"], tmp_path)
+
+        new_chunks = list_source_chunks(db, source["id"])
+        assert len(new_chunks) > 0
+        # Chunk IDs should differ after rebuild
+        old_ids = {c["id"] for c in old_chunks}
+        new_ids = {c["id"] for c in new_chunks}
+        assert old_ids != new_ids
+
+    def test_reprocess_extraction_fails(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        source, _ = save_source_file(
+            db,
+            title="test.txt",
+            filename="test.txt",
+            mime_type="text/plain",
+            data=b"hello world",
+            data_dir=tmp_path,
+        )
+
+        with patch(
+            "anteroom.services.storage._try_extract",
+            return_value=ExtractionResult(text=None, warnings=["extraction failed"]),
+        ):
+            result, warnings = reprocess_source(db, source["id"], tmp_path)
+
+        assert "extraction failed" in warnings
+        assert result["chunk_count"] == 0
+
+    def test_reprocess_no_text_no_warnings(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        source, _ = save_source_file(
+            db,
+            title="test.txt",
+            filename="test.txt",
+            mime_type="text/plain",
+            data=b"hello world",
+            data_dir=tmp_path,
+        )
+
+        with patch(
+            "anteroom.services.storage._try_extract",
+            return_value=ExtractionResult(text=None),
+        ):
+            result, warnings = reprocess_source(db, source["id"], tmp_path)
+
+        assert any("re-extraction produced no text" in w.lower() for w in warnings)
+
+    def test_reprocess_file_read_error(self, db: ThreadSafeConnection, tmp_path: Path) -> None:
+        """reprocess_source returns a warning instead of raising when file can't be read."""
+        from unittest.mock import patch
+
+        source, _ = save_source_file(
+            db,
+            title="test.txt",
+            filename="test.txt",
+            mime_type="text/plain",
+            data=b"hello world",
+            data_dir=tmp_path,
+        )
+
+        # Mock read_bytes to raise OSError (e.g. permission denied)
+        with patch("pathlib.Path.read_bytes", side_effect=OSError("Permission denied")):
+            result, warnings = reprocess_source(db, source["id"], tmp_path)
+
+        assert any("cannot read" in w.lower() for w in warnings)
+        assert result.get("id") == source["id"]
+
+
+class TestGetSourceEmbeddingStatus:
+    def test_no_chunks(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="url", title="Empty", url="https://example.com")
+        assert get_source_embedding_status(db, source["id"]) == "no_chunks"
+
+    def test_pending(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        # create_source auto-chunks, so chunks exist but no embeddings
+        assert get_source_embedding_status(db, source["id"]) == "pending"
+
+    def test_embedded(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        chunks = list_source_chunks(db, source["id"])
+        assert len(chunks) > 0
+        for c in chunks:
+            db.execute(
+                "INSERT INTO source_chunk_embeddings (chunk_id, source_id, content_hash, status, created_at) "
+                "VALUES (?, ?, 'hash', 'embedded', '2024-01-01T00:00:00')",
+                (c["id"], source["id"]),
+            )
+        db.commit()
+        assert get_source_embedding_status(db, source["id"]) == "embedded"
+
+    def test_partial(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        # Add a second chunk manually so we have 2 total
+        create_source_chunks(db, source["id"], ["extra chunk for partial test"])
+        chunks = list_source_chunks(db, source["id"])
+        assert len(chunks) >= 2
+        # Only embed the first chunk
+        db.execute(
+            "INSERT INTO source_chunk_embeddings (chunk_id, source_id, content_hash, status, created_at) "
+            "VALUES (?, ?, 'hash1', 'embedded', '2024-01-01T00:00:00')",
+            (chunks[0]["id"], source["id"]),
+        )
+        db.commit()
+        assert get_source_embedding_status(db, source["id"]) == "partial"

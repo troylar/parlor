@@ -46,6 +46,7 @@ class TestListSources:
         app = _make_app()
         with patch("anteroom.routers.sources.storage") as mock_storage:
             mock_storage.list_sources.return_value = [{"id": "s1", "title": "Test"}]
+            mock_storage.get_source_embedding_status.return_value = "pending"
             client = TestClient(app)
             resp = client.get("/api/sources?type=text&search=test")
             assert resp.status_code == 200
@@ -54,17 +55,36 @@ class TestListSources:
             assert call_kwargs[1]["source_type"] == "text"
             assert call_kwargs[1]["search"] == "test"
 
+    def test_list_sources_includes_embedding_status(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.list_sources.return_value = [
+                {"id": "s1", "title": "A"},
+                {"id": "s2", "title": "B"},
+            ]
+            mock_storage.get_source_embedding_status.side_effect = ["embedded", "pending"]
+            client = TestClient(app)
+            resp = client.get("/api/sources")
+            assert resp.status_code == 200
+            sources = resp.json()["sources"]
+            assert sources[0]["embedding_status"] == "embedded"
+            assert sources[1]["embedding_status"] == "pending"
+            assert mock_storage.get_source_embedding_status.call_count == 2
+
 
 class TestCreateSource:
     def test_create_text_source(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.create_source.return_value = {
-                "id": "s1",
-                "type": "text",
-                "title": "Note",
-                "content": "Hello",
-            }
+            mock_storage.create_source.return_value = (
+                {
+                    "id": "s1",
+                    "type": "text",
+                    "title": "Note",
+                    "content": "Hello",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources",
@@ -109,13 +129,16 @@ class TestUploadSource:
     def test_upload_file(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.save_source_file.return_value = {
-                "id": "s1",
-                "type": "file",
-                "title": "test.txt",
-                "filename": "test.txt",
-                "content": "file content",
-            }
+            mock_storage.save_source_file.return_value = (
+                {
+                    "id": "s1",
+                    "type": "file",
+                    "title": "test.txt",
+                    "filename": "test.txt",
+                    "content": "file content",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources/upload",
@@ -128,11 +151,14 @@ class TestUploadSource:
     def test_upload_with_title(self) -> None:
         app = _make_app()
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.save_source_file.return_value = {
-                "id": "s2",
-                "type": "file",
-                "title": "Custom Title",
-            }
+            mock_storage.save_source_file.return_value = (
+                {
+                    "id": "s2",
+                    "type": "file",
+                    "title": "Custom Title",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources/upload",
@@ -173,10 +199,25 @@ class TestGetSource:
         app = _make_app()
         with patch("anteroom.routers.sources.storage") as mock_storage:
             mock_storage.get_source.return_value = {"id": "s1", "title": "Test"}
+            mock_storage.get_source_embedding_status.return_value = "embedded"
             client = TestClient(app)
             # Use a valid UUID
             resp = client.get("/api/sources/12345678-1234-1234-1234-123456789012")
             assert resp.status_code == 200
+
+    def test_get_source_includes_embedding_status(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.get_source.return_value = {"id": "s1", "title": "Test"}
+            mock_storage.get_source_embedding_status.return_value = "partial"
+            client = TestClient(app)
+            resp = client.get("/api/sources/12345678-1234-1234-1234-123456789012")
+            assert resp.status_code == 200
+            assert resp.json()["embedding_status"] == "partial"
+            mock_storage.get_source_embedding_status.assert_called_once_with(
+                mock_storage.get_source_embedding_status.call_args[0][0],
+                "12345678-1234-1234-1234-123456789012",
+            )
 
     def test_get_missing_source(self) -> None:
         app = _make_app()
@@ -316,6 +357,7 @@ class TestGetDbFallback:
         app = _make_app_no_db_manager()
         with patch("anteroom.routers.sources.storage") as mock_storage:
             mock_storage.list_sources.return_value = [{"id": "s1"}]
+            mock_storage.get_source_embedding_status.return_value = "pending"
             client = TestClient(app)
             resp = client.get("/api/sources")
             assert resp.status_code == 200
@@ -335,12 +377,15 @@ class TestGetIdentity:
         config.app.data_dir = "/tmp/test"
         app = _make_app(config=config)
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.create_source.return_value = {
-                "id": "s1",
-                "type": "text",
-                "title": "Note",
-                "content": "Hello",
-            }
+            mock_storage.create_source.return_value = (
+                {
+                    "id": "s1",
+                    "type": "text",
+                    "title": "Note",
+                    "content": "Hello",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources",
@@ -363,12 +408,15 @@ class TestEmbeddingWorker:
         app.state.embedding_worker = mock_worker
 
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.create_source.return_value = {
-                "id": "s1",
-                "type": "text",
-                "title": "Note",
-                "content": "Hello",
-            }
+            mock_storage.create_source.return_value = (
+                {
+                    "id": "s1",
+                    "type": "text",
+                    "title": "Note",
+                    "content": "Hello",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources",
@@ -389,12 +437,15 @@ class TestEmbeddingWorker:
         app.state.embedding_worker = mock_worker
 
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.create_source.return_value = {
-                "id": "s1",
-                "type": "text",
-                "title": "Note",
-                "content": "Hello",
-            }
+            mock_storage.create_source.return_value = (
+                {
+                    "id": "s1",
+                    "type": "text",
+                    "title": "Note",
+                    "content": "Hello",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources",
@@ -411,12 +462,15 @@ class TestEmbeddingWorker:
         app.state.embedding_worker = mock_worker
 
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.save_source_file.return_value = {
-                "id": "s2",
-                "type": "file",
-                "title": "test.txt",
-                "content": "file content",
-            }
+            mock_storage.save_source_file.return_value = (
+                {
+                    "id": "s2",
+                    "type": "file",
+                    "title": "test.txt",
+                    "content": "file content",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources/upload",
@@ -436,12 +490,15 @@ class TestEmbeddingWorker:
         app.state.embedding_worker = mock_worker
 
         with patch("anteroom.routers.sources.storage") as mock_storage:
-            mock_storage.save_source_file.return_value = {
-                "id": "s2",
-                "type": "file",
-                "title": "test.txt",
-                "content": "file content",
-            }
+            mock_storage.save_source_file.return_value = (
+                {
+                    "id": "s2",
+                    "type": "file",
+                    "title": "test.txt",
+                    "content": "file content",
+                },
+                [],
+            )
             client = TestClient(app)
             resp = client.post(
                 "/api/sources/upload",
@@ -642,3 +699,57 @@ class TestGroupMembership:
         client = TestClient(app)
         resp = client.delete("/api/source-groups/12345678-1234-1234-1234-123456789012/sources/not-a-uuid")
         assert resp.status_code == 400
+
+
+class TestReprocessSource:
+    def test_reprocess_source(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.reprocess_source.return_value = (
+                {"id": "s1", "content": "reprocessed", "chunk_count": 2},
+                [],
+            )
+            client = TestClient(app)
+            resp = client.post("/api/sources/12345678-1234-1234-1234-123456789012/reprocess")
+            assert resp.status_code == 200
+            assert resp.json()["content"] == "reprocessed"
+            assert resp.json()["warnings"] == []
+
+    def test_reprocess_source_with_warnings(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.reprocess_source.return_value = (
+                {"id": "s1", "content": None},
+                ["extraction failed"],
+            )
+            client = TestClient(app)
+            resp = client.post("/api/sources/12345678-1234-1234-1234-123456789012/reprocess")
+            assert resp.status_code == 200
+            assert resp.json()["warnings"] == ["extraction failed"]
+
+    def test_reprocess_source_not_found(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.reprocess_source.return_value = ({}, ["Source not found"])
+            client = TestClient(app)
+            resp = client.post("/api/sources/12345678-1234-1234-1234-123456789012/reprocess")
+            assert resp.status_code == 404
+
+    def test_reprocess_source_invalid_uuid(self) -> None:
+        app = _make_app()
+        client = TestClient(app)
+        resp = client.post("/api/sources/not-a-uuid/reprocess")
+        assert resp.status_code == 400
+
+    def test_reprocess_triggers_embedding(self) -> None:
+        app = _make_app()
+        mock_worker = MagicMock()
+        app.state.embedding_worker = mock_worker
+        with patch("anteroom.routers.sources.storage") as mock_storage:
+            mock_storage.reprocess_source.return_value = (
+                {"id": "s1", "content": "text"},
+                [],
+            )
+            client = TestClient(app)
+            resp = client.post("/api/sources/12345678-1234-1234-1234-123456789012/reprocess")
+            assert resp.status_code == 200
