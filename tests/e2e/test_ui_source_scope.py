@@ -29,11 +29,11 @@ class TestSpaceSourcesTagEnrichment:
         resp.raise_for_status()
         source_id = resp.json()["id"]
 
-        resp = api_client.post("/api/sources/tags", json={"name": tag_name})
+        resp = api_client.post("/api/tags", json={"name": tag_name})
         resp.raise_for_status()
         tag_id = resp.json()["id"]
 
-        resp = api_client.post(f"/api/sources/{source_id}/tags", json={"tag_id": tag_id})
+        resp = api_client.post(f"/api/sources/{source_id}/tags/{tag_id}")
         resp.raise_for_status()
 
         return source_id, tag_id
@@ -70,11 +70,11 @@ class TestSpaceSourcesTagEnrichment:
         resp.raise_for_status()
         source_id = resp.json()["id"]
 
-        resp = api_client.post("/api/sources/tags", json={"name": "global-tag"})
+        resp = api_client.post("/api/tags", json={"name": "global-tag"})
         resp.raise_for_status()
         tag_id = resp.json()["id"]
 
-        api_client.post(f"/api/sources/{source_id}/tags", json={"tag_id": tag_id})
+        api_client.post(f"/api/sources/{source_id}/tags/{tag_id}")
 
         resp = api_client.get("/api/sources")
         resp.raise_for_status()
