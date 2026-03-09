@@ -25,6 +25,7 @@ from anteroom.services.storage import (
     delete_source_group,
     get_source,
     get_source_embedding_status,
+    get_source_embedding_statuses,
     get_source_group,
     get_source_tags,
     get_unembedded_source_chunks,
@@ -768,3 +769,88 @@ class TestGetSourceEmbeddingStatus:
         )
         db.commit()
         assert get_source_embedding_status(db, source["id"]) == "partial"
+
+
+class TestGetSourceEmbeddingStatuses:
+    def test_empty_list(self, db: ThreadSafeConnection) -> None:
+        assert get_source_embedding_statuses(db, []) == {}
+
+    def test_no_chunks(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="url", title="Empty", url="https://example.com")
+        result = get_source_embedding_statuses(db, [source["id"]])
+        assert result[source["id"]] == "no_chunks"
+
+    def test_pending(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        result = get_source_embedding_statuses(db, [source["id"]])
+        assert result[source["id"]] == "pending"
+
+    def test_embedded(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        chunks = list_source_chunks(db, source["id"])
+        for c in chunks:
+            db.execute(
+                "INSERT INTO source_chunk_embeddings (chunk_id, source_id, content_hash, status, created_at) "
+                "VALUES (?, ?, 'hash', 'embedded', '2024-01-01T00:00:00')",
+                (c["id"], source["id"]),
+            )
+        db.commit()
+        result = get_source_embedding_statuses(db, [source["id"]])
+        assert result[source["id"]] == "embedded"
+
+    def test_partial(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        create_source_chunks(db, source["id"], ["extra chunk for partial test"])
+        chunks = list_source_chunks(db, source["id"])
+        assert len(chunks) >= 2
+        db.execute(
+            "INSERT INTO source_chunk_embeddings (chunk_id, source_id, content_hash, status, created_at) "
+            "VALUES (?, ?, 'hash1', 'embedded', '2024-01-01T00:00:00')",
+            (chunks[0]["id"], source["id"]),
+        )
+        db.commit()
+        result = get_source_embedding_statuses(db, [source["id"]])
+        assert result[source["id"]] == "partial"
+
+    def test_skipped_not_counted_as_embedded(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        chunks = list_source_chunks(db, source["id"])
+        for c in chunks:
+            db.execute(
+                "INSERT INTO source_chunk_embeddings (chunk_id, source_id, content_hash, status, created_at) "
+                "VALUES (?, ?, 'hash', 'skipped', '2024-01-01T00:00:00')",
+                (c["id"], source["id"]),
+            )
+        db.commit()
+        result = get_source_embedding_statuses(db, [source["id"]])
+        assert result[source["id"]] == "pending"
+
+    def test_failed_not_counted_as_embedded(self, db: ThreadSafeConnection) -> None:
+        source, _ = create_source(db, source_type="text", title="Note", content="hello world")
+        chunks = list_source_chunks(db, source["id"])
+        for c in chunks:
+            db.execute(
+                "INSERT INTO source_chunk_embeddings (chunk_id, source_id, content_hash, status, created_at) "
+                "VALUES (?, ?, 'hash', 'failed', '2024-01-01T00:00:00')",
+                (c["id"], source["id"]),
+            )
+        db.commit()
+        result = get_source_embedding_statuses(db, [source["id"]])
+        assert result[source["id"]] == "pending"
+
+    def test_mixed_sources(self, db: ThreadSafeConnection) -> None:
+        s1, _ = create_source(db, source_type="url", title="URL", url="https://example.com")
+        s2, _ = create_source(db, source_type="text", title="Pending", content="hello world")
+        s3, _ = create_source(db, source_type="text", title="Embedded", content="hello world")
+        chunks = list_source_chunks(db, s3["id"])
+        for c in chunks:
+            db.execute(
+                "INSERT INTO source_chunk_embeddings (chunk_id, source_id, content_hash, status, created_at) "
+                "VALUES (?, ?, 'hash', 'embedded', '2024-01-01T00:00:00')",
+                (c["id"], s3["id"]),
+            )
+        db.commit()
+        result = get_source_embedding_statuses(db, [s1["id"], s2["id"], s3["id"]])
+        assert result[s1["id"]] == "no_chunks"
+        assert result[s2["id"]] == "pending"
+        assert result[s3["id"]] == "embedded"

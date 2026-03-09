@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 import uuid as uuid_mod
 from typing import Any
 
@@ -10,6 +12,8 @@ from pydantic import ValidationError
 
 from ..models import SourceCreate, SourceGroupCreate, SourceGroupUpdate, SourceUpdate
 from ..services import storage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["sources"])
 
@@ -75,8 +79,15 @@ async def list_sources(
         limit=limit,
         offset=offset,
     )
-    for s in sources:
-        s["embedding_status"] = storage.get_source_embedding_status(db, s["id"])
+    try:
+        source_ids = [s["id"] for s in sources]
+        statuses = storage.get_source_embedding_statuses(db, source_ids)
+        for s in sources:
+            s["embedding_status"] = statuses.get(s["id"], "unknown")
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        logger.warning("Failed to fetch embedding statuses", exc_info=True)
+        for s in sources:
+            s["embedding_status"] = "unknown"
     return {"sources": sources}
 
 
