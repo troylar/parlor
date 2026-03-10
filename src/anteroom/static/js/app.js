@@ -666,9 +666,18 @@ const App = (() => {
             _eventSource = null;
         }
 
-        // Clear stale approval prompts from DOM and dedup set on reconnect
-        document.querySelectorAll('.approval-prompt').forEach(el => el.remove());
-        _shownApprovalIds.clear();
+        // Clear only pending (unresolved) approval/ask_user prompts on reconnect;
+        // preserve resolved cards so the user retains approval history (#864)
+        document.querySelectorAll('.approval-prompt:not(.approval-allowed):not(.approval-denied)').forEach(el => {
+            const id = el.getAttribute('data-approval-id');
+            if (id) _shownApprovalIds.delete(id);
+            el.remove();
+        });
+        document.querySelectorAll('.ask-user-prompt:not(.ask-user-answered):not(.ask-user-cancelled)').forEach(el => {
+            const id = el.getAttribute('data-ask-id');
+            if (id) _shownApprovalIds.delete(id);
+            el.remove();
+        });
 
         const db = state.currentDatabase || 'personal';
         const _safeParam = (v) => /^[a-zA-Z0-9_-]+$/.test(v);

@@ -2105,6 +2105,18 @@ const Chat = (() => {
         scrollToBottom();
     }
 
+    function _insertPromptCard(container, el) {
+        // Insert approval/ask_user cards after the last assistant message
+        // so they appear in chronological order (before any subsequent user reply).
+        const assistantMsgs = container.querySelectorAll('.message.assistant');
+        const lastAssistant = assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1] : null;
+        if (lastAssistant && lastAssistant.nextSibling) {
+            container.insertBefore(el, lastAssistant.nextSibling);
+        } else {
+            container.appendChild(el);
+        }
+    }
+
     function showApprovalPrompt(data) {
         const container = document.getElementById('messages-container');
         if (!container) return;
@@ -2127,7 +2139,8 @@ const Chat = (() => {
 
         const reason = document.createElement('div');
         reason.className = 'approval-reason';
-        reason.textContent = data.reason || 'A potentially destructive operation needs your confirmation.';
+        reason.innerHTML = renderMarkdown(data.reason || 'A potentially destructive operation needs your confirmation.');
+        renderMath(reason);
         body.appendChild(reason);
 
         if (data.details) {
@@ -2175,7 +2188,7 @@ const Chat = (() => {
         body.appendChild(actions);
         el.appendChild(icon);
         el.appendChild(body);
-        container.appendChild(el);
+        _insertPromptCard(container, el);
         scrollToBottom();
     }
 
@@ -2239,7 +2252,8 @@ const Chat = (() => {
 
         const question = document.createElement('div');
         question.className = 'ask-user-question';
-        question.textContent = data.question;
+        question.innerHTML = renderMarkdown(data.question || '');
+        renderMath(question);
         body.appendChild(question);
 
         const actions = document.createElement('div');
@@ -2289,7 +2303,7 @@ const Chat = (() => {
         body.appendChild(actions);
         el.appendChild(icon);
         el.appendChild(body);
-        container.appendChild(el);
+        _insertPromptCard(container, el);
         scrollToBottom();
     }
 
