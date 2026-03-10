@@ -7,6 +7,21 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 10, 2026
 
+### v1.110.1 — Better Error Messages
+
+When an LLM provider returns a 400-class error, Anteroom now surfaces the provider's actual error message instead of the generic "AI request error", sanitized for safety.
+
+#### Provider Error Surfacing
+
+Previously, provider errors like "the model was unable to complete inference due to an internal error" were discarded in favor of a generic message. Now you see the actual reason — with URLs, API keys, and structured payloads stripped. All three providers (OpenAI, Anthropic, LiteLLM) share a common sanitizer that fails closed to the generic fallback. (#867)
+
+#### Bug Fixes
+
+- Provider 400 errors no longer escape as unhandled 500s with stack traces in the web UI (#867)
+- LiteLLM provider now detects "too many tools" errors consistently with OpenAI and Anthropic (#867)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.110.1)
+
 ### v1.110.0 — Sources Remember
 
 RAG source provenance is now persisted with messages, so resuming a conversation preserves full attribution of which documents and prior chats informed each response.
