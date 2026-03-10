@@ -5,6 +5,22 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## March 10, 2026
+
+### v1.110.0 — Sources Remember
+
+RAG source provenance is now persisted with messages, so resuming a conversation preserves full attribution of which documents and prior chats informed each response.
+
+#### Persistent RAG Source Provenance
+
+Previously, RAG source badges were ephemeral — visible during streaming but lost on resume. Now, when the RAG pipeline retrieves context, that metadata is saved with the assistant's message. Resuming a conversation in either the web UI or CLI shows the same "knowledge" and "conversation" badges that appeared during the original session. The schema migration is automatic, including for databases that went through the earlier `messages_repaired` path. (#822)
+
+See [How RAG Works](../knowledge/how-rag-works.md) for details on the retrieval pipeline and provenance display.
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.110.0)
+
+---
+
 ## March 9, 2026
 
 ### v1.109.0 — Source Scope Awareness
