@@ -2107,11 +2107,20 @@ const Chat = (() => {
 
     function _insertPromptCard(container, el) {
         // Insert approval/ask_user cards after the last assistant message
-        // so they appear in chronological order (before any subsequent user reply).
+        // and after any existing prompt cards, so multiple cards appear in
+        // chronological (FIFO) order before any subsequent user reply.
         const assistantMsgs = container.querySelectorAll('.message.assistant');
         const lastAssistant = assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1] : null;
-        if (lastAssistant && lastAssistant.nextSibling) {
-            container.insertBefore(el, lastAssistant.nextSibling);
+        if (lastAssistant) {
+            let insertBefore = lastAssistant.nextSibling;
+            while (insertBefore && (insertBefore.classList?.contains('approval-prompt') || insertBefore.classList?.contains('ask-user-prompt'))) {
+                insertBefore = insertBefore.nextSibling;
+            }
+            if (insertBefore) {
+                container.insertBefore(el, insertBefore);
+            } else {
+                container.appendChild(el);
+            }
         } else {
             container.appendChild(el);
         }

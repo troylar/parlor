@@ -13,8 +13,16 @@ import { describe, it, expect, beforeEach } from 'vitest';
 function insertPromptCard(container, el) {
     const assistantMsgs = container.querySelectorAll('.message.assistant');
     const lastAssistant = assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1] : null;
-    if (lastAssistant && lastAssistant.nextSibling) {
-        container.insertBefore(el, lastAssistant.nextSibling);
+    if (lastAssistant) {
+        let insertBefore = lastAssistant.nextSibling;
+        while (insertBefore && (insertBefore.classList?.contains('approval-prompt') || insertBefore.classList?.contains('ask-user-prompt'))) {
+            insertBefore = insertBefore.nextSibling;
+        }
+        if (insertBefore) {
+            container.insertBefore(el, insertBefore);
+        } else {
+            container.appendChild(el);
+        }
     } else {
         container.appendChild(el);
     }
@@ -155,11 +163,10 @@ describe('_insertPromptCard ordering', () => {
         insertPromptCard(container, card2);
 
         const children = [...container.children];
-        // Each card inserts right after the last .message.assistant,
-        // so newer cards appear closer to the assistant element
+        // Cards skip over existing prompt cards, so they stack in FIFO order
         expect(children[0]).toBe(assistant);
-        expect(children[1]).toBe(card2);
-        expect(children[2]).toBe(card1);
+        expect(children[1]).toBe(card1);
+        expect(children[2]).toBe(card2);
         expect(children[3]).toBe(user);
     });
 });
