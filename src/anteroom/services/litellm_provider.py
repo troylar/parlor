@@ -264,8 +264,7 @@ class LiteLLMService:
                         "event": "error",
                         "data": {
                             "message": (
-                                "Too many tools for this API provider."
-                                " Reduce MCP tools or set ai.max_tools in config."
+                                "Too many tools for this API provider. Reduce MCP tools or set ai.max_tools in config."
                             ),
                             "code": "too_many_tools",
                             "retryable": False,

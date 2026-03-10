@@ -772,7 +772,6 @@ class TestErrorHandling:
     async def test_bad_request_context_length(self):
         """AnthropicBadRequestError with context-related message yields context_length_exceeded."""
         import httpx
-
         from anthropic import BadRequestError as RealBadRequestError
 
         with (
@@ -811,7 +810,6 @@ class TestErrorHandling:
     async def test_bad_request_too_many_tools(self):
         """AnthropicBadRequestError with too-many-tools message yields too_many_tools."""
         import httpx
-
         from anthropic import BadRequestError as RealBadRequestError
 
         with (
@@ -850,7 +848,6 @@ class TestErrorHandling:
     async def test_bad_request_generic_surfaces_sanitized_message(self):
         """Generic AnthropicBadRequestError must yield sanitized provider message."""
         import httpx
-
         from anthropic import BadRequestError as RealBadRequestError
 
         with (

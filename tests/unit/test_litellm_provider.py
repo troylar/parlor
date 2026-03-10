@@ -433,9 +433,7 @@ class TestLiteLLMStreamErrors:
         svc = _make_service()
         mock_litellm = MagicMock()
         mock_litellm.acompletion = AsyncMock(
-            side_effect=_MockBadRequestError(
-                "The model was unable to complete inference due to an internal error"
-            )
+            side_effect=_MockBadRequestError("The model was unable to complete inference due to an internal error")
         )
 
         with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
@@ -453,9 +451,7 @@ class TestLiteLLMStreamErrors:
     async def test_bad_request_too_many_tools(self) -> None:
         svc = _make_service()
         mock_litellm = MagicMock()
-        mock_litellm.acompletion = AsyncMock(
-            side_effect=_MockBadRequestError("too many tool definitions provided")
-        )
+        mock_litellm.acompletion = AsyncMock(side_effect=_MockBadRequestError("too many tool definitions provided"))
 
         with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
             events: list[dict[str, Any]] = []
