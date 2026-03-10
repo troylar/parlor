@@ -1890,14 +1890,21 @@ def render_subagent_end(agent_id: str, elapsed: float, tool_calls: list[str], er
 
 
 def render_rag_sources(chunks: list[Any]) -> None:
-    """Render a muted line listing which sources contributed RAG context."""
+    """Render a muted line listing which sources contributed RAG context.
+
+    Accepts either RetrievedChunk objects (with attributes) or dicts (from persisted metadata).
+    """
     if not chunks:
         return
     seen: set[str] = set()
     parts: list[str] = []
     for c in chunks:
-        label = getattr(c, "source_label", None) or "?"
-        stype = getattr(c, "source_type", None) or "?"
+        if isinstance(c, dict):
+            label = c.get("label") or "?"
+            stype = c.get("type") or "?"
+        else:
+            label = getattr(c, "source_label", None) or "?"
+            stype = getattr(c, "source_type", None) or "?"
         key = f"{stype}:{label}"
         if key in seen:
             continue

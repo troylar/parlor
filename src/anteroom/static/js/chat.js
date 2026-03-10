@@ -2027,6 +2027,16 @@ const Chat = (() => {
                 });
             }
 
+            // Render persisted RAG source provenance footer
+            if (msg.role === 'assistant' && msg.metadata) {
+                try {
+                    const meta = typeof msg.metadata === 'string' ? JSON.parse(msg.metadata) : msg.metadata;
+                    if (meta && Array.isArray(meta.rag_sources) && meta.rag_sources.length > 0) {
+                        _addRagSourcesFooter(el, meta.rag_sources);
+                    }
+                } catch (_) { /* ignore malformed metadata */ }
+            }
+
             // Add action buttons (copy, fork, edit, rewind)
             const idx = messages.indexOf(msg);
             const isLast = idx === messages.length - 1;

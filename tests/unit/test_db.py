@@ -126,6 +126,7 @@ class TestInitDb:
             "completion_tokens",
             "total_tokens",
             "model",
+            "metadata",
         }
 
     def test_creates_users_table(self) -> None:

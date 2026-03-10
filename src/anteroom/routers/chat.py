@@ -1308,6 +1308,10 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                 }
 
             elif kind == "assistant_message":
+                _msg_meta = None
+                _rag_sources = ctx.prompt_meta.get("rag_sources")
+                if _rag_sources:
+                    _msg_meta = {"rag_sources": _rag_sources}
                 current_assistant_msg = storage.create_message(
                     ctx.db,
                     ctx.conversation_id,
@@ -1315,6 +1319,7 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                     data["content"],
                     user_id=ctx.uid,
                     user_display_name=ctx.uname,
+                    metadata=_msg_meta,
                 )
 
                 if _pending_usage and current_assistant_msg:

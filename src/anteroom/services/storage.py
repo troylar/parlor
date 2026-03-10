@@ -630,8 +630,8 @@ def fork_conversation(
             new_mid = _uuid()
             conn.execute(
                 "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
-                " created_at, position)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " created_at, position, metadata)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     new_mid,
                     new_cid,
@@ -641,6 +641,7 @@ def fork_conversation(
                     msg.get("user_display_name"),
                     msg["created_at"],
                     msg["position"],
+                    msg.get("metadata"),
                 ),
             )
 
@@ -711,9 +712,11 @@ def copy_conversation_to_db(
     messages = list_messages(source_db, conversation_id)
     for msg in messages:
         new_mid = _uuid()
+        meta = msg.get("metadata")
+        meta_json = json.dumps(meta) if meta else None
         target_db.execute(
             "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
-            " created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " created_at, position, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 new_mid,
                 new_cid,
@@ -723,6 +726,7 @@ def copy_conversation_to_db(
                 msg.get("user_display_name"),
                 msg["created_at"],
                 msg["position"],
+                meta_json,
             ),
         )
         for att in msg.get("attachments", []):
@@ -796,9 +800,11 @@ def create_message(
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
     model: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     mid = _uuid()
     now = _now()
+    metadata_json = json.dumps(metadata) if metadata else None
     with db.transaction() as conn:
         pos_row = conn.execute(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM messages WHERE conversation_id = ?",
@@ -807,8 +813,8 @@ def create_message(
         position = pos_row[0]
         conn.execute(
             "INSERT INTO messages (id, conversation_id, role, content, user_id, user_display_name,"
-            " created_at, position, prompt_tokens, completion_tokens, total_tokens, model)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " created_at, position, prompt_tokens, completion_tokens, total_tokens, model, metadata)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 mid,
                 conversation_id,
@@ -822,6 +828,7 @@ def create_message(
                 completion_tokens,
                 total_tokens,
                 model,
+                metadata_json,
             ),
         )
         conn.execute(
@@ -841,6 +848,7 @@ def create_message(
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
         "model": model,
+        "metadata": metadata,
     }
 
 
@@ -856,6 +864,18 @@ def update_message_usage(
     db.execute(
         "UPDATE messages SET prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, model = ? WHERE id = ?",
         (prompt_tokens, completion_tokens, total_tokens, model, message_id),
+    )
+
+
+def update_message_metadata(
+    db: ThreadSafeConnection,
+    message_id: str,
+    metadata: dict[str, Any],
+) -> None:
+    """Update metadata JSON on an existing message (called after streaming completes)."""
+    db.execute(
+        "UPDATE messages SET metadata = ? WHERE id = ?",
+        (json.dumps(metadata), message_id),
     )
 
 
@@ -922,6 +942,12 @@ def list_messages(db: ThreadSafeConnection, conversation_id: str) -> list[dict[s
     messages = []
     for row in rows:
         msg = dict(row)
+        raw_meta = msg.get("metadata")
+        if isinstance(raw_meta, str):
+            try:
+                msg["metadata"] = json.loads(raw_meta)
+            except (json.JSONDecodeError, ValueError):
+                msg["metadata"] = None
         msg["attachments"] = list_attachments(db, msg["id"])
         msg["tool_calls"] = list_tool_calls(db, msg["id"])
         messages.append(msg)

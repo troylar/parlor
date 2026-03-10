@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS messages (
     completion_tokens INTEGER DEFAULT NULL,
     total_tokens INTEGER DEFAULT NULL,
     model TEXT DEFAULT NULL,
+    metadata TEXT DEFAULT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 
@@ -815,6 +816,8 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
             conn.execute(f"ALTER TABLE messages ADD COLUMN {col} INTEGER DEFAULT NULL")
     if "model" not in msg_cols:
         conn.execute("ALTER TABLE messages ADD COLUMN model TEXT DEFAULT NULL")
+    if "metadata" not in msg_cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN metadata TEXT DEFAULT NULL")
 
     # Ensure change_log table exists for cross-process event polling
     conn.execute(
@@ -1074,7 +1077,7 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                     user_display_name TEXT DEFAULT NULL, created_at TEXT NOT NULL,
                     position INTEGER NOT NULL, prompt_tokens INTEGER DEFAULT NULL,
                     completion_tokens INTEGER DEFAULT NULL, total_tokens INTEGER DEFAULT NULL,
-                    model TEXT DEFAULT NULL,
+                    model TEXT DEFAULT NULL, metadata TEXT DEFAULT NULL,
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
                 )"""
             )

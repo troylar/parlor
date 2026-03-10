@@ -197,8 +197,12 @@ def _detect_git_branch() -> str | None:
     return None
 
 
-def _load_conversation_messages(db: Any, conversation_id: str) -> list[dict[str, Any]]:
-    """Load existing conversation messages into AI message format."""
+def _load_conversation_messages(db: Any, conversation_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load existing conversation messages into AI message format.
+
+    Returns (ai_messages, stored_messages) where stored_messages is the raw
+    list from storage.list_messages (includes metadata).
+    """
     stored = storage.list_messages(db, conversation_id)
     messages: list[dict[str, Any]] = []
     for msg in stored:
@@ -231,7 +235,7 @@ def _load_conversation_messages(db: Any, conversation_id: str) -> list[dict[str,
                     )
                 continue
             messages.append(entry)
-    return messages
+    return messages, stored
 
 
 # Context window management — overridden at runtime by config.cli thresholds
@@ -417,11 +421,18 @@ def _restore_working_dir(
 
 
 def _show_resume_info(db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]) -> None:
-    """Display resume header with last exchange context."""
+    """Display resume header with last exchange context and persisted RAG sources."""
     stored = storage.list_messages(db, conv["id"])
     title = conv.get("title", "Untitled")
     renderer.console.print(f"[{CHROME}]Resumed: {title} ({len(ai_messages)} messages)[/{CHROME}]")
     renderer.render_conversation_recap(stored)
+    # Render persisted RAG source provenance from stored metadata
+    for msg in stored:
+        if msg.get("role") == "assistant" and msg.get("metadata"):
+            meta = msg["metadata"]
+            sources = meta.get("rag_sources") if isinstance(meta, dict) else None
+            if sources:
+                renderer.render_rag_sources(sources)
 
 
 def _show_usage_stats(db: Any, config: Any) -> None:
@@ -1623,7 +1634,7 @@ async def _run_one_shot(
             renderer.render_error(f"Conversation {resume_conversation_id} not found")
             return
         working_dir = _restore_working_dir(conv, tool_registry, working_dir)
-        messages = _load_conversation_messages(db, resume_conversation_id)
+        messages, _ = _load_conversation_messages(db, resume_conversation_id)
     else:
         conv = storage.create_conversation(db, working_dir=working_dir, **id_kw)
         messages = []
@@ -2284,7 +2295,7 @@ async def _run_repl(
         conv_data = storage.get_conversation(db, resume_conversation_id)
         if conv_data:
             conv = conv_data
-            ai_messages = _load_conversation_messages(db, resume_conversation_id)
+            ai_messages, _ = _load_conversation_messages(db, resume_conversation_id)
             is_first_message = False
             working_dir = _restore_working_dir(conv, tool_registry, working_dir)
             _pending_resume_info = True
@@ -2970,7 +2981,7 @@ async def _run_repl(
                     convs = storage.list_conversations(db, limit=1)
                     if convs:
                         conv = storage.get_conversation(db, convs[0]["id"]) or conv
-                        ai_messages = _load_conversation_messages(db, conv["id"])
+                        ai_messages, _ = _load_conversation_messages(db, conv["id"])
                         is_first_message = False
                         _show_resume_info(db, conv, ai_messages)
                     else:
@@ -4408,7 +4419,7 @@ async def _run_repl(
                         continue
                     conv = loaded
                     working_dir = _restore_working_dir(conv, tool_registry, working_dir)
-                    ai_messages = _load_conversation_messages(db, conv["id"])
+                    ai_messages, _ = _load_conversation_messages(db, conv["id"])
                     is_first_message = False
                     _show_resume_info(db, conv, ai_messages)
                     continue
@@ -4472,7 +4483,7 @@ async def _run_repl(
                         vec_index=vec_manager.messages if vec_manager and vec_manager.enabled else None,
                     )
 
-                    ai_messages = _load_conversation_messages(db, conv["id"])
+                    ai_messages, _ = _load_conversation_messages(db, conv["id"])
 
                     summary = f"Rewound {rewind_result.deleted_messages} message(s)"
                     if rewind_result.reverted_files:
