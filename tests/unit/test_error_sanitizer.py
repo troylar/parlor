@@ -39,9 +39,9 @@ class TestSanitizeProviderError:
     def test_raw_html_returns_fallback(self) -> None:
         assert sanitize_provider_error("<html><body>Error</body></html>") == "AI request error"
 
-    def test_error_xml_tag_allowed(self) -> None:
-        result = sanitize_provider_error("<Error>Something went wrong</Error>")
-        assert "Something went wrong" in result
+    def test_angle_bracket_prefix_returns_fallback(self) -> None:
+        assert sanitize_provider_error("<Error>Something went wrong</Error>") == "AI request error"
+        assert sanitize_provider_error("<error>details</error>") == "AI request error"
 
     def test_truncation_at_max_length(self) -> None:
         long_msg = "A" * 201

@@ -30,7 +30,7 @@ def sanitize_provider_error(raw: str, *, fallback: str = _GENERIC_FALLBACK) -> s
     # Reject structured payloads that aren't human-readable
     if text.startswith("{") or text.startswith("["):
         return fallback
-    if text.startswith("<") and not text.startswith("<Error"):
+    if text.startswith("<"):
         return fallback
 
     # Strip URLs and API key patterns
