@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from anteroom.config import AppConfig, RerankerConfig
+from anteroom.services.embeddings import EmbeddingPermanentError
 from anteroom.services.reranker import LocalRerankerService, create_reranker_service
 
 # ---------------------------------------------------------------------------
@@ -140,18 +143,27 @@ class TestLocalRerankerService:
         svc = LocalRerankerService()
         assert svc._cache_dir == ""
 
-    def test_cache_dir_passed_to_text_cross_encoder(self) -> None:
+    def test_cache_dir_with_local_files_only(self) -> None:
         mock_fastembed = MagicMock()
         mock_tce_class = MagicMock()
         mock_fastembed.TextCrossEncoder = mock_tce_class
-        svc = LocalRerankerService(model_name="test-model", cache_dir="/custom/cache")
+        svc = LocalRerankerService(model_name="test-model", cache_dir="/custom/cache", local_files_only=True)
         with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
             svc._ensure_model()
         mock_tce_class.assert_called_once_with(
             model_name="test-model", cache_dir="/custom/cache", local_files_only=True
         )
 
-    def test_cache_dir_not_passed_when_empty(self) -> None:
+    def test_cache_dir_without_local_files_only(self) -> None:
+        mock_fastembed = MagicMock()
+        mock_tce_class = MagicMock()
+        mock_fastembed.TextCrossEncoder = mock_tce_class
+        svc = LocalRerankerService(model_name="test-model", cache_dir="/default/models")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            svc._ensure_model()
+        mock_tce_class.assert_called_once_with(model_name="test-model", cache_dir="/default/models")
+
+    def test_cache_dir_empty_no_kwargs(self) -> None:
         mock_fastembed = MagicMock()
         mock_tce_class = MagicMock()
         mock_fastembed.TextCrossEncoder = mock_tce_class
@@ -200,8 +212,58 @@ class TestCreateRerankerService:
         assert svc is not None
         assert svc.model == "custom/model"
 
-    def test_cache_dir_passed_through(self) -> None:
-        config = self._make_config(enabled=True, cache_dir="/vendored/models")
+    def test_explicit_cache_dir_passed_through(self) -> None:
+        from anteroom.config import AIConfig, AppSettings
+
+        config = AppConfig(
+            ai=AIConfig(base_url="http://test", api_key="test"),
+            app=AppSettings(data_dir=Path("/home/user/.anteroom")),
+            reranker=RerankerConfig(enabled=True, cache_dir="/vendored/models"),
+        )
         svc = create_reranker_service(config)
         assert svc is not None
         assert svc._cache_dir == "/vendored/models"
+        assert svc._local_files_only is True
+
+    def test_default_cache_dir_from_data_dir(self) -> None:
+        from anteroom.config import AIConfig, AppSettings
+
+        config = AppConfig(
+            ai=AIConfig(base_url="http://test", api_key="test"),
+            app=AppSettings(data_dir=Path("/custom/data")),
+            reranker=RerankerConfig(enabled=True, cache_dir=""),
+        )
+        svc = create_reranker_service(config)
+        assert svc is not None
+        assert svc._cache_dir == "/custom/data/models"
+        assert svc._local_files_only is False
+
+
+class TestRerankerHfXetEnvVar:
+    """Tests for HF_HUB_DISABLE_XET env var handling in reranker (#865)."""
+
+    def test_xet_disabled_before_model_init(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("HF_HUB_DISABLE_XET", raising=False)
+        mock_fastembed = MagicMock()
+        mock_fastembed.TextCrossEncoder = MagicMock()
+        svc = LocalRerankerService(model_name="test-model", cache_dir="/tmp/test")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            svc._ensure_model()
+        assert os.environ.get("HF_HUB_DISABLE_XET") == "1"
+
+    def test_xet_does_not_overwrite_user_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HF_HUB_DISABLE_XET", "0")
+        mock_fastembed = MagicMock()
+        mock_fastembed.TextCrossEncoder = MagicMock()
+        svc = LocalRerankerService(model_name="test-model", cache_dir="/tmp/test")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            svc._ensure_model()
+        assert os.environ.get("HF_HUB_DISABLE_XET") == "0"
+
+    def test_error_message_references_cache_dir(self) -> None:
+        mock_fastembed = MagicMock()
+        mock_fastembed.TextCrossEncoder = MagicMock(side_effect=Exception("connection refused"))
+        svc = LocalRerankerService(model_name="test-model", cache_dir="/my/cache")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            with pytest.raises(EmbeddingPermanentError, match="/my/cache/"):
+                svc._ensure_model()
