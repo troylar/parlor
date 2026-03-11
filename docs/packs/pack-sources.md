@@ -11,6 +11,8 @@ pack_sources:
   - url: https://github.com/acme/anteroom-packs.git
     branch: main
     refresh_interval: 30
+    auto_attach: true
+    priority: 50
 ```
 
 | Field | Type | Default | Description |
@@ -18,6 +20,8 @@ pack_sources:
 | `url` | string | (required) | Git remote URL |
 | `branch` | string | `"main"` | Branch to track |
 | `refresh_interval` | int | `30` | Minutes between auto-refresh. `0` = manual only |
+| `auto_attach` | bool | `true` | Automatically attach new packs from this source on install. Set to `false` for opt-in attachment |
+| `priority` | int | `50` | Conflict resolution priority (1-100). Lower number wins when multiple sources provide the same pack |
 
 Minimum `refresh_interval` is 5 minutes (values below 5 are clamped up).
 

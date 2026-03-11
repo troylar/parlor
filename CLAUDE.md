@@ -207,7 +207,7 @@ Key config sections (see `config.py` dataclasses for all fields and defaults):
 - **`AuditConfig`** — Structured audit log: `enabled` (default false), `log_path`, `tamper_protection` (hmac/none), `rotation` (daily/size), `retention_days` (90), `redact_content` (true), per-event-type toggles
 - **`OutputFilterConfig`** — Output content filtering: `enabled` (default false), `system_prompt_leak_detection` (default true), `leak_threshold` (0.0-1.0, default 0.4), `custom_patterns` (regex list for forbidden patterns), `action` (redact/block/warn, default warn), `redaction_string` (default `[FILTERED]`), `log_detections` (default true). Nested `OutputFilterPatternConfig`: `name`, `pattern` (regex), `description`
 - **`ComplianceConfig`** — Declarative compliance rules: `rules` (list of `ComplianceRule`). Each rule: `field` (dot-path), `must_be`, `must_not_be`, `must_match` (regex), `must_not_be_empty`, `must_contain`, `message`. Evaluated at startup; non-compliant configs fail closed
-- **`PackSourceConfig`** — Git-based pack source repos: `url` (git remote URL), `branch` (default "main"), `refresh_interval` (minutes, default 30, 0 = manual only). Top-level `pack_sources` list in config. URL scheme validation (rejects ext::, file://)
+- **`PackSourceConfig`** — Git-based pack source repos: `url`, `branch` (main), `refresh_interval` (30 min), `auto_attach` (bool, true), `priority` (1-100, default 50). URL scheme validation (rejects ext::, file://)
 
 ### Developer Workflow
 
