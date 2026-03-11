@@ -8,6 +8,7 @@ everywhere. Project attachments apply only when working in that directory.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,23 @@ if TYPE_CHECKING:
     from ..db import ThreadSafeConnection
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_project_path(raw: str) -> str:
+    """Normalize a project path for consistent DB storage."""
+    resolved = os.path.realpath(raw)
+    normalized = resolved.replace(os.sep, "/")
+    if normalized == "/" or (len(normalized) == 3 and normalized[1:] == ":/"):
+        return normalized
+    return normalized.rstrip("/")
+
+
+def _normalize_for_comparison(path: str) -> str:
+    """Lightweight string normalization for paths already in the DB."""
+    normalized = path.replace("\\", "/")
+    if normalized == "/" or (len(normalized) == 3 and normalized[1:] == ":/"):
+        return normalized
+    return normalized.rstrip("/")
 
 
 def _validate_project_path(project_path: str | None) -> None:
@@ -75,6 +93,8 @@ def attach_pack(
         the same priority.
     """
     _validate_project_path(project_path)
+    if project_path is not None:
+        project_path = _normalize_project_path(project_path)
     if not 1 <= priority <= 100:
         msg = f"Priority must be between 1 and 100, got {priority}"
         raise ValueError(msg)
@@ -174,6 +194,8 @@ def detach_pack(
     project_path: str | None = None,
 ) -> bool:
     """Detach a pack from the given scope. Returns True if found and removed."""
+    if project_path is not None:
+        project_path = _normalize_project_path(project_path)
     cursor = db.execute(
         "DELETE FROM pack_attachments WHERE pack_id = ? AND project_path IS ?",
         (pack_id, project_path),
@@ -224,14 +246,18 @@ def list_attachments(
     Results are ordered by priority (lower first), then namespace/name.
     """
     if project_path is not None:
+        project_path = _normalize_project_path(project_path)
         rows = db.execute(
             """SELECT pa.id, pa.pack_id, pa.project_path, pa.scope, pa.priority,
                       pa.created_at, p.namespace, p.name, p.version
                FROM pack_attachments pa
                JOIN packs p ON pa.pack_id = p.id
-               WHERE pa.project_path IS NULL OR pa.project_path = ?
+               WHERE pa.project_path IS NULL
+               OR pa.project_path = ?
+               OR SUBSTR(?, 1, LENGTH(pa.project_path) + 1)
+                  = pa.project_path || '/'
                ORDER BY pa.priority, p.namespace, p.name""",
-            (project_path,),
+            (project_path, project_path),
         ).fetchall()
     else:
         rows = db.execute(
@@ -257,12 +283,18 @@ def get_active_pack_ids(
     path is provided.
     """
     if project_path is not None:
+        project_path = _normalize_project_path(project_path)
         rows = db.execute(
-            "SELECT DISTINCT pack_id FROM pack_attachments WHERE project_path IS NULL OR project_path = ?",
-            (project_path,),
+            "SELECT DISTINCT pack_id FROM pack_attachments "
+            "WHERE project_path IS NULL "
+            "OR project_path = ? "
+            "OR SUBSTR(?, 1, LENGTH(project_path) + 1) = project_path || '/'",
+            (project_path, project_path),
         ).fetchall()
     else:
-        rows = db.execute("SELECT DISTINCT pack_id FROM pack_attachments WHERE project_path IS NULL").fetchall()
+        rows = db.execute(
+            "SELECT DISTINCT pack_id FROM pack_attachments WHERE project_path IS NULL",
+        ).fetchall()
 
     return [r[0] if isinstance(r, (tuple, list)) else r["pack_id"] for r in rows]
 
@@ -437,12 +469,15 @@ def get_active_pack_ids_for_space(
     if *project_path* is provided (three-scope union).
     """
     if project_path is not None:
+        project_path = _normalize_project_path(project_path)
         rows = db.execute(
             "SELECT DISTINCT pack_id FROM pack_attachments "
             "WHERE (project_path IS NULL AND space_id IS NULL) "
             "   OR (space_id = ?) "
-            "   OR (space_id IS NULL AND project_path = ?)",
-            (space_id, project_path),
+            "   OR (space_id IS NULL AND (project_path = ? "
+            "       OR SUBSTR(?, 1, LENGTH(project_path) + 1)"
+            "          = project_path || '/'))",
+            (space_id, project_path, project_path),
         ).fetchall()
     else:
         rows = db.execute(

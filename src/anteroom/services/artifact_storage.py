@@ -129,12 +129,14 @@ def list_artifacts(
     *,
     attached_only: bool = False,
     space_id: str | None = None,
+    project_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """List artifacts with optional filtering.
 
     When *attached_only* is True, only returns artifacts that are either:
     - standalone (not linked to any pack via pack_artifacts), or
-    - linked to a pack that has an active attachment (global or matching *space_id*).
+    - linked to a pack that has an active attachment (global, matching
+      *space_id*, or matching *project_path* with ancestor matching).
 
     Config overlay artifacts are always excluded when *attached_only* is True
     because they have their own loading path via ``collect_pack_overlays()``.
@@ -163,14 +165,31 @@ def list_artifacts(
         clauses.append("a.type != 'config_overlay'")
         # Standalone artifacts (no pack link) OR artifacts from attached packs
         clauses.append("(pa.pack_id IS NULL OR att.id IS NOT NULL)")
-        sql = (
-            f"SELECT {cols} FROM artifacts a"
-            " LEFT JOIN pack_artifacts pa ON pa.artifact_id = a.id"
-            " LEFT JOIN pack_attachments att ON att.pack_id = pa.pack_id"
-            "   AND (att.scope = 'global'"
-            "        OR (att.scope = 'space' AND att.space_id = ?))"
-        )
-        params.append(space_id or "")
+
+        if project_path is not None:
+            from .pack_attachments import _normalize_project_path
+
+            project_path = _normalize_project_path(project_path)
+            sql = (
+                f"SELECT {cols} FROM artifacts a"
+                " LEFT JOIN pack_artifacts pa ON pa.artifact_id = a.id"
+                " LEFT JOIN pack_attachments att ON att.pack_id = pa.pack_id"
+                "   AND (att.scope = 'global'"
+                "        OR (att.scope = 'space' AND att.space_id = ?)"
+                "        OR (att.scope = 'project' AND (att.project_path = ?"
+                "            OR SUBSTR(?, 1, LENGTH(att.project_path) + 1)"
+                "               = att.project_path || '/')))"
+            )
+            params.extend([space_id or "", project_path, project_path])
+        else:
+            sql = (
+                f"SELECT {cols} FROM artifacts a"
+                " LEFT JOIN pack_artifacts pa ON pa.artifact_id = a.id"
+                " LEFT JOIN pack_attachments att ON att.pack_id = pa.pack_id"
+                "   AND (att.scope = 'global'"
+                "        OR (att.scope = 'space' AND att.space_id = ?))"
+            )
+            params.append(space_id or "")
     else:
         sql = f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts"
 

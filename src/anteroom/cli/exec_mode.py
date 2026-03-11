@@ -268,7 +268,7 @@ async def run_exec_mode(
         from ..services.rule_enforcer import RuleEnforcer
 
         _artifact_registry = ArtifactRegistry()
-        _artifact_registry.load_from_db(db, space_id=space_id)
+        _artifact_registry.load_from_db(db, space_id=space_id, project_path=working_dir)
         _rule_enforcer = RuleEnforcer()
         _rule_enforcer.load_rules(_artifact_registry.list_all(artifact_type=_ArtType.RULE))
         tool_registry.set_rule_enforcer(_rule_enforcer)
