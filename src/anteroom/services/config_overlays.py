@@ -94,7 +94,10 @@ Key design decisions
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -600,3 +603,99 @@ def detect_artifact_conflicts(
             conflicts.append(f"{key} provided by both {existing_label} and {new_label}")
 
     return conflicts
+
+
+# ---------------------------------------------------------------------------
+# Runtime config rebuild after pack lifecycle changes
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConfigRebuildResult:
+    """Result of rebuilding effective config after pack changes."""
+
+    config: Any  # AppConfig — typed as Any to avoid circular imports
+    enforced_fields: list[str]
+    warnings: list[str] = field(default_factory=list)
+    restart_required_fields: list[str] = field(default_factory=list)
+
+
+# Fields that require process restart to take effect
+_RESTART_ONLY_FIELDS = frozenset(
+    {
+        "ai.base_url",
+        "ai.api_key",
+        "ai.provider",
+        "storage.encrypt_at_rest",
+        "storage.encryption_kdf",
+        "session.store",
+        "audit.enabled",
+        "audit.log_path",
+        "audit.tamper_protection",
+        "mcp_servers",
+    }
+)
+
+
+def rebuild_effective_config(
+    db: ThreadSafeConnection,
+    *,
+    team_config_path: Path | None = None,
+    project_path: str | None = None,
+    space_id: str | None = None,
+    previous_config: Any | None = None,
+) -> ConfigRebuildResult:
+    """Rebuild the effective AppConfig after a pack lifecycle change.
+
+    Collects current pack overlays, re-runs config loading, validates
+    compliance, and detects restart-required field changes.
+
+    Raises ``ValueError`` if the new config violates compliance rules.
+    """
+    from ..config import load_config
+    from .compliance import validate_compliance
+    from .pack_attachments import get_active_pack_ids, get_attachment_priorities
+
+    active_ids = get_active_pack_ids(db, project_path=project_path)
+    pack_config: dict[str, Any] | None = None
+    if active_ids:
+        overlays = collect_pack_overlays(db, active_ids)
+        if overlays:
+            priorities = get_attachment_priorities(db, active_ids)
+            pack_config = merge_pack_overlays(overlays, priorities)
+
+    config, enforced_fields = load_config(
+        team_config_path=team_config_path,
+        pack_config=pack_config,
+    )
+
+    compliance_result = validate_compliance(config)
+    if not compliance_result.is_compliant:
+        msg = "Config compliance failure after pack change:\n" + compliance_result.format_report()
+        raise ValueError(msg)
+
+    warnings: list[str] = []
+    restart_fields: list[str] = []
+    if previous_config is not None:
+        old_flat = flatten_to_dot_paths(_config_to_dict(previous_config))
+        new_flat = flatten_to_dot_paths(_config_to_dict(config))
+        for field_path in sorted(_RESTART_ONLY_FIELDS):
+            old_val = old_flat.get(field_path)
+            new_val = new_flat.get(field_path)
+            if old_val != new_val:
+                restart_fields.append(field_path)
+                warnings.append(f"Config field '{field_path}' changed but requires process restart to take effect")
+
+    return ConfigRebuildResult(
+        config=config,
+        enforced_fields=enforced_fields,
+        warnings=warnings,
+        restart_required_fields=restart_fields,
+    )
+
+
+def _config_to_dict(config: Any) -> dict[str, Any]:
+    """Convert an AppConfig to a flat-friendly dict."""
+    if dataclasses.is_dataclass(config) and not isinstance(config, type):
+        return dataclasses.asdict(config)
+    return {}
