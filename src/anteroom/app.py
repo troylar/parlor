@@ -259,12 +259,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start pack refresh worker if configured
     app.state.pack_refresh_worker = None
     if config.pack_sources:
+        import asyncio
+
         from .services.pack_refresh import PackRefreshWorker
+
+        def _reload_after_pack_refresh() -> None:
+            """Rebuild registries after background pack refresh installs/attaches packs."""
+            try:
+                from .services.artifact_registry import ArtifactRegistry
+                from .services.artifacts import ArtifactType
+                from .services.rule_enforcer import RuleEnforcer
+
+                registry = ArtifactRegistry()
+                registry.load_from_db(app.state.db)
+                app.state.artifact_registry = registry
+
+                enforcer = RuleEnforcer()
+                enforcer.load_rules(registry.list_all(artifact_type=ArtifactType.RULE))
+                app.state.rule_enforcer = enforcer
+
+                skill_reg = getattr(app.state, "skill_registry", None)
+                if skill_reg is not None:
+                    skill_reg.load_from_artifacts(registry)
+
+                logger.info("Registries reloaded after pack refresh")
+            except Exception:
+                logger.warning("Failed to reload registries after pack refresh", exc_info=True)
 
         pack_refresh_worker = PackRefreshWorker(
             db=app.state.db,
             data_dir=config.app.data_dir,
             sources=config.pack_sources,
+            on_packs_changed=_reload_after_pack_refresh,
+            event_loop=asyncio.get_running_loop(),
         )
         pack_refresh_worker.start()
         app.state.pack_refresh_worker = pack_refresh_worker

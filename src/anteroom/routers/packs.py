@@ -114,6 +114,7 @@ async def refresh_sources(request: Request) -> list[dict[str, Any]]:
             "success": r.success,
             "packs_installed": r.packs_installed,
             "packs_updated": r.packs_updated,
+            "packs_attached": r.packs_attached,
             "changed": r.changed,
             "error": r.error,
         }

@@ -120,7 +120,7 @@ def add_pack_source(url: str) -> AddSourceResult:
     if url in existing_urls:
         return AddSourceResult(ok=True, message=f"Source already configured: {url}")
 
-    sources_list.append({"url": url, "branch": "main", "refresh_interval": 30})
+    sources_list.append({"url": url, "branch": "main", "refresh_interval": 30, "auto_attach": True, "priority": 50})
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
     try:

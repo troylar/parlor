@@ -771,6 +771,8 @@ class PackSourceConfig:
     url: str
     branch: str = "main"
     refresh_interval: int = 30  # minutes; 0 = manual only
+    auto_attach: bool = True
+    priority: int = 50  # 1-100, lower wins
 
     _MIN_REFRESH: int = field(default=5, init=False, repr=False)
 
@@ -782,6 +784,9 @@ class PackSourceConfig:
                 self._MIN_REFRESH,
             )
             self.refresh_interval = self._MIN_REFRESH
+        if not 1 <= self.priority <= 100:
+            logger.warning("priority=%d is out of range (1-100), clamping to 50", self.priority)
+            self.priority = 50
 
 
 @dataclass
@@ -2124,11 +2129,19 @@ def load_config(
             refresh = int(src.get("refresh_interval", 30))
         except (ValueError, TypeError):
             refresh = 30
+        auto_attach_raw = src.get("auto_attach", True)
+        auto_attach = bool(auto_attach_raw) if auto_attach_raw is not None else True
+        try:
+            priority = int(src.get("priority", 50))
+        except (ValueError, TypeError):
+            priority = 50
         pack_sources_list.append(
             PackSourceConfig(
                 url=url,
                 branch=str(src.get("branch", "main")),
                 refresh_interval=refresh,
+                auto_attach=auto_attach,
+                priority=priority,
             )
         )
 

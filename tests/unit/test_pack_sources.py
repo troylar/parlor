@@ -65,6 +65,30 @@ class TestPackSourceConfig:
         cfg = PackSourceConfig(url="https://example.com/repo.git", refresh_interval=2)
         assert cfg.refresh_interval == 5
 
+    def test_auto_attach_default_true(self) -> None:
+        cfg = PackSourceConfig(url="https://example.com/repo.git")
+        assert cfg.auto_attach is True
+
+    def test_auto_attach_explicit_false(self) -> None:
+        cfg = PackSourceConfig(url="https://example.com/repo.git", auto_attach=False)
+        assert cfg.auto_attach is False
+
+    def test_priority_default_50(self) -> None:
+        cfg = PackSourceConfig(url="https://example.com/repo.git")
+        assert cfg.priority == 50
+
+    def test_priority_custom(self) -> None:
+        cfg = PackSourceConfig(url="https://example.com/repo.git", priority=10)
+        assert cfg.priority == 10
+
+    def test_priority_out_of_range_clamped(self) -> None:
+        cfg = PackSourceConfig(url="https://example.com/repo.git", priority=200)
+        assert cfg.priority == 50
+
+    def test_priority_zero_clamped(self) -> None:
+        cfg = PackSourceConfig(url="https://example.com/repo.git", priority=0)
+        assert cfg.priority == 50
+
 
 class TestResolveCachePath:
     def test_deterministic(self, tmp_path: Path) -> None:
@@ -551,3 +575,42 @@ class TestConfigParsing:
 
         assert len(config.pack_sources) == 1
         assert config.pack_sources[0].url == "https://valid.com/repo.git"
+
+    def test_auto_attach_and_priority_parsed(self, tmp_path: Path) -> None:
+        from anteroom.config import load_config
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            self._AI_BLOCK + "pack_sources:\n"
+            "  - url: https://github.com/org/packs.git\n"
+            "    auto_attach: false\n"
+            "    priority: 10\n"
+            "  - url: https://github.com/team/packs.git\n"
+        )
+
+        config, _ = load_config(config_file)
+
+        assert len(config.pack_sources) == 2
+        assert config.pack_sources[0].auto_attach is False
+        assert config.pack_sources[0].priority == 10
+        # Second source uses defaults
+        assert config.pack_sources[1].auto_attach is True
+        assert config.pack_sources[1].priority == 50
+
+
+class TestAddPackSourceSerialization:
+    def test_add_pack_source_includes_auto_attach_and_priority(self, tmp_path: Path) -> None:
+        import yaml
+
+        from anteroom.services.pack_sources import add_pack_source
+
+        config_path = tmp_path / "config.yaml"
+        with patch("anteroom.config._get_config_path", return_value=config_path):
+            result = add_pack_source("https://github.com/org/packs.git")
+
+        assert result.ok is True
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        source = raw["pack_sources"][0]
+        assert source["auto_attach"] is True
+        assert source["priority"] == 50
+        assert source["url"] == "https://github.com/org/packs.git"

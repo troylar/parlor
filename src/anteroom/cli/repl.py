@@ -3909,13 +3909,15 @@ async def _run_repl(
                         for psc in sources_cfg:
                             url = getattr(psc, "url", None) or "?"
                             branch = getattr(psc, "branch", "main") or "main"
+                            auto_attach = getattr(psc, "auto_attach", True)
                             cached_entry = cached_map.get(url)
                             status = (
                                 f"[green]cached[/green] ({cached_entry.ref[:8]})"
                                 if cached_entry
                                 else "[yellow]not cloned[/yellow]"
                             )
-                            renderer.console.print(f"  {url} ({branch}) — {status}")
+                            attach_label = "auto-attach" if auto_attach else "manual attach"
+                            renderer.console.print(f"  {url} ({branch}) — {status}, {attach_label}")
                         renderer.console.print()
 
                     elif sub == "refresh":
@@ -3930,6 +3932,7 @@ async def _run_repl(
                         data_dir = config.app.data_dir
                         total_installed = 0
                         total_updated = 0
+                        total_attached = 0
                         for psc in sources_cfg:
                             url = getattr(psc, "url", None) or "?"
                             branch = getattr(psc, "branch", "main") or "main"
@@ -3941,12 +3944,29 @@ async def _run_repl(
                             if src_result.path:
                                 from ..services.pack_refresh import install_from_source
 
-                                i, u = install_from_source(db, src_result.path)
-                                total_installed += i
-                                total_updated += u
-                        renderer.console.print(
-                            f"[green]Done:[/green] {total_installed} installed, {total_updated} updated\n"
-                        )
+                                ifs_result = install_from_source(
+                                    db,
+                                    src_result.path,
+                                    auto_attach=getattr(psc, "auto_attach", True),
+                                    priority=getattr(psc, "priority", 50),
+                                )
+                                total_installed += ifs_result.installed
+                                total_updated += ifs_result.updated
+                                total_attached += ifs_result.attached
+                        parts_msg = f"{total_installed} installed, {total_updated} updated"
+                        if total_attached:
+                            parts_msg += f", {total_attached} attached"
+                        renderer.console.print(f"[green]Done:[/green] {parts_msg}\n")
+                        if total_installed > 0 or total_attached > 0:
+                            if artifact_registry is not None:
+                                artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
+                                if skill_registry is not None:
+                                    skill_registry.load_from_artifacts(artifact_registry)
+                                _refresh_artifact_prompt()
+                        if total_installed > 0 and total_attached == 0:
+                            renderer.console.print(
+                                f"[{MUTED}]Packs installed but not attached. Use /pack attach to activate.[/{MUTED}]\n"
+                            )
 
                     elif sub == "add-source":
                         url = parts[2].strip() if len(parts) >= 3 else ""
