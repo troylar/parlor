@@ -108,6 +108,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ComplianceError(Exception):
+    """Raised when a config rebuild fails compliance validation."""
+
+
 # ---------------------------------------------------------------------------
 # Dot-path flattening
 # ---------------------------------------------------------------------------
@@ -675,7 +679,7 @@ def rebuild_effective_config(
     compliance_result = validate_compliance(config)
     if not compliance_result.is_compliant:
         msg = "Config compliance failure after pack change:\n" + compliance_result.format_report()
-        raise ValueError(msg)
+        raise ComplianceError(msg)
 
     warnings: list[str] = []
     restart_fields: list[str] = []

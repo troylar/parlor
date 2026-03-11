@@ -2802,7 +2802,7 @@ async def _run_repl(
             Returns ``True`` on success.
             """
             nonlocal config
-            from ..services.config_overlays import rebuild_effective_config
+            from ..services.config_overlays import ComplianceError, rebuild_effective_config
 
             previous = config
             try:
@@ -2817,17 +2817,17 @@ async def _run_repl(
                 for warning in result.warnings:
                     renderer.console.print(f"[yellow]{warning}[/yellow]")
                 return True
-            except (ValueError, Exception) as exc:
+            except ComplianceError as exc:
                 config = previous
-                is_compliance = isinstance(exc, ValueError)
-                if is_compliance:
-                    renderer.console.print(f"[red]Config rebuild blocked (compliance failure): {exc}[/red]")
-                else:
-                    renderer.console.print("[red]Config rebuild failed — keeping previous config.[/red]")
+                renderer.console.print(f"[red]Config rebuild blocked (compliance failure): {exc}[/red]")
                 logger.warning("Config rebuild failed after pack change", exc_info=True)
-                # Roll back the DB mutation that caused the failure
                 if rollback_pack_id and rollback_action:
                     _rollback_pack_mutation(db, rollback_pack_id, rollback_project_path, rollback_action)
+                return False
+            except Exception:
+                config = previous
+                renderer.console.print("[red]Config rebuild failed — keeping previous config.[/red]")
+                logger.warning("Config rebuild failed after pack change", exc_info=True)
                 return False
 
         def _rollback_pack_mutation(

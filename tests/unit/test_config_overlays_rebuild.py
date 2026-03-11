@@ -9,6 +9,7 @@ import pytest
 
 from anteroom.services.config_overlays import (
     _RESTART_ONLY_FIELDS,
+    ComplianceError,
     ConfigRebuildResult,
     _config_to_dict,
     rebuild_effective_config,
@@ -121,13 +122,13 @@ class TestRebuildEffectiveConfig:
     @patch("anteroom.services.compliance.validate_compliance")
     @patch("anteroom.config.load_config")
     @patch("anteroom.services.pack_attachments.get_active_pack_ids")
-    def test_compliance_failure_raises_value_error(
+    def test_compliance_failure_raises_compliance_error(
         self,
         mock_active: MagicMock,
         mock_load: MagicMock,
         mock_compliance: MagicMock,
     ) -> None:
-        """When compliance validation fails, ValueError is raised."""
+        """When compliance validation fails, ComplianceError is raised."""
         db = MagicMock()
         mock_active.return_value = []
         mock_load.return_value = (MagicMock(), [])
@@ -137,7 +138,7 @@ class TestRebuildEffectiveConfig:
         mock_result.format_report.return_value = "field X must be Y"
         mock_compliance.return_value = mock_result
 
-        with pytest.raises(ValueError, match="compliance failure"):
+        with pytest.raises(ComplianceError, match="compliance failure"):
             rebuild_effective_config(db)
 
     @patch("anteroom.services.compliance.validate_compliance")
@@ -284,13 +285,13 @@ class TestWebRebuildConfig:
     @patch("anteroom.routers.packs._refresh_derived_state")
     @patch("anteroom.services.config_overlays.rebuild_effective_config")
     def test_rebuild_compliance_failure_keeps_previous(self, mock_rebuild: MagicMock, mock_refresh: MagicMock) -> None:
-        """ValueError (compliance failure) keeps previous config and signals compliance_failure."""
+        """ComplianceError keeps previous config and signals compliance_failure."""
         from anteroom.routers.packs import _rebuild_config
 
         request = MagicMock()
         old_config = _FakeConfig(model="old")
         request.app.state.config = old_config
-        mock_rebuild.side_effect = ValueError("compliance failure")
+        mock_rebuild.side_effect = ComplianceError("compliance failure")
 
         success, compliance_failure = _rebuild_config(request, MagicMock())
 

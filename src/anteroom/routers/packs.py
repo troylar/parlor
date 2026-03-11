@@ -31,7 +31,7 @@ def _rebuild_config(request: Request, db: Any) -> tuple[bool, bool]:
       but the pack mutation should NOT be rolled back (the pack itself
       is fine, it's the rebuild machinery that failed).
     """
-    from ..services.config_overlays import rebuild_effective_config
+    from ..services.config_overlays import ComplianceError, rebuild_effective_config
 
     previous_config = getattr(request.app.state, "config", None)
     try:
@@ -42,7 +42,7 @@ def _rebuild_config(request: Request, db: Any) -> tuple[bool, bool]:
         for warning in result.warnings:
             logger.warning(warning)
         return True, False
-    except ValueError:
+    except ComplianceError:
         logger.warning(
             "Config rebuild blocked (compliance failure) — keeping previous config",
             exc_info=True,
