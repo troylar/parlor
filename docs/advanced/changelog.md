@@ -5,6 +5,19 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## March 11, 2026
+
+### v1.110.3
+
+**Fixed:**
+
+- Embedding and reranker models now cache to `data_dir/models/` (default `~/.anteroom/models/`) instead of `/tmp/fastembed_cache/`, surviving reboots and container restarts. Explicit `cache_dir` config enables `local_files_only` mode. (#865)
+- Disabled HuggingFace Hub's xet downloader (`HF_HUB_DISABLE_XET=1`) which failed on read-only volumes. Respects user-set values. (#865)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.110.3)
+
+---
+
 ## March 10, 2026
 
 ### v1.110.2 — The Prompt Card Fix
