@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from anteroom.services.embeddings import (
+    EmbeddingPermanentError,
     EmbeddingService,
     LocalEmbeddingService,
     create_embedding_service,
@@ -374,16 +377,25 @@ class TestLocalEmbeddingService:
         service = LocalEmbeddingService()
         assert service._cache_dir == ""
 
-    def test_cache_dir_passed_to_text_embedding(self) -> None:
+    def test_cache_dir_with_local_files_only(self) -> None:
         mock_fastembed = MagicMock()
         mock_te_class = MagicMock()
         mock_fastembed.TextEmbedding = mock_te_class
-        service = LocalEmbeddingService(model_name="test-model", cache_dir="/custom/cache")
+        service = LocalEmbeddingService(model_name="test-model", cache_dir="/custom/cache", local_files_only=True)
         with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
             service._ensure_model()
         mock_te_class.assert_called_once_with(model_name="test-model", cache_dir="/custom/cache", local_files_only=True)
 
-    def test_cache_dir_not_passed_when_empty(self) -> None:
+    def test_cache_dir_without_local_files_only(self) -> None:
+        mock_fastembed = MagicMock()
+        mock_te_class = MagicMock()
+        mock_fastembed.TextEmbedding = mock_te_class
+        service = LocalEmbeddingService(model_name="test-model", cache_dir="/default/models")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            service._ensure_model()
+        mock_te_class.assert_called_once_with(model_name="test-model", cache_dir="/default/models")
+
+    def test_cache_dir_empty_no_kwargs(self) -> None:
         mock_fastembed = MagicMock()
         mock_te_class = MagicMock()
         mock_fastembed.TextEmbedding = mock_te_class
@@ -623,14 +635,60 @@ class TestTriStateEnabled:
         config = EmbeddingsConfig()
         assert config.enabled is None
 
-    def test_local_factory_passes_cache_dir(self) -> None:
-        from anteroom.config import AIConfig, AppConfig, EmbeddingsConfig
+    def test_local_factory_passes_explicit_cache_dir(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, AppSettings, EmbeddingsConfig
 
         config = AppConfig(
             ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            app=AppSettings(data_dir=Path("/home/user/.anteroom")),
             embeddings=EmbeddingsConfig(enabled=True, provider="local", cache_dir="/vendored/models"),
         )
         service = create_embedding_service(config)
         assert service is not None
         assert isinstance(service, LocalEmbeddingService)
         assert service._cache_dir == "/vendored/models"
+        assert service._local_files_only is True
+
+    def test_local_factory_defaults_cache_dir_from_data_dir(self) -> None:
+        from anteroom.config import AIConfig, AppConfig, AppSettings, EmbeddingsConfig
+
+        config = AppConfig(
+            ai=AIConfig(base_url="https://api.test", api_key="sk-test"),
+            app=AppSettings(data_dir=Path("/custom/data")),
+            embeddings=EmbeddingsConfig(enabled=True, provider="local", cache_dir=""),
+        )
+        service = create_embedding_service(config)
+        assert service is not None
+        assert isinstance(service, LocalEmbeddingService)
+        assert service._cache_dir == "/custom/data/models"
+        assert service._local_files_only is False
+
+
+class TestHfXetEnvVar:
+    """Tests for HF_HUB_DISABLE_XET env var handling (#865)."""
+
+    def test_xet_disabled_before_model_init(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("HF_HUB_DISABLE_XET", raising=False)
+        mock_fastembed = MagicMock()
+        mock_fastembed.TextEmbedding = MagicMock()
+        service = LocalEmbeddingService(model_name="test-model", cache_dir="/tmp/test")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            service._ensure_model()
+        assert os.environ.get("HF_HUB_DISABLE_XET") == "1"
+
+    def test_xet_does_not_overwrite_user_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HF_HUB_DISABLE_XET", "0")
+        mock_fastembed = MagicMock()
+        mock_fastembed.TextEmbedding = MagicMock()
+        service = LocalEmbeddingService(model_name="test-model", cache_dir="/tmp/test")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            service._ensure_model()
+        assert os.environ.get("HF_HUB_DISABLE_XET") == "0"
+
+    def test_error_message_references_cache_dir(self) -> None:
+        mock_fastembed = MagicMock()
+        mock_fastembed.TextEmbedding = MagicMock(side_effect=Exception("connection refused"))
+        service = LocalEmbeddingService(model_name="test-model", cache_dir="/my/cache")
+        with patch.dict("sys.modules", {"fastembed": mock_fastembed}):
+            with pytest.raises(EmbeddingPermanentError, match="/my/cache/"):
+                service._ensure_model()

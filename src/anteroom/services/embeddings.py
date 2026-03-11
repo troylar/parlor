@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -188,10 +189,17 @@ def get_effective_dimensions(config: AppConfig) -> int:
 class LocalEmbeddingService:
     """Generate embeddings locally using fastembed (ONNX Runtime, no external API)."""
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5", dimensions: int = 0, cache_dir: str = "") -> None:
+    def __init__(
+        self,
+        model_name: str = "BAAI/bge-small-en-v1.5",
+        dimensions: int = 0,
+        cache_dir: str = "",
+        local_files_only: bool = False,
+    ) -> None:
         self._model_name = model_name
         self._dimensions = dimensions if dimensions > 0 else get_local_model_dimensions(model_name)
         self._cache_dir = cache_dir
+        self._local_files_only = local_files_only
         self._embedding_model: Any = None
 
     @property
@@ -212,20 +220,24 @@ class LocalEmbeddingService:
             raise EmbeddingPermanentError(
                 "fastembed is not installed. Install it with: pip install anteroom[embeddings]"
             )
+        # Disable xet downloader to prevent writes to HF_HOME (#865)
+        os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
         logger.info("Loading local embedding model '%s' (first use may download ~50MB)", self._model_name)
         try:
             kwargs: dict[str, Any] = {"model_name": self._model_name}
             if self._cache_dir:
                 kwargs["cache_dir"] = self._cache_dir
+            if self._local_files_only:
                 kwargs["local_files_only"] = True
             self._embedding_model = TextEmbedding(**kwargs)
         except Exception as e:
             error_str = str(e).lower()
             if any(hint in error_str for hint in ("connection", "timeout", "resolve", "ssl", "network", "urlopen")):
+                cache_hint = self._cache_dir or "~/.anteroom/models"
                 raise EmbeddingPermanentError(
                     f"Failed to download embedding model '{self._model_name}'. "
                     f"If you're behind a firewall, download the model on a machine with internet access "
-                    f"and copy ~/.cache/fastembed/ to this machine, or set embeddings.cache_dir "
+                    f"and copy it to {cache_hint}/, or set embeddings.cache_dir "
                     f"in config.yaml. Error: {e}"
                 ) from e
             raise EmbeddingPermanentError(f"Failed to load local embedding model '{self._model_name}': {e}") from e
@@ -315,10 +327,13 @@ def create_embedding_service(config: AppConfig) -> EmbeddingService | LocalEmbed
         dims = config.embeddings.dimensions
         if dims == 0:
             dims = get_local_model_dimensions(config.embeddings.local_model)
+        explicit_cache = config.embeddings.cache_dir
+        cache_dir = explicit_cache or str(config.app.data_dir / "models")
         return LocalEmbeddingService(
             model_name=config.embeddings.local_model,
             dimensions=dims,
-            cache_dir=config.embeddings.cache_dir,
+            cache_dir=cache_dir,
+            local_files_only=bool(explicit_cache),
         )
 
     # API-based provider
