@@ -34,16 +34,13 @@ def _run_init(force: bool = False, team_config: str | None = None) -> None:
     run_init_wizard(force=force, team_config_path=team_config)
 
 
-def _collect_pack_overlay(project_path: str | None = None) -> dict[str, Any] | None:
+def _collect_pack_overlay() -> dict[str, Any] | None:
     """Collect merged config overlays from attached packs.
 
     Opens the DB at the default data_dir (without requiring config.yaml)
-    and queries for attached packs with ``config_overlay`` artifacts.
-    Returns the merged overlay dict, or ``None`` if no overlays are
-    active.
-
-    When *project_path* is provided, project-scoped pack attachments are
-    included alongside global ones.
+    and queries for globally-attached packs with ``config_overlay``
+    artifacts.  Returns the merged overlay dict, or ``None`` if no
+    overlays are active.
 
     This is Phase 1 of the two-phase config load: we need the DB to
     discover pack overlays, then feed those overlays into
@@ -62,7 +59,7 @@ def _collect_pack_overlay(project_path: str | None = None) -> dict[str, Any] | N
         from .services.config_overlays import collect_pack_overlays, merge_pack_overlays
         from .services.pack_attachments import get_active_pack_ids, get_attachment_priorities
 
-        active_ids = get_active_pack_ids(db, project_path=project_path)
+        active_ids = get_active_pack_ids(db)
         if not active_ids:
             return None
 
@@ -81,7 +78,6 @@ def _load_config_or_exit(
     team_config_path: Path | None = None,
     *,
     interactive: bool = False,
-    project_path: str | None = None,
 ) -> tuple[Path, AppConfig, list[str]]:
     config_path = _get_config_path()
 
@@ -89,7 +85,7 @@ def _load_config_or_exit(
     # This runs before the init wizard so that pack overlays can provide
     # required fields like ai.base_url and ai.api_key, enabling
     # zero-config onboarding via `aroom pack install <url> --attach`.
-    pack_config = _collect_pack_overlay(project_path=project_path)
+    pack_config = _collect_pack_overlay()
 
     if not config_path.exists() and not pack_config:
         # No config file AND no pack overlays — run the init wizard.
@@ -2103,6 +2099,7 @@ def _run_chat(
     no_project_context: bool = False,
     plan_mode: bool = False,
     space_id: str | None = None,
+    ui: str = "textual",
 ) -> None:
     """Launch the CLI chat mode."""
     import os
@@ -2133,6 +2130,7 @@ def _run_chat(
                 no_project_context=no_project_context,
                 plan_mode=plan_mode,
                 space_id=space_id,
+                ui=ui,
             )
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -2286,6 +2284,12 @@ def main() -> None:
         "--plan",
         action="store_true",
         help="Start in planning mode (explore-only, then approve to implement)",
+    )
+    chat_parser.add_argument(
+        "--ui",
+        choices=("textual", "legacy"),
+        default="textual",
+        help="Chat UI to use (default: textual)",
     )
     # `aroom exec` subcommand
     exec_parser = subparsers.add_parser("exec", help="Non-interactive exec mode for scripting and CI")
@@ -2639,11 +2643,9 @@ def main() -> None:
     _team_config_arg = getattr(args, "team_config", None)
     _team_config_path = Path(_team_config_arg) if _team_config_arg else None
     _is_interactive = args.command in ("chat", None)  # chat or web UI (default)
-    _project_path = os.getcwd() if args.command in ("chat", "exec") else None
     config_path, config, enforced_fields = _load_config_or_exit(
         team_config_path=_team_config_path,
         interactive=_is_interactive,
-        project_path=_project_path,
     )
 
     # Apply global safety flag overrides (work for both web UI and CLI modes)
@@ -2764,6 +2766,7 @@ def main() -> None:
             no_project_context=args.no_project_context,
             plan_mode=args.plan,
             space_id=_space_id,
+            ui=args.ui,
         )
     elif args.command == "exec":
         _run_exec(

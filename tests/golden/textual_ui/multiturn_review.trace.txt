@@ -1,0 +1,8 @@
+✓ stream · 14 events · waiting <time> · last done
+✓ tool_call_end {'tool_name': 'read', 'status': 'success', 'output': {}}
+✓ tool_call_start {'tool_name': 'read', 'arguments': {'path': '/tmp/issue-798.md'}}
+✓ tool_call_end {'tool_name': 'read', 'status': 'success', 'output': {}}
+✓ tool_call_start {'tool_name': 'read', 'arguments': {'path': '/tmp/pr799-review.md'}}
+✓ tool_call_end {'tool_name': 'read', 'status': 'success', 'output': {}}
+✓ assistant_message chars=286
+✓ done {}

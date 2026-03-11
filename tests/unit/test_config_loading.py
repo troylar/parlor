@@ -216,7 +216,7 @@ class TestAITimeoutEnvVars:
         monkeypatch.setenv("AI_CHAT_CHUNK_STALL_TIMEOUT", "bad")
         cfg = _minimal(tmp_path)
         config, _ = load_config(cfg)
-        assert config.ai.chunk_stall_timeout == 30
+        assert config.ai.chunk_stall_timeout == 10
 
     def test_retry_max_attempts_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AI_CHAT_RETRY_MAX_ATTEMPTS", "5")

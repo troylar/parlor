@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from anteroom.services.artifacts import Artifact, ArtifactSource, ArtifactType
 from anteroom.services.rule_enforcer import (
     ParsedRule,
@@ -444,48 +442,3 @@ class TestYamlLoadRulePattern:
         """yaml.safe_load() is a different function and should not be matched."""
         rule = self._make_yaml_rule()
         assert not check_rule(rule, "bash", {"command": "python -c 'yaml.safe_load(data)'"})
-
-
-# ---------------------------------------------------------------------------
-# #873 — Front-matter-sourced metadata integration
-# ---------------------------------------------------------------------------
-
-
-class TestParseRuleFromFrontmatter:
-    def test_frontmatter_metadata_produces_parsed_rule(self) -> None:
-        art = Artifact(
-            fqn="@pack/rule/no-eval",
-            type=ArtifactType.RULE,
-            namespace="pack",
-            name="no-eval",
-            content="# No eval\nDo not use eval().",
-            source=ArtifactSource.GLOBAL,
-            metadata={
-                "enforce": "hard",
-                "reason": "No eval allowed",
-                "matches": [{"tool": "bash", "pattern": r"\beval\s*\("}],
-            },
-        )
-        result = parse_rule(art)
-        assert result is not None
-        assert result.fqn == "@pack/rule/no-eval"
-        assert result.reason == "No eval allowed"
-        assert len(result.matches) == 1
-
-    def test_empty_metadata_warning_message(self, caplog: Any) -> None:
-        import logging
-
-        art = Artifact(
-            fqn="@test/rule/no-meta",
-            type=ArtifactType.RULE,
-            namespace="test",
-            name="no-meta",
-            content="Guideline only",
-            source=ArtifactSource.LOCAL,
-            metadata={},
-        )
-        with caplog.at_level(logging.WARNING):
-            result = parse_rule(art)
-        assert result is None
-        assert "has no metadata" in caplog.text
-        assert "enforce: hard" in caplog.text

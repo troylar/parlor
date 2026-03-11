@@ -39,6 +39,7 @@ from ..services.rewind import rewind_conversation as rewind_service
 from ..services.slug import is_valid_slug, suggest_unique_slug
 from ..tools import ToolRegistry, register_default_tools
 from . import renderer
+from .commands import CommandContext, CommandResult, execute_slash_command
 from .instructions import (
     CONVENTIONS_TOKEN_WARNING_THRESHOLD,
     discover_conventions,
@@ -149,6 +150,11 @@ def _collapse_long_input(user_input: str) -> None:
     Replaces the displayed multi-line input with the first few lines
     plus a "... (N more lines)" indicator. The actual content is
     preserved; only the visual display is truncated.
+
+    All output goes through ``renderer._stdout`` (the raw fd) as a single
+    atomic write — mixing raw ANSI with Rich console.print() through the
+    patch_stdout proxy caused desync (#779).  The row count includes +1
+    for prompt_toolkit's bottom toolbar row.
     """
     if not sys.stdout.isatty():
         return
@@ -160,21 +166,29 @@ def _collapse_long_input(user_input: str) -> None:
     term_cols = shutil.get_terminal_size((80, 24)).columns
     usable = max(term_cols - 2, 10)  # 2 = "❯ " prompt width
 
-    # Estimate terminal rows the prompt_toolkit input occupied
-    total_rows = sum(max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines)
+    # Estimate terminal rows the prompt_toolkit input occupied.
+    # +1 accounts for prompt_toolkit's bottom toolbar row, which is
+    # cleared on accept but shifts the cursor down by one.
+    total_rows = sum(max(1, (len(ln) + usable - 1) // usable) if ln else 1 for ln in lines) + 1
 
     show = 3
     hidden = len(lines) - show
 
-    # Move cursor up to input start and clear to end of screen.
-    # Use renderer._stdout (real fd) to bypass patch_stdout() proxy
-    # which corrupts raw ESC bytes.
-    renderer._stdout.write(f"\033[{total_rows}A\033[J")
-    # Reprint truncated with styled prompt via Rich (handles patch_stdout correctly)
-    renderer.console.print(f"[bold cyan]❯[/] {escape(lines[0])}")
+    # ANSI color codes matching the Rich styles we replaced.
+    cyan_bold = "\033[1;36m"
+    dim = "\033[2m"
+    rst = "\033[0m"
+
+    # Single atomic write to the raw fd — no dual-fd race (#779).
+    parts = [
+        f"\033[{total_rows}A\033[J",  # move up + clear to end of screen
+        f"{cyan_bold}❯{rst} {lines[0]}\n",
+    ]
     for ln in lines[1:show]:
-        renderer.console.print(f"  {escape(ln)}")
-    renderer.console.print(f"  [dim]... ({hidden} more lines)[/]")
+        parts.append(f"  {ln}\n")
+    parts.append(f"  {dim}... ({hidden} more lines){rst}")
+
+    renderer._stdout.write("".join(parts))
     renderer._stdout.flush()
 
 
@@ -197,12 +211,8 @@ def _detect_git_branch() -> str | None:
     return None
 
 
-def _load_conversation_messages(db: Any, conversation_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Load existing conversation messages into AI message format.
-
-    Returns (ai_messages, stored_messages) where stored_messages is the raw
-    list from storage.list_messages (includes metadata).
-    """
+def _load_conversation_messages(db: Any, conversation_id: str) -> list[dict[str, Any]]:
+    """Load existing conversation messages into AI message format."""
     stored = storage.list_messages(db, conversation_id)
     messages: list[dict[str, Any]] = []
     for msg in stored:
@@ -235,7 +245,7 @@ def _load_conversation_messages(db: Any, conversation_id: str) -> tuple[list[dic
                     )
                 continue
             messages.append(entry)
-    return messages, stored
+    return messages
 
 
 # Context window management — overridden at runtime by config.cli thresholds
@@ -421,18 +431,11 @@ def _restore_working_dir(
 
 
 def _show_resume_info(db: Any, conv: dict[str, Any], ai_messages: list[dict[str, Any]]) -> None:
-    """Display resume header with last exchange context and persisted RAG sources."""
+    """Display resume header with last exchange context."""
     stored = storage.list_messages(db, conv["id"])
     title = conv.get("title", "Untitled")
     renderer.console.print(f"[{CHROME}]Resumed: {title} ({len(ai_messages)} messages)[/{CHROME}]")
     renderer.render_conversation_recap(stored)
-    # Render persisted RAG source provenance from stored metadata
-    for msg in stored:
-        if msg.get("role") == "assistant" and msg.get("metadata"):
-            meta = msg["metadata"]
-            sources = meta.get("rag_sources") if isinstance(meta, dict) else None
-            if sources:
-                renderer.render_rag_sources(sources)
 
 
 def _show_usage_stats(db: Any, config: Any) -> None:
@@ -978,6 +981,7 @@ async def run_cli(
     no_project_context: bool = False,
     plan_mode: bool = False,
     space_id: str | None = None,
+    ui: str = "textual",
 ) -> None:
     """Main entry point for CLI mode."""
     working_dir = os.getcwd()
@@ -1077,6 +1081,7 @@ async def run_cli(
 
     _private_key = config.identity.private_key if config.identity else ""
     audit_writer = create_audit_writer(config, private_key_pem=_private_key)
+    _ui_bridge: dict[str, Any] = {"ask": None, "confirm": None}
 
     # Start retention worker if configured
     retention_worker = None
@@ -1096,25 +1101,6 @@ async def run_cli(
     from ..tools.safety import SafetyVerdict
 
     _approval_lock = asyncio.Lock()
-
-    async def _sub_prompt_async(prompt_text: str) -> str | None:
-        """Read one line of input using a nested PromptSession.
-
-        The caller must print any context (options, warnings) via
-        ``renderer.console.print()`` *before* calling this, so the text
-        persists through patch_stdout.  This function only shows a
-        minimal prompt (e.g. ``"> "``) via the nested session.
-
-        Returns the stripped input, or ``None`` on EOF/interrupt.
-        """
-        from prompt_toolkit import PromptSession as _SubSession
-
-        try:
-            _sub: Any = _SubSession()
-            answer = await _sub.prompt_async(prompt_text)
-            return answer.strip() if answer is not None else None
-        except (EOFError, KeyboardInterrupt):
-            return None
 
     async def _confirm_destructive(verdict: SafetyVerdict) -> bool:
         from rich.markup import escape
@@ -1136,23 +1122,35 @@ async def run_cli(
             return False
 
         await renderer.stop_thinking()
-        renderer.stop_tool_ticker_sync()
 
         async with _approval_lock:
+            if _ui_bridge.get("confirm") is not None:
+                choice = await _ui_bridge["confirm"](verdict)
+                return _apply_choice((choice or "deny").strip().lower())
+            # Clear any ticker line (tool ticker or fold ticker) before rendering the approval gate
+            renderer.stop_tool_ticker_sync()
+            if renderer._repl_mode and renderer._stdout:
+                renderer._stdout.write("\r\033[2K")
+                renderer._stdout.flush()
             renderer.console.print(f"\n[yellow bold]Warning:[/yellow bold] {verdict.reason}")
             if verdict.details.get("command"):
                 renderer.console.print(f"  Command: [{MUTED}]{verdict.details['command']}[/{MUTED}]")
             elif verdict.details.get("path"):
                 renderer.console.print(f"  Path: [{MUTED}]{verdict.details['path']}[/{MUTED}]")
-            renderer.console.print("  \\[y] Allow once  \\[s] Allow for session  \\[a] Allow always  \\[n] Deny")
-            answer = await _sub_prompt_async("  > ")
-            if answer is None:
+            try:
+                from prompt_toolkit import PromptSession as _ConfirmSession
+
+                _confirm_session: Any = _ConfirmSession()
+                answer = await _confirm_session.prompt_async(
+                    "  [y] Allow once  [s] Allow for session  [a] Allow always  [n] Deny: "
+                )
+                result = _apply_choice(answer.strip().lower())
+                renderer.start_thinking()
+                return result
+            except (EOFError, KeyboardInterrupt):
                 renderer.console.print(f"  [{MUTED}]✗ Denied: {escape(verdict.tool_name)}[/{MUTED}]\n")
                 renderer.start_thinking()
                 return False
-            result = _apply_choice(answer.lower())
-            renderer.start_thinking()
-            return result
 
     def _persist_allowed_tool(tool_name: str) -> None:
         """Append a tool to safety.allowed_tools in the config file."""
@@ -1176,31 +1174,36 @@ async def run_cli(
                 renderer.console.print(f"  [{MUTED}]Invalid choice #{idx}, using as freeform answer[/{MUTED}]")
             return answer
 
+        if _ui_bridge.get("ask") is not None:
+            return str(await _ui_bridge["ask"](question, options))
+
         await renderer.stop_thinking()
-        renderer.stop_tool_ticker_sync()
 
         renderer.console.print(f"\n[yellow bold]Question:[/yellow bold] {question}")
-        if options:
-            for i, opt in enumerate(options, 1):
-                renderer.console.print(f"  [{MUTED}]{i}.[/{MUTED}] {opt}")
-            hint = "(enter number to select, or type a custom answer; ctrl-d to cancel)"
-            renderer.console.print(f"  [{MUTED}]{hint}[/{MUTED}]")
-            answer = await _sub_prompt_async("  > ")
-        else:
-            renderer.console.print(f"  [{MUTED}](ctrl-d to cancel)[/{MUTED}]")
-            answer = await _sub_prompt_async("  > ")
+        try:
+            from prompt_toolkit import PromptSession as _AskSession
 
-        if answer is None:
+            _ask_session: Any = _AskSession()
+
+            if options:
+                for i, opt in enumerate(options, 1):
+                    renderer.console.print(f"  [{MUTED}]{i}.[/{MUTED}] {opt}")
+                hint = "(enter number to select, or type a custom answer; esc to cancel)"
+                renderer.console.print(f"  [{MUTED}]{hint}[/{MUTED}]")
+                answer = await _ask_session.prompt_async("  Choice: ")
+                answer = _resolve_choice(answer.strip(), options)
+            else:
+                renderer.console.print(f"  [{MUTED}](esc to cancel)[/{MUTED}]")
+                answer = await _ask_session.prompt_async("  Answer: ")
+                answer = answer.strip()
+
+            renderer.console.print()
+            renderer.start_thinking()
+            return str(answer)
+        except (EOFError, KeyboardInterrupt):
             renderer.console.print(f"  [{MUTED}](cancelled)[/{MUTED}]\n")
             renderer.start_thinking()
             return ""
-
-        if options:
-            answer = _resolve_choice(answer, options)
-
-        renderer.console.print()
-        renderer.start_thinking()
-        return str(answer)
 
     # Build unified tool executor
     _subagent_counter = 0
@@ -1403,7 +1406,7 @@ async def run_cli(
         from ..services.artifact_registry import ArtifactRegistry
 
         _artifact_registry = ArtifactRegistry()
-        _artifact_registry.load_from_db(db, space_id=space_id, project_path=working_dir)
+        _artifact_registry.load_from_db(db, space_id=space_id)
         if _artifact_registry.count:
             skill_registry.load_from_artifacts(_artifact_registry)
         # Load hard-enforced rules from the registry
@@ -1502,7 +1505,59 @@ async def run_cli(
         _output_filter = OutputContentFilter(config.safety.output_filter, system_prompt=extra_system_prompt)
 
     try:
-        if prompt:
+        if ui == "textual":
+            if mcp_manager:
+                try:
+                    await mcp_manager.startup()
+                    mcp_tools_post = mcp_manager.get_openai_tools()
+                    if mcp_tools_post:
+                        tools_openai.extend(mcp_tools_post)
+                        tools_openai[:] = cap_tools(
+                            tools_openai, set(tool_registry.list_tools()), limit=config.ai.max_tools
+                        )
+                        if config.safety.read_only:
+                            from ..tools.tiers import filter_read_only_tools as _fro
+
+                            tools_openai[:] = _fro(tools_openai, config.safety.tool_tiers)
+                        tools_openai_or_none = tools_openai if tools_openai else None
+                        all_tool_names.extend(t["name"] for t in mcp_manager.get_all_tools())
+                except Exception as e:
+                    logger.warning("MCP startup failed for Textual UI: %s", e)
+
+            from .textual_app import AgentLoopTextualBackend, SessionSnapshot, run_textual_chat
+
+            git_branch = _detect_git_branch()
+            installed_packs = packs_service.list_packs(db)
+            backend = AgentLoopTextualBackend(
+                config=config,
+                db=db,
+                ai_service=ai_service,
+                tool_executor=tool_executor,
+                tools_openai=tools_openai_or_none,
+                extra_system_prompt=extra_system_prompt,
+                working_dir=working_dir,
+                tool_registry=tool_registry,
+                mcp_manager=mcp_manager,
+                skill_registry=skill_registry,
+                artifact_registry=_artifact_registry,
+                resume_conversation_id=resume_conversation_id,
+                dlp_scanner=_dlp_scanner,
+                injection_detector=_injection_detector,
+                output_filter=_output_filter,
+            )
+            session = SessionSnapshot(
+                model=config.ai.model,
+                working_dir=working_dir,
+                tool_count=len(all_tool_names),
+                instructions_loaded=instructions is not None,
+                plan_mode=plan_mode,
+                git_branch=git_branch,
+                version=__version__,
+                skill_count=len(skill_registry.list_skills()),
+                pack_count=len(installed_packs),
+            )
+            await run_textual_chat(backend=backend, session=session, initial_prompt=prompt, ui_bridge=_ui_bridge)
+        elif prompt:
             await _run_one_shot(
                 config=config,
                 db=db,
@@ -1634,7 +1689,7 @@ async def _run_one_shot(
             renderer.render_error(f"Conversation {resume_conversation_id} not found")
             return
         working_dir = _restore_working_dir(conv, tool_registry, working_dir)
-        messages, _ = _load_conversation_messages(db, resume_conversation_id)
+        messages = _load_conversation_messages(db, resume_conversation_id)
     else:
         conv = storage.create_conversation(db, working_dir=working_dir, **id_kw)
         messages = []
@@ -1684,6 +1739,7 @@ async def _run_one_shot(
                 output_filter=output_filter,
                 max_consecutive_text_only=config.cli.max_consecutive_text_only,
                 max_line_repeats=config.cli.max_line_repeats,
+                max_identical_tool_repeats=config.cli.max_identical_tool_repeats,
             ):
                 if event.kind == "thinking":
                     if not thinking:
@@ -1703,13 +1759,20 @@ async def _run_one_shot(
                     renderer.update_thinking()
                     # Yield to event loop so the thinking ticker task can update (#775)
                     await asyncio.sleep(0)
+                elif event.kind == "tool_batch_start":
+                    if thinking:
+                        await renderer.stop_thinking(clear=True)
+                        thinking = False
+                    renderer.render_tool_batch_start(event.data["call_count"])
                 elif event.kind == "tool_call_start":
                     if thinking:
-                        await renderer.stop_thinking()
+                        await renderer.stop_thinking(clear=True)
                         thinking = False
                     renderer.render_tool_call_start(event.data["tool_name"], event.data["arguments"])
                 elif event.kind == "tool_call_end":
                     renderer.render_tool_call_end(event.data["tool_name"], event.data["status"], event.data["output"])
+                elif event.kind == "tool_batch_end":
+                    renderer.render_tool_batch_end(event.data["call_count"], event.data["elapsed_seconds"])
                 elif event.kind == "assistant_message":
                     if event.data["content"]:
                         storage.create_message(db, conv["id"], "assistant", event.data["content"], **id_kw)
@@ -2295,7 +2358,7 @@ async def _run_repl(
         conv_data = storage.get_conversation(db, resume_conversation_id)
         if conv_data:
             conv = conv_data
-            ai_messages, _ = _load_conversation_messages(db, resume_conversation_id)
+            ai_messages = _load_conversation_messages(db, resume_conversation_id)
             is_first_message = False
             working_dir = _restore_working_dir(conv, tool_registry, working_dir)
             _pending_resume_info = True
@@ -2550,6 +2613,11 @@ async def _run_repl(
     exit_flag = asyncio.Event()
     _current_cancel_event: list[asyncio.Event | None] = [None]
 
+    @kb.add("c-o")
+    def _toggle_fold(event: Any) -> None:
+        """Ctrl-O: expand/collapse the most recent tool batch fold."""
+        renderer.toggle_last_fold()
+
     @kb.add("tab")
     def _tab_complete(event: Any) -> None:
         buf = event.current_buffer
@@ -2779,82 +2847,92 @@ async def _run_repl(
                 if invoke_def:
                     tools_openai.append(invoke_def)
 
-        def _rebuild_pack_config(
-            *,
-            rollback_pack_id: str | None = None,
-            rollback_project_path: str | None = None,
-            rollback_action: str | None = None,
-        ) -> bool:
-            """Rebuild effective config after pack attach/detach/install/remove.
+        def _shared_command_context() -> CommandContext:
+            return CommandContext(
+                current_model=config.ai.model,
+                working_dir=working_dir,
+                available_tools=tuple(all_tool_names),
+                tool_registry=tool_registry,
+                skill_registry=skill_registry,
+                artifact_registry=artifact_registry,
+            )
 
-            Fails closed: on error, rolls back the DB mutation and keeps
-            the previous config.
+        async def _apply_shared_command_result(result: CommandResult) -> bool:
+            nonlocal conv, ai_messages, is_first_message
 
-            Parameters
-            ----------
-            rollback_pack_id:
-                Pack ID to rollback on failure.
-            rollback_project_path:
-                Project path for rollback scope.
-            rollback_action:
-                ``"detach"`` to undo an attach, ``"attach"`` to undo a detach.
-
-            Returns ``True`` on success.
-            """
-            nonlocal config
-            from ..services.config_overlays import ComplianceError, rebuild_effective_config
-
-            previous = config
-            try:
-                _space_id = space["id"] if space else None
-                result = rebuild_effective_config(
-                    db,
-                    project_path=str(Path(working_dir)),
-                    space_id=_space_id,
-                    previous_config=previous,
-                )
-                config = result.config
-                for warning in result.warnings:
-                    renderer.console.print(f"[yellow]{warning}[/yellow]")
+            if result.kind == "exit":
+                exit_flag.set()
                 return True
-            except ComplianceError as exc:
-                config = previous
-                renderer.console.print(f"[red]Config rebuild blocked (compliance failure): {exc}[/red]")
-                logger.warning("Config rebuild failed after pack change", exc_info=True)
-                if rollback_pack_id and rollback_action:
-                    _rollback_pack_mutation(db, rollback_pack_id, rollback_project_path, rollback_action)
-                return False
-            except Exception:
-                config = previous
-                renderer.console.print("[red]Config rebuild failed — keeping previous config.[/red]")
-                logger.warning("Config rebuild failed after pack change", exc_info=True)
-                return False
+            if result.kind == "new_conversation":
+                active_sid = _active_space[0]["id"] if _active_space[0] else None
+                conv = storage.create_conversation(
+                    db,
+                    title=result.conversation_title or "New Conversation",
+                    conversation_type=result.conversation_type or "chat",
+                    working_dir=working_dir,
+                    **id_kw,
+                )
+                if active_sid:
+                    from ..services.space_storage import update_conversation_space
 
-        def _rollback_pack_mutation(
-            db: Any,
-            pack_id: str,
-            project_path: str | None,
-            action: str,
-        ) -> None:
-            """Undo a pack attachment/detachment after config rebuild failure."""
-            from ..services.pack_attachments import attach_pack as _do_attach
-            from ..services.pack_attachments import detach_pack as _do_detach
-
-            try:
-                if action == "detach":
-                    _do_detach(db, pack_id, project_path=project_path)
-                    renderer.console.print("[yellow]Rolled back: pack detached to restore valid config.[/yellow]")
-                elif action == "attach":
-                    _do_attach(
-                        db,
-                        pack_id,
-                        project_path=project_path,
-                        check_overlay_conflicts=False,
+                    update_conversation_space(db, conv["id"], active_sid)
+                ai_messages = []
+                is_first_message = (result.conversation_type or "chat") == "chat"
+                if _plan_active[0]:
+                    _apply_plan_mode(conv["id"])
+                conv_type = result.conversation_type or "chat"
+                type_label = f" ({conv_type})" if conv_type != "chat" else ""
+                renderer.console.print(f"[{CHROME}]New conversation started{type_label}[/{CHROME}]\n")
+                return True
+            if result.kind == "show_help":
+                await _show_help_dialog()
+                return True
+            if result.kind == "show_tools":
+                renderer.render_tools(list(result.tool_names))
+                return True
+            if result.kind == "show_usage":
+                _show_usage_stats(db, config)
+                return True
+            if result.kind == "show_model":
+                renderer.console.print(f"[{CHROME}]Current model: {result.model_name or config.ai.model}[/{CHROME}]\n")
+                return True
+            if result.kind == "set_model" and result.model_name:
+                config.ai.model = result.model_name
+                if hasattr(ai_service, "config") and hasattr(ai_service.config, "model"):
+                    ai_service.config.model = result.model_name
+                renderer.console.print(f"[{CHROME}]Active model changed to {result.model_name}[/{CHROME}]\n")
+                return True
+            if result.kind == "show_skills":
+                if skill_registry:
+                    _refresh_skill_tools()
+                    descs = skill_registry.get_skill_descriptions()
+                    completer.update_skill_names([n for n, _ in descs], {n: d for n, d in descs})
+                if result.skill_entries:
+                    renderer.console.print("\n[bold]Available skills:[/bold]")
+                    for entry in result.skill_entries:
+                        desc = entry.description or "No description."
+                        renderer.console.print(
+                            f"  /{entry.display_name} - {desc} [{CHROME}]({entry.source})[/{CHROME}]"
+                        )
+                else:
+                    renderer.console.print(
+                        f"\n[{CHROME}]No skills loaded. Add .yaml files to"
+                        f" ~/.anteroom/skills/ or .anteroom/skills/[/{CHROME}]"
                     )
-                    renderer.console.print("[yellow]Rolled back: pack re-attached to restore valid config.[/yellow]")
-            except Exception:
-                logger.error("Rollback failed", exc_info=True)
-                renderer.console.print("[red]Rollback also failed. Manual intervention required.[/red]")
+                if result.skill_warnings:
+                    renderer.console.print(f"\n[yellow]Warnings ({len(result.skill_warnings)}):[/yellow]")
+                    for warn in result.skill_warnings:
+                        renderer.console.print(f"  [yellow]- {warn}[/yellow]")
+                if result.searched_dirs:
+                    renderer.console.print(f"\n[{CHROME}]Searched directories:[/{CHROME}]")
+                    for sd in result.searched_dirs:
+                        if sd.source == "default":
+                            continue
+                        status = f"{sd.skill_count} skill(s)" if sd.exists else "not found"
+                        renderer.console.print(f"  [{CHROME}]{sd.path} ({sd.source}) — {status}[/{CHROME}]")
+                renderer.console.print()
+                return True
+            return False
 
         # Inject initial space instructions if space is active
         if _active_space[0] and space_instructions:
@@ -2873,8 +2951,16 @@ async def _run_repl(
             except asyncio.TimeoutError:
                 continue
 
+            original_user_input = user_input
+
             # Handle commands
             if user_input.startswith("/"):
+                shared_result = execute_slash_command(user_input, _shared_command_context())
+                if shared_result is not None:
+                    if shared_result.kind == "forward_prompt" and shared_result.forward_prompt:
+                        user_input = shared_result.forward_prompt
+                    elif await _apply_shared_command_result(shared_result):
+                        continue
                 cmd = user_input.lower().split()[0]
                 if cmd in ("/quit", "/exit"):
                     exit_flag.set()
@@ -3058,7 +3144,7 @@ async def _run_repl(
                     convs = storage.list_conversations(db, limit=1)
                     if convs:
                         conv = storage.get_conversation(db, convs[0]["id"]) or conv
-                        ai_messages, _ = _load_conversation_messages(db, conv["id"])
+                        ai_messages = _load_conversation_messages(db, conv["id"])
                         is_first_message = False
                         _show_resume_info(db, conv, ai_messages)
                     else:
@@ -3936,13 +4022,8 @@ async def _run_repl(
                                 f"[green]{action_word}[/green] @{manifest.namespace}/{manifest.name}"
                                 f" v{manifest.version} ({install_result.get('artifact_count', 0)} artifacts)"
                             )
-                            _rebuild_pack_config()
                             if artifact_registry is not None:
-                                artifact_registry.load_from_db(
-                                    db,
-                                    space_id=space["id"] if space else None,
-                                    project_path=working_dir,
-                                )
+                                artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
                                 if skill_registry is not None:
                                     skill_registry.load_from_artifacts(artifact_registry)
                                 _refresh_artifact_prompt()
@@ -3966,13 +4047,8 @@ async def _run_repl(
                         removed = packs_service.remove_pack_by_id(db, _pm["id"])
                         if removed:
                             renderer.console.print(f"[green]Removed[/green] @{ns}/{name}\n")
-                            _rebuild_pack_config()
                             if artifact_registry is not None:
-                                artifact_registry.load_from_db(
-                                    db,
-                                    space_id=space["id"] if space else None,
-                                    project_path=working_dir,
-                                )
+                                artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
                                 if skill_registry is not None:
                                     skill_registry.load_from_artifacts(artifact_registry)
                                 _refresh_artifact_prompt()
@@ -3996,15 +4072,13 @@ async def _run_repl(
                         for psc in sources_cfg:
                             url = getattr(psc, "url", None) or "?"
                             branch = getattr(psc, "branch", "main") or "main"
-                            auto_attach = getattr(psc, "auto_attach", True)
                             cached_entry = cached_map.get(url)
                             status = (
                                 f"[green]cached[/green] ({cached_entry.ref[:8]})"
                                 if cached_entry
                                 else "[yellow]not cloned[/yellow]"
                             )
-                            attach_label = "auto-attach" if auto_attach else "manual attach"
-                            renderer.console.print(f"  {url} ({branch}) — {status}, {attach_label}")
+                            renderer.console.print(f"  {url} ({branch}) — {status}")
                         renderer.console.print()
 
                     elif sub == "refresh":
@@ -4019,8 +4093,6 @@ async def _run_repl(
                         data_dir = config.app.data_dir
                         total_installed = 0
                         total_updated = 0
-                        total_attached = 0
-                        changed_pack_ids: list[str] = []
                         for psc in sources_cfg:
                             url = getattr(psc, "url", None) or "?"
                             branch = getattr(psc, "branch", "main") or "main"
@@ -4032,53 +4104,12 @@ async def _run_repl(
                             if src_result.path:
                                 from ..services.pack_refresh import install_from_source
 
-                                ifs_result = install_from_source(
-                                    db,
-                                    src_result.path,
-                                    auto_attach=getattr(psc, "auto_attach", True),
-                                    priority=getattr(psc, "priority", 50),
-                                )
-                                total_installed += ifs_result.installed
-                                total_updated += ifs_result.updated
-                                total_attached += ifs_result.attached
-                                changed_pack_ids.extend(ifs_result.changed_pack_ids)
-                        parts_msg = f"{total_installed} installed, {total_updated} updated"
-                        if total_attached:
-                            parts_msg += f", {total_attached} attached"
-                        renderer.console.print(f"[green]Done:[/green] {parts_msg}\n")
-                        if total_installed > 0 or total_updated > 0 or total_attached > 0:
-                            if _rebuild_pack_config():
-                                if artifact_registry is not None:
-                                    artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
-                                    if skill_registry is not None:
-                                        skill_registry.load_from_artifacts(artifact_registry)
-                                    _refresh_artifact_prompt()
-                            else:
-                                # Quarantine: detach changed packs, then rebuild
-                                # from the clean attachment set
-                                from ..services.pack_attachments import detach_pack as _q_detach
-
-                                for pid in changed_pack_ids:
-                                    try:
-                                        _q_detach(db, pid)
-                                    except Exception:
-                                        pass
-                                if changed_pack_ids:
-                                    renderer.console.print(
-                                        f"[yellow]Quarantined {len(changed_pack_ids)} pack(s) "
-                                        "— detached until config issue is resolved.[/yellow]"
-                                    )
-                                # Second rebuild from the now-clean attachment set
-                                _rebuild_pack_config()
-                                if artifact_registry is not None:
-                                    artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
-                                    if skill_registry is not None:
-                                        skill_registry.load_from_artifacts(artifact_registry)
-                                    _refresh_artifact_prompt()
-                        if total_installed > 0 and total_attached == 0:
-                            renderer.console.print(
-                                f"[{MUTED}]Packs installed but not attached. Use /pack attach to activate.[/{MUTED}]\n"
-                            )
+                                i, u = install_from_source(db, src_result.path)
+                                total_installed += i
+                                total_updated += u
+                        renderer.console.print(
+                            f"[green]Done:[/green] {total_installed} installed, {total_updated} updated\n"
+                        )
 
                     elif sub == "add-source":
                         url = parts[2].strip() if len(parts) >= 3 else ""
@@ -4133,21 +4164,12 @@ async def _run_repl(
                         renderer.console.print(
                             f"[green]Attached[/green] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                         )
-                        if _rebuild_pack_config(
-                            rollback_pack_id=_pm["id"],
-                            rollback_project_path=project_path,
-                            rollback_action="detach",
-                        ):
-                            if artifact_registry is not None:
-                                artifact_registry.load_from_db(
-                                    db,
-                                    space_id=space["id"] if space else None,
-                                    project_path=working_dir,
-                                )
-                                if skill_registry is not None:
-                                    skill_registry.load_from_artifacts(artifact_registry)
-                                _refresh_artifact_prompt()
-                                _refresh_skill_tools()
+                        if artifact_registry is not None:
+                            artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
+                            if skill_registry is not None:
+                                skill_registry.load_from_artifacts(artifact_registry)
+                            _refresh_artifact_prompt()
+                            _refresh_skill_tools()
 
                     elif sub == "detach":
                         _detach_rest = parts[2].strip() if len(parts) >= 3 else ""
@@ -4179,21 +4201,12 @@ async def _run_repl(
                             renderer.console.print(
                                 f"[green]Detached[/green] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                             )
-                            if _rebuild_pack_config(
-                                rollback_pack_id=_pm["id"],
-                                rollback_project_path=project_path,
-                                rollback_action="attach",
-                            ):
-                                if artifact_registry is not None:
-                                    artifact_registry.load_from_db(
-                                        db,
-                                        space_id=space["id"] if space else None,
-                                        project_path=working_dir,
-                                    )
-                                    if skill_registry is not None:
-                                        skill_registry.load_from_artifacts(artifact_registry)
-                                    _refresh_artifact_prompt()
-                                    _refresh_skill_tools()
+                            if artifact_registry is not None:
+                                artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
+                                if skill_registry is not None:
+                                    skill_registry.load_from_artifacts(artifact_registry)
+                                _refresh_artifact_prompt()
+                                _refresh_skill_tools()
                         else:
                             renderer.console.print(
                                 f"[yellow]Not attached:[/yellow] @{rich_escape(ns)}/{rich_escape(name)}\n"
@@ -4569,7 +4582,7 @@ async def _run_repl(
                         continue
                     conv = loaded
                     working_dir = _restore_working_dir(conv, tool_registry, working_dir)
-                    ai_messages, _ = _load_conversation_messages(db, conv["id"])
+                    ai_messages = _load_conversation_messages(db, conv["id"])
                     is_first_message = False
                     _show_resume_info(db, conv, ai_messages)
                     continue
@@ -4633,7 +4646,7 @@ async def _run_repl(
                         vec_index=vec_manager.messages if vec_manager and vec_manager.enabled else None,
                     )
 
-                    ai_messages, _ = _load_conversation_messages(db, conv["id"])
+                    ai_messages = _load_conversation_messages(db, conv["id"])
 
                     summary = f"Rewound {rewind_result.deleted_messages} message(s)"
                     if rewind_result.reverted_files:
@@ -4647,13 +4660,6 @@ async def _run_repl(
                             renderer.console.print(f"  [yellow]Skipped: {sf}[/yellow]")
                         renderer.console.print()
                     continue
-
-            # Check for skill invocation — preserve original for title generation
-            original_user_input = user_input
-            if skill_registry and user_input.startswith("/"):
-                is_skill, skill_prompt = skill_registry.resolve_input(user_input)
-                if is_skill:
-                    user_input = skill_prompt
 
             # For note/document types, save message without AI response
             current_conv_type = conv.get("type", "chat")
@@ -4725,14 +4731,17 @@ async def _run_repl(
                         )
                         if _rag_chunks:
                             extra_system_prompt += format_rag_context(_rag_chunks)
-                            renderer.render_rag_status("ok", chunk_count=len(_rag_chunks))
+                            renderer.console.print(
+                                f"  [{MUTED}][RAG: {len(_rag_chunks)} relevant chunk(s) retrieved][/{MUTED}]"
+                            )
                         else:
-                            renderer.render_rag_status("no_results", reason=_rag_reason)
+                            _reason_suffix = f" — {_rag_reason}" if _rag_reason else ""
+                            renderer.console.print(f"  [{MUTED}][RAG: no results{_reason_suffix}][/{MUTED}]")
                     else:
-                        renderer.render_rag_status("no_vec_support")
+                        logger.debug("RAG: embedding service unavailable")
                 except Exception:
                     logger.debug("RAG retrieval failed in CLI", exc_info=True)
-                    renderer.render_rag_status("failed")
+                    renderer.console.print(f"  [{MUTED}][RAG: retrieval failed][/{MUTED}]")
 
             # Build message queue for queued follow-ups during agent loop
             msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -4819,6 +4828,7 @@ async def _run_repl(
                         output_filter=output_filter,
                         max_consecutive_text_only=config.cli.max_consecutive_text_only,
                         max_line_repeats=config.cli.max_line_repeats,
+                        max_identical_tool_repeats=config.cli.max_identical_tool_repeats,
                     ):
                         # Drain input_queue into msg_queue during streaming
                         await _drain_input_to_msg_queue(
@@ -4867,9 +4877,14 @@ async def _run_repl(
                                 response_token_count += max(1, len(event.data["content"]) // 4)
                             # Yield to event loop so the thinking ticker task can update (#775)
                             await asyncio.sleep(0)
+                        elif event.kind == "tool_batch_start":
+                            if thinking:
+                                total_elapsed += await renderer.stop_thinking(clear=True)
+                                thinking = False
+                            renderer.render_tool_batch_start(event.data["call_count"])
                         elif event.kind == "tool_call_start":
                             if thinking:
-                                total_elapsed += await renderer.stop_thinking()
+                                total_elapsed += await renderer.stop_thinking(clear=True)
                                 thinking = False
                             # Advance plan checklist: mark current step as in_progress
                             if _plan_checklist_steps and _plan_current_step[0] < len(_plan_checklist_steps):
@@ -4880,6 +4895,8 @@ async def _run_repl(
                             renderer.render_tool_call_end(
                                 event.data["tool_name"], event.data["status"], event.data["output"]
                             )
+                        elif event.kind == "tool_batch_end":
+                            renderer.render_tool_batch_end(event.data["call_count"], event.data["elapsed_seconds"])
                         elif event.kind == "auto_plan_suggest":
                             _auto_mode = config.cli.planning.auto_mode
                             if _auto_mode == "auto" and not _plan_active[0]:

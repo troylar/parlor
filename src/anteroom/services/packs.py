@@ -168,22 +168,6 @@ def validate_manifest(manifest: PackManifest, pack_dir: Path) -> list[str]:
 
         if not art_path.is_file():
             errors.append(f"Missing artifact file for {art.type}/{art.name}: {art_path}")
-            continue
-
-        # Validate rule metadata for Markdown rule files
-        if art.type == ArtifactType.RULE and art_path.suffix == ".md":
-            try:
-                _body, meta = _extract_yaml_frontmatter(
-                    art_path.read_text(encoding="utf-8"),
-                    art_path,
-                )
-            except ValueError as e:
-                errors.append(f"Malformed front matter in {art.type}/{art.name}: {e}")
-                continue
-            if meta.get("enforce") == "hard" and not meta.get("matches"):
-                errors.append(
-                    f"Rule {art.type}/{art.name} declares enforce: hard but has no 'matches' field in front matter"
-                )
 
     return errors
 
@@ -212,72 +196,11 @@ def _resolve_artifact_file(art: ManifestArtifact, pack_dir: Path) -> Path | None
     return None
 
 
-def _extract_yaml_frontmatter(text: str, path: Path) -> tuple[str, dict[str, Any]]:
-    """Extract YAML front matter from Markdown text.
-
-    Front matter is delimited by ``---`` on the first line and a closing
-    ``---`` on its own line.  Returns ``(body, metadata)`` where *body* is
-    the text after the closing delimiter.
-
-    If no front matter delimiters are found, returns ``(text, {})``.
-
-    Raises ``ValueError`` when delimiters are present but the YAML between
-    them is invalid or not a mapping — malformed front matter must never
-    silently degrade to empty metadata.
-    """
-    if not text.startswith("---\n") and not text.startswith("---\r\n"):
-        return text, {}
-
-    # Find the closing delimiter after the opening line.
-    # Search from the newline that ends the opening "---" so that
-    # back-to-back "---\n---\n" (empty front matter) is matched.
-    first_newline = text.index("\n")
-    close_idx = text.find("\n---\n", first_newline)
-    close_len = 4  # length of \n---\n
-    if close_idx == -1:
-        close_idx = text.find("\n---\r\n", first_newline)
-        close_len = 5
-    if close_idx == -1:
-        # Check for closing delimiter at end of file (no trailing newline)
-        stripped = text.rstrip()
-        if stripped.endswith("\n---") or stripped.endswith("\r\n---"):
-            close_idx = stripped.rfind("\n---")
-            close_len = len(stripped) - close_idx
-        else:
-            msg = f"Unclosed front matter in {path}: opening '---' found but no closing '---'"
-            raise ValueError(msg)
-
-    yaml_block = text[first_newline + 1 : close_idx]
-    body = text[close_idx + close_len + 1 :] if close_idx + close_len < len(text) else ""
-
-    try:
-        data = yaml.safe_load(yaml_block)
-    except yaml.YAMLError as e:
-        msg = f"Invalid YAML in front matter of {path}: {e}"
-        raise ValueError(msg) from e
-
-    if data is None:
-        return body, {}
-
-    if not isinstance(data, dict):
-        msg = f"Front matter in {path} must be a YAML mapping, got {type(data).__name__}"
-        raise ValueError(msg)
-
-    return body, data
-
-
-def _read_artifact_content(
-    path: Path,
-    *,
-    artifact_type: str = "",
-) -> tuple[str, dict[str, Any]]:
+def _read_artifact_content(path: Path) -> tuple[str, dict[str, Any]]:
     """Read artifact content from a file.
 
     For YAML files, extracts ``content`` and ``metadata`` fields.
-    For Markdown rule files, parses YAML front matter into metadata.
     For other files, the entire content is the artifact content.
-
-    Raises ``ValueError`` if a Markdown rule file has malformed front matter.
     """
     raw = path.read_text(encoding="utf-8")
 
@@ -293,9 +216,6 @@ def _read_artifact_content(
             if not isinstance(metadata, dict):
                 metadata = {}
             return content, metadata
-
-    if path.suffix == ".md" and artifact_type == ArtifactType.RULE:
-        return _extract_yaml_frontmatter(raw, path)
 
     return raw, {}
 
@@ -339,7 +259,7 @@ def install_pack(
             logger.warning("Skipping %s/%s: file not found", art.type, art.name)
             continue
 
-        content, metadata = _read_artifact_content(art_path, artifact_type=art.type)
+        content, metadata = _read_artifact_content(art_path)
         fqn = build_fqn(manifest.namespace, art.type, art.name)
         artifact_data.append((fqn, art.type, art.name, content, metadata))
 
@@ -468,7 +388,7 @@ def update_pack(
             skipped.append(f"{art.type}/{art.name}")
             logger.warning("Skipping %s/%s: file not found", art.type, art.name)
             continue
-        content, metadata = _read_artifact_content(art_path, artifact_type=art.type)
+        content, metadata = _read_artifact_content(art_path)
         fqn = build_fqn(manifest.namespace, art.type, art.name)
         artifact_data.append((fqn, art.type, art.name, content, metadata))
 

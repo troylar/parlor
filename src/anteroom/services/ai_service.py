@@ -21,7 +21,6 @@ from openai import (
 
 from ..config import AIConfig
 from .egress_allowlist import check_egress_allowed
-from .error_sanitizer import sanitize_provider_error
 from .token_provider import TokenProvider, TokenProviderError
 
 logger = logging.getLogger(__name__)
@@ -500,7 +499,22 @@ class AIService:
                         except (asyncio.TimeoutError, Exception):
                             pass  # Don't let slow stream cleanup block cancellation
 
-                # If we get here without returning, the stream ended without finish_reason
+                # If we get here without returning, the provider ended the stream
+                # without an explicit finish_reason. Treat that as incomplete.
+                logger.warning(
+                    "Stream ended without finish_reason after %.2fs; partial response may be incomplete",
+                    time.monotonic() - _attempt_start,
+                )
+                if cancel_event and cancel_event.is_set():
+                    return
+                yield {
+                    "event": "error",
+                    "data": {
+                        "message": "Stream ended unexpectedly — response may be incomplete",
+                        "code": "incomplete_stream",
+                        "retryable": True,
+                    },
+                }
                 return
 
             except AuthenticationError:
@@ -547,16 +561,10 @@ class AIService:
                         },
                     }
                 else:
-                    raw_msg = ""
-                    if isinstance(body, dict):
-                        raw_msg = body.get("error", {}).get("message", "")
-                    if not raw_msg:
-                        raw_msg = str(e)
-                    user_msg = sanitize_provider_error(raw_msg)
-                    logger.warning("AI bad request error: %s", e)
+                    logger.exception("AI bad request error")
                     yield {
                         "event": "error",
-                        "data": {"message": user_msg, "code": "bad_request", "retryable": False},
+                        "data": {"message": "AI request error", "retryable": False},
                     }
                 return
             except RateLimitError as e:

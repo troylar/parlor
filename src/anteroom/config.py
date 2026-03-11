@@ -255,7 +255,7 @@ class AIConfig:
     write_timeout: int = 30  # seconds; time to send request body
     pool_timeout: int = 10  # seconds; wait for free connection from pool
     first_token_timeout: int = 30  # seconds; max wait for first token after connect
-    chunk_stall_timeout: int = 30  # seconds; max silence between chunks mid-stream
+    chunk_stall_timeout: int = 10  # seconds; max silence between chunks mid-stream
     retry_max_attempts: int = 3  # retries on transient errors (0 = disabled)
     retry_backoff_base: float = 1.0  # seconds; base for exponential backoff
     narration_cadence: int = 5  # progress updates every N tool calls; 0 = disabled
@@ -356,6 +356,7 @@ class CliConfig:
     max_tool_iterations: int = 50
     max_consecutive_text_only: int = 3  # stop after N text-only responses with no tool calls (0 = disabled)
     max_line_repeats: int = 5  # stop if a single response repeats the same line N+ times (0 = disabled)
+    max_identical_tool_repeats: int = 3  # stop if same tool+args called N times consecutively (0 = disabled)
     context_warn_tokens: int = 80_000
     context_auto_compact_tokens: int = 100_000
     tool_dedup: bool = True  # collapse consecutive similar tool calls; False = show all
@@ -771,8 +772,6 @@ class PackSourceConfig:
     url: str
     branch: str = "main"
     refresh_interval: int = 30  # minutes; 0 = manual only
-    auto_attach: bool = True
-    priority: int = 50  # 1-100, lower wins
 
     _MIN_REFRESH: int = field(default=5, init=False, repr=False)
 
@@ -784,9 +783,6 @@ class PackSourceConfig:
                 self._MIN_REFRESH,
             )
             self.refresh_interval = self._MIN_REFRESH
-        if not 1 <= self.priority <= 100:
-            logger.warning("priority=%d is out of range (1-100), clamping to 50", self.priority)
-            self.priority = 50
 
 
 @dataclass
@@ -1029,10 +1025,10 @@ def load_config(
         first_token_timeout = 30
 
     try:
-        _raw_chunk_stall = ai_raw.get("chunk_stall_timeout", os.environ.get("AI_CHAT_CHUNK_STALL_TIMEOUT", 30))
+        _raw_chunk_stall = ai_raw.get("chunk_stall_timeout", os.environ.get("AI_CHAT_CHUNK_STALL_TIMEOUT", 10))
         chunk_stall_timeout = max(10, min(600, int(_raw_chunk_stall)))
     except (ValueError, TypeError):
-        chunk_stall_timeout = 30
+        chunk_stall_timeout = 10
 
     try:
         _raw_retry_attempts = ai_raw.get("retry_max_attempts", os.environ.get("AI_CHAT_RETRY_MAX_ATTEMPTS", 3))
@@ -2129,24 +2125,11 @@ def load_config(
             refresh = int(src.get("refresh_interval", 30))
         except (ValueError, TypeError):
             refresh = 30
-        auto_attach_raw = src.get("auto_attach", True)
-        if auto_attach_raw is None:
-            auto_attach = True
-        elif isinstance(auto_attach_raw, bool):
-            auto_attach = auto_attach_raw
-        else:
-            auto_attach = str(auto_attach_raw).lower() in ("true", "1", "yes")
-        try:
-            priority = int(src.get("priority", 50))
-        except (ValueError, TypeError):
-            priority = 50
         pack_sources_list.append(
             PackSourceConfig(
                 url=url,
                 branch=str(src.get("branch", "main")),
                 refresh_interval=refresh,
-                auto_attach=auto_attach,
-                priority=priority,
             )
         )
 

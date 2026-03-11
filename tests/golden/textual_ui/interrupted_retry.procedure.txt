@@ -1,0 +1,3 @@
+✓ I'm ready to answer with verified findings. [done]
+! Stream ended unexpectedly — response may be incomplete [model error]
+✓ I lost the response once, so I'm retrying from verified context. [retry]

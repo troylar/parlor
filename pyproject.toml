@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anteroom"
-version = "1.111.0"
+version = "1.107.2"
 description = "Anteroom - your gateway to AI conversation"
 readme = "README.md"
 license = "Apache-2.0"
@@ -40,6 +40,7 @@ dependencies = [
     "requests>=2.32.4",
     "filelock>=3.20.3",
     "h2>=4.3.0",
+    "textual>=0.80.0",
     # pillow>=12.1.1 needed for CVE-2026-25990, but fastembed 0.7.4 caps pillow<12.0.
     # Deferred until fastembed updates its constraint.
 ]
@@ -107,10 +108,16 @@ select = ["E", "F", "I", "N", "W"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests requiring real services",
     "real_ai: tests that call a real AI backend (require API key)",
+]
+filterwarnings = [
+    "ignore:websockets\\.legacy is deprecated.*:DeprecationWarning:websockets\\.legacy",
+    "ignore:websockets\\.server\\.WebSocketServerProtocol is deprecated:DeprecationWarning:uvicorn\\.protocols\\.websockets\\.websockets_impl",
+    "ignore:This process \\(pid=.*\\) is multi-threaded, use of forkpty\\(\\) may lead to deadlocks in the child\\.:DeprecationWarning:pty",
 ]
 
 [tool.mypy]

@@ -1,0 +1,4 @@
+<spin> stream · 2 events · 1 chunks · 62 chars · last chunk <time> ago · last error
+✓ user_prompt Start an answer, fail partway through, then show the recovery state.
+✓ token chars=62 total_chars=62
+✓ error {'message': 'The stream dropped before I could finish safely.', 'retryable': True}

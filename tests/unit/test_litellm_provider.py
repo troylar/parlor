@@ -90,6 +90,15 @@ class _AsyncChunkIterator:
         return chunk
 
 
+class _StallingChunkIterator:
+    def __aiter__(self) -> "_StallingChunkIterator":
+        return self
+
+    async def __anext__(self) -> Any:
+        await asyncio.sleep(999)
+        raise StopAsyncIteration
+
+
 def _make_service(config: AIConfig | None = None) -> LiteLLMService:
     """Build a LiteLLMService bypassing __init__."""
     svc = LiteLLMService.__new__(LiteLLMService)
@@ -429,12 +438,10 @@ class TestLiteLLMStreamErrors:
         assert captured_keys[0] != captured_keys[1]
 
     @pytest.mark.asyncio
-    async def test_bad_request_error_surfaces_sanitized_message(self) -> None:
+    async def test_bad_request_error(self) -> None:
         svc = _make_service()
         mock_litellm = MagicMock()
-        mock_litellm.acompletion = AsyncMock(
-            side_effect=_MockBadRequestError("The model was unable to complete inference due to an internal error")
-        )
+        mock_litellm.acompletion = AsyncMock(side_effect=_MockBadRequestError("bad request"))
 
         with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
             events: list[dict[str, Any]] = []
@@ -445,13 +452,12 @@ class TestLiteLLMStreamErrors:
         assert len(error_events) == 1
         assert error_events[0]["data"]["code"] == "bad_request"
         assert error_events[0]["data"]["retryable"] is False
-        assert "unable to complete inference" in error_events[0]["data"]["message"]
 
     @pytest.mark.asyncio
-    async def test_bad_request_too_many_tools(self) -> None:
-        svc = _make_service()
+    async def test_stream_stall_is_retryable(self) -> None:
+        svc = _make_service(_make_config(request_timeout=1, chunk_stall_timeout=0.05))
         mock_litellm = MagicMock()
-        mock_litellm.acompletion = AsyncMock(side_effect=_MockBadRequestError("too many tool definitions provided"))
+        mock_litellm.acompletion = AsyncMock(return_value=_StallingChunkIterator())
 
         with patch("anteroom.services.litellm_provider.litellm", mock_litellm):
             events: list[dict[str, Any]] = []
@@ -460,8 +466,8 @@ class TestLiteLLMStreamErrors:
 
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1
-        assert error_events[0]["data"]["code"] == "too_many_tools"
-        assert error_events[0]["data"]["retryable"] is False
+        assert error_events[0]["data"]["code"] == "timeout"
+        assert error_events[0]["data"]["retryable"] is True
 
 
 # ---------------------------------------------------------------------------

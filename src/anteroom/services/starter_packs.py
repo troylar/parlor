@@ -163,7 +163,7 @@ def _install_starter(
             logger.warning("Skipping %s/%s: file not found", art.type, art.name)
             continue
 
-        content, metadata = _read_artifact_content(art_path, artifact_type=art.type)
+        content, metadata = _read_artifact_content(art_path)
         fqn = build_fqn(manifest.namespace, art.type, art.name)
 
         row = upsert_artifact(

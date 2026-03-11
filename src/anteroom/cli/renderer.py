@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from collections import deque
@@ -21,6 +22,7 @@ console = Console(stderr=True)
 # Separate console for stdout markdown rendering (not stderr)
 _stdout_console = Console()
 _stdout = sys.stdout
+_stdout_is_tty: bool = True  # set by use_stdout_console(); controls in-place ticker updates
 
 # ---------------------------------------------------------------------------
 # Color palette — explicit values for readability on dark terminals.
@@ -36,6 +38,7 @@ ERROR_RED = "#CD6B6B"  # pale red for inline errors (operational, not alarming)
 
 _ESC_HINT_DELAY: float = 3.0  # seconds before showing "esc to cancel" hint
 _STALL_THRESHOLD: float = 15.0  # seconds before showing API stall warning
+_THINKING_APPEAR_DELAY: float = 0.35  # suppress sub-second flicker before tools take over
 
 
 def use_stdout_console() -> None:
@@ -52,7 +55,7 @@ def use_stdout_console() -> None:
 
     Call from inside ``patch_stdout()`` context.
     """
-    global console, _stdout_console, _stdout, _repl_mode
+    global console, _stdout_console, _stdout, _repl_mode, _stdout_is_tty
     # Rich consoles write through the patch_stdout proxy so prompt_toolkit
     # knows about output and can keep the prompt at the bottom.
     console = Console(file=sys.stdout, force_terminal=True)
@@ -62,17 +65,7 @@ def use_stdout_console() -> None:
     _real_stderr = os.fdopen(os.dup(sys.stderr.fileno()), "w", newline="")
     _stdout = _real_stderr
     _repl_mode = True
-
-
-def write_raw(text: str) -> None:
-    """Write text directly to the real terminal fd, bypassing patch_stdout.
-
-    Used for sub-prompt text (approval prompts, ask_user) that must be
-    visible immediately without buffering through prompt_toolkit's proxy.
-    """
-    if _stdout:
-        _stdout.write(text)
-        _stdout.flush()
+    _stdout_is_tty = _real_stderr.isatty()
 
 
 def configure_thresholds(
@@ -101,6 +94,8 @@ _thinking_start: float = 0
 _spinner: Status | None = None
 _last_spinner_update: float = 0
 _thinking_ticker_task: asyncio.Task[None] | None = None
+_thinking_line_visible: bool = False
+_working_written_lines: int = 0
 
 # Lifecycle phase tracking
 _thinking_phase: str = ""  # current phase: connecting, waiting, streaming
@@ -137,6 +132,650 @@ _tool_dedup_enabled: bool = True
 
 # Track whether we've started a tool call batch (for spacing)
 _tool_batch_active: bool = False
+
+# ---------------------------------------------------------------------------
+# Focus & Fold: turn-level tool batch grouping
+# ---------------------------------------------------------------------------
+
+# During execution: live in-place progress (⟳ 3/5 Reading src/app.py)
+# On completion: informative one-liner (✓ 3 reads, 2 globs 2.1s)
+# Tab: print per-tool detail once, then no-op until next batch
+
+
+class FoldGroup:
+    """A completed tool batch with compact summaries for Tab expand."""
+
+    __slots__ = ("call_count", "elapsed_seconds", "summaries", "tool_types")
+
+    def __init__(
+        self,
+        call_count: int,
+        elapsed_seconds: float,
+        summaries: list[str],
+        tool_types: list[str],
+    ) -> None:
+        self.call_count = call_count
+        self.elapsed_seconds = elapsed_seconds
+        self.summaries = summaries  # one-line summary per tool call
+        self.tool_types = tool_types  # tool action types for summary grouping
+
+
+_fold_groups: list[FoldGroup] = []
+_fold_last_expanded: bool = False  # True after Tab expand (prevents repeat)
+_fold_batch_active: bool = False  # True while a batch is executing
+_fold_batch_total: int = 0  # expected tool count for current batch
+_fold_batch_done: int = 0  # completed tool count for current batch
+_fold_batch_summaries: list[str] = []  # compact summaries collected during batch
+_fold_batch_types: list[str] = []  # tool action types for grouping
+_fold_batch_current: str = ""  # current tool summary for live ticker
+_fold_between_batches: bool = False  # True between batch end and next batch start
+_fold_turn_started: bool = False  # True after the first completed batch in a turn
+_fold_turn_batch_count: int = 0  # number of completed batches in the current turn
+_fold_last_narrative: str = ""  # last printed fold narrative for duplicate suppression
+
+
+# Tool type labels for the completion summary
+_TOOL_TYPE_LABELS: dict[str, str] = {
+    "read_file": "read",
+    "glob_files": "glob",
+    "grep": "grep",
+    "write_file": "write",
+    "edit_file": "edit",
+    "bash": "bash",
+    "create_canvas": "canvas",
+    "update_canvas": "canvas",
+    "patch_canvas": "canvas",
+    "run_agent": "agent",
+    "ask_user": "ask",
+}
+
+
+def _fold_type_label(tool_name: str) -> str:
+    """Map a tool name to a short human label for the batch summary."""
+    return _TOOL_TYPE_LABELS.get(tool_name, tool_name.replace("_", " "))
+
+
+def _fold_print(*args: Any, **kwargs: Any) -> None:
+    """Route tool output through fold capture.
+
+    When a fold batch is active, output is suppressed entirely — the live
+    progress ticker is the only visible feedback. Tool summaries are
+    collected separately for Tab-key expansion.
+    When inactive, output prints normally via console.
+    """
+    if _fold_batch_active:
+        return  # Suppressed — live ticker provides feedback
+    console.print(*args, **kwargs)
+
+
+def _update_fold_ticker() -> None:
+    """Refresh the live WORKING narrative block during a fold batch."""
+    if not _repl_mode or not _stdout or not _stdout_is_tty:
+        return
+    elapsed = time.monotonic() - _thinking_start if _thinking_start else 0.0
+    _write_working_block(elapsed=elapsed)
+
+
+def _build_fold_narrative(summaries: list[str], elapsed: float) -> str:
+    """Build a narrative summary from tool summaries.
+
+    Extracts the meaningful targets from humanized summaries and composes
+    a readable sentence: 'Read config.py, app.py, and 3 more' or
+    'Listed tests/, docs/, src/anteroom/, src/anteroom/services/'.
+
+    For mixed tool types, groups by action: 'Listed 4 dirs, read 2 files'.
+    """
+    elapsed_str = f" in {elapsed:.1f}s" if elapsed >= 0.1 else ""
+
+    if not summaries:
+        return f"done{elapsed_str}"
+
+    # Strip status icons from summaries (✓/✗ prefix)
+    clean = []
+    for s in summaries:
+        s = s.lstrip()
+        if s and s[0] in ("\u2713", "\u2717"):
+            s = s[1:].lstrip()
+        # Strip trailing elapsed (e.g. " 1.5s")
+        parts = s.rsplit(" ", 1)
+        if len(parts) == 2 and parts[1].endswith("s"):
+            try:
+                float(parts[1][:-1])
+                s = parts[0]
+            except ValueError:
+                pass
+        clean.append(s)
+
+    # Group by action verb
+    groups: dict[str, list[str]] = {}
+    for s in clean:
+        # Extract verb and target from summaries like "Reading src/app.py"
+        for verb in ("Reading", "Writing", "Editing", "Finding", "Listing", "Searching for", "Sub-agent:"):
+            if s.startswith(verb):
+                target = s[len(verb) :].strip().strip("'")
+                groups.setdefault(verb, []).append(target)
+                break
+        else:
+            # bash or MCP tools — use the full summary as target
+            if s.startswith("bash "):
+                groups.setdefault("Ran", []).append(s[5:])
+            else:
+                groups.setdefault("Used", []).append(s)
+
+    def phrase_for_group(verb: str, targets: list[str]) -> str:
+        past = {
+            "Reading": "Read",
+            "Writing": "Wrote",
+            "Editing": "Edited",
+            "Finding": "Found",
+            "Listing": "Listed",
+            "Searching for": "Searched",
+            "Sub-agent:": "Ran sub-agent",
+            "Ran": "Ran",
+            "Used": "Used",
+        }.get(verb, verb)
+        noun = {
+            "Reading": "file",
+            "Writing": "file",
+            "Editing": "file",
+            "Finding": "path",
+            "Listing": "path",
+            "Searching for": "search",
+            "Sub-agent:": "sub-agent",
+            "Ran": "command",
+            "Used": "tool",
+        }.get(verb, "item")
+        if len(targets) == 1:
+            target = targets[0]
+            if verb == "Sub-agent:":
+                return f"{past} {target}"
+            return f"{past} {target}"
+        if len(targets) == 2:
+            return f"{past} {_join_targets(targets, max_shown=2)}"
+        return f"{past} {len(targets)} {noun}s"
+
+    # Single action type — list the targets directly
+    if len(groups) == 1:
+        verb, targets = next(iter(groups.items()))
+        past = {
+            "Reading": "Read",
+            "Writing": "Wrote",
+            "Editing": "Edited",
+            "Finding": "Found",
+            "Listing": "Listed",
+            "Searching for": "Searched",
+            "Sub-agent:": "Ran sub-agent",
+            "Ran": "Ran",
+            "Used": "Used",
+        }.get(verb, verb)
+        return f"{past} {_join_targets(targets)}{elapsed_str}"
+
+    # Mixed action types — compact grouped summary
+    parts = []
+    for verb, targets in groups.items():
+        parts.append(phrase_for_group(verb, targets))
+    return f"{_join_targets(parts, max_shown=3)}{elapsed_str}"
+
+
+def _join_targets(targets: list[str], max_shown: int = 4) -> str:
+    """Join target names with commas and 'and N more' for long lists."""
+    if len(targets) <= max_shown:
+        if len(targets) == 1:
+            return targets[0]
+        if len(targets) == 2:
+            return f"{targets[0]} and {targets[1]}"
+        return ", ".join(targets[:-1]) + f", and {targets[-1]}"
+    shown = ", ".join(targets[:max_shown])
+    remaining = len(targets) - max_shown
+    return f"{shown}, and {remaining} more"
+
+
+def _lower_initial(text: str) -> str:
+    """Lowercase the first character for mid-sentence joins."""
+    if not text:
+        return text
+    return text[0].lower() + text[1:]
+
+
+def _badge_parts(tool_types: list[str]) -> list[str]:
+    """Build compact evidence badges preserving first-seen order."""
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for tool_type in tool_types:
+        if tool_type not in counts:
+            counts[tool_type] = 0
+            order.append(tool_type)
+        counts[tool_type] += 1
+    badges: list[str] = []
+    for tool_type in order:
+        count = counts[tool_type]
+        badges.append(f"[{tool_type} \u00d7{count}]" if count > 1 else f"[{tool_type}]")
+    return badges
+
+
+def _strip_summary(summary: str) -> str:
+    """Normalize a raw tool summary into plain text."""
+    s = summary.strip()
+    if s and s[0] in ("\u2713", "\u2717"):
+        s = s[1:].lstrip()
+    parts = s.rsplit(" ", 1)
+    if len(parts) == 2 and parts[1].endswith("s"):
+        try:
+            float(parts[1][:-1])
+            s = parts[0]
+        except ValueError:
+            pass
+    return s
+
+
+def _beat_from_summary(summary: str, *, active: bool) -> str:
+    """Convert a tool summary into first-person procedural narration."""
+    clean = _strip_summary(summary)
+    if clean.startswith("Reading "):
+        target = clean[len("Reading ") :].strip()
+        if target.count(",") >= 2 or " and " in target:
+            return "I'm reading the relevant files now." if active else "I read the relevant files."
+        return f"I'm reading {target} now." if active else f"I read {target}."
+    if clean.startswith("Writing "):
+        target = clean[len("Writing ") :].strip()
+        return f"I'm writing {target} now." if active else f"I wrote {target}."
+    if clean.startswith("Editing "):
+        target = clean[len("Editing ") :].strip()
+        return f"I'm editing {target} now." if active else f"I edited {target}."
+    if clean.startswith("Finding "):
+        target = clean[len("Finding ") :].strip()
+        if any(ch in target for ch in "*?[]"):
+            return "I'm locating the matching files." if active else "I identified the matching files."
+        return f"I'm locating {target}." if active else f"I found {target}."
+    if clean.startswith("Listing "):
+        target = clean[len("Listing ") :].strip()
+        return f"I'm listing {target} now." if active else f"I listed {target}."
+    if clean.startswith("Searching for "):
+        target = clean[len("Searching for ") :].strip().strip("'")
+        if not target:
+            return "I'm searching the codebase." if active else "I searched the codebase."
+        return f"I'm searching for {target}." if active else f"I searched for {target}."
+    if clean.startswith("Sub-agent: "):
+        return "I'm delegating part of the task." if active else "I delegated part of the task."
+    if clean.startswith("bash "):
+        return "I'm running a verification command." if active else "I ran a verification command."
+    return "I'm working through the next step." if active else f"I completed: {clean}."
+
+
+def _beat_from_group(group: FoldGroup) -> str:
+    """Build one frozen narrative beat from a completed fold group."""
+    if not group.summaries:
+        return "I completed the next step."
+    primary = _beat_from_summary(group.summaries[-1], active=False)
+    if primary.startswith("I found ") and len(group.summaries) > 1 and all(t == "glob" for t in group.tool_types):
+        return "I identified the matching files."
+    if primary.startswith("I read ") and len(group.summaries) > 1:
+        return "I read the relevant files."
+    return primary
+
+
+def _render_badges(tool_types: list[str], *, ansi: bool) -> str:
+    """Render compact badges for a beat."""
+    badges = _badge_parts(tool_types)
+    if not badges:
+        badges = ["[done]"]
+    if ansi:
+        chrome = "\033[38;2;107;114;128m"
+        rst = "\033[0m"
+        return " ".join(f"{chrome}{badge}{rst}" for badge in badges)
+    return " ".join(f"[{CHROME}]{escape(badge)}[/{CHROME}]" for badge in badges)
+
+
+def _turn_beats(*, include_handoff: bool = False) -> list[tuple[str, list[str]]]:
+    """Build compact narrative beats for the current turn."""
+    beats: list[tuple[str, list[str]]] = []
+    for group in _fold_groups:
+        beats.append((_beat_from_group(group), list(group.tool_types)))
+    if include_handoff and beats:
+        beats.append(("I'm ready to answer.", ["done"]))
+    return beats[-5:]
+
+
+def _active_badges(summary: str) -> list[str]:
+    """Infer the current active badge from the in-flight summary."""
+    clean = _strip_summary(summary)
+    if clean.startswith("Reading "):
+        return ["read"]
+    if clean.startswith("Writing "):
+        return ["write"]
+    if clean.startswith("Editing "):
+        return ["edit"]
+    if clean.startswith("Finding "):
+        return ["glob"]
+    if clean.startswith("Listing "):
+        return ["list"]
+    if clean.startswith("Searching for "):
+        return ["grep"]
+    if clean.startswith("bash "):
+        return ["bash"]
+    if clean.startswith("Sub-agent: "):
+        return ["agent"]
+    return []
+
+
+def _live_working_beats(*, include_handoff: bool = False) -> list[tuple[str, list[str]]]:
+    """Build the visible WORKING beats for the current in-flight turn."""
+    beats = _turn_beats(include_handoff=include_handoff)
+    if _fold_batch_active:
+        active_summary = _fold_batch_current or "Reading files"
+        beats.append((_beat_from_summary(active_summary, active=True), _active_badges(active_summary) or ["working"]))
+    return beats[-5:]
+
+
+def _write_working_block(*, include_handoff: bool = False, elapsed: float = 0.0) -> None:
+    """Render the live WORKING narrative block in place during a turn."""
+    global _working_written_lines, _thinking_line_visible
+    if not _stdout:
+        return
+
+    beats = _live_working_beats(include_handoff=include_handoff)
+    if not beats:
+        return
+
+    slate = "\033[38;2;148;163;184m"
+    chrome = "\033[38;2;107;114;128m"
+    muted = "\033[38;2;139;139;139m"
+    rst = "\033[0m"
+
+    buf: list[str] = []
+    if _working_written_lines > 0:
+        buf.append(f"\033[{_working_written_lines}A")
+    elif _thinking_line_visible:
+        buf.append("\033[1A")
+
+    header = f"  {slate}WORKING{rst}"
+    if include_handoff and elapsed >= 0.1:
+        header += f" {chrome}in {elapsed:.1f}s{rst}"
+    buf.append(f"\r\033[2K{header}\n")
+    for text, tool_types in beats:
+        badges = _render_badges(tool_types, ansi=True)
+        buf.append(f"\r\033[2K    {muted}{text}{rst}  {badges}\n")
+
+    _stdout.write("".join(buf))
+    _stdout.flush()
+    _working_written_lines = len(beats) + 1
+    _thinking_line_visible = False
+
+
+def _clear_working_block() -> None:
+    """Erase the in-place WORKING block if one is currently visible."""
+    global _working_written_lines
+    if not _stdout or _working_written_lines <= 0:
+        return
+    _stdout.write(f"\033[{_working_written_lines}A")
+    for _ in range(_working_written_lines):
+        _stdout.write("\r\033[2K\n")
+    _stdout.flush()
+    _working_written_lines = 0
+
+
+def _extract_fold_targets(summaries: list[str]) -> list[str]:
+    """Extract rough target strings from fold summaries for recap suppression."""
+    targets: list[str] = []
+    for summary in summaries:
+        s = summary.lstrip()
+        if s and s[0] in ("\u2713", "\u2717"):
+            s = s[1:].lstrip()
+        parts = s.rsplit(" ", 1)
+        if len(parts) == 2 and parts[1].endswith("s"):
+            try:
+                float(parts[1][:-1])
+                s = parts[0]
+            except ValueError:
+                pass
+        for prefix in (
+            "Reading ",
+            "Writing ",
+            "Editing ",
+            "Finding ",
+            "Listing ",
+            "Searching for ",
+            "Sub-agent: ",
+            "bash ",
+        ):
+            if s.startswith(prefix):
+                target = s[len(prefix) :].strip().strip("'")
+                if target:
+                    targets.append(target)
+                break
+    return targets
+
+
+def _trim_fold_recap(full_text: str) -> str:
+    """Drop the most obvious recap paragraph after a folded tool batch.
+
+    This keeps the tool block as the execution trace and lets the final answer
+    start closer to the actual conclusion instead of repeating the same work.
+    """
+    if not _fold_groups:
+        return full_text
+    paragraphs = full_text.split("\n\n")
+    if len(paragraphs) < 2:
+        return full_text
+
+    latest = _fold_groups[-1]
+    targets = [t.lower() for t in _extract_fold_targets(latest.summaries)]
+    first = paragraphs[0].strip()
+    first_lower = first.lower()
+    recap_starts = (
+        "read ",
+        "found ",
+        "searched ",
+        "listed ",
+        "wrote ",
+        "edited ",
+        "ran ",
+        "counted ",
+    )
+    progress_phrases = ("next i", "i'm ", "i am ", "then i", "now i")
+    target_hits = sum(1 for target in targets[:6] if target and target in first_lower)
+    if first_lower.startswith(recap_starts) or (target_hits >= 2 and any(p in first_lower for p in progress_phrases)):
+        paragraphs = paragraphs[1:]
+
+    while len(paragraphs) > 1:
+        para = paragraphs[0].strip()
+        if not para:
+            paragraphs = paragraphs[1:]
+            continue
+        lines = [line.strip() for line in para.splitlines() if line.strip()]
+        if not lines:
+            paragraphs = paragraphs[1:]
+            continue
+        bullet_like = all(line.startswith(("-", "*", "•")) for line in lines)
+        target_hits = sum(1 for target in targets[:6] if target and target in para.lower())
+        if bullet_like and target_hits >= 2:
+            paragraphs = paragraphs[1:]
+            continue
+        break
+
+    return "\n\n".join(paragraphs)
+
+
+def _print_fold_banner(group: FoldGroup, *, expanded: bool = False) -> None:
+    """Render a distinct block header for folded tool execution."""
+    global _fold_last_narrative
+    narrative = _build_fold_narrative(group.summaries, group.elapsed_seconds)
+    count_label = f"{group.call_count} call" if group.call_count == 1 else f"{group.call_count} calls"
+    if _repl_mode and _stdout:
+        gold = "\033[38;2;197;160;89m"
+        chrome = "\033[38;2;107;114;128m"
+        muted = "\033[38;2;139;139;139m"
+        rst = "\033[0m"
+        detail = f"expanded · {count_label}" if expanded else count_label
+        _stdout.write(f"  {gold}TOOLS{rst} {chrome}{detail}{rst}  {muted}{narrative}{rst}\n")
+        _stdout.flush()
+        return
+    if expanded:
+        console.print(f"  [{GOLD}]TOOLS[/{GOLD}] [{CHROME}]expanded · {count_label}[/{CHROME}]  [{MUTED}]{escape(narrative)}[/{MUTED}]")
+    else:
+        console.print(f"  [{GOLD}]TOOLS[/{GOLD}] [{CHROME}]{count_label}[/{CHROME}]  [{MUTED}]{escape(narrative)}[/{MUTED}]")
+    _fold_last_narrative = narrative
+
+
+def _print_fold_continuation(group: FoldGroup) -> None:
+    """Render a lighter continuation line for follow-on batches in the same turn."""
+    global _fold_last_narrative
+    narrative = _build_fold_narrative(group.summaries, group.elapsed_seconds)
+    if narrative == _fold_last_narrative:
+        if narrative.startswith("Read "):
+            narrative = "Re-read " + narrative[len("Read ") :]
+        elif narrative.startswith("Found "):
+            narrative = "Found more " + narrative[len("Found ") :]
+        elif narrative.startswith("Searched "):
+            narrative = "Searched again " + narrative[len("Searched ") :]
+        elif narrative.startswith("Listed "):
+            narrative = "Listed again " + narrative[len("Listed ") :]
+    count_label = f"{group.call_count} call" if group.call_count == 1 else f"{group.call_count} calls"
+    if _repl_mode and _stdout:
+        chrome = "\033[38;2;107;114;128m"
+        muted = "\033[38;2;139;139;139m"
+        rst = "\033[0m"
+        _stdout.write(f"    {chrome}{count_label}{rst}  {muted}{narrative}{rst}\n")
+        _stdout.flush()
+        _fold_last_narrative = narrative
+        return
+    console.print(f"    [{CHROME}]{count_label}[/{CHROME}]  [{MUTED}]{escape(narrative)}[/{MUTED}]")
+    _fold_last_narrative = narrative
+
+
+def _fold_display_groups() -> list[tuple[FoldGroup, str, bool]]:
+    """Return display-ready fold rows for the current turn."""
+    rows: list[tuple[FoldGroup, str, bool]] = []
+    last_narrative = ""
+    for idx, group in enumerate(_fold_groups):
+        narrative = _build_fold_narrative(group.summaries, group.elapsed_seconds)
+        if idx > 0 and narrative == last_narrative:
+            if narrative.startswith("Read "):
+                narrative = "Re-read " + narrative[len("Read ") :]
+            elif narrative.startswith("Found "):
+                narrative = "Found more " + narrative[len("Found ") :]
+            elif narrative.startswith("Searched "):
+                narrative = "Searched again " + narrative[len("Searched ") :]
+            elif narrative.startswith("Listed "):
+                narrative = "Listed again " + narrative[len("Listed ") :]
+        rows.append((group, narrative, idx == 0))
+        last_narrative = narrative
+    return rows
+
+
+def _render_fold_row(group: FoldGroup, narrative: str, first: bool, *, ansi: bool) -> str:
+    """Render one execution summary row."""
+    count_label = f"{group.call_count} call" if group.call_count == 1 else f"{group.call_count} calls"
+    if ansi:
+        gold = "\033[38;2;197;160;89m"
+        chrome = "\033[38;2;107;114;128m"
+        muted = "\033[38;2;139;139;139m"
+        rst = "\033[0m"
+        if first:
+            return f"\r\033[2K  {gold}TOOLS{rst} {chrome}{count_label}{rst}  {muted}{narrative}{rst}\n"
+        return f"\r\033[2K    {chrome}{count_label}{rst}  {muted}{narrative}{rst}\n"
+    if first:
+        return f"  [{GOLD}]TOOLS[/{GOLD}] [{CHROME}]{count_label}[/{CHROME}]  [{MUTED}]{escape(narrative)}[/{MUTED}]"
+    return f"    [{CHROME}]{count_label}[/{CHROME}]  [{MUTED}]{escape(narrative)}[/{MUTED}]"
+
+
+def _print_fold_summary_block() -> None:
+    """Print the WORKING narrative lane into scrollback."""
+    beats = _turn_beats(include_handoff=True)
+    if not beats:
+        return
+    _clear_working_block()
+    total_elapsed = sum(group.elapsed_seconds for group in _fold_groups)
+    elapsed = f" in {total_elapsed:.1f}s" if total_elapsed >= 0.1 else ""
+    if _repl_mode and _stdout:
+        slate = "\033[38;2;148;163;184m"
+        muted = "\033[38;2;139;139;139m"
+        rst = "\033[0m"
+        _stdout.write(f"\r\033[2K  {slate}WORKING{rst}{muted}{elapsed}{rst}\n")
+        for text, tool_types in beats:
+            badges = _render_badges(tool_types, ansi=True)
+            _stdout.write(f"\r\033[2K    {muted}{text}{rst}  {badges}\n")
+        _stdout.flush()
+        return
+    console.print(f"  [{SLATE}]WORKING[/{SLATE}] [{MUTED}]{escape(elapsed.strip())}[/{MUTED}]" if elapsed else f"  [{SLATE}]WORKING[/{SLATE}]")
+    for text, tool_types in beats:
+        badges = _render_badges(tool_types, ansi=False)
+        console.print(f"    [{MUTED}]{escape(text)}[/{MUTED}]  {badges}")
+
+
+def _strip_fold_elapsed(narrative: str) -> str:
+    """Remove trailing 'in Xs' timing from a fold narrative."""
+    marker = " in "
+    idx = narrative.rfind(marker)
+    if idx == -1:
+        return narrative
+    suffix = narrative[idx + len(marker) :].strip()
+    if suffix.endswith("s"):
+        try:
+            float(suffix[:-1])
+            return narrative[:idx]
+        except ValueError:
+            return narrative
+    return narrative
+
+
+def _build_fold_story(*, active_summary: str = "") -> str:
+    """Build a single turn-level execution story from completed and active work."""
+    parts = [_strip_fold_elapsed(_build_fold_narrative(group.summaries, group.elapsed_seconds)) for group in _fold_groups]
+    parts = [part for part in parts if part]
+
+    if active_summary:
+        active = active_summary.strip()
+        if parts:
+            if len(parts) == 1:
+                return f"{parts[0]}; now {_lower_initial(active)}"
+            return f"{parts[0]}, then {len(parts) - 1} more steps; now {_lower_initial(active)}"
+        return active
+
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]}, then {_lower_initial(parts[1])}"
+    return f"{parts[0]}, then {len(parts) - 1} more steps"
+
+
+def _build_live_tools_text(elapsed: float) -> str:
+    """Build the live narrative status line for REPL mode."""
+    slate = "\033[38;2;148;163;184m"
+    chrome = "\033[38;2;107;114;128m"
+    muted = "\033[38;2;139;139;139m"
+    rst = "\033[0m"
+
+    if _fold_batch_active:
+        story = _beat_from_summary(_fold_batch_current or "Reading files", active=True)
+        timer = f" {chrome}{elapsed:.0f}s{rst}" if elapsed >= 1.0 else ""
+        badges = _render_badges(_active_badges(_fold_batch_current) or _fold_batch_types or ["working"], ansi=True)
+        return f"{slate}WORKING{rst}  {muted}{story}{rst}  {badges}{timer}"
+
+    beats = _turn_beats()
+    if not beats:
+        timer = f" {chrome}{elapsed:.0f}s{rst}" if elapsed >= 1.0 else ""
+        return f"{slate}WORKING{rst}{timer}"
+
+    story, tool_types = beats[-1]
+
+    phase_hint = ""
+    if _thinking_phase == "streaming":
+        now = time.monotonic()
+        if _last_chunk_time and now - _last_chunk_time > _MID_STREAM_STALL:
+            phase_hint = "slow"
+        elif _verbosity != Verbosity.COMPACT:
+            phase_hint = f"{_streaming_chars:,} chars"
+    elif _thinking_phase == "retrying":
+        phase_hint = "retrying"
+
+    timer = f" {chrome}{elapsed:.0f}s{rst}" if elapsed >= 1.0 else ""
+    suffix = f"  {muted}{phase_hint}{rst}" if phase_hint else ""
+    badges = _render_badges(tool_types, ansi=True)
+    return f"{slate}WORKING{rst}  {muted}{story}{rst}  {badges}{timer}{suffix}"
+
 
 # ---------------------------------------------------------------------------
 # Plan checklist state
@@ -275,16 +914,150 @@ def cycle_verbosity() -> Verbosity:
 
 def clear_turn_history() -> None:
     """Clear current turn tool history. Called at start of each turn."""
-    global _streaming_buffer
+    global _streaming_buffer, _fold_batch_active, _fold_last_expanded
+    global _fold_between_batches, _fold_turn_started, _fold_turn_batch_count, _fold_last_narrative
+    global _thinking_line_visible, _working_written_lines
+    global _fold_batch_done, _fold_batch_total, _fold_batch_current
     _current_turn_tools.clear()
     _streaming_buffer = []
+    # Reset fold state so a stuck batch from a cancelled/errored turn
+    # doesn't swallow output in the next turn (#779).
+    _fold_groups.clear()
+    _fold_batch_active = False
+    _fold_last_expanded = False
+    _fold_between_batches = False
+    _fold_batch_done = 0
+    _fold_batch_total = 0
+    _fold_batch_current = ""
+    _fold_turn_started = False
+    _fold_turn_batch_count = 0
+    _fold_last_narrative = ""
+    _thinking_line_visible = False
+    _working_written_lines = 0
+    _fold_batch_summaries.clear()
+    _fold_batch_types.clear()
+
+
+# ---------------------------------------------------------------------------
+# Focus & Fold: batch start/end + toggle
+# ---------------------------------------------------------------------------
+
+
+def render_tool_batch_start(call_count: int) -> None:
+    """Begin a tool batch — show live progress counter.
+
+    All per-tool output is suppressed. The user sees only a live
+    in-place counter (⟳ 0/5) that updates with each tool's name.
+    """
+    global _fold_batch_active, _fold_batch_total, _fold_batch_done
+    global _fold_last_expanded, _fold_batch_current, _fold_between_batches
+    global _thinking_ticker_task, _spinner, _streaming_buffer
+    _fold_batch_summaries.clear()
+    _fold_batch_types.clear()
+    _fold_batch_total = call_count
+    _fold_batch_done = 0
+    _fold_batch_current = ""
+    _fold_batch_active = True
+    _fold_last_expanded = False
+    # Discard any inter-batch narration the model streamed between the previous
+    # batch end and this batch start. This prevents duplicate partial answers
+    # from accumulating and rendering after the final batch.
+    _streaming_buffer = []
+    _fold_between_batches = False  # No longer between batches
+    # Kill any stale thinking ticker — fold ticker takes over
+    if _thinking_ticker_task is not None:
+        _thinking_ticker_task.cancel()
+        _thinking_ticker_task = None
+    if _spinner:
+        _spinner.stop()
+        _spinner = None
+    # Kill any tool ticker started by a preceding tool_call_start event
+    # (tool_call_start fires during LLM streaming, before tool_batch_start)
+    stop_tool_ticker_sync()
+    if _repl_mode and _stdout:
+        if _thinking_start:
+            _update_fold_ticker()
+        else:
+            _stdout.write("\r\033[2K")
+            _stdout.flush()
+
+
+def render_tool_batch_end(call_count: int, elapsed_seconds: float) -> None:
+    """Finalize the batch and keep the result in transient live state."""
+    global _fold_batch_active, _fold_turn_started, _fold_turn_batch_count
+    if not _fold_batch_active:
+        return
+    _fold_batch_active = False
+    _flush_dedup()
+
+    group = FoldGroup(
+        call_count,
+        elapsed_seconds,
+        list(_fold_batch_summaries),
+        list(_fold_batch_types),
+    )
+    _fold_groups.append(group)
+    _fold_batch_summaries.clear()
+    _fold_batch_types.clear()
+
+    global _fold_between_batches
+    _fold_turn_batch_count += 1
+    if _repl_mode:
+        _fold_turn_started = True
+        if _stdout:
+            if _thinking_start:
+                _write_thinking_line(time.monotonic() - _thinking_start)
+            else:
+                _stdout.write("\r\033[2K")
+                _stdout.flush()
+    elif not _fold_turn_started:
+        _print_fold_banner(group)
+        _fold_turn_started = True
+    else:
+        _print_fold_continuation(group)
+    _fold_between_batches = True
+
+
+def _record_fold_summary(tool_name: str, summary: str, status: str, elapsed: float) -> None:
+    """Collect a compact one-line summary for Tab expansion."""
+    global _fold_batch_done, _fold_batch_current
+    icon = "\u2713" if status == "success" else "\u2717"
+    elapsed_str = f" {elapsed:.1f}s" if elapsed >= 0.1 else ""
+    _fold_batch_summaries.append(f"{icon} {summary}{elapsed_str}")
+    _fold_batch_types.append(_fold_type_label(tool_name))
+    _fold_batch_done += 1
+    _fold_batch_current = summary
+    _update_fold_ticker()
+
+
+def toggle_last_fold() -> None:
+    """Expand the most recent fold group — one-shot, prints detail once.
+
+    Called when the user presses Tab on an empty prompt.
+    Subsequent Tab presses are no-ops until a new batch completes.
+    """
+    global _fold_last_expanded
+    if not _fold_groups:
+        return
+    if _fold_last_expanded:
+        return  # Already expanded — no-op to avoid scroll noise
+
+    group = _fold_groups[-1]
+    _fold_last_expanded = True
+
+    # Header referencing the fold summary, then per-tool detail lines
+    _print_fold_banner(group, expanded=True)
+    for line in group.summaries:
+        console.print(f"      [{CHROME}]•[/{CHROME}] [{MUTED}]{escape(line)}[/{MUTED}]")
 
 
 def save_turn_history() -> None:
     """Save current turn tools to history. Called at end of each turn."""
-    global _tool_batch_active
+    global _tool_batch_active, _fold_turn_started, _fold_turn_batch_count
     _flush_dedup()
     _tool_batch_active = False
+    _fold_turn_started = False
+    _fold_turn_batch_count = 0
     if _current_turn_tools:
         _tool_history.clear()
         _tool_history.extend(_current_turn_tools)
@@ -302,6 +1075,7 @@ def _humanize_tool(tool_name: str, arguments: dict[str, Any]) -> str:
     # Built-in tools: extract the key argument
     if name_lower == "bash":
         cmd = arguments.get("command", "")
+        cmd = " ".join(str(cmd).split())
         if len(cmd) > 100:
             cmd = cmd[:97] + "..."
         return f"bash {cmd}"
@@ -316,6 +1090,10 @@ def _humanize_tool(tool_name: str, arguments: dict[str, Any]) -> str:
         return f"Editing {_short_path(path)}"
     elif name_lower in ("grep", "search", "ripgrep"):
         pattern = arguments.get("pattern", arguments.get("query", ""))
+        pattern = str(pattern)
+        pattern = pattern.replace("\\b", "").replace("\\s+", " ").replace("\\s*", " ")
+        pattern = pattern.replace("^", "").replace("$", "")
+        pattern = re.sub(r"\s+", " ", pattern).strip()
         return f"Searching for '{pattern}'"
     elif name_lower in ("glob", "glob_files", "find_files"):
         pattern = arguments.get("pattern", "")
@@ -472,7 +1250,7 @@ async def _thinking_ticker() -> None:
                     if suffix:
                         label += f"  [{MUTED}]{suffix}[/{MUTED}]"
                     _spinner.update(label)
-                elif _repl_mode:
+                elif _repl_mode and _stdout_is_tty:
                     _write_thinking_line(elapsed)
     except asyncio.CancelledError:
         return
@@ -488,13 +1266,47 @@ def start_thinking(*, newline: bool = False) -> None:
     """
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
-    global _plan_written_lines
+    global _plan_written_lines, _thinking_line_visible, _working_written_lines
+
+    # During an active fold batch, suppress thinking — the fold ticker is
+    # the visual indicator. Between batches, show thinking normally so the
+    # user knows the agent is still working (not hung).
+    if _fold_batch_active:
+        # Do NOT set _thinking_start — keep it at 0 so stop_thinking()
+        # recognises no visible thinking was shown and no-ops cleanly,
+        # preventing a ghost "Thinking... 0s" line (#779).
+        _thinking_start = 0
+        _thinking_phase = ""
+        _thinking_tokens = 0
+        _streaming_chars = 0
+        _last_chunk_time = 0
+        _phase_start_time = 0
+        _retrying_info = {}
+        _throughput_window.clear()
+        _tool_batch_active = False
+        _plan_written_lines = 0
+        _thinking_line_visible = False
+        _working_written_lines = 0
+        # No ticker, no spinner — completely silent
+        if _thinking_ticker_task is not None:
+            _thinking_ticker_task.cancel()
+            _thinking_ticker_task = None
+        _spinner = None
+        return
+
     _flush_dedup()
     # Emit spacing after tool call block before AI narration text (#680).
     # Must happen here because start_thinking() is called before
     # render_response_end(), which would otherwise handle this.
-    if _tool_batch_active:
-        console.print()
+    # Skip when between fold batches — the live tools line already
+    # owns the current row, and console.print() through patch_stdout
+    # desyncs the raw fd cursor (#758).
+    if _tool_batch_active and not _fold_between_batches:
+        if _repl_mode and _stdout:
+            _stdout.write("\n")
+            _stdout.flush()
+        else:
+            console.print()
     _tool_batch_active = False
     _thinking_start = time.monotonic()
     _thinking_phase = ""
@@ -507,24 +1319,47 @@ def start_thinking(*, newline: bool = False) -> None:
     _last_spinner_update = _thinking_start
     # Reset plan written lines — the block will be freshly written
     _plan_written_lines = 0
+    _thinking_line_visible = False
+    _working_written_lines = 0
     if _repl_mode:
+        defer_initial_line = (
+            _verbosity == Verbosity.COMPACT
+            and newline
+            and not _plan_visible
+            and not _fold_between_batches
+            and not _fold_turn_started
+        )
         # Rich Status conflicts with prompt_toolkit's patch_stdout, so
         # we write a plain "Thinking..." line and overwrite it in-place
         # via ANSI escape codes as the timer ticks.
         if newline and _stdout:
-            # Atomic \n + initial thinking block prevents prompt_toolkit race (#249).
-            gold = "\033[38;2;197;160;89m"
-            rst = "\033[0m"
-            if _plan_visible and _plan_steps:
-                # Write newline then full plan + thinking block
-                _stdout.write("\n")
+            if defer_initial_line:
+                _stdout.write("\r\033[2K")
+                _stdout.flush()
+            elif _fold_between_batches:
+                # The live tools status already owns the current row. Skip the
+                # leading \n so we can overwrite it in place without adding
+                # blank vertical space between execution and answer rendering.
+                _write_thinking_line(0.0)
+            elif _plan_visible and _plan_steps:
+                # Clear prompt_toolkit's "waiting" prompt on the current line,
+                # then move down for the thinking block (#249, #758).
+                _stdout.write("\r\033[2K\n")
                 _stdout.flush()
                 _write_thinking_block(0.0)
             else:
-                _stdout.write(f"\n\r\033[2K{gold}Thinking...{rst}")
+                # Clear prompt_toolkit's "waiting" prompt on the current line,
+                # then move down and write the initial thinking line (#249, #758).
+                gold = "\033[38;2;197;160;89m"
+                rst = "\033[0m"
+                _stdout.write(f"\r\033[2K\n\r\033[2K{gold}Thinking...{rst}")
                 _stdout.flush()
+                _thinking_line_visible = True
         else:
-            _write_thinking_line(0.0)
+            if _plan_visible and _plan_steps:
+                _write_thinking_block(0.0)
+            else:
+                _write_thinking_line(0.0)
         _spinner = None
     else:
         _spinner = Status(f"[{GOLD}]Thinking...[/]", console=console, spinner="dots12")
@@ -555,6 +1390,12 @@ def _build_thinking_text(
     err_c = "\033[38;2;205;107;107m"  # ERROR_RED #CD6B6B
     rst = "\033[0m"
 
+    if (_fold_between_batches or _fold_turn_started or _fold_batch_active) and not error_msg and not cancel_msg:
+        return _build_live_tools_text(elapsed)
+
+    if elapsed < _THINKING_APPEAR_DELAY and not error_msg and not cancel_msg:
+        return ""
+
     if elapsed < 0.5 and not error_msg and not cancel_msg:
         return f"{gold}Thinking...{rst}"
 
@@ -582,30 +1423,34 @@ def _write_thinking_block(
     countdown: int = 0,
     cancel_msg: str = "",
 ) -> None:
-    """Write the full thinking block: plan checklist (if active) + thinking line.
+    """Write the full thinking block: plan checklist (if active) + status line.
 
     Uses cursor-up ANSI codes to redraw the block in place.
     """
-    global _plan_written_lines
+    global _plan_written_lines, _thinking_line_visible
     if not _stdout:
         return
 
-    height = _plan_block_height()
+    plan_height = _plan_block_height()
     thinking_text = _build_thinking_text(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
 
-    if height == 0:
+    if plan_height == 0:
         # No plan — single-line thinking only
+        if not thinking_text:
+            return
         _stdout.write(f"\r\033[2K{thinking_text}")
         _stdout.flush()
+        _thinking_line_visible = True
         return
 
-    # Multi-line block: plan header + steps + thinking line
+    # Multi-line block: plan header + steps + status line
     buf: list[str] = []
 
     # Move cursor up to the top of the block (if we've written it before)
     if _plan_written_lines > 0:
-        up = _plan_written_lines  # lines above the thinking line
-        buf.append(f"\033[{up}A")
+        buf.append(f"\033[{_plan_written_lines}A")
+    elif _thinking_line_visible:
+        buf.append("\033[1A")
 
     # ANSI colors
     green = "\033[32m"
@@ -630,12 +1475,13 @@ def _write_thinking_block(
             text_style = muted_c
         buf.append(f"\r\033[2K    {icon} {text_style}{step['text']}{rst}\n")
 
-    # Thinking line (no trailing newline — cursor stays here)
+    # Status line (no trailing newline — cursor stays here)
     buf.append(f"\r\033[2K{thinking_text}")
 
     _stdout.write("".join(buf))
     _stdout.flush()
-    _plan_written_lines = height  # remember how many plan lines we wrote
+    _plan_written_lines = plan_height  # remember how many plan lines we wrote
+    _thinking_line_visible = False
 
 
 def _write_thinking_line(
@@ -655,23 +1501,33 @@ def _write_thinking_line(
     - ``countdown``: seconds remaining for auto-retry (shown after error_msg)
     - ``cancel_msg``: muted message like "cancelled" (user-initiated, not error)
     """
+    global _thinking_line_visible
     if _plan_visible and _plan_steps:
         _write_thinking_block(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
         return
 
-    text = f"\r\033[2K{_build_thinking_text(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)}"
+    text_content = _build_thinking_text(elapsed, error_msg=error_msg, countdown=countdown, cancel_msg=cancel_msg)
+    if not text_content:
+        return
+
+    text = f"\r\033[2K{text_content}"
     if _stdout:
         _stdout.write(text)
         _stdout.flush()
+    _thinking_line_visible = True
 
 
 def update_thinking() -> None:
     """Update the spinner timer (throttled to once per second).
 
     No-op when the background ticker is running — the ticker handles updates.
+    No-op when thinking was suppressed (e.g. between fold batches) — _thinking_start
+    is 0, and writing a thinking line would show a bogus system-uptime elapsed time.
     """
     global _last_spinner_update
     if _thinking_ticker_task is not None:
+        return
+    if not _thinking_start:
         return
     if _spinner:
         now = time.monotonic()
@@ -692,6 +1548,7 @@ async def stop_thinking(
     error_msg: str = "",
     cancel_msg: str = "",
     collapse_plan: bool = False,
+    clear: bool = False,
 ) -> float:
     """Stop the spinner, return elapsed seconds.
 
@@ -701,10 +1558,21 @@ async def stop_thinking(
     - ``error_msg``: pale-red inline error (system failure)
     - ``cancel_msg``: muted message (user-initiated cancel)
     - ``collapse_plan``: if True, collapse the plan to a one-line summary
+    - ``clear``: erase the thinking line entirely (no permanent text).
+      Used before fold batches where the thinking line is transient.
     - Neither: clean final line (just "Thinking... Ns")
     """
     global _spinner, _thinking_ticker_task, _thinking_phase, _plan_written_lines, _thinking_start
+    global _fold_batch_active, _fold_between_batches
+    global _thinking_line_visible
     elapsed = 0.0
+    # No-op if thinking isn't active — prevents stale timer display when
+    # stop_thinking() is called twice (e.g. REPL event handler + ask_user callback).
+    if not _thinking_start and _spinner is None and _thinking_ticker_task is None:
+        return 0.0
+    # Clear fold state so a cancelled batch doesn't suppress future output.
+    _fold_batch_active = False
+    _fold_between_batches = False
     # Await ticker termination to prevent race conditions
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
@@ -720,36 +1588,52 @@ async def stop_thinking(
     else:
         elapsed = time.monotonic() - _thinking_start
         if _repl_mode and _stdout:
-            # Clear the plan block if it's on screen
-            if _plan_written_lines > 0:
-                # Move cursor up to the top of the plan block
-                _stdout.write(f"\033[{_plan_written_lines}A")
-                # Clear all plan lines + thinking line
-                for _ in range(_plan_written_lines + 1):
-                    _stdout.write("\r\033[2K\n")
-                # Move back up one line (we wrote one too many \n)
-                _stdout.write("\033[1A")
-                _plan_written_lines = 0
-
-            if collapse_plan:
-                _collapse_plan()
-
-            if error_msg:
-                _write_thinking_line(elapsed, error_msg=error_msg)
-                _stdout.write("\n")
+            if clear:
+                # Erase the thinking line — no permanent text, cursor stays
+                # on this line for the next output (fold ticker, etc.).
+                _stdout.write("\r\033[2K")
                 _stdout.flush()
-            elif cancel_msg:
-                _write_thinking_line(elapsed, cancel_msg=cancel_msg)
-                _stdout.write("\n")
-                _stdout.flush()
+                _thinking_line_visible = False
             else:
-                # Clean final line: just "Thinking... Ns" — no phase, no hint.
-                _thinking_phase = ""
-                gold = "\033[38;2;197;160;89m"
-                timer_c = "\033[38;2;107;114;128m"
-                rst = "\033[0m"
-                _stdout.write(f"\r\033[2K{gold}Thinking...{rst} {timer_c}{elapsed:.0f}s{rst}\n")
-                _stdout.flush()
+                # Clear the plan block if it's on screen
+                if _plan_written_lines > 0:
+                    # Move cursor up to the top of the plan block
+                    _stdout.write(f"\033[{_plan_written_lines}A")
+                    # Clear all plan lines + thinking line
+                    for _ in range(_plan_written_lines + 1):
+                        _stdout.write("\r\033[2K\n")
+                    # Move back up one line (we wrote one too many \n)
+                    _stdout.write("\033[1A")
+                    _plan_written_lines = 0
+                    _thinking_line_visible = False
+
+                if collapse_plan:
+                    _collapse_plan()
+
+                if error_msg:
+                    _write_thinking_line(elapsed, error_msg=error_msg)
+                    _stdout.write("\n")
+                    _stdout.flush()
+                    _thinking_line_visible = False
+                elif cancel_msg:
+                    _write_thinking_line(elapsed, cancel_msg=cancel_msg)
+                    _stdout.write("\n")
+                    _stdout.flush()
+                    _thinking_line_visible = False
+                else:
+                    if (_fold_turn_started and _fold_groups) or (not _thinking_line_visible and _plan_written_lines == 0):
+                        _stdout.write("\r\033[2K")
+                        _stdout.flush()
+                        _thinking_line_visible = False
+                    else:
+                        # Clean final line: just "Thinking... Ns" — no phase, no hint.
+                        _thinking_phase = ""
+                        gold = "\033[38;2;197;160;89m"
+                        timer_c = "\033[38;2;107;114;128m"
+                        rst = "\033[0m"
+                        _stdout.write(f"\r\033[2K{gold}Thinking...{rst} {timer_c}{elapsed:.0f}s{rst}\n")
+                        _stdout.flush()
+                        _thinking_line_visible = False
     _thinking_start = 0
     return elapsed
 
@@ -758,9 +1642,14 @@ def stop_thinking_sync() -> float:
     """Synchronous fallback for stop_thinking (KeyboardInterrupt handlers).
 
     Does not await the ticker — use only when an event loop is unavailable.
+    Also clears fold batch state so a cancelled batch doesn't swallow future output.
     """
     global _spinner, _thinking_ticker_task, _plan_written_lines, _thinking_start
+    global _fold_batch_active, _fold_between_batches
+    global _thinking_line_visible
     elapsed = 0.0
+    if not _thinking_start and _spinner is None and _thinking_ticker_task is None:
+        return 0.0
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
         _thinking_ticker_task = None
@@ -778,9 +1667,14 @@ def stop_thinking_sync() -> float:
                     _stdout.write("\r\033[2K\n")
                 _stdout.write("\033[1A")
                 _plan_written_lines = 0
+                _thinking_line_visible = False
             _stdout.write("\r\033[2K")
             _stdout.flush()
+            _thinking_line_visible = False
     _thinking_start = 0
+    # Clear fold state so a cancelled batch doesn't suppress future output.
+    _fold_batch_active = False
+    _fold_between_batches = False
     return elapsed
 
 
@@ -923,7 +1817,79 @@ def _phase_suffix(elapsed: float) -> str:
 def _make_markdown(text: str) -> Markdown:
     """Create a Markdown renderable with left-aligned headings."""
     _patch_heading_left()
-    return Markdown(text)
+    return Markdown(_shape_markdown(text))
+
+
+def _shape_markdown(text: str) -> str:
+    """Reshape markdown into a calmer CLI presentation before rendering."""
+    return _soften_inline_code(_flatten_headings(text))
+
+
+def _soften_inline_code(text: str) -> str:
+    """Strip inline code boxing from prose while preserving fenced code blocks."""
+    lines = text.splitlines()
+    softened: list[str] = []
+    in_fence = False
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            softened.append(line)
+            continue
+        if in_fence:
+            softened.append(line)
+            continue
+        softened.append(_replace_inline_code(line))
+    return "\n".join(softened)
+
+
+def _flatten_headings(text: str) -> str:
+    """Convert markdown headings into plain bold labels for the CLI."""
+    lines = text.splitlines()
+    flattened: list[str] = []
+    in_fence = False
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            flattened.append(line)
+            continue
+        if in_fence:
+            flattened.append(line)
+            continue
+        if stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if level and len(stripped) > level and stripped[level] == " ":
+                heading = stripped[level + 1 :].strip()
+                if heading:
+                    label = heading.upper() if level <= 2 else heading
+                    if flattened and flattened[-1].strip():
+                        flattened.append("")
+                    flattened.append(f"**{label}**")
+                    flattened.append("")
+                    continue
+        flattened.append(line)
+    return "\n".join(flattened)
+
+
+def _replace_inline_code(line: str) -> str:
+    """Replace simple inline markdown code spans with bold text."""
+    out: list[str] = []
+    i = 0
+    while i < len(line):
+        if line[i] != "`":
+            out.append(line[i])
+            i += 1
+            continue
+        j = line.find("`", i + 1)
+        if j == -1:
+            out.append(line[i:])
+            break
+        content = line[i + 1 : j]
+        if content:
+            out.append(f"**{content}**")
+        i = j + 1
+    return "".join(out)
 
 
 _heading_patched = False
@@ -951,8 +1917,24 @@ def flush_buffered_text() -> None:
 
     Called before tool calls start so the AI's task explanation
     (e.g. 'Let me review your auth files') renders before the tool output.
+    During a fold batch, text is silently discarded — the fold summary
+    is the only visible output.
     """
     global _streaming_buffer, _tool_batch_active
+
+    # In compact REPL mode, keep provisional narration buffered until the turn
+    # is complete. This prevents "I found..." style mid-turn recaps from
+    # escaping above the folded execution summary.
+    if _repl_mode and _verbosity == Verbosity.COMPACT:
+        return
+
+    # During or between fold batches, suppress mid-turn text rendering.
+    # The buffer is kept intact — render_tool_batch_start() will clear it
+    # when the next batch begins (discarding inter-batch narration), while
+    # render_response_end() will flush whatever remains after the last batch.
+    if _fold_batch_active or _fold_between_batches:
+        return
+
     text = "".join(_streaming_buffer)
     _streaming_buffer = []
     if not text.strip():
@@ -974,7 +1956,7 @@ def _flush_dedup() -> None:
     global _dedup_key, _dedup_count, _dedup_first_summary, _dedup_summary
     if _dedup_count > 1:
         label = _dedup_flush_label(_dedup_key, _dedup_count)
-        console.print(f"    [{MUTED}]{label}[/{MUTED}]")
+        _fold_print(f"    [{MUTED}]{label}[/{MUTED}]")
     _dedup_key = ""
     _dedup_count = 0
     _dedup_first_summary = ""
@@ -988,24 +1970,38 @@ def render_token(content: str) -> None:
 
 def render_response_end() -> None:
     """Render the complete buffered response with Rich Markdown."""
-    global _streaming_buffer, _tool_batch_active
+    global _streaming_buffer, _tool_batch_active, _fold_between_batches
+    global _fold_turn_started, _fold_turn_batch_count
     _flush_dedup()
 
     full_text = "".join(_streaming_buffer)
     _streaming_buffer = []
+    _fold_between_batches = False  # Turn is over
+    _fold_turn_batch_count = 0
 
     if not full_text.strip():
+        _fold_turn_started = False
         _tool_batch_active = False
         return
+
+    full_text = _trim_fold_recap(full_text)
 
     # Add spacing after tool call block before AI response
     if _tool_batch_active:
         console.print()
         _tool_batch_active = False
 
+    if _fold_groups:
+        _print_fold_summary_block()
+        console.print()
+
+    _fold_turn_started = False
+
     from rich.padding import Padding
 
-    _stdout_console.print(Padding(_make_markdown(full_text), (0, 2, 1, 2)))
+    console.print()
+    console.print(f"  [{SLATE}]AI:[/{SLATE}]")
+    _stdout_console.print(Padding(_make_markdown(full_text), (0, 2, 1, 4)))
 
 
 def render_newline() -> None:
@@ -1041,10 +2037,10 @@ def _render_inline_diff(tool_name: str, output: dict[str, Any]) -> None:
         header_text = Text()
         header_text.append("  ● ", style="green")
         header_text.append(f"Write({short})", style="bold")
-        console.print(header_text)
+        _fold_print(header_text)
         summary_text = Text()
         summary_text.append(f"  └ Created, {lines} lines", style=MUTED)
-        console.print(summary_text)
+        _fold_print(summary_text)
         return
 
     if old_content is None or new_content is None:
@@ -1073,7 +2069,7 @@ def _render_inline_diff(tool_name: str, output: dict[str, Any]) -> None:
     header_text = Text()
     header_text.append("  ● ", style="green")
     header_text.append(f"{label}({short})", style="bold")
-    console.print(header_text)
+    _fold_print(header_text)
 
     summary_text = Text()
     summary_text.append("  └ ", style=MUTED)
@@ -1083,7 +2079,7 @@ def _render_inline_diff(tool_name: str, output: dict[str, Any]) -> None:
     summary_text.append(f"removed {removed} lines", style="red") if removed else None
     if not added and not removed:
         summary_text.append("no line changes", style=MUTED)
-    console.print(summary_text)
+    _fold_print(summary_text)
 
     # Parse hunks from unified diff and render with context collapsing
     _render_diff_hunks(diff, old_lines, new_lines)
@@ -1118,7 +2114,7 @@ def _render_diff_hunks(diff: list[str], old_lines: list[str], new_lines: list[st
 
     for i, (old_start, new_start, hunk_lines) in enumerate(hunks):
         if i > 0:
-            console.print(f"    [{MUTED}]...[/{MUTED}]")
+            _fold_print(f"    [{MUTED}]...[/{MUTED}]")
 
         old_num = old_start
         new_num = new_start
@@ -1132,19 +2128,19 @@ def _render_diff_hunks(diff: list[str], old_lines: list[str], new_lines: list[st
                 line_text = Text()
                 line_text.append(f"    {old_num:>4} ", style=_DIFF_LINE_NO)
                 line_text.append(f" {display} ", style=_DIFF_RED_BG)
-                console.print(line_text)
+                _fold_print(line_text)
                 old_num += 1
             elif tag == "+":
                 line_text = Text()
                 line_text.append(f"    {new_num:>4} ", style=_DIFF_LINE_NO)
                 line_text.append(f" {display} ", style=_DIFF_GREEN_BG)
-                console.print(line_text)
+                _fold_print(line_text)
                 new_num += 1
             else:
                 line_text = Text()
                 line_text.append(f"    {new_num:>4} ", style=_DIFF_LINE_NO)
                 line_text.append(f" {display}", style=MUTED)
-                console.print(line_text)
+                _fold_print(line_text)
                 old_num += 1
                 new_num += 1
 
@@ -1174,7 +2170,7 @@ async def _tool_ticker() -> None:
                 if _tool_spinner:
                     label = f"  [{MUTED}]{escape(_tool_ticker_summary)}  {elapsed:.0f}s[/{MUTED}]"
                     _tool_spinner.update(label)
-                elif _repl_mode and _stdout:
+                elif _repl_mode and _stdout and _stdout_is_tty:
                     muted = "\033[38;2;139;139;139m"
                     rst = "\033[0m"
                     _stdout.write(f"\r\033[2K{muted}  {_tool_ticker_summary}  {elapsed:.0f}s{rst}")
@@ -1221,7 +2217,7 @@ def stop_tool_ticker_sync() -> None:
 
 def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
     """Show tool call breadcrumb. Static print (no live spinner) for terminal compatibility."""
-    global _tool_start, _tool_batch_active
+    global _tool_start, _tool_batch_active, _thinking_line_visible
 
     # Flush any buffered AI text so task explanations appear before tool output
     flush_buffered_text()
@@ -1244,23 +2240,46 @@ def render_tool_call_start(tool_name: str, arguments: dict[str, Any]) -> None:
         }
     )
 
-    # Add spacing before the first tool call in a batch
+    # Add spacing before the first tool call in a batch.
+    # In REPL mode, use raw fd to avoid desyncing the cursor with
+    # console.print() (patch_stdout proxy) — the thinking/fold ticker
+    # writes also use the raw fd (#758).
     if not _tool_batch_active:
-        console.print()
+        if not _fold_batch_active:
+            if _repl_mode and _stdout:
+                if _thinking_line_visible and _thinking_start:
+                    # Reuse the active thinking row for the upcoming live
+                    # execution status instead of leaving "Thinking..." behind
+                    # in scrollback before the fold batch takes over.
+                    pass
+                else:
+                    _stdout.write("\n")
+                    _stdout.flush()
+            else:
+                console.print()
+        elif _thinking_line_visible:
+            _thinking_line_visible = False
         _tool_batch_active = True
+
+    # Update fold ticker with current tool name
+    if _fold_batch_active:
+        global _fold_batch_current
+        _fold_batch_current = summary
+        _update_fold_ticker()
+        return  # Everything else (verbose output, tool ticker) is suppressed
 
     if _verbosity == Verbosity.VERBOSE:
         # Full output: tool name + raw args
         args_str = json.dumps(arguments, indent=None, default=str)
         if len(args_str) > 200:
             args_str = args_str[:200] + "..."
-        console.print(f"  [{CHROME}]> {escape(tool_name)}({escape(args_str)})[/{CHROME}]")
+        _fold_print(f"  [{CHROME}]> {escape(tool_name)}({escape(args_str)})[/{CHROME}]")
 
     # Start live elapsed timer — skip for interactive tools that use the terminal.
-    # Stop any existing ticker first so it doesn't keep printing during input.
+    # Also skip during fold batch (tools are suppressed, summary shown at end).
     if tool_name in ("ask_user", "ask_human"):
         stop_tool_ticker_sync()
-    else:
+    elif not _fold_batch_active:
         start_tool_ticker(summary)
 
 
@@ -1291,6 +2310,11 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
 
     summary = matched_entry["summary"] if matched_entry else tool_name
 
+    # During fold batch: record summary for Tab expand, update live ticker
+    if _fold_batch_active:
+        _record_fold_summary(tool_name, summary, status, elapsed)
+        return
+
     if _verbosity == Verbosity.VERBOSE:
         # Legacy-style
         if status == "success":
@@ -1312,7 +2336,7 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
                     stdout = stdout[:200] + "..."
                 output_str = f" - {stdout}" if stdout else ""
         text = Text(f"  < {tool_name}: {status}{output_str}", style=style)
-        console.print(text)
+        _fold_print(text)
         return
 
     # Build the result line
@@ -1338,25 +2362,25 @@ def render_tool_call_end(tool_name: str, status: str, output: Any) -> None:
         return
 
     if status != "success":
-        console.print(f"{status_icon} {escape(summary)}{elapsed_str}")
+        _fold_print(f"{status_icon} {escape(summary)}{elapsed_str}")
         err = _error_summary(output)
         if err:
-            console.print(f"    [red]{escape(err)}[/red]")
+            _fold_print(f"    [red]{escape(err)}[/red]")
         _dedup_key = ""
         _dedup_count = 0
         _dedup_summary = ""
     elif _verbosity == Verbosity.DETAILED:
         detail = _output_summary(output)
-        console.print(f"{status_icon} [{MUTED}]{escape(summary)}{elapsed_str}[/{MUTED}]")
+        _fold_print(f"{status_icon} [{MUTED}]{escape(summary)}{elapsed_str}[/{MUTED}]")
         if detail:
-            console.print(f"    [{CHROME}]{escape(detail)}[/{CHROME}]")
+            _fold_print(f"    [{CHROME}]{escape(detail)}[/{CHROME}]")
         _dedup_key = key
         _dedup_count = 1
         _dedup_first_summary = summary
         _dedup_summary = summary
     else:
         # Compact: just result line
-        console.print(f"{status_icon} [{MUTED}]{escape(summary)}{elapsed_str}[/{MUTED}]")
+        _fold_print(f"{status_icon} [{MUTED}]{escape(summary)}{elapsed_str}[/{MUTED}]")
         _dedup_key = key
         _dedup_count = 1
         _dedup_first_summary = summary
@@ -1890,43 +2914,22 @@ def render_subagent_end(agent_id: str, elapsed: float, tool_calls: list[str], er
 
 
 def render_rag_sources(chunks: list[Any]) -> None:
-    """Render a muted line listing which sources contributed RAG context.
-
-    Accepts either RetrievedChunk objects (with attributes) or dicts (from persisted metadata).
-    """
+    """Render a muted line listing which sources contributed RAG context."""
     if not chunks:
         return
     seen: set[str] = set()
     parts: list[str] = []
     for c in chunks:
-        if isinstance(c, dict):
-            label = c.get("label") or "?"
-            stype = c.get("type") or "?"
-        else:
-            label = getattr(c, "source_label", None) or "?"
-            stype = getattr(c, "source_type", None) or "?"
+        label = getattr(c, "source_label", None) or "?"
+        stype = getattr(c, "source_type", None) or "?"
         key = f"{stype}:{label}"
         if key in seen:
             continue
         seen.add(key)
-        badge = "knowledge" if stype == "source_chunk" else "conversation"
+        badge = "source" if stype == "source_chunk" else "message"
         parts.append(f'"{escape(label)}" ({badge})')
     if parts:
         console.print(f"  [{MUTED}]Sources: {', '.join(parts)}[/{MUTED}]")
-
-
-def render_rag_status(status: str, chunk_count: int = 0, reason: str | None = None) -> None:
-    """Render RAG retrieval status with consistent formatting."""
-    if status == "ok" and chunk_count > 0:
-        console.print(f"  [{MUTED}][RAG: {chunk_count} relevant chunk(s) retrieved][/{MUTED}]")
-    elif status == "no_results":
-        suffix = f" — {reason}" if reason else ""
-        console.print(f"  [{MUTED}][RAG: no results{suffix}][/{MUTED}]")
-    elif status == "failed":
-        console.print(f"  [{MUTED}][RAG: retrieval failed][/{MUTED}]")
-    elif status == "no_vec_support":
-        console.print(f"  [{MUTED}][RAG: embedding service unavailable][/{MUTED}]")
-    # Silent for: disabled, no_config, skipped_plan_mode, skipped
 
 
 def render_context_footer(

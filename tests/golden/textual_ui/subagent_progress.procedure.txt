@@ -1,0 +1,2 @@
+<spin> I'm verifying the result before I trust it. [command]
+✓ I'm identifying the files and symbols that matter. [grep]

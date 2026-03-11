@@ -1,0 +1,8 @@
+✓ stream · 6 events · waiting <time> · last done
+✓ tool_call_start {'tool_name': 'read', 'arguments': {'path': '/root/secret.txt'}}
+✓ tool_call_end {'tool_name': 'read', 'status': 'error', 'output': {'error': 'permission denied'}}
+✓ tool_error_output {'error': 'permission denied'}
+✓ tool_call_start {'tool_name': 'read', 'arguments': {'path': 'tests/unit/test_focus_fold.py'}}
+✓ tool_call_end {'tool_name': 'read', 'status': 'success', 'output': {}}
+✓ assistant_message chars=177
+✓ done {}

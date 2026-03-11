@@ -1,0 +1,2 @@
+<spin> Running run_agent [command]
+✓ Searching for "rm -rf" [grep]

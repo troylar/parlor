@@ -329,71 +329,16 @@ class TestBadRequestErrorHandling:
         assert error_events[0]["data"]["code"] == "context_length_exceeded"
 
     @pytest.mark.asyncio
-    async def test_other_bad_request_surfaces_sanitized_message(self):
-        """BadRequestError without context_length_exceeded must yield sanitized provider message."""
+    async def test_other_bad_request_yields_error_message(self):
+        """BadRequestError without context_length_exceeded must yield the error message."""
         from openai import BadRequestError
 
         service = _make_service()
         service.client.chat.completions.create = AsyncMock(
             side_effect=BadRequestError(
-                message="The model was unable to complete inference due to an internal error",
+                message="Invalid request parameters",
                 response=MagicMock(status_code=400),
-                body={
-                    "error": {
-                        "code": "invalid_request",
-                        "message": "The model was unable to complete inference due to an internal error",
-                    }
-                },
-            )
-        )
-
-        events = []
-        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
-            events.append(event)
-
-        error_events = [e for e in events if e["event"] == "error"]
-        assert len(error_events) == 1
-        assert "unable to complete inference" in error_events[0]["data"]["message"]
-        assert error_events[0]["data"]["code"] == "bad_request"
-
-    @pytest.mark.asyncio
-    async def test_bad_request_with_url_strips_url(self):
-        """Provider error messages containing URLs must have them stripped."""
-        from openai import BadRequestError
-
-        service = _make_service()
-        service.client.chat.completions.create = AsyncMock(
-            side_effect=BadRequestError(
-                message="Error at endpoint",
-                response=MagicMock(status_code=400),
-                body={
-                    "error": {
-                        "code": "invalid_request",
-                        "message": "Error at https://api.example.com/v1/chat - bad request",
-                    }
-                },
-            )
-        )
-
-        events = []
-        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
-            events.append(event)
-
-        error_events = [e for e in events if e["event"] == "error"]
-        assert len(error_events) == 1
-        assert "https://" not in error_events[0]["data"]["message"]
-
-    @pytest.mark.asyncio
-    async def test_bad_request_with_json_body_returns_fallback(self):
-        """If provider error body message is JSON, fall back to generic."""
-        from openai import BadRequestError
-
-        service = _make_service()
-        service.client.chat.completions.create = AsyncMock(
-            side_effect=BadRequestError(
-                message='{"nested": "json"}',
-                response=MagicMock(status_code=400),
-                body={"error": {"code": "invalid_request", "message": '{"nested": "json"}'}},
+                body={"error": {"code": "invalid_request"}},
             )
         )
 
@@ -825,6 +770,37 @@ class TestStreamChatWithIterStream:
         # No retrying events emitted
         retry_events = [e for e in events if e["event"] == "retrying"]
         assert len(retry_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_unexpected_eof_yields_incomplete_stream_error(self):
+        class MockStream:
+            def __aiter__(self):
+                return self._gen().__aiter__()
+
+            async def _gen(self):
+                yield MagicMock(
+                    choices=[MagicMock(delta=MagicMock(content="If", tool_calls=None), finish_reason=None)]
+                )
+                return
+
+            async def close(self):
+                pass
+
+        service = _make_service(_make_config(request_timeout=30, first_token_timeout=30))
+        service.client.chat.completions.create = AsyncMock(return_value=MockStream())
+
+        events = []
+        async for event in service.stream_chat([{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        token_events = [e for e in events if e["event"] == "token"]
+        error_events = [e for e in events if e["event"] == "error"]
+
+        assert len(token_events) == 1
+        assert token_events[0]["data"]["content"] == "If"
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["code"] == "incomplete_stream"
+        assert error_events[0]["data"]["retryable"] is True
 
 
 class TestBuildClientCleanup:

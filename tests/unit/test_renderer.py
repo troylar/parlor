@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -290,6 +290,9 @@ class TestStartThinkingFlushesDedup:
         r._dedup_summary = ""
         r._tool_batch_active = False
         r._tool_dedup_enabled = True
+        r._fold_batch_active = False
+        r._fold_between_batches = False
+        r._fold_suppress_thinking = False
 
     def test_start_thinking_flushes_dedup(self) -> None:
         import anteroom.cli.renderer as r
@@ -306,20 +309,22 @@ class TestStartThinkingFlushesDedup:
         assert r._dedup_count == 0
 
     def test_start_thinking_resets_tool_batch(self) -> None:
+        from unittest.mock import MagicMock
+
         import anteroom.cli.renderer as r
 
         r._tool_batch_active = True
-        with (
-            patch("anteroom.cli.renderer._write_thinking_line"),
-            patch("anteroom.cli.renderer.console") as mock_console,
-        ):
+        mock_stdout = MagicMock()
+        r._stdout = mock_stdout
+        with patch("anteroom.cli.renderer._write_thinking_line"):
             r._repl_mode = True
             start_thinking()
             r._repl_mode = False
+            r._stdout = None
         assert r._tool_batch_active is False
-        # Should have emitted a blank line for spacing (#680)
-        blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
-        assert len(blank_calls) >= 1
+        # In REPL mode, spacing uses raw fd write (#758)
+        raw_writes = [c[0][0] for c in mock_stdout.write.call_args_list]
+        assert any("\n" in w for w in raw_writes)
 
     def test_start_thinking_no_spacing_without_tool_batch(self) -> None:
         """start_thinking() should NOT emit a blank line when no tool batch was active."""
@@ -405,6 +410,8 @@ class TestFlushBufferedTextToolSpacing:
 
         r._streaming_buffer.clear()
         r._tool_batch_active = False
+        r._fold_batch_active = False
+        r._fold_between_batches = False
 
     def test_flush_adds_spacing_after_tool_batch(self) -> None:
         """flush_buffered_text() should print a blank line when _tool_batch_active is True."""
@@ -466,9 +473,9 @@ class TestFlushBufferedTextToolSpacing:
         r._streaming_buffer.append("final text")
         with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
             render_response_end()
-            # No blank line from console since _tool_batch_active was already cleared
+            # One intentional spacer before the AI label.
             blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
-            assert len(blank_calls) == 0
+            assert len(blank_calls) == 1
 
 
 class TestToolCallDimming:
@@ -763,6 +770,26 @@ class TestToolBatchSpacing:
                 if call == ((),) or (call[0] == () and call[1] == {}):
                     raise AssertionError("Should not print blank line for second tool call")
 
+    def test_first_tool_call_reuses_thinking_line_in_repl(self) -> None:
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._thinking_start = time.monotonic()
+        r._thinking_line_visible = True
+        mock_stdout = MagicMock()
+        r._stdout = mock_stdout
+        try:
+            with patch("anteroom.cli.renderer.console"), patch("anteroom.cli.renderer._stdout_console"):
+                render_tool_call_start("bash", {"command": "ls"})
+            raw_writes = [c[0][0] for c in mock_stdout.write.call_args_list]
+            assert all("\n" not in w for w in raw_writes)
+            assert r._tool_batch_active is True
+        finally:
+            r._repl_mode = False
+            r._stdout = None
+            r._thinking_start = 0
+            r._thinking_line_visible = False
+
     def test_save_turn_history_resets_batch_flag(self) -> None:
         import anteroom.cli.renderer as r
 
@@ -791,9 +818,9 @@ class TestToolBatchSpacing:
         r._streaming_buffer.extend(["hello ", "world"])
         with patch("anteroom.cli.renderer.console") as mock_console, patch("anteroom.cli.renderer._stdout_console"):
             render_response_end()
-            # No blank line should be printed on console (only _stdout_console gets the markdown)
+            # One intentional spacer should be printed before the AI label.
             blank_calls = [c for c in mock_console.print.call_args_list if c == ((),) or c[0] == ()]
-            assert len(blank_calls) == 0
+            assert len(blank_calls) == 1
 
 
 class TestStartupStep:
@@ -1041,6 +1068,18 @@ class TestEnhancedDedup:
 class TestWriteThinkingLine:
     """Tests for _write_thinking_line() ESC cancel hint (#164)."""
 
+    def test_no_output_before_appear_delay(self) -> None:
+        """Very fast turns should not flash a transient thinking label."""
+        import io
+
+        import anteroom.cli.renderer as r
+
+        buf = io.StringIO()
+        r._stdout = buf
+        _write_thinking_line(0.2)
+        assert buf.getvalue() == ""
+        r._stdout = None
+
     def test_no_timer_under_half_second(self) -> None:
         """Under 0.5s: only 'Thinking...' with no timer or hint."""
         import io
@@ -1049,7 +1088,7 @@ class TestWriteThinkingLine:
 
         buf = io.StringIO()
         r._stdout = buf
-        _write_thinking_line(0.3)
+        _write_thinking_line(0.4)
         output = buf.getvalue()
         assert "Thinking..." in output
         assert "s" not in output.split("Thinking...")[1].split("\033")[0]
@@ -1250,13 +1289,12 @@ class TestThinkingTicker:
 class TestFirstThinkingNewline:
     """Regression tests for first thinking indicator blank line (#249).
 
-    start_thinking(newline=True) must write \\n + Thinking... as a single
-    atomic write so prompt_toolkit's cursor teardown cannot interleave.
+    start_thinking(newline=True) must clear the prompt row atomically.
     """
 
     @pytest.mark.asyncio
     async def test_newline_true_writes_atomic_line(self) -> None:
-        """newline=True writes \\n + erase + Thinking... in one write call."""
+        """newline=True clears prompt line without flashing Thinking immediately."""
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
@@ -1265,12 +1303,9 @@ class TestFirstThinkingNewline:
         try:
             start_thinking(newline=True)
             output = buf.getvalue()
-            # Must contain Thinking... text
-            assert "Thinking..." in output
-            # Must start with \n for visual separation
-            assert output.startswith("\n")
-            # The \n and Thinking... must be in the same write (atomic)
-            assert "\n\r\033[2K" in output
+            # Starts with \r\033[2K to clear prompt_toolkit's waiting prompt (#758)
+            assert output.startswith("\r\033[2K")
+            assert "Thinking..." not in output
         finally:
             stop_thinking_sync()
             r._repl_mode = False
@@ -1278,7 +1313,7 @@ class TestFirstThinkingNewline:
 
     @pytest.mark.asyncio
     async def test_newline_false_no_leading_newline(self) -> None:
-        """Default (newline=False) writes no leading \\n — for retries."""
+        """Default (newline=False) no longer flashes Thinking immediately."""
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
@@ -1286,10 +1321,7 @@ class TestFirstThinkingNewline:
         r._stdout = buf
         try:
             start_thinking(newline=False)
-            output = buf.getvalue()
-            assert "Thinking..." in output
-            # Must NOT start with \n (retry overwrites in-place)
-            assert not output.startswith("\n")
+            assert buf.getvalue() == ""
         finally:
             stop_thinking_sync()
             r._repl_mode = False
@@ -1297,7 +1329,7 @@ class TestFirstThinkingNewline:
 
     @pytest.mark.asyncio
     async def test_newline_default_is_false(self) -> None:
-        """start_thinking() without keyword defaults to no leading newline."""
+        """start_thinking() without keyword also defers the visible label."""
         import anteroom.cli.renderer as r
 
         buf = io.StringIO()
@@ -1305,9 +1337,7 @@ class TestFirstThinkingNewline:
         r._stdout = buf
         try:
             start_thinking()
-            output = buf.getvalue()
-            assert "Thinking..." in output
-            assert not output.startswith("\n")
+            assert buf.getvalue() == ""
         finally:
             stop_thinking_sync()
             r._repl_mode = False
@@ -2265,6 +2295,7 @@ class TestAsyncStopThinking:
         r._repl_mode = True
         r._stdout = buf
         r._thinking_start = time.monotonic() - 10.0  # long enough for esc hint
+        r._thinking_line_visible = True
         r._thinking_phase = "waiting"  # stale phase that should NOT appear
         r._phase_start_time = time.monotonic() - 8.0
         r._thinking_ticker_task = None
@@ -2293,6 +2324,7 @@ class TestAsyncStopThinking:
         r._repl_mode = True
         r._stdout = buf
         r._thinking_start = time.monotonic() - 5.0
+        r._thinking_line_visible = True
         r._thinking_phase = "streaming"
         r._streaming_chars = 1234
         r._phase_start_time = time.monotonic() - 3.0

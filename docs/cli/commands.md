@@ -1,40 +1,104 @@
 # Commands
 
-All slash commands available in the CLI REPL.
+Slash commands are now driven by a shared command engine used by:
+
+- the legacy CLI REPL
+- the Textual CLI
+- the web UI
+
+The parity contract is split into two practical tiers:
+
+- Tier 1: core commands that should behave equivalently everywhere
+- Tier 2: conversation, space, artifact, and pack commands that share semantics but may use client-specific UI affordances like pickers or inline confirmations
+
+On the web UI, many parity-tier commands now render structured result cards and picker overlays instead of raw markdown-only output.
 
 ## Command Reference
 
-| Command | Action |
-|---|---|
-| `/new` | Start a new conversation |
-| `/last` | Resume the most recent conversation |
-| `/list [N]` | Show recent conversations (default 20) |
-| `/search <query>` | Search conversations by content |
-| `/resume <N\|id\|slug>` | Resume by list number, conversation ID, or slug |
-| `/slug [name]` | View or set the conversation slug |
-| `/delete <N\|id\|slug>` | Delete a conversation (with confirmation) |
-| `/rewind` | Rewind to a previous message, optionally undoing file changes via git |
-| `/compact` | Summarize and compact message history to free context |
-| `/model NAME` | Switch to a different model mid-session (omit NAME to see current) |
-| `/upload <path>` | Upload a file to the knowledge base, auto-extracts text from PDFs/DOCX |
-| `/tools` | List all available tools (built-in + MCP), sorted alphabetically |
-| `/skills` | List available skills with descriptions and source (auto-reloads from disk) |
-| `/reload-skills` | Reload skill files from disk |
-| `/space list` | List all spaces |
-| `/space create <name>` | Create a new space |
-| `/space select <name\|id>` | Set active space for new conversations |
-| `/space edit <name\|id>` | Edit space instructions or model |
-| `/space delete <name\|id>` | Delete a space (with confirmation) |
-| `/space clear` | Deactivate the current space |
-| `/space sources` | List sources linked to the active space |
-| `/spaces` | Shortcut for `/space list` |
-| `/mcp` | Show MCP server status |
-| `/mcp status <name>` | Detailed diagnostics for one server |
-| `/usage` | Show token usage statistics (today, this week, this month, all time) |
-| `/verbose` | Cycle verbosity: compact > detailed > verbose |
-| `/detail` | Replay last turn's tool calls with full output |
-| `/help` | Show all commands, input syntax, and keyboard shortcuts |
-| `/quit`, `/exit` | Exit the REPL |
+| Command | Availability | Action |
+|---|---|---|
+| `/new` | Shared | Start a new conversation |
+| `/last` | UI-adapted | Resume the most recent conversation |
+| `/list [N]` | UI-adapted | Show recent conversations (default 20) |
+| `/search <query>` | UI-adapted | Search conversations by content |
+| `/resume <N\|id\|slug>` | UI-adapted | Resume by list number, conversation ID, or slug |
+| `/slug [name]` | UI-adapted | View or set the conversation slug |
+| `/delete <N\|id\|slug>` | UI-adapted | Delete a conversation (with confirmation) |
+| `/rewind` | UI-adapted | Rewind to a previous message, optionally undoing file changes via git |
+| `/compact` | UI-adapted | Summarize and compact message history to free context |
+| `/model NAME` | Shared | Switch to a different model mid-session (omit NAME to see current) |
+| `/upload <path>` | CLI/Textual-only | Local file upload shortcut |
+| `/tools` | Shared | List all available tools (built-in + MCP), sorted alphabetically |
+| `/skills` | Shared | List available skills with descriptions and source (auto-reloads from disk) |
+| `/reload-skills` | Shared | Reload skill files from disk |
+| `/space list` | UI-adapted | List all spaces |
+| `/space create <name>` | UI-adapted | Create a new space |
+| `/space select <name\|id>` | UI-adapted | Set active space for new conversations |
+| `/space use <name\|id>` | UI-adapted | Alias for `/space select` |
+| `/space edit instructions <text>` | UI-adapted | Edit the active space instructions |
+| `/space edit model <model-name>` | UI-adapted | Edit the active space model |
+| `/space edit name <new-name>` | UI-adapted | Rename the active space |
+| `/space refresh [name\|id]` | UI-adapted | Refresh a tracked space from its source file |
+| `/space export [name\|id]` | UI-adapted | Export a space as YAML |
+| `/space delete <name\|id>` | UI-adapted | Delete a space (with confirmation) |
+| `/space clear` | UI-adapted | Deactivate the current space |
+| `/space sources` | UI-adapted | List sources linked to the active space |
+| `/spaces` | UI-adapted | Shortcut for `/space list` |
+| `/mcp` | UI-adapted | Show MCP server status |
+| `/mcp status <name>` | UI-adapted | Detailed diagnostics for one server |
+| `/usage` | Shared | Show token usage statistics (today, this week, this month, all time) |
+| `/verbose` | CLI/Textual-only | Cycle verbosity: compact > detailed > verbose |
+| `/detail` | CLI/Textual-only | Replay last turn's tool calls with full output |
+| `/help` | Shared | Show all commands, input syntax, and keyboard shortcuts |
+| `/quit`, `/exit` | CLI-only on web | Exit the REPL |
+
+## Parity Tiers
+
+### Tier 1
+
+These commands are expected to work the same way across legacy CLI, Textual CLI, and web:
+
+- `/help`
+- `/new`
+- `/tools`
+- `/usage`
+- `/model`
+- `/skills`
+- `/reload-skills`
+
+### Tier 2
+
+These commands share backend semantics across interfaces, but the UI may adapt how results are presented:
+
+- `/list`, `/last`, `/resume`, `/search`
+- `/rename`, `/slug`, `/delete`
+- `/rewind`, `/compact`
+- `/spaces`, `/space ...`
+- `/artifacts`, `/artifact ...`
+- `/packs`, `/pack ...`
+- `/mcp ...`
+- `/plan on|off|status`
+
+Examples of UI-adapted behavior:
+
+- web uses picker overlays for `/list`, `/search`, `/skills`, `/spaces`, `/artifacts`, and `/packs`
+- web uses inline confirmation UI for destructive actions like delete/remove
+- CLI surfaces the same commands in transcript form or via dedicated dialogs
+
+## CLI/Textual-Only Commands
+
+These commands are intentionally local-only for now and should not be treated as web parity gaps:
+
+- `/upload <path>`
+- `/verbose`
+- `/detail`
+- inline `/plan <prompt>`
+
+Web equivalents:
+
+- use the web uploader instead of `/upload`
+- use the normal chat composer instead of inline `/plan <prompt>`
+- there is currently no web equivalent for `/verbose` or `/detail`
 
 ## Conversation Management
 
@@ -307,6 +371,7 @@ aroom exec "task" --no-project-context
 | Submit message | `Enter` |
 | Insert newline | `Alt+Enter` or `Shift+Enter` |
 | Cancel AI response | `Escape` |
+| Expand/collapse fold groups | `Ctrl+O` |
 | Clear input / exit | `Ctrl+C` |
 | Exit (EOF) | `Ctrl+D` |
 | Autocomplete | `Tab` |

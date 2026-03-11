@@ -1,0 +1,7 @@
+✓ stream · 5 events · 1 chunks · 97 chars · last chunk <time> ago · last done
+✓ user_prompt who is the president
+✓ token chars=97 total_chars=97
+✓ error {'message': 'Stream ended unexpectedly — response may be incomplete', 'retryable': True}
+✓ retrying {'attempt': 2, 'max_attempts': 2, 'reason': 'turn_retry'}
+✓ assistant_message chars=120
+✓ done {}

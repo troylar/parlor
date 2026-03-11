@@ -1,0 +1,2 @@
+<spin> I'm answering directly from what we already know. [model]
+<spin> The model has gone quiet, but I'm still watching the stream. [model slow]

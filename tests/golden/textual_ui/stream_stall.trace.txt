@@ -1,0 +1,3 @@
+<spin> stream · 1 events · 1 chunks · 56 chars · last chunk <time> ago · last token
+✓ user_prompt Explain the answer, but pause mid-stream so I can inspect the UI
+✓ token chars=56 total_chars=56

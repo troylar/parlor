@@ -1,0 +1,3 @@
+✓ I'm identifying the files and symbols that matter. [glob]
+✓ I'm reading the relevant material closely. [read]
+✓ I'm ready to answer with verified findings. [done]

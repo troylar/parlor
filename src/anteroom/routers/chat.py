@@ -13,6 +13,7 @@ import time as time_mod
 import uuid as uuid_mod
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +21,41 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from ..cli.commands import (
+    CommandContext,
+    CommandResult,
+    build_help_markdown,
+    build_skills_markdown,
+    build_tools_markdown,
+    execute_slash_command,
+    parse_slash_command,
+)
 from ..cli.instructions import load_instructions
 from ..config import CliConfig, build_runtime_context
 from ..models import ChatRequest
-from ..services import storage
+from ..services import artifact_storage, storage
+from ..services import packs as packs_service
+from ..services.agent_loop import _build_compaction_history
 from ..services.ai_service import AIService, create_ai_service
+from ..services.artifacts import validate_fqn
 from ..services.context_trust import trusted_section_marker, untrusted_section_marker, wrap_untrusted
-from ..services.space_storage import get_space_local_dirs
+from ..services.pack_attachments import list_attachments_for_pack
+from ..services.pack_sources import list_cached_sources
+from ..services.rewind import collect_file_paths
+from ..services.rewind import rewind_conversation as rewind_service
+from ..services.slug import is_valid_slug, suggest_unique_slug
+from ..services.space_storage import (
+    count_space_conversations,
+    create_space,
+    delete_space,
+    get_space,
+    get_space_paths,
+    get_spaces_by_name,
+    list_spaces,
+    resolve_space,
+    update_conversation_space,
+    update_space,
+)
 from ..tools.path_utils import safe_resolve_pathlib
 
 logger = logging.getLogger(__name__)
@@ -245,6 +274,12 @@ def _get_identity(request: Request) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _require_json(request: Request) -> None:
+    ct = request.headers.get("content-type", "")
+    if not ct.startswith("application/json"):
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
+
+
 def _get_ai_service(request: Request, model_override: str | None = None) -> AIService:
     config = request.app.state.config
     if model_override:
@@ -254,11 +289,17 @@ def _get_ai_service(request: Request, model_override: str | None = None) -> AISe
     return create_ai_service(config.ai)
 
 
-def _get_request_registries(request: Request, db: Any, space_id: str | None) -> tuple[Any, Any, Any]:
+def _get_request_registries(
+    request: Request,
+    db: Any,
+    space_id: str | None,
+    working_dir: str | None = None,
+) -> tuple[Any, Any, Any]:
     """Return (artifact_registry, skill_registry, rule_enforcer) scoped to the request.
 
     When *space_id* is set, builds per-request registries that include
-    both global and space-scoped pack artifacts, skills, and rules.
+    both global/project skills for *working_dir* and space-scoped pack
+    artifacts, skills, and rules.
     Without a space, returns the app-level globals unchanged.
     """
     global_art = getattr(request.app.state, "artifact_registry", None)
@@ -271,14 +312,8 @@ def _get_request_registries(request: Request, db: Any, space_id: str | None) -> 
     from ..services.artifact_registry import ArtifactRegistry
     from ..services.artifacts import ArtifactType
 
-    # Derive project_path from the space's first mapped directory
-    project_path: str | None = None
-    local_dirs = get_space_local_dirs(db, space_id)
-    if local_dirs:
-        project_path = local_dirs[0]
-
     art_reg = ArtifactRegistry()
-    art_reg.load_from_db(db, space_id=space_id, project_path=project_path)
+    art_reg.load_from_db(db, space_id=space_id)
 
     # Build per-request skill registry from space-scoped artifacts
     skill_reg = None
@@ -286,9 +321,7 @@ def _get_request_registries(request: Request, db: Any, space_id: str | None) -> 
         from ..cli.skills import SkillRegistry
 
         skill_reg = SkillRegistry()
-        # Copy global skills first, then overlay space-scoped ones
-        if hasattr(global_skill, "_skills"):
-            skill_reg._skills = dict(global_skill._skills)
+        skill_reg.load(working_dir)
         skill_reg.load_from_artifacts(art_reg)
 
     # Build per-request rule enforcer from space-scoped artifacts
@@ -302,17 +335,1690 @@ def _get_request_registries(request: Request, db: Any, space_id: str | None) -> 
     return art_reg, skill_reg, rule_enf
 
 
-@dataclass(frozen=True)
-class SourceResolutionResult:
-    """Result of resolving source references with space-scope tracking."""
+def _command_tool_names(request: Request) -> tuple[str, ...]:
+    names: list[str] = []
+    tool_registry = getattr(request.app.state, "tool_registry", None)
+    if tool_registry is not None:
+        try:
+            names.extend(tool_registry.list_tools())
+        except Exception:
+            logger.debug("Failed to enumerate tool registry names", exc_info=True)
+    mcp_manager = getattr(request.app.state, "mcp_manager", None)
+    if mcp_manager is not None and hasattr(mcp_manager, "get_all_tools"):
+        try:
+            for tool in mcp_manager.get_all_tools() or []:
+                if isinstance(tool, dict) and tool.get("name"):
+                    names.append(str(tool["name"]))
+        except Exception:
+            logger.debug("Failed to enumerate MCP tool names", exc_info=True)
+    return tuple(dict.fromkeys(names))
 
-    content: str
-    excluded_ids: list[str]
-    included: list[dict[str, str]]
-    requested_count: int
-    truncated: bool
+
+def _usage_markdown(db: Any, config: Any) -> str:
+    now = datetime.now(timezone.utc)
+    periods = [
+        ("Today", now - timedelta(days=1)),
+        ("This week", now - timedelta(days=config.cli.usage.week_days)),
+        ("This month", now - timedelta(days=config.cli.usage.month_days)),
+        ("All time", None),
+    ]
+    lines = ["## Usage"]
+    for label, since_dt in periods:
+        stats = storage.get_usage_stats(db, since=since_dt.isoformat() if since_dt else None)
+        total_tokens = sum(s.get("total_tokens", 0) or 0 for s in stats)
+        total_messages = sum(s.get("message_count", 0) or 0 for s in stats)
+        lines.append(f"- **{label}:** {total_tokens:,} tokens across {total_messages} messages")
+    return "\n".join(lines)
 
 
+def _command_response(
+    *,
+    kind: str,
+    message: str | None = None,
+    echo_user: bool = True,
+    conversation: dict[str, Any] | None = None,
+    deleted_conversation_id: str | None = None,
+    command_items: list[dict[str, Any]] | None = None,
+    forward_prompt: str | None = None,
+    model_name: str | None = None,
+    plan_mode_enabled: bool | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"kind": kind, "echo_user": echo_user}
+    if message is not None:
+        payload["message"] = message
+    if conversation is not None:
+        payload["conversation"] = conversation
+    if deleted_conversation_id is not None:
+        payload["deleted_conversation_id"] = deleted_conversation_id
+    if command_items is not None:
+        payload["command_items"] = command_items
+    if forward_prompt is not None:
+        payload["forward_prompt"] = forward_prompt
+    if model_name is not None:
+        payload["model_name"] = model_name
+    if plan_mode_enabled is not None:
+        payload["plan_mode_enabled"] = plan_mode_enabled
+    return payload
+
+
+def _resolve_conversation_target(db: Any, target: str) -> dict[str, Any] | None:
+    if target.isdigit():
+        idx = int(target) - 1
+        convs = storage.list_conversations(db, limit=max(20, idx + 1))
+        if 0 <= idx < len(convs):
+            return storage.get_conversation(db, convs[idx]["id"])
+        return None
+    return storage.get_conversation(db, target)
+
+
+def _list_conversations_markdown(db: Any, limit: int = 20, convs: list[dict[str, Any]] | None = None) -> str:
+    convs = convs if convs is not None else storage.list_conversations(db, limit=limit)
+    if not convs:
+        return "No conversations yet."
+    lines = ["## Recent Conversations"]
+    for i, conv in enumerate(convs, start=1):
+        badge = f" ({conv['type']})" if conv.get("type") not in {None, "chat"} else ""
+        slug = f" — `{conv['slug']}`" if conv.get("slug") else ""
+        lines.append(f"{i}. **{conv.get('title', 'Untitled')}**{badge}{slug}")
+    lines.append("")
+    lines.append("Use `/resume <number|slug|id>` to open one.")
+    return "\n".join(lines)
+
+
+def _conversation_items(convs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for idx, conv in enumerate(convs, start=1):
+        title = conv.get("title", "Untitled")
+        conversation_type = conv.get("type") or "chat"
+        message_count = int(conv.get("message_count") or 0)
+        meta_parts = [f"{message_count} message{'s' if message_count != 1 else ''}"]
+        if conv.get("slug"):
+            meta_parts.append(str(conv["slug"]))
+        items.append(
+            {
+                "kind": "conversation",
+                "index": idx,
+                "id": conv["id"],
+                "title": title,
+                "conversation_type": conversation_type,
+                "slug": conv.get("slug"),
+                "meta": " · ".join(meta_parts),
+                "summary": _conversation_summary(conversation_type, message_count),
+                "actions": [
+                    {"label": "Open", "conversation_id": conv["id"], "variant": "primary"},
+                    {
+                        "label": "Delete",
+                        "command": f"/delete --confirm {conv['id']}",
+                        "requires_confirm": True,
+                        "confirm_text": f"Delete {title}?",
+                        "confirm_label": "Delete",
+                    },
+                ],
+            }
+        )
+    return items
+
+
+def _delete_conversation_item(conv: dict[str, Any]) -> dict[str, Any]:
+    title = conv.get("title", "Untitled")
+    meta_parts = []
+    if conv.get("type") not in {None, "chat"}:
+        meta_parts.append(str(conv["type"]))
+    if conv.get("slug"):
+        meta_parts.append(str(conv["slug"]))
+    return {
+        "kind": "conversation",
+        "id": conv["id"],
+        "title": title,
+        "conversation_type": conv.get("type") or "chat",
+        "slug": conv.get("slug"),
+        "meta": " · ".join(meta_parts) if meta_parts else "Delete conversation",
+        "summary": "This permanently removes the conversation history.",
+        "actions": [
+            {
+                "label": "Delete",
+                "command": f"/delete --confirm {conv['id']}",
+                "variant": "primary",
+                "requires_confirm": True,
+                "confirm_label": "Delete",
+                "confirm_text": f"Delete {title}?",
+            }
+        ],
+    }
+
+
+def _conversation_summary(conversation_type: str, message_count: int) -> str:
+    label = {"chat": "Chat thread", "note": "Note", "document": "Document"}.get(conversation_type, "Conversation")
+    if message_count <= 0:
+        return f"{label} with no messages yet."
+    return f"{label} with {message_count} message{'s' if message_count != 1 else ''}."
+
+
+def _space_items(spaces: list[dict[str, Any]], active_space_id: str | None = None) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for space in spaces:
+        is_active = active_space_id == space["id"]
+        actions = [
+            {"label": "Show", "command": f"/space show {space['name']}"},
+            {"label": "Sources", "command": f"/space sources {space['name']}"},
+            {"label": "Refresh", "command": f"/space refresh {space['name']}"},
+            {"label": "Export", "command": f"/space export {space['name']}"},
+        ]
+        if not is_active:
+            actions.append({"label": "Switch", "command": f"/space switch {space['name']}", "variant": "primary"})
+        actions.append(
+            {
+                "label": "Delete",
+                "command": f"/space delete --confirm {space['id']}",
+                "requires_confirm": True,
+                "confirm_text": f"Delete {space['name']}?",
+                "confirm_label": "Delete",
+            }
+        )
+        items.append(
+            {
+                "kind": "space",
+                "id": space["id"],
+                "title": space["name"],
+                "meta": "Active space" if is_active else "Space",
+                "summary": "Use this space's instructions, sources, and model context."
+                if is_active
+                else "Switch into this shared context or inspect its sources and config.",
+                "badges": ["current"] if is_active else [],
+                "actions": actions,
+            }
+        )
+    return items
+
+
+def _mcp_items(statuses: dict[str, dict[str, Any]], focus_name: str | None = None) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    names = [focus_name] if focus_name and focus_name in statuses else sorted(statuses.keys())
+    for name in names:
+        info = statuses[name]
+        status = str(info.get("status", "unknown"))
+        transport = str(info.get("transport", "?"))
+        tool_count = int(info.get("tool_count", 0) or 0)
+        badges = [status]
+        actions = [
+            {"label": "Status", "command": f"/mcp status {name}", "variant": "primary"},
+            {"label": "Reconnect", "command": f"/mcp reconnect {name}"},
+        ]
+        if status == "connected":
+            actions.insert(1, {"label": "Disconnect", "command": f"/mcp disconnect {name}"})
+        else:
+            actions.insert(1, {"label": "Connect", "command": f"/mcp connect {name}"})
+        summary = f"{transport.upper()} transport with {tool_count} tool{'s' if tool_count != 1 else ''}."
+        if info.get("error_message"):
+            summary += f" Last error: {info['error_message']}."
+        items.append(
+            {
+                "kind": "mcp",
+                "id": name,
+                "title": name,
+                "meta": f"{transport} · {tool_count} tool{'s' if tool_count != 1 else ''}",
+                "summary": summary,
+                "badges": badges,
+                "actions": actions,
+            }
+        )
+    return items
+
+
+def _artifact_items(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        is_builtin = artifact.get("source") == "built_in"
+        actions = [{"label": "Show", "command": f"/artifact show {artifact['fqn']}", "variant": "primary"}]
+        if not is_builtin:
+            actions.append(
+                {
+                    "label": "Delete",
+                    "command": f"/artifact delete {artifact['fqn']}",
+                    "requires_confirm": True,
+                    "confirm_text": f"Delete {artifact['fqn']}?",
+                    "confirm_label": "Delete",
+                }
+            )
+        items.append(
+            {
+                "kind": "artifact",
+                "id": artifact.get("id") or artifact["fqn"],
+                "title": artifact["fqn"],
+                "meta": " · ".join([artifact.get("type", "?"), artifact.get("source", "?")]),
+                "summary": (
+                    f"{artifact.get('type', 'artifact').capitalize()} artifact from "
+                    f"{artifact.get('source', 'unknown')}."
+                ),
+                "badges": ["built-in"] if is_builtin else [],
+                "actions": actions,
+            }
+        )
+    return items
+
+
+def _pack_items(packs: list[dict[str, Any]], *, attached_refs: set[str] | None = None) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    attached_refs = attached_refs or set()
+    for pack in packs:
+        ref = f"{pack.get('namespace', 'default')}/{pack['name']}"
+        is_attached = ref in attached_refs
+        actions = [{"label": "Show", "command": f"/pack show {ref}", "variant": "primary"}]
+        if is_attached:
+            actions.append({"label": "Detach", "command": f"/pack detach {ref}"})
+        else:
+            actions.append({"label": "Attach", "command": f"/pack attach {ref}"})
+        actions.append(
+            {
+                "label": "Remove",
+                "command": f"/pack remove {ref}",
+                "requires_confirm": True,
+                "confirm_text": f"Remove @{ref}?",
+                "confirm_label": "Remove",
+            }
+        )
+        items.append(
+            {
+                "kind": "pack",
+                "id": pack.get("id") or ref,
+                "title": f"@{ref}",
+                "meta": " · ".join(
+                    part
+                    for part in [
+                        f"v{pack.get('version', '?')}",
+                        f"{pack.get('artifact_count', 0)} artifacts",
+                        "attached globally" if is_attached else "",
+                    ]
+                    if part
+                ),
+                "summary": pack.get("description") or "Reusable pack of artifacts and instructions.",
+                "badges": ["attached"] if is_attached else [],
+                "actions": actions,
+            }
+        )
+    return items
+
+
+def _skill_items(entries: list[Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for entry in entries:
+        title = f"/{entry.display_name}"
+        meta_parts = [entry.description or "No description."]
+        if entry.source:
+            meta_parts.append(entry.source)
+        actions = []
+        if getattr(entry, "accepts_args", False):
+            actions.append(
+                {
+                    "label": "Insert",
+                    "insert_text": f"{title} ",
+                    "variant": "primary",
+                }
+            )
+        else:
+            actions.append(
+                {
+                    "label": "Run",
+                    "command": title,
+                    "variant": "primary",
+                }
+            )
+            actions.append(
+                {
+                    "label": "Insert",
+                    "insert_text": title,
+                }
+            )
+        items.append(
+            {
+                "kind": "skill",
+                "id": entry.display_name,
+                "title": title,
+                "meta": " · ".join(meta_parts),
+                "summary": entry.description or "Reusable command shortcut.",
+                "badges": [entry.source] if entry.source else [],
+                "actions": actions,
+            }
+        )
+    return items
+
+
+def _search_conversations_markdown(
+    db: Any,
+    arg: str,
+    results: list[dict[str, Any]] | None = None,
+) -> str:
+    query = arg.strip()
+    if not query:
+        return "Usage: `/search <query>`"
+    type_filter = None
+    force_keyword = False
+    if query.startswith("--keyword "):
+        force_keyword = True
+        query = query[len("--keyword ") :].strip()
+    elif query.startswith("--type "):
+        rest = query[len("--type ") :].strip()
+        parts = rest.split(maxsplit=1)
+        if parts and parts[0] in {"chat", "note", "document"}:
+            type_filter = parts[0]
+            query = parts[1] if len(parts) > 1 else ""
+    if not query:
+        return "Usage: `/search <query>`"
+    results = (
+        results
+        if results is not None
+        else storage.list_conversations(
+            db,
+            search=query,
+            limit=20,
+            conversation_type=type_filter,
+        )
+    )
+    if not results:
+        return f"No conversations matching `{query}`."
+    heading = "Keyword search" if force_keyword else "Search results"
+    lines = [f"## {heading}", ""]
+    for i, conv in enumerate(results, start=1):
+        badge = f" ({conv['type']})" if conv.get("type") not in {None, "chat"} else ""
+        slug = f" — `{conv['slug']}`" if conv.get("slug") else ""
+        lines.append(f"{i}. **{conv.get('title', 'Untitled')}**{badge}{slug}")
+    lines.append("")
+    lines.append("Use `/resume <number|slug|id>` to open one.")
+    return "\n".join(lines)
+
+
+def _rename_conversation(
+    db: Any,
+    active_conversation: dict[str, Any] | None,
+    arg: str,
+) -> tuple[dict[str, Any] | None, str]:
+    if not arg.strip():
+        return None, "Usage: `/rename <title>` or `/rename <number|slug|id> <title>`"
+    parts = arg.split(maxsplit=1)
+    target = None
+    new_title = ""
+    if len(parts) == 1:
+        new_title = parts[0].strip()
+    else:
+        maybe_target, remainder = parts
+        resolved = _resolve_conversation_target(db, maybe_target)
+        if resolved:
+            target = resolved
+            new_title = remainder.strip()
+        else:
+            new_title = arg.strip()
+    if not new_title:
+        return None, "Usage: `/rename <title>` or `/rename <number|slug|id> <title>`"
+    if target is None:
+        target = active_conversation
+    if not target:
+        return None, "No active conversation to rename."
+    updated = storage.update_conversation_title(db, target["id"], new_title)
+    return updated, f"Renamed conversation to **{new_title}**."
+
+
+def _set_conversation_slug(
+    db: Any,
+    conversation: dict[str, Any] | None,
+    desired: str | None,
+) -> tuple[dict[str, Any] | None, str]:
+    if not conversation:
+        return None, "No active conversation."
+    if not desired:
+        return conversation, f"Current slug: `{conversation.get('slug') or 'none'}`"
+    if not is_valid_slug(desired):
+        return None, "Invalid slug. Use lowercase letters, numbers, and hyphens."
+    suggestion = suggest_unique_slug(db, desired)
+    if suggestion is None:
+        updated = storage.update_conversation_slug(db, conversation["id"], desired)
+        return updated, f"Slug set to `{desired}`."
+    return None, f"`{desired}` is already taken. Try `{suggestion}`."
+
+
+def _rewind_messages_markdown(db: Any, conversation: dict[str, Any] | None) -> str:
+    if not conversation:
+        return "No active conversation to rewind."
+    stored = storage.list_messages(db, conversation["id"])
+    if len(stored) < 2:
+        return "Not enough messages to rewind."
+    lines = ["## Rewind Conversation", ""]
+    for message in stored:
+        role_label = "You" if message["role"] == "user" else "AI"
+        preview = (message.get("content") or "").strip().replace("\n", " ")
+        preview = (preview[:77] + "...") if len(preview) > 80 else preview
+        lines.append(f"{message['position']}. **{role_label}** {preview}")
+    lines.append("")
+    lines.append("Use `/rewind <position>` to keep that message and delete everything after it.")
+    lines.append("Add `--undo-files` to also revert files changed by later write/edit tool calls.")
+    return "\n".join(lines)
+
+
+async def _rewind_conversation(
+    request: Request,
+    conversation: dict[str, Any] | None,
+    arg: str,
+) -> tuple[dict[str, Any] | None, str]:
+    if not conversation:
+        return None, "No active conversation to rewind."
+    db = _get_db(request)
+    stored = storage.list_messages(db, conversation["id"])
+    if len(stored) < 2:
+        return None, "Not enough messages to rewind."
+    if not arg.strip():
+        return conversation, _rewind_messages_markdown(db, conversation)
+
+    tokens = [token for token in arg.split() if token]
+    undo_files = False
+    if "--undo-files" in tokens:
+        undo_files = True
+        tokens = [token for token in tokens if token != "--undo-files"]
+    if len(tokens) != 1 or not tokens[0].isdigit():
+        return None, "Usage: `/rewind <position> [--undo-files]`"
+
+    target_pos = int(tokens[0])
+    positions = {message["position"] for message in stored}
+    if target_pos not in positions:
+        return None, f"Position {target_pos} not found."
+
+    msgs_after = [message for message in stored if message["position"] > target_pos]
+    msg_ids_after = [message["id"] for message in msgs_after]
+    file_paths = collect_file_paths(db, msg_ids_after)
+    rewind_result = await rewind_service(
+        db=db,
+        conversation_id=conversation["id"],
+        to_position=target_pos,
+        undo_files=undo_files,
+        data_dir=request.app.state.config.app.data_dir,
+        working_dir=conversation.get("working_dir") or os.getcwd(),
+    )
+
+    summary = f"Rewound **{rewind_result.deleted_messages}** message(s) to position `{target_pos}`."
+    if rewind_result.reverted_files:
+        summary += f"\n\nReverted **{len(rewind_result.reverted_files)}** file(s)."
+    elif file_paths and not undo_files:
+        summary += (
+            f"\n\nLeft **{len(file_paths)}** changed file(s) in place. "
+            "Re-run with `--undo-files` to revert them."
+        )
+    if rewind_result.skipped_files:
+        skipped = "\n".join(f"- `{item}`" for item in rewind_result.skipped_files)
+        summary += f"\n\n### Skipped file reverts\n{skipped}"
+    return storage.get_conversation(db, conversation["id"]), summary
+
+
+async def _compact_conversation(
+    request: Request,
+    conversation: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str]:
+    if not conversation:
+        return None, "No active conversation to compact."
+    db = _get_db(request)
+    messages = storage.list_messages(db, conversation["id"])
+    compactable = [
+        {"role": m["role"], "content": m.get("content", "")}
+        for m in messages
+        if m["role"] in {"user", "assistant"}
+    ]
+    if len(compactable) < 4:
+        return None, "Not enough messages to compact."
+
+    history_text = _build_compaction_history(compactable)
+    summary_prompt = (
+        "Summarize the following conversation concisely, preserving:\n"
+        "- Key decisions and conclusions\n"
+        "- File paths that were read, written, or edited\n"
+        "- Important code changes and their purpose\n"
+        "- Which steps of any multi-step plan have been completed vs remaining\n"
+        "- Current state of the task — what has been done and what is next\n"
+        "- Any errors encountered and how they were resolved\n\n" + history_text
+    )
+    try:
+        ai_service = _get_ai_service(request, conversation.get("model") or request.app.state.config.ai.model)
+        response = await ai_service.client.chat.completions.create(
+            model=ai_service.config.model,
+            messages=[{"role": "user", "content": summary_prompt}],
+            max_completion_tokens=1000,
+        )
+        summary = response.choices[0].message.content or "Conversation summary unavailable."
+    except Exception:
+        logger.exception("Failed to compact conversation on web")
+        return None, "Failed to generate summary."
+
+    compact_note = f"Previous conversation summary (auto-compacted from {len(compactable)} messages):\n\n{summary}"
+    now = datetime.now(timezone.utc).isoformat()
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation["id"],))
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, position) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid_mod.uuid4()), conversation["id"], "system", compact_note, now, 0),
+        )
+        conn.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation["id"]))
+    return (
+        storage.get_conversation(db, conversation["id"]),
+        f"Compacted **{len(compactable)}** messages into a working summary.",
+    )
+
+
+def _space_list_markdown(db: Any, active_space_id: str | None = None) -> str:
+    spaces = list_spaces(db)
+    if not spaces:
+        return "No spaces yet."
+    lines = ["## Spaces", ""]
+    for space in spaces:
+        active = " · active" if active_space_id and active_space_id == space["id"] else ""
+        count = count_space_conversations(db, space["id"])
+        lines.append(f"- **{space['name']}** · {count} conversations · `{space['id'][:8]}...`{active}")
+    lines.append("")
+    lines.append("Use `/space show <name>` or `/space switch <name>`.")
+    return "\n".join(lines)
+
+
+def _create_space_markdown(db: Any, target: str | None) -> tuple[dict[str, Any] | None, str]:
+    name = (target or "").strip()
+    if not name:
+        return None, "Usage: `/space create <name>`"
+    if get_spaces_by_name(db, name):
+        return None, f"Space **{name}** already exists."
+    space = create_space(db, name)
+    return space, f"Created space **{space['name']}**."
+
+
+def _update_space_markdown(
+    db: Any,
+    conversation: dict[str, Any] | None,
+    edit_field: str | None,
+    edit_value: str | None,
+) -> tuple[dict[str, Any] | None, str]:
+    if not conversation or not conversation.get("space_id"):
+        return None, "No active space."
+    space = get_space(db, conversation["space_id"])
+    if not space:
+        return None, "No active space."
+
+    field = (edit_field or "").strip().lower()
+    value = edit_value or ""
+    if field not in {"instructions", "model", "name"}:
+        return None, "Unknown field. Use: `instructions`, `model`, or `name`."
+    if field == "name" and not value.strip():
+        return None, "Usage: `/space edit name <new-name>`"
+
+    if field == "instructions":
+        updates = {"instructions": value}
+        message = f"Updated instructions for **{space['name']}**."
+    elif field == "model":
+        updates = {"model": value or None}
+        message = f"Updated model for **{space['name']}**: `{value or '(cleared)'}`"
+    else:
+        updates = {"name": value.strip()}
+        message = f"Renamed space to **{value.strip()}**."
+
+    updated = update_space(db, space["id"], **updates)
+    return updated, message
+
+
+def _refresh_space_markdown(
+    db: Any,
+    conversation: dict[str, Any] | None,
+    target: str | None,
+) -> tuple[dict[str, Any] | None, str]:
+    from ..services.spaces import compute_file_hash, parse_space_file
+
+    if target and target.strip():
+        space, candidates = resolve_space(db, target.strip())
+        if candidates:
+            names = ", ".join(candidate["name"] for candidate in candidates[:5])
+            return None, f"Space `{target}` is ambiguous. Matches: {names}"
+    elif conversation and conversation.get("space_id"):
+        space = get_space(db, conversation["space_id"])
+    else:
+        space = None
+    if not space:
+        return None, "No active space."
+    source_file = space.get("source_file", "")
+    if not source_file:
+        return None, "This space has no source file to refresh from."
+    fpath = Path(source_file)
+    if not fpath.is_file():
+        return None, f"Space file not found: `{fpath}`"
+    try:
+        cfg = parse_space_file(fpath)
+    except Exception:
+        return None, f"Failed to refresh space from `{fpath}`"
+
+    updated = update_space(
+        db,
+        space["id"],
+        source_hash=compute_file_hash(fpath),
+        instructions=cfg.instructions or "",
+        model=cfg.config.get("model") or None,
+    )
+    if not updated:
+        return None, f"Failed to refresh space from `{fpath}`"
+    return updated, f"Refreshed space **{updated['name']}**."
+
+
+def _export_space_markdown(
+    db: Any,
+    conversation: dict[str, Any] | None,
+    target: str | None,
+) -> str:
+    import yaml
+
+    from ..services.spaces import export_space_to_yaml
+
+    if target and target.strip():
+        space, candidates = resolve_space(db, target.strip())
+        if candidates:
+            names = ", ".join(candidate["name"] for candidate in candidates[:5])
+            return f"Space `{target}` is ambiguous. Matches: {names}"
+    elif conversation and conversation.get("space_id"):
+        space = get_space(db, conversation["space_id"])
+    else:
+        space = None
+    if not space:
+        return "No active space."
+    try:
+        cfg = export_space_to_yaml(db, space["id"])
+    except ValueError as exc:
+        return str(exc)
+
+    data: dict[str, Any] = {"name": cfg.name, "version": cfg.version}
+    if cfg.repos:
+        data["repos"] = cfg.repos
+    if cfg.pack_sources:
+        data["pack_sources"] = [{"url": ps.url, "branch": ps.branch} for ps in cfg.pack_sources]
+    if cfg.packs:
+        data["packs"] = cfg.packs
+    if cfg.sources:
+        data["sources"] = [{k: v for k, v in [("path", s.path), ("url", s.url)] if v} for s in cfg.sources]
+    if cfg.instructions:
+        data["instructions"] = cfg.instructions
+    if cfg.config:
+        data["config"] = cfg.config
+    dumped = yaml.dump(data, default_flow_style=False, sort_keys=False).strip()
+    return f"## Space YAML: {space['name']}\n\n```yaml\n{dumped}\n```"
+
+
+def _space_show_markdown(db: Any, active_space_id: str | None, target: str | None) -> str:
+    if not target and active_space_id:
+        from ..services.space_storage import get_space
+
+        space = get_space(db, active_space_id)
+        candidates: list[dict[str, Any]] = []
+    else:
+        space, candidates = resolve_space(db, target or "")
+    if candidates:
+        names = ", ".join(candidate["name"] for candidate in candidates[:5])
+        return f"Space `{target}` is ambiguous. Matches: {names}"
+    if not space:
+        return f"Space `{target}` not found."
+    paths = get_space_paths(db, space["id"])
+    lines = [f"## Space: {space['name']}", ""]
+    if space.get("source_file"):
+        lines.append(f"- Source: `{space['source_file']}`")
+    if space.get("model"):
+        lines.append(f"- Model: `{space['model']}`")
+    lines.append(f"- Conversations: `{count_space_conversations(db, space['id'])}`")
+    instructions = space.get("instructions") or ""
+    if instructions:
+        preview = instructions.strip().replace("\n", " ")
+        preview = (preview[:97] + "...") if len(preview) > 100 else preview
+        lines.append(f"- Instructions: {preview}")
+    if paths:
+        lines.extend(["", "### Paths"])
+        for path in paths:
+            label = path.get("repo_url") or "(mapped)"
+            lines.append(f"- `{label}` -> `{path['local_path']}`")
+    return "\n".join(lines)
+
+
+def _space_sources_markdown(db: Any, active_space_id: str | None, target: str | None) -> str:
+    if not target and active_space_id:
+        from ..services.space_storage import get_space
+
+        space = get_space(db, active_space_id)
+        candidates: list[dict[str, Any]] = []
+    else:
+        space, candidates = resolve_space(db, target or "")
+    if candidates:
+        names = ", ".join(candidate["name"] for candidate in candidates[:5])
+        return f"Space `{target}` is ambiguous. Matches: {names}"
+    if not space:
+        return f"Space `{target}` not found."
+    linked = storage.get_direct_space_source_links(db, space["id"])
+    if not linked:
+        return f"No sources linked to space `{space['name']}`."
+    lines = [f"## Sources in {space['name']}", ""]
+    for source in linked:
+        title = source.get("title") or "Untitled"
+        source_type = source.get("type") or "unknown"
+        lines.append(f"- **{title}** · {source_type} · `{str(source['id'])[:8]}...`")
+    return "\n".join(lines)
+
+
+def _set_space(
+    db: Any,
+    conversation: dict[str, Any] | None,
+    target: str | None,
+) -> tuple[dict[str, Any] | None, str]:
+    if not conversation:
+        return None, "Open or create a conversation before changing spaces."
+    if target == "":
+        if not conversation.get("space_id"):
+            return conversation, "No active space."
+        update_conversation_space(db, conversation["id"], None)
+        updated = storage.get_conversation(db, conversation["id"])
+        return updated, "Cleared active space."
+
+    space, candidates = resolve_space(db, target or "")
+    if candidates:
+        names = ", ".join(candidate["name"] for candidate in candidates[:5])
+        return None, f"Space `{target}` is ambiguous. Matches: {names}"
+    if not space:
+        return None, f"Space `{target}` not found."
+    update_conversation_space(db, conversation["id"], space["id"])
+    updated = storage.get_conversation(db, conversation["id"])
+    return updated, f"Active space: **{space['name']}**"
+
+
+def _delete_space(
+    db: Any,
+    conversation: dict[str, Any] | None,
+    target: str | None,
+) -> tuple[dict[str, Any] | None, str]:
+    space, candidates = resolve_space(db, target or "")
+    if candidates:
+        names = ", ".join(candidate["name"] for candidate in candidates[:5])
+        return conversation, f"Space `{target}` is ambiguous. Matches: {names}"
+    if not space:
+        return conversation, f"Space `{target}` not found."
+    deleted_space_id = space["id"]
+    deleted_space_name = space["name"]
+    if not delete_space(db, deleted_space_id):
+        return conversation, f"Space `{target}` not found."
+    updated = conversation
+    if conversation:
+        updated = storage.get_conversation(db, conversation["id"])
+    return updated, f"Deleted space **{deleted_space_name}**."
+
+
+def _artifact_list_markdown(db: Any) -> str:
+    artifacts = artifact_storage.list_artifacts(db)
+    if not artifacts:
+        return "No artifacts found."
+    lines = ["## Artifacts", ""]
+    for artifact in artifacts:
+        lines.append(f"- `{artifact['fqn']}` · {artifact.get('type', '?')} · {artifact.get('source', '?')}")
+    lines.extend(["", "Use `/artifact show <fqn>` to inspect one."])
+    return "\n".join(lines)
+
+
+def _artifact_show_markdown(db: Any, fqn: str) -> str:
+    if not fqn:
+        return "Usage: `/artifact show <fqn>`"
+    if not validate_fqn(fqn):
+        return "Invalid FQN format."
+    artifact = artifact_storage.get_artifact_by_fqn(db, fqn)
+    if not artifact:
+        return "Artifact not found."
+    lines = [
+        f"## Artifact: {artifact['fqn']}",
+        "",
+        f"- Type: `{artifact['type']}`",
+        f"- Source: `{artifact['source']}`",
+        f"- Hash: `{artifact['content_hash']}`",
+        f"- Updated: `{artifact.get('updated_at', '')}`",
+        "",
+        "### Content",
+        artifact["content"],
+    ]
+    return "\n".join(lines)
+
+
+def _delete_artifact(request: Request, fqn: str) -> str:
+    if not fqn:
+        return "Usage: `/artifact delete <fqn>`"
+    if not validate_fqn(fqn):
+        return "Invalid FQN format."
+    db = _get_db(request)
+    artifact = artifact_storage.get_artifact_by_fqn(db, fqn)
+    if not artifact:
+        return "Artifact not found."
+    if artifact.get("source") == "built_in":
+        return "Cannot delete built-in artifacts."
+    artifact_storage.delete_artifact(db, artifact["id"])
+    artifact_registry = getattr(request.app.state, "artifact_registry", None)
+    if artifact_registry is not None:
+        artifact_registry.load_from_db(db)
+    skill_registry = getattr(request.app.state, "skill_registry", None)
+    if skill_registry is not None and artifact_registry is not None:
+        skill_registry.load_from_artifacts(artifact_registry)
+    return f"Deleted `{fqn}`."
+
+
+def _resolve_pack_ref(db: Any, ref: str) -> dict[str, Any] | None:
+    namespace, _, name = ref.rpartition("/")
+    if not namespace:
+        namespace = "default"
+    pack, _ = packs_service.resolve_pack(db, namespace, name)
+    return pack
+
+
+def _pack_list_markdown(db: Any) -> str:
+    installed = packs_service.list_packs(db)
+    if not installed:
+        return "No packs installed. Install one with the CLI: `/pack install <path>`."
+    lines = ["## Installed Packs", ""]
+    for pack in installed:
+        namespace = pack.get("namespace", "default")
+        description = f" — {pack['description']}" if pack.get("description") else ""
+        lines.append(
+            f"- `@{namespace}/{pack['name']}` v{pack.get('version', '?')} "
+            f"({pack.get('artifact_count', 0)} artifacts){description}"
+        )
+    return "\n".join(lines)
+
+
+def _pack_show_markdown(db: Any, ref: str) -> str:
+    if not ref:
+        return "Usage: `/pack show <namespace/name>`"
+    pack = _resolve_pack_ref(db, ref)
+    if not pack:
+        return f"Pack `{ref}` not found."
+    info = packs_service.get_pack(db, pack["namespace"], pack["name"])
+    if not info:
+        return f"Pack `{ref}` not found."
+    lines = [f"## @{info['namespace']}/{info['name']}", "", f"- Version: `{info.get('version', '?')}`"]
+    if info.get("description"):
+        lines.append(f"- Description: {info['description']}")
+    artifacts = info.get("artifacts", [])
+    lines.append(f"- Artifacts: `{len(artifacts)}`")
+    if artifacts:
+        lines.extend(["", "### Artifacts"])
+        for artifact in artifacts:
+            lines.append(f"- `{artifact.get('type', '?')}`: `{artifact.get('name', '?')}`")
+    return "\n".join(lines)
+
+
+def _remove_pack(request: Request, ref: str) -> str:
+    if not ref:
+        return "Usage: `/pack remove <namespace/name>`"
+    db = _get_db(request)
+    pack = _resolve_pack_ref(db, ref)
+    if not pack:
+        return f"Pack `{ref}` not found."
+    removed = packs_service.remove_pack_by_id(db, pack["id"])
+    if not removed:
+        return f"Pack `{ref}` not found."
+    artifact_registry = getattr(request.app.state, "artifact_registry", None)
+    if artifact_registry is not None:
+        artifact_registry.load_from_db(db)
+    skill_registry = getattr(request.app.state, "skill_registry", None)
+    if skill_registry is not None and artifact_registry is not None:
+        skill_registry.load_from_artifacts(artifact_registry)
+    return f"Removed `@{pack['namespace']}/{pack['name']}`."
+
+
+def _attach_pack_markdown(
+    request: Request,
+    conversation: dict[str, Any] | None,
+    ref: str,
+    *,
+    project_scope: bool,
+) -> str:
+    from ..services.pack_attachments import attach_pack
+
+    if not ref:
+        return "Usage: `/pack attach <namespace/name> [--project]`"
+    db = _get_db(request)
+    pack = _resolve_pack_ref(db, ref)
+    if not pack:
+        return f"Pack `{ref}` not found."
+    try:
+        attach_pack(
+            db,
+            pack["id"],
+            project_path=(conversation.get("working_dir") if conversation else None) if project_scope else None,
+        )
+    except ValueError as exc:
+        return str(exc)
+    artifact_registry = getattr(request.app.state, "artifact_registry", None)
+    if artifact_registry is not None:
+        artifact_registry.load_from_db(db)
+    skill_registry = getattr(request.app.state, "skill_registry", None)
+    if skill_registry is not None and artifact_registry is not None:
+        skill_registry.load_from_artifacts(artifact_registry)
+    scope = "project" if project_scope else "global"
+    return f"Attached `@{pack['namespace']}/{pack['name']}` ({scope})."
+
+
+def _detach_pack_markdown(
+    request: Request,
+    conversation: dict[str, Any] | None,
+    ref: str,
+    *,
+    project_scope: bool,
+) -> str:
+    from ..services.pack_attachments import detach_pack
+
+    if not ref:
+        return "Usage: `/pack detach <namespace/name> [--project]`"
+    db = _get_db(request)
+    pack = _resolve_pack_ref(db, ref)
+    if not pack:
+        return f"Pack `{ref}` not found."
+    removed = detach_pack(
+        db,
+        pack["id"],
+        project_path=(conversation.get("working_dir") if conversation else None) if project_scope else None,
+    )
+    if not removed:
+        return f"Pack `{ref}` is not attached at {'project' if project_scope else 'global'} scope."
+    artifact_registry = getattr(request.app.state, "artifact_registry", None)
+    if artifact_registry is not None:
+        artifact_registry.load_from_db(db)
+    skill_registry = getattr(request.app.state, "skill_registry", None)
+    if skill_registry is not None and artifact_registry is not None:
+        skill_registry.load_from_artifacts(artifact_registry)
+    scope = "project" if project_scope else "global"
+    return f"Detached `@{pack['namespace']}/{pack['name']}` ({scope})."
+
+
+def _pack_sources_markdown(request: Request) -> str:
+    sources_cfg = getattr(request.app.state.config, "pack_sources", []) or []
+    if not sources_cfg:
+        return "No pack sources configured. Add one with the CLI: `/pack add-source <url>`."
+    cached = list_cached_sources(request.app.state.config.app.data_dir)
+    cached_map = {entry.url: entry for entry in cached}
+    lines = ["## Pack Sources", ""]
+    for source in sources_cfg:
+        url = getattr(source, "url", None) or "?"
+        branch = getattr(source, "branch", "main") or "main"
+        cached_entry = cached_map.get(url)
+        status = f"cached ({cached_entry.ref[:8]})" if cached_entry else "not cloned"
+        lines.append(f"- `{url}` ({branch}) — {status}")
+    return "\n".join(lines)
+
+
+def _refresh_pack_sources_markdown(request: Request) -> str:
+    sources_cfg = getattr(request.app.state.config, "pack_sources", []) or []
+    if not sources_cfg:
+        return "No pack sources configured. Add one with the CLI: `/pack add-source <url>`."
+
+    db = _get_db(request)
+    from ..services.pack_refresh import PackRefreshWorker
+
+    worker = PackRefreshWorker(db=db, data_dir=request.app.state.config.app.data_dir, sources=sources_cfg)
+    results = worker.refresh_all()
+    if any(result.changed for result in results):
+        artifact_registry = getattr(request.app.state, "artifact_registry", None)
+        if artifact_registry is not None:
+            artifact_registry.load_from_db(db)
+        skill_registry = getattr(request.app.state, "skill_registry", None)
+        if skill_registry is not None and artifact_registry is not None:
+            skill_registry.load_from_artifacts(artifact_registry)
+
+    lines = ["## Pack Refresh", ""]
+    for result in results:
+        if result.success:
+            lines.append(
+                f"- `{result.url}` — installed `{result.packs_installed}`, "
+                f"updated `{result.packs_updated}`, changed `{str(result.changed).lower()}`"
+            )
+        else:
+                lines.append(f"- `{result.url}` — error: {result.error or 'unknown error'}")
+    return "\n".join(lines)
+
+
+def _add_pack_source_markdown(request: Request, url: str) -> str:
+    if not url:
+        return "Usage: `/pack add-source <git-url>`"
+
+    from ..config import PackSourceConfig
+    from ..services.pack_sources import add_pack_source
+
+    result = add_pack_source(url)
+    if not result.ok:
+        return result.message or "Failed to add pack source."
+
+    sources_cfg = getattr(request.app.state.config, "pack_sources", None)
+    if sources_cfg is None:
+        request.app.state.config.pack_sources = []
+        sources_cfg = request.app.state.config.pack_sources
+    if not any(getattr(source, "url", None) == url for source in sources_cfg):
+        sources_cfg.append(PackSourceConfig(url=url, branch="main", refresh_interval=30))
+
+    return result.message or f"Added pack source: {url}"
+
+
+def _install_or_update_pack_markdown(
+    request: Request,
+    conversation: dict[str, Any] | None,
+    pack_path_str: str,
+    *,
+    update: bool,
+    project_scope: bool = False,
+    attach_after_install: bool = False,
+    priority: int = 50,
+) -> str:
+    from pathlib import Path
+
+    from ..services.pack_attachments import attach_pack
+
+    if not pack_path_str:
+        return "Usage: `/pack update <path>`" if update else "Usage: `/pack install <path>`"
+
+    db = _get_db(request)
+    working_dir = (conversation.get("working_dir") if conversation else None) or os.getcwd()
+    pack_path = Path(pack_path_str).expanduser()
+    if not pack_path.is_absolute():
+        pack_path = Path(working_dir) / pack_path
+    pack_path = pack_path.resolve()
+    manifest_path = pack_path / "pack.yaml"
+    if not manifest_path.exists():
+        return f"No pack.yaml found in `{pack_path}`."
+
+    try:
+        manifest = packs_service.parse_manifest(manifest_path)
+        errors = packs_service.validate_manifest(manifest, pack_path)
+        if errors:
+            return "\n".join(["Pack validation failed:"] + [f"- {err}" for err in errors])
+        project_dir = Path(working_dir) if project_scope else None
+        result = (
+            packs_service.update_pack(db, manifest, pack_path, project_dir=project_dir)
+            if update
+            else packs_service.install_pack(db, manifest, pack_path, project_dir=project_dir)
+        )
+    except ValueError as exc:
+        return str(exc)
+
+    attach_note = ""
+    if attach_after_install:
+        try:
+            attach_pack(
+                db,
+                result["id"],
+                project_path=working_dir if project_scope else None,
+                priority=priority,
+            )
+            attach_scope = "project" if project_scope else "global"
+            attach_note = f"\nAttached `@{manifest.namespace}/{manifest.name}` ({attach_scope}, p{priority})."
+        except ValueError as exc:
+            attach_note = f"\nPack installed but not attached: {exc}"
+
+    artifact_registry = getattr(request.app.state, "artifact_registry", None)
+    if artifact_registry is not None:
+        artifact_registry.load_from_db(db)
+    skill_registry = getattr(request.app.state, "skill_registry", None)
+    if skill_registry is not None and artifact_registry is not None:
+        skill_registry.load_from_artifacts(artifact_registry)
+
+    action_word = "Updated" if update or result.get("action") == "updated" else "Installed"
+    return (
+        f"{action_word} `@{manifest.namespace}/{manifest.name}` v{manifest.version} "
+        f"({result.get('artifact_count', 0)} artifacts).{attach_note}"
+    )
+
+
+def _mcp_status_markdown(request: Request) -> str:
+    mcp_manager = getattr(request.app.state, "mcp_manager", None)
+    if mcp_manager is None:
+        return "No MCP servers configured."
+    statuses = mcp_manager.get_server_statuses()
+    if not statuses:
+        return "No MCP servers configured."
+    lines = ["## MCP Servers", ""]
+    for name, info in statuses.items():
+        status = info.get("status", "unknown")
+        transport = info.get("transport", "?")
+        tool_count = info.get("tool_count", 0)
+        err = info.get("error_message")
+        suffix = f" — {err}" if err else ""
+        lines.append(f"- **{name}** · {transport} · {status} · {tool_count} tools{suffix}")
+    lines.append("")
+    lines.append("Use `/mcp status <name>` for details or `/mcp connect|disconnect|reconnect <name>`.")
+    return "\n".join(lines)
+
+
+def _mcp_server_detail_markdown(request: Request, name: str) -> str:
+    mcp_manager = getattr(request.app.state, "mcp_manager", None)
+    if mcp_manager is None:
+        return "No MCP servers configured."
+    statuses = mcp_manager.get_server_statuses()
+    if name not in statuses:
+        available = ", ".join(sorted(statuses.keys())) if statuses else "none"
+        return f"Unknown MCP server `{name}`. Available: {available}"
+
+    info = statuses[name]
+    lines = [f"## MCP Server: {name}", ""]
+    lines.append(f"- Status: `{info.get('status', 'unknown')}`")
+    lines.append(f"- Transport: `{info.get('transport', '?')}`")
+    lines.append(f"- Tools: `{info.get('tool_count', 0)}`")
+    if info.get("error_message"):
+        lines.append(f"- Error: `{info['error_message']}`")
+    config = getattr(mcp_manager, "_configs", {}).get(name)
+    if config is not None:
+        url = getattr(config, "url", None)
+        timeout = getattr(config, "timeout", None)
+        if url:
+            lines.append(f"- URL: `{url}`")
+        if timeout is not None:
+            lines.append(f"- Timeout: `{timeout}`")
+    server_tools = getattr(mcp_manager, "_server_tools", {}).get(name, [])
+    if server_tools:
+        lines.extend(["", "### Tools"])
+        for tool in server_tools:
+            lines.append(f"- `{tool}`")
+    return "\n".join(lines)
+
+
+async def _run_mcp_action_markdown(request: Request, action: str, server_name: str) -> str:
+    mcp_manager = getattr(request.app.state, "mcp_manager", None)
+    if mcp_manager is None:
+        return "No MCP servers configured."
+    try:
+        if action == "connect":
+            await mcp_manager.connect_server(server_name)
+        elif action == "disconnect":
+            await mcp_manager.disconnect_server(server_name)
+        elif action == "reconnect":
+            await mcp_manager.reconnect_server(server_name)
+        else:
+            return f"Unknown MCP action `{action}`."
+    except ValueError as exc:
+        return str(exc)
+    return f"MCP `{action}` for **{server_name}** complete.\n\n{_mcp_status_markdown(request)}"
+
+
+async def _execute_web_command(
+    request: Request,
+    *,
+    conversation_id: str | None,
+    raw_command: str,
+    plan_mode: bool = False,
+) -> dict[str, Any]:
+    db = _get_db(request)
+    conv = storage.get_conversation(db, conversation_id) if conversation_id else None
+    if conversation_id and not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    parsed = parse_slash_command(raw_command)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail="Not a slash command")
+
+    working_dir = (conv.get("working_dir") if conv else None) or os.getcwd()
+    space_id = conv.get("space_id") if conv else None
+    artifact_registry, skill_registry, _ = _get_request_registries(request, db, space_id, working_dir)
+    if parsed.name == "/reload-skills" and skill_registry is not None:
+        skill_registry.reload(working_dir)
+        if artifact_registry is not None:
+            skill_registry.load_from_artifacts(artifact_registry)
+
+    current_model = (conv.get("model") if conv else None) or request.app.state.config.ai.model
+    context = CommandContext(
+        current_model=current_model,
+        working_dir=working_dir,
+        available_tools=_command_tool_names(request),
+        tool_registry=getattr(request.app.state, "tool_registry", None),
+        skill_registry=skill_registry,
+        artifact_registry=artifact_registry,
+        plan_mode=plan_mode,
+    )
+    result = execute_slash_command(raw_command, context)
+    if result is None:
+        local_message = _web_local_only_command_message(parsed.name, raw_command)
+        if local_message:
+            return _command_response(kind="show_message", message=local_message, echo_user=False)
+        raise HTTPException(status_code=400, detail="Unsupported slash command")
+    return await _apply_web_command_result(request, conversation_id=conversation_id, conversation=conv, result=result)
+
+
+def _web_local_only_command_message(command_name: str, raw_command: str) -> str | None:
+    if command_name == "/upload":
+        return "Use the web file uploader instead of `/upload <path>`."
+    if command_name == "/verbose":
+        return "`/verbose` is available in the CLI and Textual UI only."
+    if command_name == "/detail":
+        return "`/detail` is available in the CLI and Textual UI only."
+    if command_name == "/plan" and len(raw_command.strip().split(maxsplit=1)) > 1:
+        return "Inline `/plan <prompt>` is available in the CLI and Textual UI only. Use normal chat input on the web."
+    return None
+
+
+async def _apply_web_command_result(
+    request: Request,
+    *,
+    conversation_id: str | None,
+    conversation: dict[str, Any] | None,
+    result: CommandResult,
+) -> dict[str, Any]:
+    db = _get_db(request)
+    if result.kind == "exit":
+        return _command_response(
+            kind="show_message",
+            message="`/quit` is not available in the web UI.",
+            echo_user=False,
+        )
+    if result.kind == "forward_prompt" and result.forward_prompt:
+        return _command_response(
+            kind="forward_prompt",
+            forward_prompt=result.forward_prompt,
+            echo_user=True,
+        )
+    if result.kind == "show_help":
+        return _command_response(kind="show_message", message=build_help_markdown(), echo_user=True)
+    if result.kind == "show_spaces":
+        spaces = list_spaces(db)
+        return _command_response(
+            kind="show_message",
+            message=_space_list_markdown(db, conversation.get("space_id") if conversation else None),
+            command_items=_space_items(spaces, conversation.get("space_id") if conversation else None),
+        )
+    if result.kind == "create_space":
+        created_space, message = _create_space_markdown(db, result.space_target)
+        return _command_response(
+            kind="create_space",
+            message=message,
+            command_items=_space_items([created_space], conversation.get("space_id") if conversation else None)
+            if created_space
+            else None,
+            echo_user=False,
+        )
+    if result.kind == "update_space":
+        updated_space, message = _update_space_markdown(
+            db,
+            conversation,
+            result.space_edit_field,
+            result.space_edit_value,
+        )
+        return _command_response(
+            kind="update_space",
+            message=message,
+            command_items=_space_items([updated_space], conversation.get("space_id") if conversation else None)
+            if updated_space
+            else None,
+            echo_user=False,
+        )
+    if result.kind == "refresh_space":
+        refreshed_space, message = _refresh_space_markdown(db, conversation, result.space_target)
+        return _command_response(
+            kind="refresh_space",
+            message=message,
+            command_items=_space_items([refreshed_space], conversation.get("space_id") if conversation else None)
+            if refreshed_space
+            else None,
+            echo_user=False,
+        )
+    if result.kind == "export_space":
+        return _command_response(
+            kind="show_message",
+            message=_export_space_markdown(db, conversation, result.space_target),
+            echo_user=False,
+        )
+    if result.kind == "show_artifacts":
+        artifacts = artifact_storage.list_artifacts(db)
+        return _command_response(
+            kind="show_message",
+            message=_artifact_list_markdown(db),
+            command_items=_artifact_items(artifacts),
+        )
+    if result.kind == "show_packs":
+        packs = packs_service.list_packs(db)
+
+        attached_refs: set[str] = set()
+        for pack in packs:
+            ref = f"{pack.get('namespace', 'default')}/{pack['name']}"
+            attachments = list_attachments_for_pack(db, pack["id"])
+            if any(
+                attachment.get("scope") == "global"
+                and not attachment.get("project_path")
+                and not attachment.get("space_id")
+                for attachment in attachments
+            ):
+                attached_refs.add(ref)
+        return _command_response(
+            kind="show_message",
+            message=_pack_list_markdown(db),
+            command_items=_pack_items(packs, attached_refs=attached_refs),
+        )
+    if result.kind == "show_pack_sources":
+        return _command_response(kind="show_message", message=_pack_sources_markdown(request))
+    if result.kind == "refresh_pack_sources":
+        return _command_response(kind="show_message", message=_refresh_pack_sources_markdown(request))
+    if result.kind == "add_pack_source":
+        return _command_response(
+            kind="show_message",
+            message=_add_pack_source_markdown(request, result.pack_source_url or ""),
+        )
+    if result.kind == "list_conversations":
+        convs = storage.list_conversations(db, limit=result.list_limit or 20)
+        return _command_response(
+            kind="show_message",
+            message=_list_conversations_markdown(db, result.list_limit or 20, convs),
+            command_items=_conversation_items(convs),
+        )
+    if result.kind == "resume_conversation":
+        target = result.resume_target
+        if target:
+            conv = _resolve_conversation_target(db, target)
+        else:
+            convs = storage.list_conversations(db, limit=1)
+            conv = storage.get_conversation(db, convs[0]["id"]) if convs else None
+        if not conv:
+            return _command_response(
+                kind="show_message",
+                message="Conversation not found. Use `/list` to see available conversations.",
+                echo_user=False,
+            )
+        return _command_response(
+            kind="resume_conversation",
+            message=f"Resumed **{conv.get('title', 'Untitled')}**.",
+            conversation=conv,
+            echo_user=False,
+        )
+    if result.kind == "delete_conversation":
+        conv = _resolve_conversation_target(db, result.delete_target or "")
+        if not conv:
+            return _command_response(
+                kind="show_message",
+                message="Conversation not found. Use `/list` to see available conversations.",
+                echo_user=False,
+            )
+        if not (result.command.arg or "").strip().startswith("--confirm "):
+            return _command_response(
+                kind="show_message",
+                message=f"Confirm deleting **{conv.get('title', 'Untitled')}**.",
+                command_items=[_delete_conversation_item(conv)],
+                echo_user=False,
+            )
+        title = conv.get("title", "Untitled")
+        storage.delete_conversation(db, conv["id"], request.app.state.config.app.data_dir)
+        return _command_response(
+            kind="delete_conversation",
+            message=f"Deleted **{title}**.",
+            deleted_conversation_id=conv["id"],
+            echo_user=False,
+        )
+    if result.kind == "rewind_conversation":
+        updated, message = await _rewind_conversation(request, conversation, result.rewind_arg or "")
+        if updated and (result.rewind_arg or "").strip():
+            return _command_response(
+                kind="rewind_conversation",
+                message=message,
+                conversation=updated,
+                echo_user=False,
+            )
+        return _command_response(
+            kind="show_message",
+            message=message,
+            conversation=updated,
+            echo_user=False,
+        )
+    if result.kind == "search_conversations":
+        query = (result.search_query or "").strip()
+        type_filter = None
+        if query.startswith("--keyword "):
+            query = query[len("--keyword ") :].strip()
+        elif query.startswith("--type "):
+            rest = query[len("--type ") :].strip()
+            parts = rest.split(maxsplit=1)
+            if parts and parts[0] in {"chat", "note", "document"}:
+                type_filter = parts[0]
+                query = parts[1] if len(parts) > 1 else ""
+        search_results = (
+            storage.list_conversations(db, search=query, limit=20, conversation_type=type_filter)
+            if query
+            else []
+        )
+        return _command_response(
+            kind="show_message",
+            message=_search_conversations_markdown(db, result.search_query or "", search_results),
+            command_items=_conversation_items(search_results),
+        )
+    if result.kind == "show_tools":
+        return _command_response(kind="show_message", message=build_tools_markdown(result.tool_names), echo_user=True)
+    if result.kind == "show_usage":
+        return _command_response(kind="show_message", message=_usage_markdown(db, request.app.state.config))
+    if result.kind == "show_mcp_status":
+        mcp_manager = getattr(request.app.state, "mcp_manager", None)
+        statuses = mcp_manager.get_server_statuses() if mcp_manager is not None else {}
+        return _command_response(
+            kind="show_message",
+            message=_mcp_status_markdown(request),
+            command_items=_mcp_items(statuses),
+        )
+    if result.kind == "show_mcp_server_detail":
+        mcp_manager = getattr(request.app.state, "mcp_manager", None)
+        statuses = mcp_manager.get_server_statuses() if mcp_manager is not None else {}
+        return _command_response(
+            kind="show_message",
+            message=_mcp_server_detail_markdown(request, result.mcp_server_name or ""),
+            command_items=_mcp_items(statuses, focus_name=result.mcp_server_name),
+        )
+    if result.kind == "run_mcp_action":
+        return _command_response(
+            kind="show_message",
+            message=await _run_mcp_action_markdown(request, result.mcp_action or "", result.mcp_server_name or ""),
+        )
+    if result.kind == "show_skills":
+        message = build_skills_markdown(
+            result.skill_entries,
+            result.skill_warnings,
+            has_registry=getattr(request.app.state, "skill_registry", None) is not None,
+        )
+        if result.command.name == "/reload-skills":
+            message = "Reloaded skill registry.\n\n" + message
+        return _command_response(
+            kind="show_message",
+            message=message,
+            command_items=_skill_items(list(result.skill_entries)),
+        )
+    if result.kind == "show_plan_status":
+        message = "Planning mode: **active**" if result.plan_mode_enabled else "Planning mode: **off**"
+        return _command_response(
+            kind="show_plan_status",
+            message=message,
+            plan_mode_enabled=bool(result.plan_mode_enabled),
+        )
+    if result.kind == "set_plan_mode":
+        enabled = bool(result.plan_mode_enabled)
+        message = (
+            "Planning mode active. The next turn will stay in investigation mode until you turn it off."
+            if enabled
+            else "Planning mode off. Full tools restored."
+        )
+        return _command_response(kind="set_plan_mode", message=message, plan_mode_enabled=enabled, echo_user=False)
+    if result.kind == "show_model":
+        return _command_response(kind="show_message", message=f"Current model: `{result.model_name}`")
+    if result.kind == "show_artifact":
+        return _command_response(kind="show_message", message=_artifact_show_markdown(db, result.artifact_fqn or ""))
+    if result.kind == "show_pack":
+        return _command_response(kind="show_message", message=_pack_show_markdown(db, result.pack_ref or ""))
+    if result.kind == "install_pack":
+        return _command_response(
+            kind="show_message",
+            message=_install_or_update_pack_markdown(
+                request,
+                conversation,
+                result.pack_path or "",
+                update=False,
+                project_scope=result.pack_project_scope,
+                attach_after_install=result.pack_attach_after_install,
+                priority=result.pack_priority or 50,
+            ),
+            echo_user=False,
+        )
+    if result.kind == "update_pack":
+        return _command_response(
+            kind="show_message",
+            message=_install_or_update_pack_markdown(
+                request,
+                conversation,
+                result.pack_path or "",
+                update=True,
+                project_scope=result.pack_project_scope,
+            ),
+            echo_user=False,
+        )
+    if result.kind == "show_space":
+        return _command_response(
+            kind="show_message",
+            message=_space_show_markdown(
+                db,
+                conversation.get("space_id") if conversation else None,
+                result.space_target,
+            ),
+        )
+    if result.kind == "show_space_sources":
+        return _command_response(
+            kind="show_message",
+            message=_space_sources_markdown(
+                db,
+                conversation.get("space_id") if conversation else None,
+                result.space_target,
+            ),
+        )
+    if result.kind == "show_slug":
+        _, message = _set_conversation_slug(db, conversation, None)
+        return _command_response(kind="show_message", message=message)
+    if result.kind == "set_model":
+        if not conversation_id:
+            return _command_response(
+                kind="show_message",
+                message="Open or create a conversation before changing the model.",
+            )
+        updated = storage.update_conversation_model(db, conversation_id, result.model_name or "")
+        return _command_response(
+            kind="set_model",
+            message=f"Active model changed to `{result.model_name}`.",
+            conversation=updated,
+            model_name=result.model_name,
+        )
+    if result.kind == "rename_conversation":
+        updated, message = _rename_conversation(db, conversation, result.conversation_title or "")
+        return _command_response(
+            kind="rename_conversation" if updated else "show_message",
+            message=message,
+            conversation=updated,
+        )
+    if result.kind == "set_slug":
+        updated, message = _set_conversation_slug(db, conversation, result.slug_value)
+        return _command_response(
+            kind="set_slug" if updated else "show_message",
+            message=message,
+            conversation=updated,
+        )
+    if result.kind == "set_space":
+        updated, message = _set_space(db, conversation, result.space_target)
+        return _command_response(
+            kind="set_space" if updated else "show_message",
+            message=message,
+            conversation=updated,
+        )
+    if result.kind == "delete_space":
+        if not result.command.arg.startswith("delete --confirm "):
+            target = result.space_target or ""
+            space, candidates = resolve_space(db, target)
+            if candidates:
+                names = ", ".join(candidate["name"] for candidate in candidates[:5])
+                return _command_response(
+                    kind="show_message",
+                    message=f"Space `{target}` is ambiguous. Matches: {names}",
+                )
+            if not space:
+                return _command_response(kind="show_message", message=f"Space `{target}` not found.")
+            return _command_response(
+                kind="show_message",
+                message=f"Delete space **{space['name']}**?",
+                command_items=[
+                    {
+                        "kind": "space",
+                        "id": space["id"],
+                        "title": space["name"],
+                        "meta": "Delete space",
+                        "actions": [
+                            {
+                                "label": "Delete",
+                                "command": f"/space delete --confirm {space['id']}",
+                                "requires_confirm": True,
+                                "confirm_text": f"Delete {space['name']}?",
+                                "confirm_label": "Delete",
+                            }
+                        ],
+                    }
+                ],
+                echo_user=False,
+            )
+        updated, message = _delete_space(db, conversation, result.space_target)
+        return _command_response(
+            kind="delete_space",
+            message=message,
+            conversation=updated,
+            echo_user=False,
+        )
+    if result.kind == "delete_artifact":
+        return _command_response(
+            kind="show_message",
+            message=_delete_artifact(request, result.artifact_fqn or ""),
+            echo_user=False,
+        )
+    if result.kind == "attach_pack":
+        return _command_response(
+            kind="show_message",
+            message=_attach_pack_markdown(
+                request,
+                conversation,
+                result.pack_ref or "",
+                project_scope=result.pack_project_scope,
+            ),
+            echo_user=False,
+        )
+    if result.kind == "detach_pack":
+        return _command_response(
+            kind="show_message",
+            message=_detach_pack_markdown(
+                request,
+                conversation,
+                result.pack_ref or "",
+                project_scope=result.pack_project_scope,
+            ),
+            echo_user=False,
+        )
+    if result.kind == "delete_pack":
+        return _command_response(
+            kind="show_message",
+            message=_remove_pack(request, result.pack_ref or ""),
+            echo_user=False,
+        )
+    if result.kind == "new_conversation":
+        uid, uname = _get_identity(request)
+        space_id = conversation.get("space_id") if conversation else None
+        conv = storage.create_conversation(
+            db,
+            title=result.conversation_title or "New Conversation",
+            conversation_type=result.conversation_type or "chat",
+            user_id=uid,
+            user_display_name=uname,
+            working_dir=(conversation.get("working_dir") if conversation else None),
+            space_id=space_id,
+        )
+        return _command_response(
+            kind="new_conversation",
+            message="Started a new conversation.",
+            conversation=conv,
+            echo_user=False,
+        )
+    if result.kind == "show_message":
+        return _command_response(kind="show_message", message=result.message or "", echo_user=result.echo_user)
+    if result.kind == "compact_conversation":
+        updated, message = await _compact_conversation(request, conversation)
+        return _command_response(
+            kind="compact_conversation" if updated else "show_message",
+            message=message,
+            conversation=updated,
+            echo_user=False,
+        )
+    raise HTTPException(status_code=500, detail=f"Unhandled web command result kind: {result.kind}")
 def _resolve_sources(
     db: Any,
     source_ids: list[str],
@@ -321,8 +2027,8 @@ def _resolve_sources(
     limit: int = 50_000,
     *,
     space_id: str | None = None,
-) -> SourceResolutionResult:
-    """Resolve source references and return content with exclusion metadata.
+) -> str:
+    """Resolve source references and return XML-delimited source content string.
 
     When *space_id* is given, only sources linked to that space are included.
     Sources auto-injected by the space resolution layer always pass this check;
@@ -336,13 +2042,9 @@ def _resolve_sources(
         _allowed_ids.update(s["id"] for s in storage.get_space_sources(db, space_id))
 
     _referenced_sources: list[dict[str, Any]] = []
-    _excluded_set: set[str] = set()
-    _requested_count = 0
     if source_ids:
         for sid in source_ids[:20]:
-            _requested_count += 1
             if _allowed_ids is not None and sid not in _allowed_ids:
-                _excluded_set.add(sid)
                 continue
             src = storage.get_source(db, sid)
             if src and src.get("content"):
@@ -350,9 +2052,7 @@ def _resolve_sources(
     if source_tag:
         tagged = storage.list_sources(db, tag_id=source_tag, limit=20)
         for src in tagged:
-            _requested_count += 1
             if _allowed_ids is not None and src["id"] not in _allowed_ids:
-                _excluded_set.add(src["id"])
                 continue
             if src.get("content") and src["id"] not in {s["id"] for s in _referenced_sources}:
                 full = storage.get_source(db, src["id"])
@@ -361,58 +2061,36 @@ def _resolve_sources(
     if source_group_id:
         grouped = storage.list_sources(db, group_id=source_group_id, limit=20)
         for src in grouped:
-            _requested_count += 1
             if _allowed_ids is not None and src["id"] not in _allowed_ids:
-                _excluded_set.add(src["id"])
                 continue
             if src.get("content") and src["id"] not in {s["id"] for s in _referenced_sources}:
                 full = storage.get_source(db, src["id"])
                 if full and full.get("content"):
                     _referenced_sources.append(full)
-    _excluded_ids: list[str] = sorted(_excluded_set)
 
     if not _referenced_sources:
-        return SourceResolutionResult(
-            content="",
-            excluded_ids=_excluded_ids,
-            included=[],
-            requested_count=_requested_count,
-            truncated=False,
-        )
+        return ""
 
     source_parts: list[str] = []
     total_chars = 0
-    _truncated = False
-    _included_sources: list[dict[str, str]] = []
     for src in _referenced_sources:
         content = src.get("content", "")
         remaining = limit - total_chars
         if remaining <= 0:
-            _truncated = True
             break
         if len(content) > remaining:
             content = content[:remaining] + "\n[...truncated...]"
-            _truncated = True
         safe_title = str(src.get("title", ""))[:200]
         src_id = src["id"]
         source_parts.append(f"### {safe_title}\n" + wrap_untrusted(content, f"source:{src_id}", "reference"))
         total_chars += len(content)
-        _included_sources.append({"id": src_id, "title": safe_title, "type": src.get("type", "text")})
-
-    _content = ""
     if source_parts:
-        _content = (
+        return (
             "\n\n## Referenced Knowledge Sources\n"
             "The user has attached the following sources as context for this conversation.\n"
             + "\n\n".join(source_parts)
         )
-    return SourceResolutionResult(
-        content=_content,
-        excluded_ids=_excluded_ids,
-        included=_included_sources,
-        requested_count=_requested_count,
-        truncated=_truncated,
-    )
+    return ""
 
 
 def _build_tool_list(
@@ -598,13 +2276,10 @@ async def _build_chat_system_prompt(
         extra += canvas_context
 
     # Source references
-    source_result = _resolve_sources(db, source_ids, source_tag, source_group_id, space_id=space_id)
-    if source_result.content:
-        extra += source_result.content
-    meta["sources_truncated"] = source_result.truncated
-    if source_result.excluded_ids:
-        meta["sources_excluded_count"] = len(source_result.excluded_ids)
-    meta["sources_attached"] = source_result.included
+    source_content = _resolve_sources(db, source_ids, source_tag, source_group_id, space_id=space_id)
+    if source_content:
+        extra += source_content
+        meta["sources_truncated"] = "[...truncated...]" in source_content
 
     # RAG context (skip in plan mode)
     rag_config = getattr(config, "rag", None)
@@ -1227,6 +2902,11 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                 "max_line_repeats",
                 CliConfig.max_line_repeats,
             ),
+            max_identical_tool_repeats=getattr(
+                getattr(_app_config, "cli", None),
+                "max_identical_tool_repeats",
+                CliConfig.max_identical_tool_repeats,
+            ),
         )
         _pending_usage: dict[str, Any] | None = None
         async for agent_event in _with_keepalive(agent_gen):
@@ -1296,6 +2976,12 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                                 "data": json.dumps({"content_delta": delta_text}),
                             }
 
+            elif kind == "tool_batch_start":
+                yield {
+                    "event": "tool_batch_start",
+                    "data": json.dumps({"call_count": data["call_count"]}),
+                }
+
             elif kind == "tool_call_start":
                 idx = data.get("index", 0)
                 _canvas_args_accum.pop(idx, None)
@@ -1315,10 +3001,6 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                 }
 
             elif kind == "assistant_message":
-                _msg_meta = None
-                _rag_sources = ctx.prompt_meta.get("rag_sources")
-                if _rag_sources:
-                    _msg_meta = {"rag_sources": _rag_sources}
                 current_assistant_msg = storage.create_message(
                     ctx.db,
                     ctx.conversation_id,
@@ -1326,7 +3008,6 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                     data["content"],
                     user_id=ctx.uid,
                     user_display_name=ctx.uname,
-                    metadata=_msg_meta,
                 )
 
                 if _pending_usage and current_assistant_msg:
@@ -1505,6 +3186,17 @@ async def _stream_chat_events(ctx: StreamContext) -> Any:
                                     "data": json.dumps(sa_event),
                                 }
                             del ctx.subagent_events[sa_agent_id]
+
+            elif kind == "tool_batch_end":
+                yield {
+                    "event": "tool_batch_end",
+                    "data": json.dumps(
+                        {
+                            "call_count": data["call_count"],
+                            "elapsed_seconds": data["elapsed_seconds"],
+                        }
+                    ),
+                }
 
             elif kind == "error":
                 yield {"event": "error", "data": json.dumps(data)}
@@ -1711,6 +3403,44 @@ async def _parse_chat_request(request: Request) -> ChatRequestContext:
         source_tag=source_tag,
         source_group_id=source_group_id,
         files=files,
+    )
+
+
+@router.post("/commands")
+async def execute_global_command(request: Request) -> Any:
+    _require_json(request)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    command = body.get("command", "").strip() if isinstance(body, dict) else ""
+    plan_mode = bool(body.get("plan_mode", False)) if isinstance(body, dict) else False
+    if not command:
+        raise HTTPException(status_code=400, detail="Command is required")
+    return JSONResponse(
+        await _execute_web_command(
+            request,
+            conversation_id=None,
+            raw_command=command,
+            plan_mode=plan_mode,
+        )
+    )
+
+
+@router.post("/conversations/{conversation_id}/command")
+async def execute_conversation_command(conversation_id: str, request: Request) -> Any:
+    _validate_uuid(conversation_id)
+    _require_json(request)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    command = body.get("command", "").strip() if isinstance(body, dict) else ""
+    plan_mode = bool(body.get("plan_mode", False)) if isinstance(body, dict) else False
+    if not command:
+        raise HTTPException(status_code=400, detail="Command is required")
+    return JSONResponse(
+        await _execute_web_command(request, conversation_id=conversation_id, raw_command=command, plan_mode=plan_mode)
     )
 
 
@@ -2000,9 +3730,10 @@ async def chat(conversation_id: str, request: Request) -> Any:
     # Build unified tool list: builtins + MCP
     tool_registry = request.app.state.tool_registry
     mcp_manager = request.app.state.mcp_manager
+    working_dir = conv.get("working_dir") or os.getcwd()
 
     # Build per-request registries scoped to the active space
-    req_art_reg, req_skill_reg, req_rule_enf = _get_request_registries(request, db, space_id)
+    req_art_reg, req_skill_reg, req_rule_enf = _get_request_registries(request, db, space_id, working_dir)
 
     tools_openai, plan_path, plan_prompt = _build_tool_list(
         tool_registry=tool_registry,

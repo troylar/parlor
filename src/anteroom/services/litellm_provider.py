@@ -9,7 +9,6 @@ from typing import Any, AsyncGenerator
 
 from ..config import AIConfig
 from .egress_allowlist import check_egress_allowed
-from .error_sanitizer import sanitize_provider_error
 from .token_provider import TokenProvider, TokenProviderError
 
 logger = logging.getLogger(__name__)
@@ -24,6 +23,86 @@ try:
     HAS_LITELLM = True
 except ImportError:
     HAS_LITELLM = False
+
+
+class _StreamTimeoutError(Exception):
+    """Raised when a streaming response stops yielding chunks."""
+
+
+async def _iter_stream(
+    stream_iter: Any,
+    cancel_event: asyncio.Event | None,
+    total_timeout: float,
+    stall_timeout: float | None = None,
+) -> AsyncGenerator[Any, None]:
+    """Iterate a LiteLLM stream with cancellation and stall detection."""
+    deadline = asyncio.get_running_loop().time() + total_timeout
+
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            logger.debug("LiteLLM stream deadline exceeded before next chunk (%.0fs)", total_timeout)
+            try:
+                await stream_iter.aclose()
+            except Exception:
+                pass
+            raise _StreamTimeoutError()
+
+        wait_limit = min(remaining, stall_timeout) if stall_timeout else remaining
+
+        next_chunk = asyncio.ensure_future(stream_iter.__anext__())
+        wait_tasks: list[asyncio.Future[Any]] = [next_chunk]
+
+        if cancel_event:
+            cancel_wait = asyncio.ensure_future(cancel_event.wait())
+            wait_tasks.append(cancel_wait)
+        else:
+            cancel_wait = None
+
+        try:
+            done, _pending = await asyncio.wait(
+                wait_tasks,
+                timeout=wait_limit,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except Exception:
+            next_chunk.cancel()
+            if cancel_wait:
+                cancel_wait.cancel()
+            raise
+
+        if not done:
+            next_chunk.cancel()
+            if cancel_wait:
+                cancel_wait.cancel()
+            remaining_now = deadline - asyncio.get_running_loop().time()
+            if remaining_now <= 0:
+                logger.debug("LiteLLM stream total deadline exceeded after %.0fs", total_timeout)
+            else:
+                logger.warning("LiteLLM stream stalled — no chunk for %.0fs", wait_limit)
+            try:
+                await stream_iter.aclose()
+            except Exception:
+                pass
+            raise _StreamTimeoutError()
+
+        if cancel_wait and cancel_wait in done:
+            next_chunk.cancel()
+            try:
+                await stream_iter.aclose()
+            except Exception:
+                pass
+            return
+
+        if cancel_wait and cancel_wait not in done:
+            cancel_wait.cancel()
+
+        try:
+            chunk = next_chunk.result()
+        except StopAsyncIteration:
+            return
+
+        yield chunk
 
 
 class LiteLLMService:
@@ -140,8 +219,10 @@ class LiteLLMService:
 
                 current_tool_calls: dict[int, dict[str, Any]] = {}
                 usage_data: dict[str, Any] | None = None
+                total_timeout = float(self.config.request_timeout)
+                stall_timeout = float(self.config.chunk_stall_timeout)
 
-                async for chunk in stream:
+                async for chunk in _iter_stream(stream.__aiter__(), cancel_event, total_timeout, stall_timeout):
                     if cancel_event and cancel_event.is_set():
                         return
 
@@ -257,30 +338,15 @@ class LiteLLMService:
                 }
                 return
 
-            except LiteLLMBadRequestError as e:
-                err_msg = str(e).lower()
-                if "too many" in err_msg and "tool" in err_msg:
-                    yield {
-                        "event": "error",
-                        "data": {
-                            "message": (
-                                "Too many tools for this API provider. Reduce MCP tools or set ai.max_tools in config."
-                            ),
-                            "code": "too_many_tools",
-                            "retryable": False,
-                        },
-                    }
-                else:
-                    user_msg = sanitize_provider_error(str(e))
-                    logger.warning("AI bad request error: %s", e)
-                    yield {
-                        "event": "error",
-                        "data": {
-                            "message": user_msg,
-                            "code": "bad_request",
-                            "retryable": False,
-                        },
-                    }
+            except LiteLLMBadRequestError:
+                yield {
+                    "event": "error",
+                    "data": {
+                        "message": "AI request error",
+                        "code": "bad_request",
+                        "retryable": False,
+                    },
+                }
                 return
 
             except Exception as e:

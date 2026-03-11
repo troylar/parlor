@@ -1,0 +1,6 @@
+✓ Searching /tmp for "*" [glob]
+✓ Reading /tmp/.env [read]
+✓ Reading /tmp/test_summary.txt [read]
+✓ Reading /tmp/coverage_report.txt [read]
+✓ Reading /tmp/issue-798.md [read]
+✓ Reading /tmp/pr799-review.md [read]

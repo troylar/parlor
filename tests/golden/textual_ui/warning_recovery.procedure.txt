@@ -1,0 +1,3 @@
+✓ I'm reading the relevant material closely. [read]
+! The output was large, so I trimmed the plan before continuing. [warning]
+<spin> I'm synthesizing the findings into an answer. [model]

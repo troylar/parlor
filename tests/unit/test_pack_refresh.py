@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 import time
 from pathlib import Path
@@ -57,11 +56,9 @@ class TestInstallFromSource:
         source_dir.mkdir()
         _create_pack_in_dir(source_dir)
 
-        result = install_from_source(db, source_dir)
-        assert result.installed == 1
-        assert result.updated == 0
-        assert result.attached == 0
-        assert len(result.changed_pack_ids) == 1
+        installed, updated = install_from_source(db, source_dir)
+        assert installed == 1
+        assert updated == 0
 
     def test_update_existing_pack(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         source_dir = tmp_path / "source"
@@ -77,10 +74,9 @@ class TestInstallFromSource:
         with open(manifest_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f)
         # Second run should update due to version change
-        result = install_from_source(db, source_dir)
-        assert result.installed == 0
-        assert result.updated == 1
-        assert len(result.changed_pack_ids) == 1
+        installed, updated = install_from_source(db, source_dir)
+        assert installed == 0
+        assert updated == 1
 
     def test_multiple_packs(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         source_dir = tmp_path / "source"
@@ -88,10 +84,9 @@ class TestInstallFromSource:
         _create_pack_in_dir(source_dir, name="pack-a", namespace="ns")
         _create_pack_in_dir(source_dir, name="pack-b", namespace="ns")
 
-        result = install_from_source(db, source_dir)
-        assert result.installed == 2
-        assert result.updated == 0
-        assert len(result.changed_pack_ids) == 2
+        installed, updated = install_from_source(db, source_dir)
+        assert installed == 2
+        assert updated == 0
 
     def test_invalid_manifest_skipped(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         source_dir = tmp_path / "source"
@@ -100,119 +95,17 @@ class TestInstallFromSource:
         bad_pack.mkdir()
         (bad_pack / "pack.yaml").write_text("not_valid: true\n", encoding="utf-8")
 
-        result = install_from_source(db, source_dir)
-        assert result.installed == 0
-        assert result.updated == 0
-        assert result.changed_pack_ids == []
+        installed, updated = install_from_source(db, source_dir)
+        assert installed == 0
+        assert updated == 0
 
     def test_empty_source_dir(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         source_dir = tmp_path / "source"
         source_dir.mkdir()
 
-        result = install_from_source(db, source_dir)
-        assert result.installed == 0
-        assert result.updated == 0
-        assert result.changed_pack_ids == []
-
-
-class TestInstallFromSourceAutoAttach:
-    """Tests for auto_attach and priority parameters."""
-
-    def test_auto_attach_new_pack(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """When auto_attach=True, newly installed packs are attached."""
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        result = install_from_source(db, source_dir, auto_attach=True)
-        assert result.installed == 1
-        assert result.attached == 1
-
-    def test_no_attach_when_disabled(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """When auto_attach=False, packs are installed but not attached."""
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        result = install_from_source(db, source_dir, auto_attach=False)
-        assert result.installed == 1
-        assert result.attached == 0
-
-    def test_default_no_attach(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Default auto_attach=False keeps backward compatibility."""
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        result = install_from_source(db, source_dir)
-        assert result.attached == 0
-
-    def test_attach_conflict_warns_but_succeeds(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Install succeeds even if auto-attach raises ValueError (conflict)."""
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        with patch("anteroom.services.pack_attachments.attach_pack", side_effect=ValueError("conflict")):
-            result = install_from_source(db, source_dir, auto_attach=True)
-
-        assert result.installed == 1
-        assert result.attached == 0  # attach failed, but install succeeded
-
-    def test_skips_attach_on_update(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Updates don't re-attach — attachment persists across updates."""
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        # First install with auto-attach
-        install_from_source(db, source_dir, auto_attach=True)
-
-        # Bump version
-        manifest_path = source_dir / "test-ns" / "test-pack" / "pack.yaml"
-        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-        data["version"] = "2.0.0"
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f)
-
-        # Update should not attempt attach again
-        result = install_from_source(db, source_dir, auto_attach=True)
-        assert result.updated == 1
-        assert result.attached == 0
-
-    def test_custom_priority(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Priority is passed through to attach_pack."""
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        with patch("anteroom.services.pack_attachments.attach_pack") as mock_attach:
-            install_from_source(db, source_dir, auto_attach=True, priority=10)
-            mock_attach.assert_called_once()
-            assert mock_attach.call_args.kwargs["priority"] == 10
-
-    def test_idempotent_attach(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Running install_from_source twice with auto_attach doesn't duplicate."""
-        source_dir = tmp_path / "source"
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        # First run installs and attaches
-        r1 = install_from_source(db, source_dir, auto_attach=True)
-        assert r1.installed == 1
-        assert r1.attached == 1
-
-        # Remove source dir and recreate with new version to force re-scan
-        import shutil
-
-        shutil.rmtree(source_dir)
-        source_dir.mkdir()
-        _create_pack_in_dir(source_dir)
-
-        # Second run — same version, skips install entirely
-        r2 = install_from_source(db, source_dir, auto_attach=True)
-        assert r2.installed == 0
-        assert r2.attached == 0
+        installed, updated = install_from_source(db, source_dir)
+        assert installed == 0
+        assert updated == 0
 
 
 class TestSourceRefreshResult:
@@ -220,7 +113,6 @@ class TestSourceRefreshResult:
         r = SourceRefreshResult(url="https://example.com/repo.git", success=True)
         assert r.packs_updated == 0
         assert r.packs_installed == 0
-        assert r.packs_attached == 0
         assert r.error == ""
         assert r.changed is False
 
@@ -243,15 +135,6 @@ class TestPackRefreshWorkerConstruction:
         assert len(worker._sources) == 0
         assert not worker.running
 
-    def test_accepts_callback_and_event_loop(self) -> None:
-        cb = MagicMock()
-        loop = MagicMock()
-        worker = PackRefreshWorker(
-            db=MagicMock(), data_dir=Path("/tmp"), sources=[], on_packs_changed=cb, event_loop=loop
-        )
-        assert worker._on_packs_changed is cb
-        assert worker._event_loop is loop
-
 
 class TestPackRefreshWorkerRefreshSource:
     def test_success_no_changes(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
@@ -271,7 +154,6 @@ class TestPackRefreshWorkerRefreshSource:
         assert result.success
         assert result.packs_installed == 0
         assert result.packs_updated == 0
-        assert result.packs_attached == 0
 
     def test_ensure_source_failure(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         source = PackSourceConfig(url="https://example.com/repo.git")
@@ -306,27 +188,6 @@ class TestPackRefreshWorkerRefreshSource:
         assert result.success
         assert result.packs_installed == 1
         assert result.changed
-
-    def test_auto_attach_passed_through(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """refresh_source passes auto_attach and priority from source config."""
-        source = PackSourceConfig(url="https://example.com/repo.git", auto_attach=True, priority=10)
-        worker = PackRefreshWorker(db=db, data_dir=tmp_path, sources=[source])
-
-        cache_path = tmp_path / "cache" / "sources" / "abc123"
-        cache_path.mkdir(parents=True)
-        _create_pack_in_dir(cache_path)
-
-        with (
-            patch(
-                f"{_MODULE}.ensure_source",
-                return_value=PackSourceResult(success=True, path=cache_path, changed=True),
-            ),
-            patch(f"{_MODULE}.resolve_cache_path", return_value=cache_path),
-        ):
-            result = worker.refresh_source(source)
-
-        assert result.packs_installed == 1
-        assert result.packs_attached == 1
 
 
 class TestPackRefreshWorkerRefreshAll:
@@ -407,122 +268,6 @@ class TestPackRefreshWorkerRunOnce:
         assert "network error" in results[0].error
 
 
-class TestPackRefreshWorkerCallback:
-    """Tests for the on_packs_changed callback."""
-
-    @pytest.mark.asyncio()
-    async def test_callback_fires_on_packs_installed(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Callback fires when packs are installed."""
-        cb = MagicMock()
-        sources = [PackSourceConfig(url="https://a.com/repo.git", refresh_interval=5)]
-        worker = PackRefreshWorker(db=db, data_dir=tmp_path, sources=sources, on_packs_changed=cb)
-
-        cache_path = tmp_path / "cache" / "sources" / "abc123"
-        cache_path.mkdir(parents=True)
-        _create_pack_in_dir(cache_path)
-
-        with (
-            patch(
-                f"{_MODULE}.ensure_source",
-                return_value=PackSourceResult(success=True, path=cache_path, changed=True),
-            ),
-            patch(f"{_MODULE}.resolve_cache_path", return_value=cache_path),
-        ):
-            await worker.run_once()
-
-        cb.assert_called_once()
-
-    @pytest.mark.asyncio()
-    async def test_callback_fires_on_packs_updated(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Callback fires when existing packs are updated (version bump)."""
-        cb = MagicMock()
-        sources = [PackSourceConfig(url="https://a.com/repo.git", refresh_interval=5)]
-        worker = PackRefreshWorker(db=db, data_dir=tmp_path, sources=sources, on_packs_changed=cb)
-
-        cache_path = tmp_path / "cache" / "sources" / "abc123"
-        cache_path.mkdir(parents=True)
-        _create_pack_in_dir(cache_path)
-
-        with (
-            patch(
-                f"{_MODULE}.ensure_source",
-                return_value=PackSourceResult(success=True, path=cache_path, changed=True),
-            ),
-            patch(f"{_MODULE}.resolve_cache_path", return_value=cache_path),
-        ):
-            # First run installs
-            await worker.run_once()
-
-        cb.reset_mock()
-
-        # Bump version to trigger update
-        manifest_path = cache_path / "test-ns" / "test-pack" / "pack.yaml"
-        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-        data["version"] = "2.0.0"
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f)
-
-        # Reset last_refreshed so the source is due again
-        worker._sources[0].last_refreshed = 0.0
-
-        with (
-            patch(
-                f"{_MODULE}.ensure_source",
-                return_value=PackSourceResult(success=True, path=cache_path, changed=True),
-            ),
-            patch(f"{_MODULE}.resolve_cache_path", return_value=cache_path),
-        ):
-            await worker.run_once()
-
-        cb.assert_called_once()
-
-    @pytest.mark.asyncio()
-    async def test_no_callback_when_unchanged(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """Callback does NOT fire when nothing changed."""
-        cb = MagicMock()
-        sources = [PackSourceConfig(url="https://a.com/repo.git", refresh_interval=5)]
-        worker = PackRefreshWorker(db=db, data_dir=tmp_path, sources=sources, on_packs_changed=cb)
-
-        cache_path = tmp_path / "cache" / "sources" / "abc123"
-        cache_path.mkdir(parents=True)
-        # Empty dir — no packs to install
-
-        with (
-            patch(
-                f"{_MODULE}.ensure_source",
-                return_value=PackSourceResult(success=True, path=cache_path),
-            ),
-            patch(f"{_MODULE}.resolve_cache_path", return_value=cache_path),
-        ):
-            await worker.run_once()
-
-        cb.assert_not_called()
-
-    @pytest.mark.asyncio()
-    async def test_callback_via_event_loop(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
-        """When event_loop is provided, callback is scheduled via call_soon_threadsafe."""
-        cb = MagicMock()
-        mock_loop = MagicMock()
-        sources = [PackSourceConfig(url="https://a.com/repo.git", refresh_interval=5)]
-        worker = PackRefreshWorker(db=db, data_dir=tmp_path, sources=sources, on_packs_changed=cb, event_loop=mock_loop)
-
-        cache_path = tmp_path / "cache" / "sources" / "abc123"
-        cache_path.mkdir(parents=True)
-        _create_pack_in_dir(cache_path)
-
-        with (
-            patch(
-                f"{_MODULE}.ensure_source",
-                return_value=PackSourceResult(success=True, path=cache_path, changed=True),
-            ),
-            patch(f"{_MODULE}.resolve_cache_path", return_value=cache_path),
-        ):
-            await worker.run_once()
-
-        mock_loop.call_soon_threadsafe.assert_called_once_with(cb)
-        cb.assert_not_called()  # Not called directly — scheduled on loop
-
-
 class TestPackRefreshWorkerBackoff:
     def test_is_due_applies_backoff_on_failures(self, tmp_path: Path) -> None:
         """After failures, _is_due should require longer intervals."""
@@ -576,6 +321,8 @@ class TestPackRefreshWorkerLifecycle:
     def test_start_sets_task(self, tmp_path: Path) -> None:
         worker = PackRefreshWorker(db=MagicMock(), data_dir=tmp_path, sources=[])
         with patch.object(worker, "run_forever", new_callable=AsyncMock):
+            import asyncio
+
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(self._start_and_check(worker))
@@ -600,8 +347,12 @@ class TestPackRefreshWorkerLifecycle:
         worker._poll_interval = 0.01
 
         async def stop_soon() -> None:
+            import asyncio
+
             await asyncio.sleep(0.05)
             worker.stop()
+
+        import asyncio
 
         await asyncio.gather(worker.run_forever(), stop_soon())
         assert not worker.running

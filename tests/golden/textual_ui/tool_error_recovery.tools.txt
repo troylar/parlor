@@ -1,0 +1,2 @@
+! Reading /root/secret.txt [read]
+✓ Reading tests/unit/test_focus_fold.py [read]

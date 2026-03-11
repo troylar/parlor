@@ -579,15 +579,10 @@ const Sources = (() => {
 
             const isAttached = _attachedSources.some(s => s.id === source.id);
             const isInSpace = _spaceSourceIds.has(source.id);
-            const spaceActive = _spaceSourceIds.size > 0;
-            const isOutOfScope = spaceActive && !isInSpace;
             const typeBadge = _typeBadge(source.type);
             const title = DOMPurify.sanitize(source.title || 'Untitled');
-            const spaceBadge = isInSpace ? '<span class="source-space-badge">space</span>'
-                : (spaceActive ? '<span class="source-scope-badge">out of scope</span>' : '');
+            const spaceBadge = isInSpace ? '<span class="source-space-badge">space</span>' : '';
             const date = App.formatTimestamp(source.created_at);
-
-            if (isOutOfScope) item.classList.add('source-out-of-scope');
 
             item.innerHTML = `
                 <div class="source-item-main">
@@ -597,7 +592,7 @@ const Sources = (() => {
                         <span class="source-item-date">${date}</span>
                     </div>
                 </div>
-                <button class="source-item-attach" title="${isAttached ? 'Detach' : (isOutOfScope ? 'Out of scope — not linked to active space' : 'Attach to chat')}">
+                <button class="source-item-attach" title="${isAttached ? 'Detach' : 'Attach to chat'}">
                     ${isAttached ? '&times;' : '+'}
                 </button>
             `;
@@ -608,9 +603,6 @@ const Sources = (() => {
                 if (isAttached) {
                     _attachedSources = _attachedSources.filter(s => s.id !== source.id);
                 } else {
-                    if (isOutOfScope) {
-                        if (!confirm('This source is not linked to the active space and will be excluded. Attach anyway?')) return;
-                    }
                     _attachedSources.push({ id: source.id, title: source.title, type: source.type });
                 }
                 _renderAttachedBar();
@@ -848,39 +840,21 @@ const Sources = (() => {
     function _renderGroupDetail(group, members) {
         const detailEl = document.getElementById('sources-group-detail');
         const isAttached = _attachedGroup && _attachedGroup.id === group.id;
-        const spaceActive = _spaceSourceIds.size > 0;
-        const inScopeCount = spaceActive ? members.filter(s => _spaceSourceIds.has(s.id)).length : members.length;
-        const allOutOfScope = spaceActive && members.length > 0 && inScopeCount === 0;
 
         let membersHtml = '';
         if (members.length === 0) {
             membersHtml = '<div class="sources-empty">No sources in this group yet.</div>';
         } else {
-            membersHtml = members.map(src => {
-                const outOfScope = spaceActive && !_spaceSourceIds.has(src.id);
-                return `
-                <div class="source-item source-group-member${outOfScope ? ' source-out-of-scope' : ''}">
+            membersHtml = members.map(src => `
+                <div class="source-item source-group-member">
                     <div class="source-item-main">
-                        <div class="source-item-title">${DOMPurify.sanitize(src.title)}${outOfScope ? ' <span class="source-scope-badge">out of scope</span>' : ''}</div>
+                        <div class="source-item-title">${DOMPurify.sanitize(src.title)}</div>
                         <div class="source-item-meta">${_typeBadge(src.type)}</div>
                     </div>
                     <button class="source-item-attach source-group-remove-member" data-source-id="${DOMPurify.sanitize(src.id)}" title="Remove from group">&times;</button>
                 </div>
-            `}).join('');
+            `).join('');
         }
-
-        let scopeInfo = '';
-        if (spaceActive && members.length > 0) {
-            if (allOutOfScope) {
-                scopeInfo = '<div class="source-detail-info source-scope-warn">All members are outside the active space scope. Attaching this group will have no effect.</div>';
-            } else if (inScopeCount < members.length) {
-                scopeInfo = `<div class="source-detail-info source-scope-warn">${inScopeCount} of ${members.length} members are in the active space scope. Out-of-scope sources will be excluded.</div>`;
-            }
-        }
-
-        const membersLabel = spaceActive && members.length > 0
-            ? `Members (${members.length}) — ${inScopeCount} in scope`
-            : `Members (${members.length})`;
 
         detailEl.innerHTML = `
             <div class="source-detail-header">
@@ -893,13 +867,12 @@ const Sources = (() => {
                 </div>
             </div>
             ${group.description ? `<div class="source-detail-info"><span>${DOMPurify.sanitize(group.description)}</span></div>` : ''}
-            ${scopeInfo}
             <div class="source-detail-actions">
-                <button class="btn-modal-save source-attach-btn${allOutOfScope ? ' source-out-of-scope' : ''}" id="group-attach-btn" ${allOutOfScope ? 'title="All members are outside the active space scope"' : ''}>${isAttached ? 'Detach from chat' : 'Attach to chat'}</button>
+                <button class="btn-modal-save source-attach-btn" id="group-attach-btn">${isAttached ? 'Detach from chat' : 'Attach to chat'}</button>
                 <button class="btn-modal-save" id="group-add-source-btn">Add source</button>
                 <button class="btn-modal-cancel source-delete-btn" id="group-delete-btn">Delete group</button>
             </div>
-            <div class="source-group-members-label">${membersLabel}</div>
+            <div class="source-group-members-label">Members (${members.length})</div>
             <div class="source-group-members" id="source-group-members">${membersHtml}</div>
         `;
 
@@ -916,11 +889,6 @@ const Sources = (() => {
             if (isAttached) {
                 _attachedGroup = null;
             } else {
-                if (allOutOfScope) {
-                    if (!confirm('All sources in this group are outside the active space scope and will be excluded. Attach anyway?')) return;
-                } else if (spaceActive && inScopeCount < members.length) {
-                    if (!confirm(`${members.length - inScopeCount} of ${members.length} sources in this group are outside the active space scope and will be excluded. Attach anyway?`)) return;
-                }
                 _attachedGroup = { id: group.id, name: group.name };
             }
             _renderAttachedBar();
@@ -1026,29 +994,13 @@ const Sources = (() => {
             return;
         }
 
-        // Compute which tags have at least one in-scope source (#853)
-        const spaceActive = _spaceSourceIds.size > 0;
-        const tagHasInScope = new Map();
-        if (spaceActive) {
-            for (const tag of allTags) {
-                const inScope = _sources.some(s =>
-                    Array.isArray(s.tag_ids) && s.tag_ids.includes(tag.id) && _spaceSourceIds.has(s.id)
-                );
-                tagHasInScope.set(tag.id, inScope);
-            }
-        }
-
         const picker = document.createElement('div');
         picker.className = 'source-tag-picker';
         allTags.forEach(tag => {
             const tagBtn = document.createElement('button');
-            const isOutOfScope = spaceActive && !tagHasInScope.get(tag.id);
-            tagBtn.className = 'source-tag-picker-item' + (isOutOfScope ? ' source-out-of-scope' : '');
-            tagBtn.textContent = tag.name + (isOutOfScope ? ' (out of scope)' : '');
+            tagBtn.className = 'source-tag-picker-item';
+            tagBtn.textContent = tag.name;
             tagBtn.addEventListener('click', () => {
-                if (isOutOfScope) {
-                    if (!confirm('No sources with this tag are linked to the active space. Attach anyway?')) return;
-                }
                 _attachedTag = { id: tag.id, name: tag.name };
                 _renderAttachedBar();
                 _renderList();

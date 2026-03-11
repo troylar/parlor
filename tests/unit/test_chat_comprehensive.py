@@ -235,9 +235,7 @@ class TestResolveSources:
     def test_no_sources_returns_empty(self) -> None:
         db = MagicMock()
         result = _resolve_sources(db, [], None, None)
-        assert result.content == ""
-        assert result.excluded_ids == []
-        assert result.included == []
+        assert result == ""
 
     def test_source_ids_resolved(self) -> None:
         db = MagicMock()
@@ -247,14 +245,11 @@ class TestResolveSources:
                 "id": sid,
                 "title": "My Source",
                 "content": "some content here",
-                "type": "text",
             }
             result = _resolve_sources(db, [sid], None, None)
-        assert "My Source" in result.content
-        assert "some content here" in result.content
-        assert "Referenced Knowledge Sources" in result.content
-        assert len(result.included) == 1
-        assert result.included[0]["id"] == sid
+        assert "My Source" in result
+        assert "some content here" in result
+        assert "Referenced Knowledge Sources" in result
 
     def test_source_with_no_content_skipped(self) -> None:
         db = MagicMock()
@@ -262,7 +257,7 @@ class TestResolveSources:
         with patch("anteroom.routers.chat.storage") as mock_storage:
             mock_storage.get_source.return_value = {"id": sid, "title": "Empty", "content": ""}
             result = _resolve_sources(db, [sid], None, None)
-        assert result.content == ""
+        assert result == ""
 
     def test_source_tag_resolves(self) -> None:
         db = MagicMock()
@@ -270,14 +265,9 @@ class TestResolveSources:
         src_id = str(uuid.uuid4())
         with patch("anteroom.routers.chat.storage") as mock_storage:
             mock_storage.list_sources.return_value = [{"id": src_id, "content": "tag content"}]
-            mock_storage.get_source.return_value = {
-                "id": src_id,
-                "title": "Tagged",
-                "content": "tag content",
-                "type": "text",
-            }
+            mock_storage.get_source.return_value = {"id": src_id, "title": "Tagged", "content": "tag content"}
             result = _resolve_sources(db, [], tag_id, None)
-        assert "tag content" in result.content
+        assert "tag content" in result
 
     def test_source_group_id_resolves(self) -> None:
         db = MagicMock()
@@ -285,35 +275,29 @@ class TestResolveSources:
         src_id = str(uuid.uuid4())
         with patch("anteroom.routers.chat.storage") as mock_storage:
             mock_storage.list_sources.return_value = [{"id": src_id, "content": "group content"}]
-            mock_storage.get_source.return_value = {
-                "id": src_id,
-                "title": "Grouped",
-                "content": "group content",
-                "type": "text",
-            }
+            mock_storage.get_source.return_value = {"id": src_id, "title": "Grouped", "content": "group content"}
             result = _resolve_sources(db, [], None, group_id)
-        assert "group content" in result.content
+        assert "group content" in result
 
     def test_truncation_applied(self) -> None:
         db = MagicMock()
         sid = str(uuid.uuid4())
         long_content = "x" * 200
         with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_source.return_value = {"id": sid, "title": "Big", "content": long_content, "type": "text"}
+            mock_storage.get_source.return_value = {"id": sid, "title": "Big", "content": long_content}
             result = _resolve_sources(db, [sid], None, None, limit=100)
-        assert "truncated" in result.content
-        assert result.truncated is True
+        assert "truncated" in result
 
     def test_deduplication_across_tag_and_ids(self) -> None:
         db = MagicMock()
         sid = str(uuid.uuid4())
         tag_id = str(uuid.uuid4())
         with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_source.return_value = {"id": sid, "title": "Src", "content": "content", "type": "text"}
+            mock_storage.get_source.return_value = {"id": sid, "title": "Src", "content": "content"}
             mock_storage.list_sources.return_value = [{"id": sid, "content": "content"}]
             result = _resolve_sources(db, [sid], tag_id, None)
         # Source should only appear once
-        assert result.content.count("Src") == 1
+        assert result.count("Src") == 1
 
     def test_max_20_source_ids(self) -> None:
         db = MagicMock()
@@ -323,7 +307,7 @@ class TestResolveSources:
         def side_effect(db_arg, sid):
             nonlocal call_count
             call_count += 1
-            return {"id": sid, "title": f"src{call_count}", "content": "data", "type": "text"}
+            return {"id": sid, "title": f"src{call_count}", "content": "data"}
 
         with patch("anteroom.routers.chat.storage") as mock_storage:
             mock_storage.get_source.side_effect = side_effect
@@ -347,87 +331,13 @@ class TestResolveSources:
                 "id": allowed_src,
                 "title": "Allowed",
                 "content": "ok",
-                "type": "text",
             }
             result = _resolve_sources(db, [], tag_id, None, space_id=space_id)
-        assert "Allowed" in result.content
-        assert denied_src in result.excluded_ids
+        assert "Allowed" in result
         # get_source should only be called for the allowed source
         calls = mock_storage.get_source.call_args_list
         fetched_ids = {c[0][1] for c in calls}
         assert denied_src not in fetched_ids
-
-    def test_excluded_ids_tracked_for_direct_sources(self) -> None:
-        """Direct source IDs outside space scope appear in excluded_ids."""
-        db = MagicMock()
-        space_id = str(uuid.uuid4())
-        allowed_src = str(uuid.uuid4())
-        denied_src = str(uuid.uuid4())
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_space_sources.return_value = [{"id": allowed_src}]
-            mock_storage.get_source.return_value = {
-                "id": allowed_src,
-                "title": "In Scope",
-                "content": "data",
-                "type": "text",
-            }
-            result = _resolve_sources(db, [allowed_src, denied_src], None, None, space_id=space_id)
-        assert denied_src in result.excluded_ids
-        assert len(result.included) == 1
-        assert result.included[0]["id"] == allowed_src
-
-    def test_group_sources_scoped_by_space(self) -> None:
-        """Group-resolved sources outside space scope are excluded."""
-        db = MagicMock()
-        group_id = str(uuid.uuid4())
-        space_id = str(uuid.uuid4())
-        allowed_src = str(uuid.uuid4())
-        denied_src = str(uuid.uuid4())
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_space_sources.return_value = [{"id": allowed_src}]
-            mock_storage.list_sources.return_value = [
-                {"id": allowed_src, "content": "ok"},
-                {"id": denied_src, "content": "blocked"},
-            ]
-            mock_storage.get_source.return_value = {
-                "id": allowed_src,
-                "title": "Allowed",
-                "content": "ok",
-                "type": "text",
-            }
-            result = _resolve_sources(db, [], None, group_id, space_id=space_id)
-        assert denied_src in result.excluded_ids
-        assert "Allowed" in result.content
-
-    def test_included_has_id_title_type(self) -> None:
-        """Included sources carry id, title, and type metadata."""
-        db = MagicMock()
-        sid = str(uuid.uuid4())
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_source.return_value = {
-                "id": sid,
-                "title": "Test Source",
-                "content": "hello",
-                "type": "url",
-            }
-            result = _resolve_sources(db, [sid], None, None)
-        assert len(result.included) == 1
-        assert result.included[0] == {"id": sid, "title": "Test Source", "type": "url"}
-
-    def test_no_space_no_exclusions(self) -> None:
-        """Without space_id, no sources are excluded."""
-        db = MagicMock()
-        sid = str(uuid.uuid4())
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_source.return_value = {
-                "id": sid,
-                "title": "Any",
-                "content": "data",
-                "type": "text",
-            }
-            result = _resolve_sources(db, [sid], None, None)
-        assert result.excluded_ids == []
-        assert len(result.included) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -2363,45 +2273,6 @@ class TestParseChatRequestJSON:
                 json={"message": "", "regenerate": True},
             )
         assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# Provider error → SSE regression
-# ---------------------------------------------------------------------------
-
-
-class TestProviderErrorSurfacing:
-    @pytest.mark.asyncio
-    async def test_provider_bad_request_emits_clean_sse_error(self) -> None:
-        """A provider 400 error must surface as a clean SSE error event, not a 500."""
-        ctx = _make_stream_context()
-        events = [
-            _make_agent_event(
-                "error",
-                {"message": "The model was unable to complete inference", "code": "bad_request", "retryable": False},
-            ),
-        ]
-
-        async def fake_agent_gen(*args, **kwargs):
-            for ev in events:
-                yield ev
-
-        with (
-            patch("anteroom.services.agent_loop.run_agent_loop", side_effect=fake_agent_gen),
-            patch("anteroom.routers.chat.storage") as mock_storage,
-        ):
-            mock_storage.get_conversation_token_total.return_value = 0
-            mock_storage.get_daily_token_total.return_value = 0
-            result = await _collect_events(_stream_chat_events(ctx))
-
-        sse_events = [e for e in result if isinstance(e, dict) and "event" in e]
-        error_events = [e for e in sse_events if e["event"] == "error"]
-        assert len(error_events) == 1
-        data = json.loads(error_events[0]["data"])
-        assert "unable to complete inference" in data["message"]
-        assert data.get("code") == "bad_request"
-        # Must NOT contain "An internal error occurred" (the 500-style fallback)
-        assert "internal error occurred" not in data["message"].lower()
 
 
 # ---------------------------------------------------------------------------

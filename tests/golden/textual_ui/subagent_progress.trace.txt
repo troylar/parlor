@@ -1,0 +1,5 @@
+<spin> stream · 3 events · waiting <time> · last tool_call_end
+✓ user_prompt Audit the repo with a sub-agent and tell me the outcome.
+✓ tool_call_start {'tool_name': 'run_agent', 'arguments': {'prompt': 'Audit the repo for risky chan...
+✓ tool_call_start {'tool_name': 'grep', 'arguments': {'pattern': 'rm -rf'}}
+✓ tool_call_end {'tool_name': 'grep', 'status': 'success', 'output': {}}

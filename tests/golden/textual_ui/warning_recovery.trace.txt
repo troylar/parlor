@@ -1,0 +1,7 @@
+<spin> stream · 5 events · 1 chunks · 55 chars · last chunk <time> ago · last token
+✓ user_prompt Summarize the output, but account for a safety warning on the way
+✓ thinking {}
+✓ tool_call_start {'tool_name': 'read', 'arguments': {'path': 'reports/build-output.txt'}}
+✓ tool_call_end {'tool_name': 'read', 'status': 'success', 'output': {}}
+✓ budget_warning {'message': 'The output was large, so I trimmed the plan before continuing.'}
+✓ token chars=55 total_chars=55

@@ -268,7 +268,7 @@ async def run_exec_mode(
         from ..services.rule_enforcer import RuleEnforcer
 
         _artifact_registry = ArtifactRegistry()
-        _artifact_registry.load_from_db(db, space_id=space_id, project_path=working_dir)
+        _artifact_registry.load_from_db(db, space_id=space_id)
         _rule_enforcer = RuleEnforcer()
         _rule_enforcer.load_rules(_artifact_registry.list_all(artifact_type=_ArtType.RULE))
         tool_registry.set_rule_enforcer(_rule_enforcer)
@@ -437,6 +437,7 @@ async def run_exec_mode(
             output_filter=_output_filter,
             max_consecutive_text_only=config.cli.max_consecutive_text_only,
             max_line_repeats=config.cli.max_line_repeats,
+            max_identical_tool_repeats=config.cli.max_identical_tool_repeats,
         ):
             if event.kind == "token":
                 if output_total_chars < _MAX_OUTPUT_CHARS:
