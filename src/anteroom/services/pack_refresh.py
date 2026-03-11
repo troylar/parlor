@@ -75,6 +75,7 @@ class PackRefreshWorker:
         self._poll_interval = 60.0  # check every minute which sources are due
         self._on_packs_changed = on_packs_changed
         self._event_loop = event_loop
+        self._last_changed_pack_ids: list[str] = []
 
     @property
     def running(self) -> bool:
@@ -164,6 +165,10 @@ class PackRefreshWorker:
         if self._on_packs_changed and any(
             r.packs_installed > 0 or r.packs_updated > 0 or r.packs_attached > 0 for r in results
         ):
+            all_changed: list[str] = []
+            for r in results:
+                all_changed.extend(r.changed_pack_ids)
+            self._last_changed_pack_ids = all_changed
             if self._event_loop:
                 self._event_loop.call_soon_threadsafe(self._on_packs_changed)
             else:

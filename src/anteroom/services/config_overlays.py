@@ -654,7 +654,7 @@ def rebuild_effective_config(
     Collects current pack overlays, re-runs config loading, validates
     compliance, and detects restart-required field changes.
 
-    Raises ``ValueError`` if the new config violates compliance rules.
+    Raises ``ComplianceError`` if the new config violates compliance rules.
     """
     from ..config import load_config
     from .compliance import validate_compliance

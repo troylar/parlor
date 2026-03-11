@@ -263,12 +263,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         from .services.pack_refresh import PackRefreshWorker
 
+        def _refresh_derived_singletons(cfg: object) -> None:
+            """Refresh config-derived singletons (rate limit, DLP, injection detector)."""
+            app.state.rate_limit_config = getattr(cfg, "rate_limit", None)
+            safety = getattr(cfg, "safety", None)
+            dlp_cfg = getattr(safety, "dlp", None) if safety else None
+            if dlp_cfg is not None and dlp_cfg.enabled:
+                from .services.dlp import DlpScanner
+
+                app.state.dlp_scanner = DlpScanner(dlp_cfg)
+            else:
+                app.state.dlp_scanner = None
+            inj_cfg = getattr(safety, "prompt_injection", None) if safety else None
+            if inj_cfg is not None and inj_cfg.enabled:
+                from .services.injection_detector import InjectionDetector
+
+                app.state.injection_detector = InjectionDetector(inj_cfg)
+            else:
+                app.state.injection_detector = None
+
         def _reload_after_pack_refresh() -> None:
             """Rebuild config overlays and registries after background pack refresh."""
             try:
                 from .services.artifact_registry import ArtifactRegistry
                 from .services.artifacts import ArtifactType
                 from .services.config_overlays import ComplianceError, rebuild_effective_config
+                from .services.pack_attachments import detach_pack as _q_detach
                 from .services.rule_enforcer import RuleEnforcer
 
                 # 1. Rebuild config overlays so source-installed pack configs take effect
@@ -279,8 +299,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     result = rebuild_effective_config(app.state.db, previous_config=previous_config)
                     app.state.config = result.config
                     app.state.enforced_fields = result.enforced_fields
-                    # Refresh config-derived singletons (rate limit, DLP, etc.)
-                    app.state.rate_limit_config = getattr(result.config, "rate_limit", None)
+                    _refresh_derived_singletons(result.config)
                     for warning in result.warnings:
                         logger.warning(warning)
                 except ComplianceError:
@@ -289,21 +308,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         "Config rebuild blocked after pack refresh (compliance failure) — quarantining changed packs",
                         exc_info=True,
                     )
-                    # Quarantine: detach all recently-changed packs
+                    # Quarantine: detach recently-changed packs that caused the failure
                     worker = app.state.pack_refresh_worker
                     if worker is not None:
-                        # The worker tracks last results — collect changed_pack_ids
-                        # Since we're called from the worker callback, we need to
-                        # detach packs that caused the compliance failure
-                        # For safety, just rebuild from the current clean attachment set
-                        pass
-                    # Re-attempt rebuild from the now-clean set
+                        changed_ids = list(worker._last_changed_pack_ids)
+                        quarantined = 0
+                        for pid in changed_ids:
+                            try:
+                                _q_detach(app.state.db, pid)
+                                quarantined += 1
+                            except Exception:
+                                logger.warning("Failed to quarantine pack %s", pid, exc_info=True)
+                        if quarantined:
+                            logger.warning(
+                                "Quarantined %d pack(s) — detached until config issue is resolved",
+                                quarantined,
+                            )
+                    # Re-attempt rebuild from the now-clean attachment set
                     try:
                         result2 = rebuild_effective_config(app.state.db, previous_config=previous_config)
                         app.state.config = result2.config
                         app.state.enforced_fields = result2.enforced_fields
+                        _refresh_derived_singletons(result2.config)
                     except Exception:
-                        # Keep previous config
                         app.state.config = previous_config
                         app.state.enforced_fields = previous_enforced
                 except Exception:

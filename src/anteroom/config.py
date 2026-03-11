@@ -2130,7 +2130,12 @@ def load_config(
         except (ValueError, TypeError):
             refresh = 30
         auto_attach_raw = src.get("auto_attach", True)
-        auto_attach = bool(auto_attach_raw) if auto_attach_raw is not None else True
+        if auto_attach_raw is None:
+            auto_attach = True
+        elif isinstance(auto_attach_raw, bool):
+            auto_attach = auto_attach_raw
+        else:
+            auto_attach = str(auto_attach_raw).lower() in ("true", "1", "yes")
         try:
             priority = int(src.get("priority", 50))
         except (ValueError, TypeError):
