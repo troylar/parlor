@@ -416,16 +416,82 @@ class TestGetRequestRegistries:
 
         mock_art_reg = MagicMock()
         mock_art_reg.list_all.return_value = []
-        with patch(
-            "anteroom.services.artifact_registry.ArtifactRegistry",
-            return_value=mock_art_reg,
+        with (
+            patch(
+                "anteroom.services.artifact_registry.ArtifactRegistry",
+                return_value=mock_art_reg,
+            ),
+            patch(
+                "anteroom.routers.chat.get_space_local_dirs",
+                return_value=[],
+            ),
         ):
             db = MagicMock()
             art, skill, rules = _get_request_registries(request, db, space_id="space-123")
             assert art is mock_art_reg
-            mock_art_reg.load_from_db.assert_called_once_with(db, space_id="space-123")
+            mock_art_reg.load_from_db.assert_called_once_with(db, space_id="space-123", project_path=None)
             assert skill is not global_skill
             assert rules is not global_rules
+
+    def test_passes_project_path_from_space_paths(self) -> None:
+        """When a space has mapped directories, the first is passed as project_path."""
+        from anteroom.routers.chat import _get_request_registries
+
+        request = MagicMock()
+        global_art = MagicMock()
+        global_skill = MagicMock()
+        global_skill._skills = {}
+        global_rules = MagicMock()
+        request.app.state.artifact_registry = global_art
+        request.app.state.skill_registry = global_skill
+        request.app.state.rule_enforcer = global_rules
+
+        mock_art_reg = MagicMock()
+        mock_art_reg.list_all.return_value = []
+        with (
+            patch(
+                "anteroom.services.artifact_registry.ArtifactRegistry",
+                return_value=mock_art_reg,
+            ),
+            patch(
+                "anteroom.routers.chat.get_space_local_dirs",
+                return_value=["/home/user/my-project", "/home/user/other-repo"],
+            ),
+        ):
+            db = MagicMock()
+            art, skill, rules = _get_request_registries(request, db, space_id="space-456")
+            mock_art_reg.load_from_db.assert_called_once_with(
+                db, space_id="space-456", project_path="/home/user/my-project"
+            )
+
+    def test_project_path_none_when_no_space_paths(self) -> None:
+        """When a space has no mapped directories, project_path is None."""
+        from anteroom.routers.chat import _get_request_registries
+
+        request = MagicMock()
+        global_art = MagicMock()
+        global_skill = MagicMock()
+        global_skill._skills = {}
+        global_rules = MagicMock()
+        request.app.state.artifact_registry = global_art
+        request.app.state.skill_registry = global_skill
+        request.app.state.rule_enforcer = global_rules
+
+        mock_art_reg = MagicMock()
+        mock_art_reg.list_all.return_value = []
+        with (
+            patch(
+                "anteroom.services.artifact_registry.ArtifactRegistry",
+                return_value=mock_art_reg,
+            ),
+            patch(
+                "anteroom.routers.chat.get_space_local_dirs",
+                return_value=[],
+            ),
+        ):
+            db = MagicMock()
+            _get_request_registries(request, db, space_id="space-empty")
+            mock_art_reg.load_from_db.assert_called_once_with(db, space_id="space-empty", project_path=None)
 
     def test_globals_returned_without_space(self) -> None:
         """Without a space, the global registries are returned as-is (no copy)."""

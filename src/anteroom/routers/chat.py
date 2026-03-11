@@ -26,6 +26,7 @@ from ..models import ChatRequest
 from ..services import storage
 from ..services.ai_service import AIService, create_ai_service
 from ..services.context_trust import trusted_section_marker, untrusted_section_marker, wrap_untrusted
+from ..services.space_storage import get_space_local_dirs
 from ..tools.path_utils import safe_resolve_pathlib
 
 logger = logging.getLogger(__name__)
@@ -270,8 +271,14 @@ def _get_request_registries(request: Request, db: Any, space_id: str | None) -> 
     from ..services.artifact_registry import ArtifactRegistry
     from ..services.artifacts import ArtifactType
 
+    # Derive project_path from the space's first mapped directory
+    project_path: str | None = None
+    local_dirs = get_space_local_dirs(db, space_id)
+    if local_dirs:
+        project_path = local_dirs[0]
+
     art_reg = ArtifactRegistry()
-    art_reg.load_from_db(db, space_id=space_id)
+    art_reg.load_from_db(db, space_id=space_id, project_path=project_path)
 
     # Build per-request skill registry from space-scoped artifacts
     skill_reg = None
