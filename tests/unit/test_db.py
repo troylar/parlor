@@ -13,6 +13,7 @@ from anteroom.db import (
     _create_indexes,
     _eradicate_projects,
     _run_migrations,
+    _safe_rename_spaces_column,
     has_vec_support,
     init_db,
 )
@@ -880,6 +881,52 @@ class TestMigrationPaths:
         cols = {r["name"] for r in fresh.execute("PRAGMA table_info(spaces)").fetchall()}
         assert "source_file" in cols
         assert "file_path" not in cols
+
+    def test_safe_rename_spaces_column_reraises_unrelated_failure(self) -> None:
+        """Migration must not swallow non-race rename failures."""
+
+        class _FakeResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        class _FakeConn:
+            def execute(self, sql: str):
+                if sql.startswith("ALTER TABLE spaces RENAME COLUMN"):
+                    raise sqlite3.OperationalError("database is locked")
+                if sql == "PRAGMA table_info(spaces)":
+                    return _FakeResult([(0, "file_path"), (1, "source_hash")])
+                raise AssertionError(sql)
+
+        conn = _FakeConn()
+        try:
+            _safe_rename_spaces_column(conn, "file_path", "source_file")
+        except sqlite3.OperationalError as exc:
+            assert "locked" in str(exc)
+        else:
+            raise AssertionError("expected sqlite3.OperationalError")
+
+    def test_safe_rename_spaces_column_tolerates_completed_race(self) -> None:
+        """Migration should ignore the expected concurrent-rename race."""
+
+        class _FakeResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        class _FakeConn:
+            def execute(self, sql: str):
+                if sql.startswith("ALTER TABLE spaces RENAME COLUMN"):
+                    raise sqlite3.OperationalError("duplicate column name: source_file")
+                if sql == "PRAGMA table_info(spaces)":
+                    return _FakeResult([(0, "source_file"), (1, "source_hash")])
+                raise AssertionError(sql)
+
+        _safe_rename_spaces_column(_FakeConn(), "file_path", "source_file")
 
 
 class TestPacksUniqueConstraint:

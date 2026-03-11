@@ -1696,6 +1696,135 @@ class TestStreamChatEventsKinds:
         mock_storage.create_tool_call.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_fold_batch_events_stay_ordered_around_followup_text(self) -> None:
+        ctx = _make_stream_context()
+        tool_id = "call_fold_1"
+        assistant_msg = {"id": "msg_fold", "position": 1}
+        events = [
+            _make_agent_event(
+                "tool_call_start",
+                {
+                    "id": tool_id,
+                    "tool_name": "read_file",
+                    "index": 0,
+                    "arguments": {"path": "src/anteroom/cli/renderer.py"},
+                },
+            ),
+            _make_agent_event("assistant_message", {"content": ""}),
+            _make_agent_event("tool_batch_start", {"call_count": 1}),
+            _make_agent_event(
+                "tool_call_end",
+                {
+                    "id": tool_id,
+                    "tool_name": "read_file",
+                    "output": {"content": "     1\tfile body", "_approval_decision": "auto"},
+                    "status": "success",
+                },
+            ),
+            _make_agent_event("tool_batch_end", {"call_count": 1, "elapsed_seconds": 0.3}),
+            _make_agent_event("token", {"content": "Follow-up after tools."}),
+            _make_agent_event("assistant_message", {"content": "Follow-up after tools."}),
+            _make_agent_event("done", {}),
+        ]
+
+        async def fake_agent_gen(*args: Any, **kwargs: Any) -> Any:
+            for ev in events:
+                yield ev
+
+        ctx.tool_registry.has_tool.return_value = True
+
+        with (
+            patch("anteroom.services.agent_loop.run_agent_loop", side_effect=fake_agent_gen),
+            patch("anteroom.routers.chat.storage") as mock_storage,
+        ):
+            mock_storage.get_conversation_token_total.return_value = 0
+            mock_storage.get_daily_token_total.return_value = 0
+            mock_storage.create_message.side_effect = [assistant_msg, {"id": "msg_followup", "position": 2}]
+            mock_storage.create_tool_call.return_value = None
+            mock_storage.update_tool_call.return_value = None
+            result = await _collect_events(_stream_chat_events(ctx))
+
+        sse_events = [e for e in result if isinstance(e, dict) and "event" in e]
+        event_types = [e["event"] for e in sse_events]
+
+        assert "tool_batch_start" in event_types
+        assert "tool_call_end" in event_types
+        assert "tool_batch_end" in event_types
+        assert "token" in event_types
+        assert "done" in event_types
+
+        tool_start_idx = event_types.index("tool_call_start")
+        batch_start_idx = event_types.index("tool_batch_start")
+        tool_end_idx = event_types.index("tool_call_end")
+        batch_end_idx = event_types.index("tool_batch_end")
+        token_idx = event_types.index("token")
+        done_idx = event_types.index("done")
+
+        assert tool_start_idx < batch_start_idx < tool_end_idx < batch_end_idx < token_idx < done_idx
+
+    @pytest.mark.asyncio
+    async def test_failed_fold_batch_closes_before_followup_text(self) -> None:
+        ctx = _make_stream_context()
+        tool_id = "call_fold_error"
+        assistant_msg = {"id": "msg_fold_err", "position": 1}
+        events = [
+            _make_agent_event(
+                "tool_call_start",
+                {
+                    "id": tool_id,
+                    "tool_name": "missing_tool_for_focus_fold",
+                    "index": 0,
+                    "arguments": {"path": "missing.py"},
+                },
+            ),
+            _make_agent_event("assistant_message", {"content": ""}),
+            _make_agent_event("tool_batch_start", {"call_count": 1}),
+            _make_agent_event(
+                "tool_call_end",
+                {
+                    "id": tool_id,
+                    "tool_name": "missing_tool_for_focus_fold",
+                    "output": {"error": "Unknown tool: missing_tool_for_focus_fold"},
+                    "status": "error",
+                },
+            ),
+            _make_agent_event("tool_batch_end", {"call_count": 1, "elapsed_seconds": 0.2}),
+            _make_agent_event("token", {"content": "The tool failed."}),
+            _make_agent_event("assistant_message", {"content": "The tool failed."}),
+            _make_agent_event("done", {}),
+        ]
+
+        async def fake_agent_gen(*args: Any, **kwargs: Any) -> Any:
+            for ev in events:
+                yield ev
+
+        with (
+            patch("anteroom.services.agent_loop.run_agent_loop", side_effect=fake_agent_gen),
+            patch("anteroom.routers.chat.storage") as mock_storage,
+        ):
+            mock_storage.get_conversation_token_total.return_value = 0
+            mock_storage.get_daily_token_total.return_value = 0
+            mock_storage.create_message.side_effect = [assistant_msg, {"id": "msg_followup_err", "position": 2}]
+            mock_storage.create_tool_call.return_value = None
+            mock_storage.update_tool_call.return_value = None
+            result = await _collect_events(_stream_chat_events(ctx))
+
+        sse_events = [e for e in result if isinstance(e, dict) and "event" in e]
+        event_types = [e["event"] for e in sse_events]
+
+        tool_end_idx = event_types.index("tool_call_end")
+        batch_end_idx = event_types.index("tool_batch_end")
+        token_idx = event_types.index("token")
+        done_idx = event_types.index("done")
+
+        assert tool_end_idx < batch_end_idx < token_idx < done_idx
+
+        tool_end_event = next(e for e in sse_events if e["event"] == "tool_call_end")
+        payload = json.loads(tool_end_event["data"])
+        assert payload["status"] == "error"
+        assert "Unknown tool" in payload["output"]["error"]
+
+    @pytest.mark.asyncio
     async def test_usage_event_not_emitted_as_sse(self) -> None:
         """usage events are consumed internally, not emitted as SSE events."""
         ctx = _make_stream_context()

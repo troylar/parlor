@@ -2,6 +2,7 @@
   "private": true,
   "scripts": {
     "test": "vitest run",
+    "test:js": "vitest run tests/js",
     "test:watch": "vitest"
   },
   "devDependencies": {

@@ -17,9 +17,9 @@ from rich.markup import escape
 from rich.status import Status
 from rich.text import Text
 
-console = Console(stderr=True)
+console = Console(stderr=True, force_jupyter=False)
 # Separate console for stdout markdown rendering (not stderr)
-_stdout_console = Console()
+_stdout_console = Console(force_jupyter=False)
 _stdout = sys.stdout
 _stdout_is_tty: bool = True  # set by use_stdout_console(); controls in-place ticker updates
 
@@ -56,8 +56,8 @@ def use_stdout_console() -> None:
     global console, _stdout_console, _stdout, _repl_mode, _stdout_is_tty
     # Rich consoles write through the patch_stdout proxy so prompt_toolkit
     # knows about output and can keep the prompt at the bottom.
-    console = Console(file=sys.stdout, force_terminal=True)
-    _stdout_console = Console(file=sys.stdout, force_terminal=True)
+    console = Console(file=sys.stdout, force_terminal=True, force_jupyter=False)
+    _stdout_console = Console(file=sys.stdout, force_terminal=True, force_jupyter=False)
     # Raw ANSI writes (spinners, tickers) go to a real stderr fd to avoid
     # proxy buffering and allow carriage-return cursor manipulation.
     _real_stderr = os.fdopen(os.dup(sys.stderr.fileno()), "w", newline="")

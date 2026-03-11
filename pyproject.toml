@@ -107,10 +107,16 @@ select = ["E", "F", "I", "N", "W"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests requiring real services",
     "real_ai: tests that call a real AI backend (require API key)",
+]
+filterwarnings = [
+    'ignore:install "ipywidgets" for Jupyter support:UserWarning:rich.live',
+    'ignore:.*websockets\\.legacy is deprecated.*:DeprecationWarning',
+    'ignore:.*websockets\\.server\\.WebSocketServerProtocol is deprecated.*:DeprecationWarning',
 ]
 
 [tool.mypy]

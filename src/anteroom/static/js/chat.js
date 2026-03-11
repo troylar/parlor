@@ -4,6 +4,8 @@ const Chat = (() => {
     let eventSource = null;
     let currentAssistantEl = null;
     let currentAssistantContent = '';
+    let currentAssistantSegmentContent = '';
+    let currentAssistantSegmentEl = null;
     let _streamRawMode = localStorage.getItem('anteroom_stream_raw_mode') === 'true';
     let _rewindPosition = null;
     let _rewindMsgEl = null;
@@ -350,6 +352,7 @@ const Chat = (() => {
                 _webDedupFlush();
                 _onStreamingToken(data.content ? data.content.length : 0);
                 currentAssistantContent += data.content;
+                currentAssistantSegmentContent += data.content;
                 renderAssistantContent();
                 break;
             case 'tool_batch_start':
@@ -391,6 +394,8 @@ const Chat = (() => {
             case 'queued_message':
                 finalizeAssistant();
                 currentAssistantContent = '';
+                currentAssistantSegmentContent = '';
+                currentAssistantSegmentEl = null;
                 currentAssistantEl = appendMessage('assistant', '');
                 document.querySelectorAll('.queued-badge').forEach(b => b.remove());
                 break;
@@ -445,26 +450,43 @@ const Chat = (() => {
     function renderAssistantContent() {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
-        // Preserve tool-call and tool-batch DOM nodes that innerHTML would destroy
-        const preserved = Array.from(contentEl.querySelectorAll(':scope > .tool-call, :scope > .tool-batch, :scope > .tool-call-group'));
-        if (_streamRawMode) {
-            contentEl.textContent = currentAssistantContent;
-        } else {
-            contentEl.innerHTML = renderMarkdown(currentAssistantContent);
-            renderMath(contentEl);
-            highlightCode(contentEl);
-        }
-        preserved.forEach(el => contentEl.appendChild(el));
+        if (!contentEl) return;
+        currentAssistantSegmentEl = _renderAssistantTextSegment(
+            contentEl,
+            currentAssistantSegmentEl,
+            currentAssistantSegmentContent,
+            _streamRawMode,
+        );
         scrollToBottom();
+    }
+
+    function _ensureAssistantTextSegment(contentEl, existingSegmentEl) {
+        if (existingSegmentEl && existingSegmentEl.parentElement === contentEl) {
+            return existingSegmentEl;
+        }
+        const segmentEl = document.createElement('div');
+        segmentEl.className = 'assistant-text-segment';
+        contentEl.appendChild(segmentEl);
+        return segmentEl;
+    }
+
+    function _renderAssistantTextSegment(contentEl, existingSegmentEl, text, rawMode) {
+        const segmentEl = _ensureAssistantTextSegment(contentEl, existingSegmentEl);
+        if (rawMode) {
+            segmentEl.textContent = text;
+        } else {
+            segmentEl.innerHTML = renderMarkdown(text);
+            renderMath(segmentEl);
+            highlightCode(segmentEl);
+        }
+        return segmentEl;
     }
 
     function finalizeAssistant(doneData) {
         if (!currentAssistantEl) return;
         const contentEl = currentAssistantEl.querySelector('.message-content');
-        const preserved = Array.from(contentEl.querySelectorAll(':scope > .tool-call, :scope > .tool-batch, :scope > .tool-call-group'));
-        contentEl.innerHTML = renderMarkdown(currentAssistantContent);
+        if (!contentEl) return;
         renderMath(contentEl);
-        preserved.forEach(el => contentEl.appendChild(el));
         addCodeCopyButtons(contentEl);
         let msgData = null;
         if (doneData && typeof doneData.assistant_message_id === 'string'
@@ -479,6 +501,8 @@ const Chat = (() => {
         }
         currentAssistantEl = null;
         currentAssistantContent = '';
+        currentAssistantSegmentContent = '';
+        currentAssistantSegmentEl = null;
         _toolBatchContainer = null;
         _toolBatchCallCount = 0;
         scrollToBottom();
@@ -1656,6 +1680,8 @@ const Chat = (() => {
         summary.textContent = `Tools (running...)`;
         details.appendChild(summary);
         msgEl.appendChild(details);
+        currentAssistantSegmentContent = '';
+        currentAssistantSegmentEl = null;
         _toolBatchContainer = details;
     }
 
@@ -1709,6 +1735,8 @@ const Chat = (() => {
         const contentEl = currentAssistantEl.querySelector('.message-content');
         // Use the active batch container as the parent when folding is active
         const parentEl = _toolBatchContainer || contentEl;
+        currentAssistantSegmentContent = '';
+        currentAssistantSegmentEl = null;
         _toolBatchCallCount++;
         const isSubagent = data.tool_name === 'run_agent';
         const details = document.createElement('details');
@@ -2438,5 +2466,9 @@ const Chat = (() => {
         appendRemoteMessage, startRemoteStream, handleRemoteToken, finalizeRemoteStream,
         showApprovalPrompt, resolveApprovalCard, showAskUserPrompt, showThinkingFromEvent: showThinking,
         renderMarkdown, highlightCode, showToast, sendPlanExecution, cleanupPendingPrompts,
+        __test__: {
+            ensureAssistantTextSegment: _ensureAssistantTextSegment,
+            renderAssistantTextSegment: _renderAssistantTextSegment,
+        },
     };
 })();
