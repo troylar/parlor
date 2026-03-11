@@ -32,6 +32,9 @@ def _rebuild_config(request: Request, db: Any) -> bool:
     try:
         result = rebuild_effective_config(db, previous_config=previous_config)
         request.app.state.config = result.config
+        request.app.state.enforced_fields = result.enforced_fields
+        # Refresh config-derived singletons
+        _refresh_derived_state(request, result.config)
         for warning in result.warnings:
             logger.warning(warning)
         return True
@@ -49,15 +52,57 @@ def _rebuild_config(request: Request, db: Any) -> bool:
         return False
 
 
-def _reload_registries(request: Request, db: Any) -> None:
-    """Reload artifact registry, rule enforcer, and skill registry after pack changes.
+def _refresh_derived_state(request: Request, config: Any) -> None:
+    """Refresh config-derived singletons on app.state after a config rebuild."""
+    request.app.state.rate_limit_config = getattr(config, "rate_limit", None)
 
-    Rebuilds config first (fail-closed), then refreshes all derived runtime state.
+    safety = getattr(config, "safety", None)
+    dlp_cfg = getattr(safety, "dlp", None) if safety else None
+    if dlp_cfg is not None and dlp_cfg.enabled:
+        from ..services.dlp import DlpScanner
+
+        request.app.state.dlp_scanner = DlpScanner(dlp_cfg)
+    else:
+        request.app.state.dlp_scanner = None
+
+    inj_cfg = getattr(safety, "prompt_injection", None) if safety else None
+    if inj_cfg is not None and inj_cfg.enabled:
+        from ..services.injection_detector import InjectionDetector
+
+        request.app.state.injection_detector = InjectionDetector(inj_cfg)
+    else:
+        request.app.state.injection_detector = None
+
+
+def _rollback_pack_mutation(
+    db: Any,
+    pack_id: str,
+    project_path: str | None,
+    action: str,
+) -> None:
+    """Undo a pack attachment/detachment after config rebuild failure."""
+    from ..services.pack_attachments import attach_pack as _do_attach
+    from ..services.pack_attachments import detach_pack as _do_detach
+
+    try:
+        if action == "detach":
+            _do_detach(db, pack_id, project_path=project_path)
+            logger.info("Rolled back attach for pack %s (detached)", pack_id)
+        elif action == "attach":
+            _do_attach(db, pack_id, project_path=project_path, check_overlay_conflicts=False)
+            logger.info("Rolled back detach for pack %s (re-attached)", pack_id)
+    except Exception:
+        logger.error("Rollback failed for pack %s", pack_id, exc_info=True)
+
+
+def _reload_registries_only(request: Request, db: Any) -> None:
+    """Refresh artifact registry, rule enforcer, and skill registry.
+
+    Assumes config has already been rebuilt. Use when rebuild was done separately.
     """
-    _rebuild_config(request, db)
     registry = getattr(request.app.state, "artifact_registry", None)
     if registry is not None:
-        registry.load_from_db(db)  # Web UI: reloads global attachments
+        registry.load_from_db(db)
     rule_enforcer = getattr(request.app.state, "rule_enforcer", None)
     if rule_enforcer is not None and registry is not None:
         from ..services.artifacts import ArtifactType
@@ -66,6 +111,15 @@ def _reload_registries(request: Request, db: Any) -> None:
     skill_registry = getattr(request.app.state, "skill_registry", None)
     if skill_registry is not None and registry is not None:
         skill_registry.load_from_artifacts(registry)
+
+
+def _reload_registries(request: Request, db: Any) -> None:
+    """Rebuild config and refresh all registries after pack changes.
+
+    Used for endpoints where rollback is not applicable (remove, refresh).
+    """
+    _rebuild_config(request, db)
+    _reload_registries_only(request, db)
 
 
 def _validate_pack_path_params(namespace: str, name: str) -> None:
@@ -210,7 +264,13 @@ async def attach_pack(request: Request, namespace: str, name: str, body: AttachR
         result = do_attach(db, pack["id"], project_path=body.project_path)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    _reload_registries(request, db)
+    if not _rebuild_config(request, db):
+        _rollback_pack_mutation(db, pack["id"], body.project_path, "detach")
+        raise HTTPException(
+            status_code=409,
+            detail="Pack attached but config rebuild failed (compliance violation). Attachment rolled back.",
+        )
+    _reload_registries_only(request, db)
     return result
 
 
@@ -231,7 +291,13 @@ async def detach_pack(
     removed = do_detach(db, pack["id"], project_path=project_path)
     if not removed:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    _reload_registries(request, db)
+    if not _rebuild_config(request, db):
+        _rollback_pack_mutation(db, pack["id"], project_path, "attach")
+        raise HTTPException(
+            status_code=409,
+            detail="Pack detached but config rebuild failed (compliance violation). Detachment rolled back.",
+        )
+    _reload_registries_only(request, db)
     return {"status": "detached"}
 
 

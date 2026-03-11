@@ -2779,10 +2779,27 @@ async def _run_repl(
                 if invoke_def:
                     tools_openai.append(invoke_def)
 
-        def _rebuild_pack_config() -> None:
+        def _rebuild_pack_config(
+            *,
+            rollback_pack_id: str | None = None,
+            rollback_project_path: str | None = None,
+            rollback_action: str | None = None,
+        ) -> bool:
             """Rebuild effective config after pack attach/detach/install/remove.
 
-            Fails closed: on error, keeps the previous config and warns the user.
+            Fails closed: on error, rolls back the DB mutation and keeps
+            the previous config.
+
+            Parameters
+            ----------
+            rollback_pack_id:
+                Pack ID to rollback on failure.
+            rollback_project_path:
+                Project path for rollback scope.
+            rollback_action:
+                ``"detach"`` to undo an attach, ``"attach"`` to undo a detach.
+
+            Returns ``True`` on success.
             """
             nonlocal config
             from ..services.config_overlays import rebuild_effective_config
@@ -2799,17 +2816,45 @@ async def _run_repl(
                 config = result.config
                 for warning in result.warnings:
                     renderer.console.print(f"[yellow]{warning}[/yellow]")
-            except ValueError as exc:
+                return True
+            except (ValueError, Exception) as exc:
                 config = previous
-                renderer.console.print(f"[red]Config rebuild blocked (compliance failure): {exc}[/red]")
-                renderer.console.print(
-                    "[yellow]Keeping previous config. Detach the offending pack to resolve.[/yellow]"
-                )
-                logger.warning("Config rebuild blocked after pack change", exc_info=True)
-            except Exception:
-                config = previous
-                renderer.console.print("[red]Config rebuild failed — keeping previous config.[/red]")
+                is_compliance = isinstance(exc, ValueError)
+                if is_compliance:
+                    renderer.console.print(f"[red]Config rebuild blocked (compliance failure): {exc}[/red]")
+                else:
+                    renderer.console.print("[red]Config rebuild failed — keeping previous config.[/red]")
                 logger.warning("Config rebuild failed after pack change", exc_info=True)
+                # Roll back the DB mutation that caused the failure
+                if rollback_pack_id and rollback_action:
+                    _rollback_pack_mutation(db, rollback_pack_id, rollback_project_path, rollback_action)
+                return False
+
+        def _rollback_pack_mutation(
+            db: Any,
+            pack_id: str,
+            project_path: str | None,
+            action: str,
+        ) -> None:
+            """Undo a pack attachment/detachment after config rebuild failure."""
+            from ..services.pack_attachments import attach_pack as _do_attach
+            from ..services.pack_attachments import detach_pack as _do_detach
+
+            try:
+                if action == "detach":
+                    _do_detach(db, pack_id, project_path=project_path)
+                    renderer.console.print("[yellow]Rolled back: pack detached to restore valid config.[/yellow]")
+                elif action == "attach":
+                    _do_attach(
+                        db,
+                        pack_id,
+                        project_path=project_path,
+                        check_overlay_conflicts=False,
+                    )
+                    renderer.console.print("[yellow]Rolled back: pack re-attached to restore valid config.[/yellow]")
+            except Exception:
+                logger.error("Rollback failed", exc_info=True)
+                renderer.console.print("[red]Rollback also failed. Manual intervention required.[/red]")
 
         # Inject initial space instructions if space is active
         if _active_space[0] and space_instructions:
@@ -4042,13 +4087,17 @@ async def _run_repl(
                         renderer.console.print(
                             f"[green]Attached[/green] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                         )
-                        _rebuild_pack_config()
-                        if artifact_registry is not None:
-                            artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
-                            if skill_registry is not None:
-                                skill_registry.load_from_artifacts(artifact_registry)
-                            _refresh_artifact_prompt()
-                            _refresh_skill_tools()
+                        if _rebuild_pack_config(
+                            rollback_pack_id=_pm["id"],
+                            rollback_project_path=project_path,
+                            rollback_action="detach",
+                        ):
+                            if artifact_registry is not None:
+                                artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
+                                if skill_registry is not None:
+                                    skill_registry.load_from_artifacts(artifact_registry)
+                                _refresh_artifact_prompt()
+                                _refresh_skill_tools()
 
                     elif sub == "detach":
                         _detach_rest = parts[2].strip() if len(parts) >= 3 else ""
@@ -4080,13 +4129,17 @@ async def _run_repl(
                             renderer.console.print(
                                 f"[green]Detached[/green] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                             )
-                            _rebuild_pack_config()
-                            if artifact_registry is not None:
-                                artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
-                                if skill_registry is not None:
-                                    skill_registry.load_from_artifacts(artifact_registry)
-                                _refresh_artifact_prompt()
-                                _refresh_skill_tools()
+                            if _rebuild_pack_config(
+                                rollback_pack_id=_pm["id"],
+                                rollback_project_path=project_path,
+                                rollback_action="attach",
+                            ):
+                                if artifact_registry is not None:
+                                    artifact_registry.load_from_db(db, space_id=space["id"] if space else None)
+                                    if skill_registry is not None:
+                                        skill_registry.load_from_artifacts(artifact_registry)
+                                    _refresh_artifact_prompt()
+                                    _refresh_skill_tools()
                         else:
                             renderer.console.print(
                                 f"[yellow]Not attached:[/yellow] @{rich_escape(ns)}/{rich_escape(name)}\n"

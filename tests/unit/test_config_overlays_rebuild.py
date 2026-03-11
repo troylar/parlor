@@ -260,23 +260,29 @@ class TestConfigToDict:
 class TestWebRebuildConfig:
     """Tests for the web router _rebuild_config fail-closed behavior."""
 
+    @patch("anteroom.routers.packs._refresh_derived_state")
     @patch("anteroom.services.config_overlays.rebuild_effective_config")
-    def test_rebuild_success_updates_config(self, mock_rebuild: MagicMock) -> None:
-        """Successful rebuild updates app.state.config."""
+    def test_rebuild_success_updates_config_and_derived(self, mock_rebuild: MagicMock, mock_refresh: MagicMock) -> None:
+        """Successful rebuild updates app.state.config and derived state."""
         from anteroom.routers.packs import _rebuild_config
 
         request = MagicMock()
         request.app.state.config = _FakeConfig(model="old")
         new_config = _FakeConfig(model="new")
-        mock_rebuild.return_value = ConfigRebuildResult(config=new_config, enforced_fields=[], warnings=[])
+        mock_rebuild.return_value = ConfigRebuildResult(
+            config=new_config, enforced_fields=["safety.approval_mode"], warnings=[]
+        )
 
         result = _rebuild_config(request, MagicMock())
 
         assert result is True
         assert request.app.state.config is new_config
+        assert request.app.state.enforced_fields == ["safety.approval_mode"]
+        mock_refresh.assert_called_once_with(request, new_config)
 
+    @patch("anteroom.routers.packs._refresh_derived_state")
     @patch("anteroom.services.config_overlays.rebuild_effective_config")
-    def test_rebuild_compliance_failure_keeps_previous(self, mock_rebuild: MagicMock) -> None:
+    def test_rebuild_compliance_failure_keeps_previous(self, mock_rebuild: MagicMock, mock_refresh: MagicMock) -> None:
         """ValueError (compliance failure) keeps previous config."""
         from anteroom.routers.packs import _rebuild_config
 
@@ -289,9 +295,11 @@ class TestWebRebuildConfig:
 
         assert result is False
         assert request.app.state.config is old_config
+        mock_refresh.assert_not_called()
 
+    @patch("anteroom.routers.packs._refresh_derived_state")
     @patch("anteroom.services.config_overlays.rebuild_effective_config")
-    def test_rebuild_exception_keeps_previous(self, mock_rebuild: MagicMock) -> None:
+    def test_rebuild_exception_keeps_previous(self, mock_rebuild: MagicMock, mock_refresh: MagicMock) -> None:
         """Generic exception keeps previous config."""
         from anteroom.routers.packs import _rebuild_config
 
@@ -304,6 +312,59 @@ class TestWebRebuildConfig:
 
         assert result is False
         assert request.app.state.config is old_config
+        mock_refresh.assert_not_called()
+
+
+class TestWebRollbackPackMutation:
+    """Tests for rollback on config rebuild failure in web endpoints."""
+
+    @patch("anteroom.services.pack_attachments.detach_pack")
+    def test_rollback_detach_on_attach_failure(self, mock_detach: MagicMock) -> None:
+        """After failed attach rebuild, the attachment is rolled back via detach."""
+        from anteroom.routers.packs import _rollback_pack_mutation
+
+        db = MagicMock()
+        _rollback_pack_mutation(db, "pack-1", "/project", "detach")
+
+        mock_detach.assert_called_once_with(db, "pack-1", project_path="/project")
+
+    @patch("anteroom.services.pack_attachments.attach_pack")
+    def test_rollback_attach_on_detach_failure(self, mock_attach: MagicMock) -> None:
+        """After failed detach rebuild, the detachment is rolled back via re-attach."""
+        from anteroom.routers.packs import _rollback_pack_mutation
+
+        db = MagicMock()
+        _rollback_pack_mutation(db, "pack-1", "/project", "attach")
+
+        mock_attach.assert_called_once_with(db, "pack-1", project_path="/project", check_overlay_conflicts=False)
+
+
+class TestRefreshDerivedState:
+    """Tests for _refresh_derived_state updating app.state singletons."""
+
+    def test_updates_rate_limit_config(self) -> None:
+        from anteroom.routers.packs import _refresh_derived_state
+
+        request = MagicMock()
+        config = MagicMock()
+        config.rate_limit = MagicMock()
+        config.safety = None
+
+        _refresh_derived_state(request, config)
+
+        assert request.app.state.rate_limit_config is config.rate_limit
+
+    def test_clears_dlp_when_disabled(self) -> None:
+        from anteroom.routers.packs import _refresh_derived_state
+
+        request = MagicMock()
+        config = MagicMock()
+        config.safety.dlp.enabled = False
+        config.safety.prompt_injection = None
+
+        _refresh_derived_state(request, config)
+
+        assert request.app.state.dlp_scanner is None
 
 
 class TestRestartOnlyFields:
