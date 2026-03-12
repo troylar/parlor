@@ -233,7 +233,59 @@ class TestAttachPackEndpoint:
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={"project_path": "/my/proj"})
             assert resp.status_code == 200
-            mock_attach.assert_called_once_with(app.state.db, "pack-1", project_path="/my/proj")
+            mock_attach.assert_called_once_with(
+                app.state.db, "pack-1", project_path="/my/proj", priority=50
+            )
+
+    def test_attach_with_priority(self) -> None:
+        app = _make_app()
+        with (
+            patch("anteroom.routers.packs.packs") as mock_packs,
+            patch(
+                "anteroom.services.pack_attachments.attach_pack",
+                return_value={"id": "att-1", "scope": "global"},
+            ) as mock_attach,
+        ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            resp = client.post("/api/packs/test-ns/test-pack/attach", json={"priority": 10})
+            assert resp.status_code == 200
+            mock_attach.assert_called_once_with(
+                app.state.db, "pack-1", project_path=None, priority=10
+            )
+
+    def test_attach_default_priority_is_50(self) -> None:
+        app = _make_app()
+        with (
+            patch("anteroom.routers.packs.packs") as mock_packs,
+            patch(
+                "anteroom.services.pack_attachments.attach_pack",
+                return_value={"id": "att-1", "scope": "global"},
+            ) as mock_attach,
+        ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            resp = client.post("/api/packs/test-ns/test-pack/attach", json={})
+            assert resp.status_code == 200
+            mock_attach.assert_called_once_with(
+                app.state.db, "pack-1", project_path=None, priority=50
+            )
+
+    def test_attach_priority_below_1_returns_422(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            resp = client.post("/api/packs/test-ns/test-pack/attach", json={"priority": 0})
+            assert resp.status_code == 422
+
+    def test_attach_priority_above_100_returns_422(self) -> None:
+        app = _make_app()
+        with patch("anteroom.routers.packs.packs") as mock_packs:
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            resp = client.post("/api/packs/test-ns/test-pack/attach", json={"priority": 101})
+            assert resp.status_code == 422
 
 
 class TestDetachPackEndpoint:
