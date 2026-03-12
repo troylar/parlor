@@ -307,6 +307,12 @@ async def attach_pack(request: Request, namespace: str, name: str, body: AttachR
             status_code=409,
             detail="Pack attached but config rebuild failed (compliance violation). Attachment rolled back.",
         )
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Pack attached but config rebuild failed."
+            " The attachment is saved and will take effect on next restart.",
+        )
     _reload_registries_only(request, db)
     return result
 
@@ -334,6 +340,12 @@ async def detach_pack(
         raise HTTPException(
             status_code=409,
             detail="Pack detached but config rebuild failed (compliance violation). Detachment rolled back.",
+        )
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Pack detached but config rebuild failed."
+            " The detachment is saved and will take effect on next restart.",
         )
     _reload_registries_only(request, db)
     return {"status": "detached"}
