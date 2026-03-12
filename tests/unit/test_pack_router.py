@@ -504,6 +504,79 @@ class TestRemovePackByIdEndpoint:
         )
 
 
+class TestAttachRebuildFailure:
+    """Tests for #898: attach/detach endpoints must fail on generic rebuild failure."""
+
+    def test_attach_generic_rebuild_failure_returns_500(self) -> None:
+        app = _make_app()
+        with (
+            patch("anteroom.routers.packs.packs") as mock_packs,
+            patch("anteroom.services.pack_attachments.attach_pack", return_value={"id": "att-1", "scope": "global"}),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+        ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            resp = client.post("/api/packs/test-ns/test-pack/attach", json={})
+            assert resp.status_code == 500
+            assert "config rebuild failed" in resp.json()["detail"]
+            assert "next restart" in resp.json()["detail"]
+
+    def test_attach_generic_rebuild_failure_does_not_rollback(self) -> None:
+        app = _make_app()
+        with (
+            patch("anteroom.routers.packs.packs") as mock_packs,
+            patch("anteroom.services.pack_attachments.attach_pack", return_value={"id": "att-1", "scope": "global"}),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+            patch("anteroom.routers.packs._rollback_pack_mutation") as mock_rollback,
+        ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            client.post("/api/packs/test-ns/test-pack/attach", json={})
+            mock_rollback.assert_not_called()
+
+    def test_detach_generic_rebuild_failure_returns_500(self) -> None:
+        app = _make_app()
+        with (
+            patch("anteroom.routers.packs.packs") as mock_packs,
+            patch("anteroom.services.pack_attachments.detach_pack", return_value=True),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+        ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            resp = client.delete("/api/packs/test-ns/test-pack/attach")
+            assert resp.status_code == 500
+            assert "config rebuild failed" in resp.json()["detail"]
+            assert "next restart" in resp.json()["detail"]
+
+    def test_detach_generic_rebuild_failure_does_not_rollback(self) -> None:
+        app = _make_app()
+        with (
+            patch("anteroom.routers.packs.packs") as mock_packs,
+            patch("anteroom.services.pack_attachments.detach_pack", return_value=True),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+            patch("anteroom.routers.packs._rollback_pack_mutation") as mock_rollback,
+        ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            client.delete("/api/packs/test-ns/test-pack/attach")
+            mock_rollback.assert_not_called()
+
+    def test_attach_compliance_failure_still_rolls_back(self) -> None:
+        """Regression: compliance failure path is unchanged — rollback still occurs."""
+        app = _make_app()
+        with (
+            patch("anteroom.routers.packs.packs") as mock_packs,
+            patch("anteroom.services.pack_attachments.attach_pack", return_value={"id": "att-1", "scope": "global"}),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, True)),
+            patch("anteroom.routers.packs._rollback_pack_mutation") as mock_rollback,
+        ):
+            mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
+            client = TestClient(app)
+            resp = client.post("/api/packs/test-ns/test-pack/attach", json={})
+            assert resp.status_code == 409
+            mock_rollback.assert_called_once_with(app.state.db, "pack-1", None, "detach")
+
+
 class TestRefreshSourcesEndpoint:
     def test_refresh_no_sources_returns_empty_envelope(self) -> None:
         app = _make_app()
