@@ -326,9 +326,7 @@ class TestSameVersionContentChange:
         assert len(results2[0].changed_pack_ids) == 1
         assert callback_count == 2  # Callback fired again
 
-    def test_same_version_unchanged_content_does_not_update(
-        self, tmp_path: Path, db: ThreadSafeConnection
-    ) -> None:
+    def test_same_version_unchanged_content_does_not_update(self, tmp_path: Path, db: ThreadSafeConnection) -> None:
         """Re-running install_from_source with identical content does not trigger an update."""
         source_dir = tmp_path / "source"
         source_dir.mkdir()

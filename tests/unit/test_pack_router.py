@@ -233,9 +233,7 @@ class TestAttachPackEndpoint:
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={"project_path": "/my/proj"})
             assert resp.status_code == 200
-            mock_attach.assert_called_once_with(
-                app.state.db, "pack-1", project_path="/my/proj", priority=50
-            )
+            mock_attach.assert_called_once_with(app.state.db, "pack-1", project_path="/my/proj", priority=50)
 
     def test_attach_with_priority(self) -> None:
         app = _make_app()
@@ -250,9 +248,7 @@ class TestAttachPackEndpoint:
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={"priority": 10})
             assert resp.status_code == 200
-            mock_attach.assert_called_once_with(
-                app.state.db, "pack-1", project_path=None, priority=10
-            )
+            mock_attach.assert_called_once_with(app.state.db, "pack-1", project_path=None, priority=10)
 
     def test_attach_default_priority_is_50(self) -> None:
         app = _make_app()
@@ -267,9 +263,7 @@ class TestAttachPackEndpoint:
             client = TestClient(app)
             resp = client.post("/api/packs/test-ns/test-pack/attach", json={})
             assert resp.status_code == 200
-            mock_attach.assert_called_once_with(
-                app.state.db, "pack-1", project_path=None, priority=50
-            )
+            mock_attach.assert_called_once_with(app.state.db, "pack-1", project_path=None, priority=50)
 
     def test_attach_priority_below_1_returns_422(self) -> None:
         app = _make_app()
@@ -699,7 +693,7 @@ class TestRefreshSourcesEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["quarantined"] == ["pack-bad-1"]
-        assert data["quarantine_reason"] == "field ai.temperature violates compliance"
+        assert data["quarantine_reason"] == "Compliance violation detected; see server logs for details"
 
     def test_refresh_quarantine_detach_failure_logged(self) -> None:
         sources = [PackSourceConfig(url="https://example.com/packs.git")]
@@ -736,7 +730,7 @@ class TestRefreshSourcesEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["quarantined"] == []
-        assert data["quarantine_reason"] == "compliance error"
+        assert data["quarantine_reason"] == "Compliance violation detected; see server logs for details"
 
     def test_refresh_no_quarantine_on_success(self) -> None:
         sources = [PackSourceConfig(url="https://example.com/packs.git")]

@@ -1635,9 +1635,7 @@ def _run_pack_with_config(config: AppConfig, args: argparse.Namespace) -> None:
                     )
                 rebuild_effective_config(db, previous_config=config)
             except Exception as exc:
-                console.print(
-                    f"[yellow]Config rebuild failed (packs still installed):[/yellow] {escape(str(exc))}"
-                )
+                console.print(f"[yellow]Config rebuild failed (packs still installed):[/yellow] {escape(str(exc))}")
 
 
 def _run_pack(data_dir: Path, db: "ThreadSafeConnection", args: argparse.Namespace) -> None:

@@ -218,7 +218,7 @@ async def refresh_sources(request: Request) -> dict[str, Any]:
         if success:
             _reload_registries_only(request, db)
         elif compliance_failure:
-            quarantine_reason = compliance_msg
+            quarantine_reason = "Compliance violation detected; see server logs for details"
             from ..services.pack_attachments import detach_pack as _q_detach
 
             for r in results:
