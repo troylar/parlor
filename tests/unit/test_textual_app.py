@@ -1503,6 +1503,51 @@ async def test_textual_backend_plan_mode_commands(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_textual_backend_submit_turn_applies_pending_plan_mode_to_new_conversation(tmp_path) -> None:
+    db = init_db(tmp_path / "textual_plan_submit.db")
+    backend = AgentLoopTextualBackend(
+        config=_backend_config(tmp_path),
+        db=db,
+        ai_service=SimpleNamespace(
+            config=SimpleNamespace(model="gpt-5.2", narration_cadence="compact"),
+            generate_title=lambda prompt: asyncio.sleep(0, result=f"Title: {prompt[:20]}"),
+        ),
+        tool_executor=None,
+        tools_openai=[
+            {"function": {"name": "read_file"}},
+            {"function": {"name": "edit_file"}},
+            {"function": {"name": "bash"}},
+            {"function": {"name": "ask_user"}},
+        ],
+        extra_system_prompt="base prompt",
+        working_dir=str(tmp_path),
+    )
+
+    result = await backend.execute_slash_command("/plan on")
+    assert result is not None and result.kind == "set_plan_mode"
+    assert backend._set_plan_mode(result.plan_mode_enabled is True).startswith("Planning mode active")
+    assert backend.plan_mode_active() is True
+    assert backend._pending_plan_activation is True
+    assert backend._plan_file is None
+
+    async def _fake_run_agent_loop(**_: Any):
+        yield AgentEvent(kind="assistant_message", data={"content": "Plan first."})
+        yield AgentEvent(kind="done", data={})
+
+    with patch("anteroom.cli.textual_app.run_agent_loop", new=_fake_run_agent_loop):
+        events = [event async for event in backend.submit_turn("Investigate before editing")]
+
+    assert [event.kind for event in events] == ["assistant_message", "done"]
+    assert backend._conversation is not None
+    assert backend._pending_plan_activation is False
+    assert backend._plan_file is not None
+    assert backend.plan_mode_active() is True
+    assert {tool["function"]["name"] for tool in (backend.tools_openai or [])} == {"read_file", "bash"}
+    assert "base prompt" in backend.extra_system_prompt
+    assert "<planning_mode>" in backend.extra_system_prompt
+
+
+@pytest.mark.asyncio
 async def test_textual_app_syncs_plan_mode_into_session(tmp_path) -> None:
     backend = AgentLoopTextualBackend(
         config=_backend_config(tmp_path),
