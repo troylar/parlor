@@ -1588,18 +1588,25 @@ async def test_textual_app_syncs_plan_mode_into_session(tmp_path) -> None:
         db=init_db(tmp_path / "textual_plan_app.db"),
         ai_service=SimpleNamespace(config=SimpleNamespace(model="gpt-5.2")),
         tool_executor=None,
-        tools_openai=None,
+        tools_openai=[
+            {"function": {"name": "read_file"}},
+            {"function": {"name": "edit_file"}},
+            {"function": {"name": "bash"}},
+        ],
         extra_system_prompt="",
         working_dir=str(tmp_path),
     )
     app = TextualChatApp(backend=backend, session=_session())
 
     async with app.run_test() as pilot:
+        assert app.session.tool_count == 3
         await _submit(pilot, app, "/plan on")
         assert app.session.plan_mode is True
+        assert app.session.tool_count == 3
 
         await _submit(pilot, app, "/plan off")
         assert app.session.plan_mode is False
+        assert app.session.tool_count == 3
 
 
 @pytest.mark.asyncio
