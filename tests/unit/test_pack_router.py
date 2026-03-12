@@ -564,7 +564,7 @@ class TestAttachRebuildFailure:
         with (
             patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.attach_pack", return_value={"id": "att-1", "scope": "global"}),
-            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False, None)),
         ):
             mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
@@ -578,7 +578,7 @@ class TestAttachRebuildFailure:
         with (
             patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.attach_pack", return_value={"id": "att-1", "scope": "global"}),
-            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False, None)),
             patch("anteroom.routers.packs._rollback_pack_mutation") as mock_rollback,
         ):
             mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
@@ -591,7 +591,7 @@ class TestAttachRebuildFailure:
         with (
             patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.detach_pack", return_value=True),
-            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False, None)),
         ):
             mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
             client = TestClient(app)
@@ -605,7 +605,7 @@ class TestAttachRebuildFailure:
         with (
             patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.detach_pack", return_value=True),
-            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False)),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, False, None)),
             patch("anteroom.routers.packs._rollback_pack_mutation") as mock_rollback,
         ):
             mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
@@ -619,7 +619,7 @@ class TestAttachRebuildFailure:
         with (
             patch("anteroom.routers.packs.packs") as mock_packs,
             patch("anteroom.services.pack_attachments.attach_pack", return_value={"id": "att-1", "scope": "global"}),
-            patch("anteroom.routers.packs._rebuild_config", return_value=(False, True)),
+            patch("anteroom.routers.packs._rebuild_config", return_value=(False, True, "compliance error")),
             patch("anteroom.routers.packs._rollback_pack_mutation") as mock_rollback,
         ):
             mock_packs.resolve_pack.return_value = ({"id": "pack-1"}, [])
