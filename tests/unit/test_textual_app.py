@@ -13,6 +13,7 @@ from textual.selection import Selection
 from textual.widgets import TextArea
 
 from anteroom.cli.commands import CommandResult, ParsedSlashCommand
+from anteroom.cli.plan import get_plan_file_path
 from anteroom.cli.textual_app import (
     AgentLoopTextualBackend,
     BoardWidget,
@@ -1420,6 +1421,39 @@ async def test_textual_backend_load_history_restores_working_dir_and_active_spac
     assert backend._active_space is not None and backend._active_space["id"] == space["id"]
     assert 'space="Research"' in backend.extra_system_prompt
     assert "Follow the research workflow." in backend.extra_system_prompt
+
+
+@pytest.mark.asyncio
+async def test_textual_backend_load_history_rehydrates_plan_mode_from_existing_plan_file(tmp_path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    db = init_db(tmp_path / "textual_load_history_plan.db")
+    conv = storage.create_conversation(db, title="Planned", working_dir=str(project_dir))
+    plan_file = get_plan_file_path(tmp_path / "data", conv["id"])
+    plan_file.parent.mkdir(parents=True, exist_ok=True)
+    plan_file.write_text("- inspect the renderer\n- verify tool handoff\n")
+
+    backend = AgentLoopTextualBackend(
+        config=_backend_config(tmp_path),
+        db=db,
+        ai_service=SimpleNamespace(config=SimpleNamespace(model="gpt-5.2", narration_cadence="compact")),
+        tool_executor=None,
+        tools_openai=[
+            {"function": {"name": "read_file"}},
+            {"function": {"name": "edit_file"}},
+            {"function": {"name": "bash"}},
+        ],
+        extra_system_prompt="base prompt",
+        working_dir=str(tmp_path),
+        resume_conversation_id=conv["id"],
+    )
+
+    await backend.load_history()
+
+    assert backend.plan_mode_active() is True
+    assert backend._plan_file == plan_file
+    assert {tool["function"]["name"] for tool in (backend.tools_openai or [])} == {"read_file", "bash"}
+    assert "<planning_mode>" in backend.extra_system_prompt
 
 
 @pytest.mark.asyncio

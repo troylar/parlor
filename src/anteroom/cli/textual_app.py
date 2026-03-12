@@ -1941,6 +1941,9 @@ class AgentLoopTextualBackend:
                 self.tool_registry._working_dir = resolved
             self.working_dir = resolved
         self._messages = self._load_conversation_messages(self.resume_conversation_id)
+        plan_file = get_plan_file_path(self.config.app.data_dir, conv["id"])
+        if plan_file.exists():
+            self._apply_plan_mode(conv["id"])
         return self._plain_history()
 
     async def submit_turn(self, prompt: str) -> AsyncGenerator[AgentEvent, None]:
