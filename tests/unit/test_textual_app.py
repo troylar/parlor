@@ -345,6 +345,57 @@ async def test_textual_app_tool_board_transitions_spinner_to_success_and_error()
 
 
 @pytest.mark.asyncio
+async def test_textual_app_procedure_board_transitions_active_complete_retry_and_warning() -> None:
+    backend = ScriptedBackend()
+    turn = backend.add_turn()
+    app = TextualChatApp(backend=backend, session=_session())
+
+    async with app.run_test() as pilot:
+        await _submit(pilot, app, "Work through the result carefully")
+
+        await turn.put(AgentEvent(kind="thinking", data={}))
+        await pilot.pause()
+
+        procedure_board = app.query_one("#procedure-board", BoardWidget)
+        first_frame = procedure_board.plain_text
+        assert "◜ I'm orienting to the request before I act. [model]" in first_frame
+
+        app._on_stream_heartbeat()
+        await pilot.pause()
+        second_frame = procedure_board.plain_text
+        assert "◠ I'm orienting to the request before I act. [model]" in second_frame
+
+        await turn.put(
+            AgentEvent(
+                kind="tool_call_start",
+                data={"tool_name": "grep", "arguments": {"path": "src/", "pattern": "FoldGroup"}},
+            )
+        )
+        await turn.put(
+            AgentEvent(kind="tool_call_end", data={"tool_name": "grep", "status": "success", "output": {}})
+        )
+        await pilot.pause()
+        assert "✓ I'm identifying the files and symbols that matter. [grep]" in procedure_board.plain_text
+
+        await turn.put(AgentEvent(kind="retrying", data={"attempt": 2, "max_attempts": 2, "reason": "turn_retry"}))
+        await pilot.pause()
+        assert (
+            "◠ I lost the response once, so I'm retrying from verified context. [retry]"
+            in procedure_board.plain_text
+        )
+
+        await turn.put(AgentEvent(kind="budget_warning", data={"message": "Tool budget is getting tight."}))
+        await pilot.pause()
+        assert "! Tool budget is getting tight. [warning]" in procedure_board.plain_text
+
+        await turn.put(AgentEvent(kind="assistant_message", data={"content": "Done."}))
+        await turn.put(AgentEvent(kind="done", data={}))
+        await turn.put(None)
+        await pilot.pause()
+        assert "✓ I'm ready to answer with verified findings. [done]" in procedure_board.plain_text
+
+
+@pytest.mark.asyncio
 async def test_textual_app_handles_error_and_second_turn() -> None:
     backend = ScriptedBackend(history=[("assistant", "Previous answer.")])
     turn_one = backend.add_turn()
