@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..services import packs
 from ..services.pack_sources import list_cached_sources
@@ -260,6 +260,7 @@ async def refresh_sources(request: Request) -> dict[str, Any]:
 
 class AttachRequest(BaseModel):
     project_path: str | None = None
+    priority: int | None = Field(None, ge=1, le=100)
 
 
 # --- by-id routes MUST come before {namespace}/{name} wildcard routes ---
@@ -308,7 +309,8 @@ async def attach_pack(request: Request, namespace: str, name: str, body: AttachR
     pack = _resolve_or_409(db, namespace, name)
 
     try:
-        result = do_attach(db, pack["id"], project_path=body.project_path)
+        priority = body.priority if body.priority is not None else 50
+        result = do_attach(db, pack["id"], project_path=body.project_path, priority=priority)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     success, compliance_failure, _ = _rebuild_config(request, db)
