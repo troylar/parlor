@@ -1635,6 +1635,36 @@ async def test_textual_app_mount_syncs_resumed_plan_mode_into_session(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_textual_app_mount_syncs_resumed_session_model_working_dir_and_tool_count(tmp_path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    db = init_db(tmp_path / "textual_resume_session_app.db")
+    conv = storage.create_conversation(db, title="Resumed", working_dir=str(project_dir))
+    storage.create_message(db, conv["id"], "user", "Resume me.")
+
+    backend = AgentLoopTextualBackend(
+        config=_backend_config(tmp_path),
+        db=db,
+        ai_service=SimpleNamespace(config=SimpleNamespace(model="gpt-5.4-mini")),
+        tool_executor=None,
+        tools_openai=[
+            {"function": {"name": "read_file"}},
+            {"function": {"name": "bash"}},
+        ],
+        extra_system_prompt="base prompt",
+        working_dir=str(tmp_path),
+        resume_conversation_id=conv["id"],
+    )
+    app = TextualChatApp(backend=backend, session=_session())
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.session.model == "gpt-5.4-mini"
+        assert app.session.working_dir == str(project_dir.resolve())
+        assert app.session.tool_count == 2
+
+
+@pytest.mark.asyncio
 async def test_textual_backend_mcp_commands(tmp_path) -> None:
     backend = AgentLoopTextualBackend(
         config=_backend_config(tmp_path),
