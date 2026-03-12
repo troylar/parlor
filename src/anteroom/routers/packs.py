@@ -20,14 +20,14 @@ _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 _SAFE_ID_RE = re.compile(r"^[a-f0-9-]{32,36}$")
 
 
-def _rebuild_config(request: Request, db: Any) -> tuple[bool, bool]:
+def _rebuild_config(request: Request, db: Any) -> tuple[bool, bool, str | None]:
     """Rebuild effective config after pack changes and update app state.
 
-    Returns ``(success, compliance_failure)`` tuple:
+    Returns ``(success, compliance_failure, reason)`` tuple:
 
-    - ``(True, False)`` — config rebuilt successfully.
-    - ``(False, True)`` — compliance violation; caller should rollback.
-    - ``(False, False)`` — infrastructure error; previous config kept,
+    - ``(True, False, None)`` — config rebuilt successfully.
+    - ``(False, True, reason)`` — compliance violation; caller should rollback.
+    - ``(False, False, None)`` — infrastructure error; previous config kept,
       but the pack mutation should NOT be rolled back (the pack itself
       is fine, it's the rebuild machinery that failed).
     """
@@ -50,19 +50,19 @@ def _rebuild_config(request: Request, db: Any) -> tuple[bool, bool]:
             raise
         for warning in result.warnings:
             logger.warning(warning)
-        return True, False
-    except ComplianceError:
+        return True, False, None
+    except ComplianceError as exc:
         logger.warning(
             "Config rebuild blocked (compliance failure) — keeping previous config",
             exc_info=True,
         )
-        return False, True
+        return False, True, str(exc)
     except Exception:
         logger.warning(
             "Config rebuild failed — keeping previous config",
             exc_info=True,
         )
-        return False, False
+        return False, False, None
 
 
 def _refresh_derived_state(request: Request, config: Any) -> None:
@@ -195,12 +195,12 @@ async def list_sources(request: Request) -> list[dict[str, Any]]:
 
 
 @router.post("/packs/refresh")
-async def refresh_sources(request: Request) -> list[dict[str, Any]]:
+async def refresh_sources(request: Request) -> dict[str, Any]:
     """Manually trigger a refresh of all configured pack sources."""
     config = request.app.state.config
     sources = getattr(config, "pack_sources", [])
     if not sources:
-        return []
+        return {"sources": [], "quarantined": [], "quarantine_reason": None}
 
     db = request.app.state.db
     data_dir = config.app.data_dir
@@ -209,31 +209,37 @@ async def refresh_sources(request: Request) -> list[dict[str, Any]]:
 
     worker = PackRefreshWorker(db=db, data_dir=data_dir, sources=sources)
     results = worker.refresh_all()
+
+    quarantined_ids: list[str] = []
+    quarantine_reason: str | None = None
+
     if any(r.changed for r in results):
-        success, compliance_failure = _rebuild_config(request, db)
+        success, compliance_failure, compliance_msg = _rebuild_config(request, db)
         if success:
             _reload_registries_only(request, db)
         elif compliance_failure:
-            # Quarantine: detach changed packs, then rebuild from the clean set
+            quarantine_reason = compliance_msg
             from ..services.pack_attachments import detach_pack as _q_detach
 
-            quarantined = 0
             for r in results:
                 for pid in r.changed_pack_ids:
                     try:
                         _q_detach(db, pid)
-                        quarantined += 1
+                        quarantined_ids.append(pid)
                     except Exception:
-                        pass
-            if quarantined:
-                logger.warning("Quarantined %d pack(s) after refresh rebuild failure", quarantined)
+                        logger.error("Failed to quarantine pack %s", pid, exc_info=True)
+            if quarantined_ids:
+                logger.warning(
+                    "Quarantined %d pack(s) after refresh rebuild failure",
+                    len(quarantined_ids),
+                )
             # Second rebuild from the now-clean attachment set
             _rebuild_config(request, db)
             _reload_registries_only(request, db)
         else:
-            # Infrastructure error — reload registries anyway, config stays previous
             _reload_registries_only(request, db)
-    return [
+
+    sources_out = [
         {
             "url": r.url,
             "success": r.success,
@@ -245,6 +251,11 @@ async def refresh_sources(request: Request) -> list[dict[str, Any]]:
         }
         for r in results
     ]
+    return {
+        "sources": sources_out,
+        "quarantined": quarantined_ids,
+        "quarantine_reason": quarantine_reason,
+    }
 
 
 class AttachRequest(BaseModel):
@@ -300,12 +311,18 @@ async def attach_pack(request: Request, namespace: str, name: str, body: AttachR
         result = do_attach(db, pack["id"], project_path=body.project_path)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    success, compliance_failure = _rebuild_config(request, db)
+    success, compliance_failure, _ = _rebuild_config(request, db)
     if compliance_failure:
         _rollback_pack_mutation(db, pack["id"], body.project_path, "detach")
         raise HTTPException(
             status_code=409,
             detail="Pack attached but config rebuild failed (compliance violation). Attachment rolled back.",
+        )
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Pack attached but config rebuild failed."
+            " The attachment is saved and will take effect on next restart.",
         )
     _reload_registries_only(request, db)
     return result
@@ -328,12 +345,18 @@ async def detach_pack(
     removed = do_detach(db, pack["id"], project_path=project_path)
     if not removed:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    success, compliance_failure = _rebuild_config(request, db)
+    success, compliance_failure, _ = _rebuild_config(request, db)
     if compliance_failure:
         _rollback_pack_mutation(db, pack["id"], project_path, "attach")
         raise HTTPException(
             status_code=409,
             detail="Pack detached but config rebuild failed (compliance violation). Detachment rolled back.",
+        )
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Pack detached but config rebuild failed."
+            " The detachment is saved and will take effect on next restart.",
         )
     _reload_registries_only(request, db)
     return {"status": "detached"}

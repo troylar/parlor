@@ -505,20 +505,26 @@ class TestRemovePackByIdEndpoint:
 
 
 class TestRefreshSourcesEndpoint:
-    def test_refresh_no_sources(self) -> None:
+    def test_refresh_no_sources_returns_empty_envelope(self) -> None:
         app = _make_app()
         client = TestClient(app)
         resp = client.post("/api/packs/refresh")
         assert resp.status_code == 200
-        assert resp.json() == []
+        data = resp.json()
+        assert data == {"sources": [], "quarantined": [], "quarantine_reason": None}
 
-    def test_refresh_with_sources(self) -> None:
+    def test_refresh_response_is_object_envelope(self) -> None:
         sources = [PackSourceConfig(url="https://example.com/packs.git")]
         app = _make_app(pack_sources=sources)
 
         mock_worker = MagicMock()
         mock_worker.refresh_all.return_value = [
-            SourceRefreshResult(url="https://example.com/packs.git", success=True, packs_installed=2, changed=True),
+            SourceRefreshResult(
+                url="https://example.com/packs.git",
+                success=True,
+                packs_installed=2,
+                changed=True,
+            ),
         ]
 
         with patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker):
@@ -527,7 +533,105 @@ class TestRefreshSourcesEndpoint:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        assert data[0]["success"] is True
-        assert data[0]["packs_installed"] == 2
-        assert data[0]["changed"] is True
+        assert "sources" in data
+        assert "quarantined" in data
+        assert "quarantine_reason" in data
+        assert len(data["sources"]) == 1
+        assert data["sources"][0]["success"] is True
+        assert data["sources"][0]["packs_installed"] == 2
+        assert data["quarantined"] == []
+        assert data["quarantine_reason"] is None
+
+    def test_refresh_quarantine_reports_detached_packs(self) -> None:
+        sources = [PackSourceConfig(url="https://example.com/packs.git")]
+        app = _make_app(pack_sources=sources)
+
+        mock_worker = MagicMock()
+        mock_worker.refresh_all.return_value = [
+            SourceRefreshResult(
+                url="https://example.com/packs.git",
+                success=True,
+                packs_installed=1,
+                changed=True,
+                changed_pack_ids=["pack-bad-1"],
+            ),
+        ]
+
+        with (
+            patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker),
+            patch(
+                "anteroom.routers.packs._rebuild_config",
+                side_effect=[
+                    (False, True, "field ai.temperature violates compliance"),
+                    (True, False, None),
+                ],
+            ),
+            patch("anteroom.services.pack_attachments.detach_pack", return_value=True),
+        ):
+            client = TestClient(app)
+            resp = client.post("/api/packs/refresh")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["quarantined"] == ["pack-bad-1"]
+        assert data["quarantine_reason"] == "field ai.temperature violates compliance"
+
+    def test_refresh_quarantine_detach_failure_logged(self) -> None:
+        sources = [PackSourceConfig(url="https://example.com/packs.git")]
+        app = _make_app(pack_sources=sources)
+
+        mock_worker = MagicMock()
+        mock_worker.refresh_all.return_value = [
+            SourceRefreshResult(
+                url="https://example.com/packs.git",
+                success=True,
+                packs_installed=1,
+                changed=True,
+                changed_pack_ids=["pack-bad-1"],
+            ),
+        ]
+
+        with (
+            patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker),
+            patch(
+                "anteroom.routers.packs._rebuild_config",
+                side_effect=[
+                    (False, True, "compliance error"),
+                    (True, False, None),
+                ],
+            ),
+            patch(
+                "anteroom.services.pack_attachments.detach_pack",
+                side_effect=RuntimeError("DB locked"),
+            ),
+        ):
+            client = TestClient(app)
+            resp = client.post("/api/packs/refresh")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["quarantined"] == []
+        assert data["quarantine_reason"] == "compliance error"
+
+    def test_refresh_no_quarantine_on_success(self) -> None:
+        sources = [PackSourceConfig(url="https://example.com/packs.git")]
+        app = _make_app(pack_sources=sources)
+
+        mock_worker = MagicMock()
+        mock_worker.refresh_all.return_value = [
+            SourceRefreshResult(
+                url="https://example.com/packs.git",
+                success=True,
+                packs_installed=1,
+                changed=True,
+            ),
+        ]
+
+        with patch("anteroom.services.pack_refresh.PackRefreshWorker", return_value=mock_worker):
+            client = TestClient(app)
+            resp = client.post("/api/packs/refresh")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["quarantined"] == []
+        assert data["quarantine_reason"] is None

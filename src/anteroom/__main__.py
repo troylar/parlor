@@ -1612,6 +1612,33 @@ def _run_pack_with_config(config: AppConfig, args: argparse.Namespace) -> None:
             else:
                 console.print(f"[red]FAIL[/red] {escape(r.url)} — {escape(r.error)}")
 
+        if any(r.changed for r in results):
+            from .services.config_overlays import ComplianceError, rebuild_effective_config
+
+            try:
+                rebuild_effective_config(db, previous_config=config)
+            except ComplianceError as exc:
+                from .services.pack_attachments import detach_pack
+
+                quarantined = 0
+                for r in results:
+                    for pid in r.changed_pack_ids:
+                        try:
+                            detach_pack(db, pid)
+                            quarantined += 1
+                        except Exception:
+                            pass
+                if quarantined:
+                    console.print(
+                        f"[yellow]Quarantined {quarantined} pack(s) "
+                        f"due to compliance failure:[/yellow] {escape(str(exc))}"
+                    )
+                rebuild_effective_config(db, previous_config=config)
+            except Exception as exc:
+                console.print(
+                    f"[yellow]Config rebuild failed (packs still installed):[/yellow] {escape(str(exc))}"
+                )
+
 
 def _run_pack(data_dir: Path, db: "ThreadSafeConnection", args: argparse.Namespace) -> None:
     """Handle ``aroom pack`` subcommands that only need a database."""
