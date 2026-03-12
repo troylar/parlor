@@ -1686,6 +1686,43 @@ async def test_textual_app_model_command_updates_session_snapshot(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_textual_app_resume_command_updates_session_snapshot_from_backend_state(tmp_path) -> None:
+    project_dir = tmp_path / "resume-project"
+    project_dir.mkdir()
+    db = init_db(tmp_path / "textual_resume_command_app.db")
+    conv = storage.create_conversation(db, title="Planned Resume", working_dir=str(project_dir))
+    storage.create_message(db, conv["id"], "user", "Resume this thread.")
+    plan_file = get_plan_file_path(tmp_path / "data", conv["id"])
+    plan_file.parent.mkdir(parents=True, exist_ok=True)
+    plan_file.write_text("- inspect current state\n")
+
+    backend = AgentLoopTextualBackend(
+        config=_backend_config(tmp_path),
+        db=db,
+        ai_service=SimpleNamespace(config=SimpleNamespace(model="gpt-5.4-mini")),
+        tool_executor=None,
+        tools_openai=[
+            {"function": {"name": "read_file"}},
+            {"function": {"name": "edit_file"}},
+            {"function": {"name": "bash"}},
+        ],
+        extra_system_prompt="base prompt",
+        working_dir=str(tmp_path),
+    )
+    app = TextualChatApp(backend=backend, session=_session())
+
+    async with app.run_test() as pilot:
+        await _submit(pilot, app, f"/resume {conv['id']}")
+        assert app.session.working_dir == str(project_dir.resolve())
+        assert app.session.model == "gpt-5.4-mini"
+        assert app.session.tool_count == 2
+        assert app.session.plan_mode is True
+        transcript = app.query_one("#transcript-pane", TranscriptPane)
+        assert "Resume this thread." in transcript.text
+        assert "Resumed **Planned Resume**" in transcript.text
+
+
+@pytest.mark.asyncio
 async def test_textual_backend_mcp_commands(tmp_path) -> None:
     backend = AgentLoopTextualBackend(
         config=_backend_config(tmp_path),
