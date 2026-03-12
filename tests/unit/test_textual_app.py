@@ -289,6 +289,62 @@ async def test_textual_app_keeps_completed_and_active_tools_visible() -> None:
 
 
 @pytest.mark.asyncio
+async def test_textual_app_tool_board_transitions_spinner_to_success_and_error() -> None:
+    backend = ScriptedBackend()
+    turn = backend.add_turn()
+    app = TextualChatApp(backend=backend, session=_session())
+
+    async with app.run_test() as pilot:
+        await _submit(pilot, app, "Inspect tool lifecycle")
+
+        await turn.put(
+            AgentEvent(
+                kind="tool_call_start",
+                data={"tool_name": "grep", "arguments": {"path": "src/", "pattern": "FoldGroup"}},
+            )
+        )
+        await pilot.pause()
+
+        tool_board = app.query_one("#tool-board", BoardWidget)
+        first_frame = tool_board.plain_text
+        assert '◜ Searching src/ for "FoldGroup"' in first_frame
+
+        app._on_stream_heartbeat()
+        await pilot.pause()
+        second_frame = tool_board.plain_text
+        assert '◠ Searching src/ for "FoldGroup"' in second_frame
+
+        await turn.put(
+            AgentEvent(kind="tool_call_end", data={"tool_name": "grep", "status": "success", "output": {}})
+        )
+        await pilot.pause()
+        assert '✓ Searching src/ for "FoldGroup"' in tool_board.plain_text
+
+        await turn.put(
+            AgentEvent(
+                kind="tool_call_start",
+                data={"tool_name": "read", "arguments": {"path": "/root/secret.txt"}},
+            )
+        )
+        await pilot.pause()
+        assert "Reading /root/secret.txt" in tool_board.plain_text
+
+        await turn.put(
+            AgentEvent(
+                kind="tool_call_end",
+                data={"tool_name": "read", "status": "error", "output": {"error": "permission denied"}},
+            )
+        )
+        await pilot.pause()
+        assert "! Reading /root/secret.txt" in tool_board.plain_text
+
+        await turn.put(AgentEvent(kind="assistant_message", data={"content": "Done."}))
+        await turn.put(AgentEvent(kind="done", data={}))
+        await turn.put(None)
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
 async def test_textual_app_handles_error_and_second_turn() -> None:
     backend = ScriptedBackend(history=[("assistant", "Previous answer.")])
     turn_one = backend.add_turn()
