@@ -396,6 +396,60 @@ async def test_textual_app_procedure_board_transitions_active_complete_retry_and
 
 
 @pytest.mark.asyncio
+async def test_textual_app_subagent_progress_stays_visible_until_parent_finishes() -> None:
+    backend = ScriptedBackend()
+    turn = backend.add_turn()
+    app = TextualChatApp(backend=backend, session=_session())
+
+    async with app.run_test() as pilot:
+        await _submit(pilot, app, "Audit the repo with a sub-agent")
+
+        await turn.put(
+            AgentEvent(
+                kind="tool_call_start",
+                data={"tool_name": "run_agent", "arguments": {"prompt": "Audit the repo for risky changes"}},
+            )
+        )
+        await turn.put(
+            AgentEvent(
+                kind="tool_call_start",
+                data={"tool_name": "grep", "arguments": {"path": "src/", "pattern": "rm -rf"}},
+            )
+        )
+        await pilot.pause()
+
+        procedure = app.query_one("#procedure-board", BoardWidget).plain_text
+        tools = app.query_one("#tool-board", BoardWidget).plain_text
+        assert "I'm verifying the result before I trust it." in procedure
+        assert "Running run_agent" in tools
+        assert 'Searching src/ for "rm -rf"' in tools
+
+        await turn.put(
+            AgentEvent(kind="tool_call_end", data={"tool_name": "grep", "status": "success", "output": {}})
+        )
+        await pilot.pause()
+        tools = app.query_one("#tool-board", BoardWidget).plain_text
+        assert '✓ Searching src/ for "rm -rf"' in tools
+        assert "Running run_agent" in tools
+
+        await turn.put(
+            AgentEvent(kind="tool_call_end", data={"tool_name": "run_agent", "status": "success", "output": {}})
+        )
+        await turn.put(
+            AgentEvent(
+                kind="assistant_message",
+                data={"content": "The sub-agent completed cleanly and found no destructive shell usage."},
+            )
+        )
+        await turn.put(AgentEvent(kind="done", data={}))
+        await turn.put(None)
+        await pilot.pause()
+
+        tools = app.query_one("#tool-board", BoardWidget).plain_text
+        assert "✓ Running run_agent" in tools
+
+
+@pytest.mark.asyncio
 async def test_textual_app_handles_error_and_second_turn() -> None:
     backend = ScriptedBackend(history=[("assistant", "Previous answer.")])
     turn_one = backend.add_turn()
