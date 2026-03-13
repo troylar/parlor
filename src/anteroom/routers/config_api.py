@@ -140,6 +140,339 @@ def _persist_config(config: Any) -> None:
         logger.exception("Failed to persist config to %s", config_path)
 
 
+# ---------------------------------------------------------------------------
+# Scoped config editing API (#933)
+# ---------------------------------------------------------------------------
+
+
+class ConfigFieldSetBody(BaseModel):
+    """Request body for setting a scoped config field."""
+
+    dot_path: str
+    value: str
+    scope: str = "personal"  # personal | space | project
+
+
+class ConfigFieldResetBody(BaseModel):
+    """Request body for resetting a scoped config field."""
+
+    dot_path: str
+    scope: str = "personal"
+
+
+@router.get("/config/fields")
+async def list_config_fields(request: Request) -> list[dict[str, Any]]:
+    """List all settable config fields with type info."""
+    from ..services.config_editor import list_settable_fields
+
+    fields = list_settable_fields(include_sensitive=False)
+    return [
+        {
+            "dot_path": f.dot_path,
+            "field_type": f.field_type,
+            "default": f.default,
+            "allowed_values": list(f.allowed_values) if f.allowed_values else None,
+            "min_val": f.min_val,
+            "max_val": f.max_val,
+        }
+        for f in fields
+    ]
+
+
+@router.get("/config/fields/{dot_path:path}")
+async def get_config_field(dot_path: str, request: Request) -> dict[str, Any]:
+    """Get a single config field with source attribution."""
+    from dataclasses import asdict
+
+    from ..services.config_editor import (
+        _SENSITIVE_FIELDS,
+        get_field,
+    )
+
+    if dot_path in _SENSITIVE_FIELDS:
+        raise HTTPException(status_code=403, detail="Sensitive field cannot be read via API")
+
+    config = request.app.state.config
+    enforced: list[str] = getattr(request.app.state, "enforced_fields", [])
+
+    source_map, _ = _build_api_context(request)
+
+    try:
+        result = get_field(config, dot_path, source_map, enforced)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "dot_path": result.dot_path,
+        "effective_value": result.effective_value,
+        "source_layer": result.source_layer,
+        "is_enforced": result.is_enforced,
+        "field_info": asdict(result.field_info) if result.field_info else None,
+    }
+
+
+@router.put("/config/fields")
+async def set_config_field(body: ConfigFieldSetBody, request: Request) -> dict[str, Any]:
+    """Set a config field in a specific scope."""
+    from ..services.config_editor import (
+        _SENSITIVE_FIELDS,
+        apply_field_to_config,
+        check_write_allowed,
+        validate_field_value,
+        write_personal_field,
+        write_project_field,
+        write_space_field,
+    )
+
+    if body.dot_path in _SENSITIVE_FIELDS:
+        raise HTTPException(status_code=403, detail="Sensitive field cannot be set via API")
+
+    config = request.app.state.config
+    enforced: list[str] = getattr(request.app.state, "enforced_fields", [])
+
+    allowed, reason = check_write_allowed(body.dot_path, enforced)
+    if not allowed:
+        raise HTTPException(status_code=403, detail=reason)
+
+    parsed, errors = validate_field_value(body.dot_path, body.value)
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+
+    if body.scope not in ("personal", "space", "project"):
+        raise HTTPException(status_code=400, detail="scope must be personal, space, or project")
+
+    try:
+        if body.scope == "personal":
+            path = write_personal_field(body.dot_path, parsed)
+        elif body.scope == "space":
+            space = _get_active_space(request)
+            if not space or not space.get("source_file"):
+                raise HTTPException(status_code=400, detail="No active space with YAML file")
+            db = request.app.state.db
+            path = write_space_field(
+                body.dot_path,
+                parsed,
+                Path(space["source_file"]),
+                db=db,
+                space_id=space["id"],
+            )
+        elif body.scope == "project":
+            project_dir = _resolve_project_dir(request)
+            path = write_project_field(body.dot_path, parsed, working_dir=project_dir)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid scope")
+
+        # Apply to live config (best-effort — file is already saved)
+        try:
+            apply_field_to_config(config, body.dot_path, parsed)
+        except (AttributeError, TypeError):
+            pass  # field doesn't map 1:1 to AppConfig attrs — restart needed
+
+        return {
+            "dot_path": body.dot_path,
+            "value": parsed,
+            "scope": body.scope,
+            "path": str(path),
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to set config field %s", body.dot_path)
+        raise HTTPException(status_code=500, detail="Failed to update config field")
+
+
+@router.delete("/config/fields")
+async def reset_config_field(body: ConfigFieldResetBody, request: Request) -> dict[str, Any]:
+    """Reset (remove) a config field from a specific scope."""
+    from ..services.config_editor import (
+        _SENSITIVE_FIELDS,
+        reset_personal_field,
+        reset_project_field,
+        reset_space_field,
+    )
+
+    if body.dot_path in _SENSITIVE_FIELDS:
+        raise HTTPException(status_code=403, detail="Sensitive field cannot be reset via API")
+
+    if body.scope not in ("personal", "space", "project"):
+        raise HTTPException(status_code=400, detail="scope must be personal, space, or project")
+
+    try:
+        deleted = False
+        if body.scope == "personal":
+            deleted = reset_personal_field(body.dot_path)
+        elif body.scope == "space":
+            space = _get_active_space(request)
+            if not space or not space.get("source_file"):
+                raise HTTPException(status_code=400, detail="No active space with YAML file")
+            db = request.app.state.db
+            deleted = reset_space_field(
+                body.dot_path,
+                Path(space["source_file"]),
+                db=db,
+                space_id=space["id"],
+            )
+        elif body.scope == "project":
+            project_dir = _resolve_project_dir(request)
+            deleted = reset_project_field(body.dot_path, working_dir=project_dir)
+
+        return {"dot_path": body.dot_path, "scope": body.scope, "deleted": deleted}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to reset config field %s", body.dot_path)
+        raise HTTPException(status_code=500, detail="Failed to reset config field")
+
+
+@router.get("/config/scopes")
+async def get_available_scopes(request: Request) -> list[dict[str, Any]]:
+    """Return which config scopes are available for the current session."""
+    scopes = [{"name": "personal", "available": True, "label": "Personal"}]
+
+    space = _get_active_space(request)
+    if space and space.get("source_file"):
+        scopes.append(
+            {
+                "name": "space",
+                "available": True,
+                "label": "Space (%s)" % space["name"],
+            }
+        )
+    else:
+        scopes.append({"name": "space", "available": False, "label": "Space (none active)"})
+
+    # Project scope requires a discoverable project directory
+    try:
+        _resolve_project_dir(request)
+        scopes.append({"name": "project", "available": True, "label": "Project"})
+    except HTTPException:
+        scopes.append({"name": "project", "available": False, "label": "Project (no context)"})
+
+    return scopes
+
+
+def _get_active_space(request: Request) -> dict[str, Any] | None:
+    """Get the active space from app state, if any."""
+    return getattr(request.app.state, "active_space", None)
+
+
+def _resolve_project_dir(request: Request) -> Path:
+    """Resolve the project directory for project-scoped config writes.
+
+    Uses the active space's source file parent directory as the project root.
+    Falls back to discovery from the space root (not process cwd).
+    Raises HTTPException if no project context can be determined.
+    """
+    space = _get_active_space(request)
+    if space and space.get("source_file"):
+        return Path(space["source_file"]).parent
+
+    # Discover from space root, not process cwd
+    from ..services.project_config import discover_project_config
+
+    start = _get_working_dir(request)
+    proj = discover_project_config(start)
+    if proj:
+        return proj.parent.parent  # e.g. .anteroom/config.yaml -> project root
+
+    raise HTTPException(
+        status_code=400,
+        detail="Cannot determine project directory. Load a space or use the CLI.",
+    )
+
+
+def _get_working_dir(request: Request) -> str:
+    """Derive the effective working directory from the active space.
+
+    The web server's process cwd is meaningless for context discovery —
+    use the space source file's parent directory instead.
+    """
+    space = _get_active_space(request)
+    if space and space.get("source_file"):
+        return str(Path(space["source_file"]).parent)
+    return os.getcwd()
+
+
+def _build_api_context(request: Request) -> tuple[dict[str, str], list[str]]:
+    """Build source map and enforced fields for API requests."""
+    from ..config import _get_config_path
+    from ..services.config_editor import _read_yaml, build_full_source_map, collect_env_overrides
+    from ..services.project_config import discover_project_config
+    from ..services.team_config import discover_team_config
+
+    enforced: list[str] = getattr(request.app.state, "enforced_fields", [])
+    working_dir = _get_working_dir(request)
+    team_raw: dict[str, Any] = {}
+
+    # Read team config from disk — rooted at the space dir, not process cwd
+    try:
+        team_path = discover_team_config(cwd=working_dir)
+        if team_path:
+            from ..services.team_config import load_team_config
+
+            team_raw, enforced = load_team_config(team_path, interactive=False)
+    except Exception:
+        pass
+
+    # Read personal config from disk
+    personal_raw: dict[str, Any] = _read_yaml(_get_config_path())
+
+    # Pack overlays from DB — pass project_path for directory-scoped attachments
+    pack_raw: dict[str, Any] = {}
+    db = getattr(request.app.state, "db", None)
+    space = _get_active_space(request)
+    if db is not None:
+        try:
+            from ..services.config_overlays import collect_pack_overlays, merge_pack_overlays
+            from ..services.pack_attachments import (
+                get_active_pack_ids,
+                get_active_pack_ids_for_space,
+                get_attachment_priorities,
+            )
+
+            space_id = space["id"] if space else None
+            if space_id:
+                active_ids = get_active_pack_ids_for_space(db, space_id, project_path=working_dir)
+            else:
+                active_ids = get_active_pack_ids(db, project_path=working_dir)
+            if active_ids:
+                overlays = collect_pack_overlays(db, active_ids)
+                if overlays:
+                    priorities = get_attachment_priorities(db, active_ids)
+                    pack_raw = merge_pack_overlays(overlays, priorities) or {}
+        except Exception:
+            pass  # graceful degradation
+
+    space_raw: dict[str, Any] = {}
+    project_raw: dict[str, Any] = {}
+
+    if space and space.get("source_file"):
+        sp_path = Path(space["source_file"])
+        if sp_path.exists():
+            try:
+                from ..services.spaces import parse_space_file
+
+                sc = parse_space_file(sp_path)
+                space_raw = sc.config or {}
+            except Exception:
+                pass
+
+    proj_path = discover_project_config(working_dir)
+    if proj_path:
+        project_raw = _read_yaml(proj_path)
+        project_raw.pop("required", None)
+
+    source_map = build_full_source_map(
+        team_raw=team_raw,
+        pack_raw=pack_raw,
+        personal_raw=personal_raw,
+        space_raw=space_raw,
+        project_raw=project_raw,
+        env_overrides=collect_env_overrides(),
+    )
+    return source_map, enforced
+
+
 @router.post("/config/validate")
 async def validate_connection(request: Request) -> ConnectionValidation:
     config = request.app.state.config

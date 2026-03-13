@@ -168,6 +168,7 @@ prompt: |
   | /pack            | Manage packs (list/install/update/remove/attach/detach) |
   | /mcp             | Show MCP server status and tools                    |
   | /conventions     | Display space conventions (ANTEROOM.md)             |
+  | /config          | Edit config interactively (TUI-based)               |
   | /plan            | Enter/exit planning mode                            |
   | /verbose         | Toggle verbosity level                              |
   | /quit            | Exit the REPL                                       |

@@ -1019,6 +1019,346 @@ async def _resolve_pack_interactive(
     return _pm
 
 
+# ---------------------------------------------------------------------------
+# /config command handler
+# ---------------------------------------------------------------------------
+
+_LAYER_COLORS: dict[str, str] = {
+    "default": "dim",
+    "team": "bright_red",
+    "pack": "magenta",
+    "personal": "bright_blue",
+    "space": "bright_green",
+    "project": "bright_yellow",
+    "env var": "bright_cyan",
+    "team (enforced)": "bold red",
+}
+
+
+def _handle_config_command(
+    user_input: str,
+    *,
+    config: Any,
+    db: Any,
+    active_space: dict[str, Any] | None,
+    working_dir: str,
+    ai_service: Any,
+    toolbar_refresh: Any,
+) -> None:
+    """Dispatch /config subcommands: list, get, set, reset."""
+    from rich.table import Table
+
+    from ..services.config_editor import (
+        _SENSITIVE_FIELDS,
+        apply_field_to_config,
+        build_full_source_map,
+        check_write_allowed,
+        collect_env_overrides,
+        get_field,
+        list_settable_fields,
+        reset_personal_field,
+        reset_project_field,
+        reset_space_field,
+        validate_field_value,
+        write_personal_field,
+        write_project_field,
+        write_space_field,
+    )
+
+    parts = user_input.split()
+    sub = parts[1] if len(parts) > 1 else ""
+
+    # Build context for reads
+    def _build_context() -> tuple[dict[str, str], list[str]]:
+        """Build source map and enforced fields from current config state."""
+        from ..config import _get_config_path
+        from ..services.config_editor import _read_yaml
+        from ..services.project_config import discover_project_config
+        from ..services.team_config import discover_team_config
+
+        team_raw: dict[str, Any] = {}
+        enforced: list[str] = []
+        team_path = discover_team_config(cwd=working_dir)
+        if team_path:
+            from ..services.team_config import load_team_config
+
+            team_raw, enforced = load_team_config(team_path, interactive=False)
+
+        personal_raw = _read_yaml(_get_config_path())
+
+        # Pack overlays from DB
+        pack_raw: dict[str, Any] = {}
+        try:
+            from ..services.config_overlays import collect_pack_overlays, merge_pack_overlays
+            from ..services.pack_attachments import (
+                get_active_pack_ids,
+                get_active_pack_ids_for_space,
+                get_attachment_priorities,
+            )
+
+            space_id = active_space["id"] if active_space else None
+            if space_id:
+                active_ids = get_active_pack_ids_for_space(db, space_id, project_path=working_dir)
+            else:
+                active_ids = get_active_pack_ids(db, project_path=working_dir)
+            if active_ids:
+                overlays = collect_pack_overlays(db, active_ids)
+                if overlays:
+                    priorities = get_attachment_priorities(db, active_ids)
+                    pack_raw = merge_pack_overlays(overlays, priorities) or {}
+        except Exception:
+            pass  # graceful degradation if DB schema is minimal
+
+        space_raw: dict[str, Any] = {}
+        if active_space and active_space.get("source_file"):
+            sp_path = Path(active_space["source_file"])
+            if sp_path.exists():
+                from ..services.spaces import parse_space_file
+
+                sc = parse_space_file(sp_path)
+                space_raw = sc.config or {}
+
+        project_raw: dict[str, Any] = {}
+        proj_path = discover_project_config(working_dir)
+        if proj_path:
+            project_raw = _read_yaml(proj_path)
+            project_raw.pop("required", None)
+
+        env_overrides = collect_env_overrides()
+
+        source_map = build_full_source_map(
+            team_raw=team_raw,
+            pack_raw=pack_raw,
+            personal_raw=personal_raw,
+            space_raw=space_raw,
+            project_raw=project_raw,
+            env_overrides=env_overrides,
+        )
+        return source_map, enforced
+
+    def _styled_layer(layer: str) -> str:
+        color = _LAYER_COLORS.get(layer, "white")
+        return f"[{color}]{layer}[/{color}]"
+
+    # ── /config list ──
+    if sub == "list":
+        fields = list_settable_fields()
+        source_map, enforced = _build_context()
+        filter_text = parts[2].lower() if len(parts) > 2 else ""
+
+        table = Table(show_header=True, header_style="bold", padding=(0, 1))
+        table.add_column("Field", style="bold")
+        table.add_column("Type", style="dim")
+        table.add_column("Value")
+        table.add_column("Source")
+
+        from dataclasses import asdict
+
+        from ..services.config_overlays import flatten_to_dot_paths
+
+        flat = flatten_to_dot_paths(asdict(config))
+
+        count = 0
+        for fi in fields:
+            if filter_text and filter_text not in fi.dot_path:
+                continue
+            val = flat.get(fi.dot_path, "")
+            src = source_map.get(fi.dot_path, "default")
+            if fi.dot_path in enforced:
+                src = "team (enforced)"
+            # Truncate long values
+            val_str = str(val) if val is not None else ""
+            if len(val_str) > 50:
+                val_str = val_str[:47] + "..."
+            table.add_row(fi.dot_path, fi.field_type, val_str, _styled_layer(src))
+            count += 1
+
+        renderer.console.print()
+        renderer.console.print(table)
+        filter_msg = ' matching "%s"' % filter_text if filter_text else ""
+        renderer.console.print(f"\n  [{MUTED}]{count} fields{filter_msg}[/{MUTED}]")
+        renderer.console.print(f"  [{CHROME}]Usage: /config get <field> for details[/{CHROME}]\n")
+        return
+
+    # ── /config get <field> ──
+    if sub == "get":
+        if len(parts) < 3:
+            renderer.console.print(f"  [{CHROME}]Usage: /config get <dot.path>[/{CHROME}]\n")
+            return
+
+        dot_path = parts[2]
+        if dot_path in _SENSITIVE_FIELDS:
+            renderer.render_error(f"'{dot_path}' is a sensitive field and cannot be read via /config.")
+            return
+        source_map, enforced = _build_context()
+
+        try:
+            result = get_field(config, dot_path, source_map, enforced)
+        except ValueError as e:
+            renderer.render_error(str(e))
+            return
+
+        renderer.console.print()
+        renderer.console.print(f"  [bold]{dot_path}[/bold]")
+        renderer.console.print(f"  Value:   {result.effective_value!r}")
+        renderer.console.print(f"  Source:  {_styled_layer(result.source_layer)}")
+        if result.is_enforced:
+            renderer.console.print("  [bold red]Enforced by team config — cannot be changed[/bold red]")
+        if result.field_info:
+            fi = result.field_info
+            renderer.console.print(f"  Type:    {fi.field_type}")
+            if fi.default is not None:
+                renderer.console.print(f"  Default: {fi.default!r}")
+            if fi.allowed_values:
+                renderer.console.print(f"  Allowed: {', '.join(fi.allowed_values)}")
+            if fi.min_val is not None or fi.max_val is not None:
+                renderer.console.print(f"  Range:   {fi.min_val} .. {fi.max_val}")
+        renderer.console.print()
+        return
+
+    # ── /config set <field> <value> [--scope personal|space|project] ──
+    if sub == "set":
+        if len(parts) < 4:
+            renderer.console.print(
+                f"  [{CHROME}]Usage: /config set <dot.path> <value> [--scope personal|space|project][/{CHROME}]\n"
+            )
+            return
+
+        dot_path = parts[2]
+
+        # Parse --scope flag
+        scope = "personal"  # default
+        value_parts: list[str] = []
+        i = 3
+        while i < len(parts):
+            if parts[i] == "--scope" and i + 1 < len(parts):
+                scope = parts[i + 1].lower()
+                i += 2
+            else:
+                value_parts.append(parts[i])
+                i += 1
+        raw_value = " ".join(value_parts)
+
+        if scope not in ("personal", "space", "project"):
+            renderer.render_error(f"Invalid scope: {scope!r}. Must be personal, space, or project.")
+            return
+
+        # Validate scope availability
+        if scope == "space" and not active_space:
+            renderer.render_error("No active space. Load a space first with /space load <name>.")
+            return
+        if scope == "space" and not active_space.get("source_file"):
+            renderer.render_error("Active space has no YAML file. Cannot write space config.")
+            return
+
+        # Check write guards (sensitive fields blocked)
+        _, enforced = _build_context()
+        allowed, reason = check_write_allowed(dot_path, enforced)
+        if not allowed:
+            renderer.render_error(reason or "Write not allowed")
+            return
+
+        # Validate and parse value
+        parsed, errors = validate_field_value(dot_path, raw_value)
+        if errors:
+            for err in errors:
+                renderer.render_error(err)
+            return
+
+        # Write to the appropriate scope
+        try:
+            if scope == "personal":
+                path = write_personal_field(dot_path, parsed)
+                renderer.console.print(f"\n  [bold]{dot_path}[/bold] = {parsed!r}")
+                renderer.console.print(f"  Saved to {_styled_layer('personal')} ({path})")
+            elif scope == "space":
+                sp_path = Path(active_space["source_file"])  # type: ignore[index]
+                sp_id = active_space["id"] if active_space else None  # type: ignore[index]
+                path = write_space_field(dot_path, parsed, sp_path, db=db, space_id=sp_id)
+                renderer.console.print(f"\n  [bold]{dot_path}[/bold] = {parsed!r}")
+                renderer.console.print(f"  Saved to {_styled_layer('space')} ({path})")
+            elif scope == "project":
+                path = write_project_field(dot_path, parsed, working_dir=working_dir)
+                renderer.console.print(f"\n  [bold]{dot_path}[/bold] = {parsed!r}")
+                renderer.console.print(f"  Saved to {_styled_layer('project')} ({path})")
+
+            # Apply to live config
+            try:
+                apply_field_to_config(config, dot_path, parsed)
+                # Special case: model change needs ai_service update
+                if dot_path in ("ai.model", "model"):
+                    if ai_service and hasattr(ai_service, "config"):
+                        ai_service.config.model = parsed
+                    toolbar_refresh()
+                renderer.console.print("  [dim]Applied to current session[/dim]\n")
+            except AttributeError:
+                renderer.console.print("  [dim]Saved (restart to apply)[/dim]\n")
+        except Exception as e:
+            renderer.render_error(f"Failed to write: {e}")
+        return
+
+    # ── /config reset <field> [--scope personal|space|project] ──
+    if sub == "reset":
+        if len(parts) < 3:
+            renderer.console.print(
+                f"  [{CHROME}]Usage: /config reset <dot.path> [--scope personal|space|project][/{CHROME}]\n"
+            )
+            return
+
+        dot_path = parts[2]
+        if dot_path in _SENSITIVE_FIELDS:
+            renderer.render_error(f"'{dot_path}' is a sensitive field and cannot be reset via /config.")
+            return
+
+        scope = "personal"
+        if len(parts) > 3 and parts[3] == "--scope" and len(parts) > 4:
+            scope = parts[4].lower()
+
+        if scope not in ("personal", "space", "project"):
+            renderer.render_error(f"Invalid scope: {scope!r}. Must be personal, space, or project.")
+            return
+
+        if scope == "space" and not active_space:
+            renderer.render_error("No active space.")
+            return
+        if scope == "space" and not active_space.get("source_file"):  # type: ignore[union-attr]
+            renderer.render_error("Active space has no YAML file. Cannot reset space config.")
+            return
+
+        try:
+            deleted = False
+            if scope == "personal":
+                deleted = reset_personal_field(dot_path)
+            elif scope == "space":
+                sp_path = Path(active_space["source_file"])  # type: ignore[index]
+                sp_id = active_space["id"] if active_space else None  # type: ignore[index]
+                deleted = reset_space_field(dot_path, sp_path, db=db, space_id=sp_id)
+            elif scope == "project":
+                deleted = reset_project_field(dot_path, working_dir=working_dir)
+
+            if deleted:
+                renderer.console.print(f"\n  Removed [bold]{dot_path}[/bold] from {_styled_layer(scope)}")
+                renderer.console.print("  [dim]Restart to apply defaults[/dim]\n")
+            else:
+                renderer.console.print(f"\n  [{MUTED}]{dot_path} not set in {scope} config[/{MUTED}]\n")
+        except Exception as e:
+            renderer.render_error(f"Failed to reset: {e}")
+        return
+
+    # ── /config (no subcommand or unknown) ──
+    renderer.console.print(f"\n  [{CHROME}]Config commands:[/{CHROME}]")
+    renderer.console.print("    [bold]/config list[/bold] [filter]     — list all fields (optionally filtered)")
+    renderer.console.print("    [bold]/config get[/bold]  <field>      — show field details and source")
+    renderer.console.print("    [bold]/config set[/bold]  <field> <val> [--scope personal|space|project]")
+    renderer.console.print("    [bold]/config reset[/bold] <field>     [--scope personal|space|project]")
+    renderer.console.print()
+    scopes = ["personal"]
+    if active_space:
+        scopes.append(f"space ({active_space['name']})")
+    scopes.append("project")
+    renderer.console.print(f"  [{MUTED}]Available scopes: {', '.join(scopes)}[/{MUTED}]\n")
+
+
 async def run_cli(
     config: AppConfig,
     prompt: str | None = None,
@@ -2040,6 +2380,7 @@ async def _run_repl(
         "artifact": "manage artifacts",
         "artifacts": "list artifacts",
         "artifact-check": "artifact health check",
+        "config": "view/edit scoped config",
         "quit": "exit",
         "exit": "exit",
     }
@@ -2048,6 +2389,7 @@ async def _run_repl(
         "artifact": ["list", "show", "delete", "import", "create"],
         "pack": ["list", "show", "install", "remove", "sources", "attach", "detach", "update", "add-source", "refresh"],
         "space": ["list", "show", "switch", "create", "load", "refresh", "clear", "init", "clone", "map"],
+        "config": ["list", "get", "set", "reset"],
     }
 
     class AnteroomCompleter(Completer):
@@ -2163,6 +2505,7 @@ async def _run_repl(
         "space",
         "spaces",
         "mcp",
+        "config",
         "model",
         "plan",
         "upload",
@@ -4520,6 +4863,33 @@ async def _run_repl(
                     else:
                         renderer.console.print(
                             f"[{CHROME}]Usage: /mcp [status [name]|connect|disconnect|reconnect <name>][/{CHROME}]\n"
+                        )
+                    continue
+                elif cmd == "/config":
+                    _cfg_parts = user_input.split()
+                    _cfg_sub = _cfg_parts[1] if len(_cfg_parts) > 1 else ""
+                    if _cfg_sub in ("list", "get", "set", "reset"):
+                        # Power-user subcommands (no TUI)
+                        _handle_config_command(
+                            user_input,
+                            config=config,
+                            db=db,
+                            active_space=_active_space[0],
+                            working_dir=working_dir,
+                            ai_service=ai_service,
+                            toolbar_refresh=_toolbar_refresh,
+                        )
+                    else:
+                        # Launch interactive TUI
+                        from .config_tui import run_config_tui
+
+                        await run_config_tui(
+                            config=config,
+                            db=db,
+                            active_space=_active_space[0],
+                            working_dir=working_dir,
+                            ai_service=ai_service,
+                            toolbar_refresh=_toolbar_refresh,
                         )
                     continue
                 elif cmd == "/model":

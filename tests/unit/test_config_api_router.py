@@ -779,3 +779,158 @@ def test_connect_mcp_server_returns_unknown_status_when_not_in_statuses() -> Non
     data = resp.json()
     assert data["name"] == "ghost"
     assert data["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Scoped config editing API (#933)
+# ---------------------------------------------------------------------------
+
+
+def test_list_config_fields() -> None:
+    app = _make_app()
+    client = TestClient(app)
+    resp = client.get("/api/config/fields")
+    assert resp.status_code == 200
+    fields = resp.json()
+    assert len(fields) > 0
+    # Check structure
+    f0 = fields[0]
+    assert "dot_path" in f0
+    assert "field_type" in f0
+    # Sensitive fields excluded
+    paths = {f["dot_path"] for f in fields}
+    assert "ai.api_key" not in paths
+
+
+def test_get_config_field() -> None:
+    config = _make_config(model="gpt-4o")
+    app = _make_app(config=config)
+    client = TestClient(app)
+
+    mock_result = MagicMock()
+    mock_result.dot_path = "ai.model"
+    mock_result.effective_value = "gpt-4o"
+    mock_result.source_layer = "default"
+    mock_result.is_enforced = False
+    mock_result.field_info = None
+
+    with patch("anteroom.services.config_editor.get_field", return_value=mock_result):
+        resp = client.get("/api/config/fields/ai.model")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dot_path"] == "ai.model"
+    assert data["effective_value"] == "gpt-4o"
+    assert data["is_enforced"] is False
+
+
+def test_get_config_field_sensitive_blocked() -> None:
+    app = _make_app()
+    client = TestClient(app)
+    resp = client.get("/api/config/fields/ai.api_key")
+    assert resp.status_code == 403
+
+
+def test_set_config_field_personal(tmp_path: Path) -> None:
+    config = _make_config()
+    app = _make_app(config=config)
+    client = TestClient(app)
+
+    with patch("anteroom.services.config_editor.write_personal_field", return_value=tmp_path / "config.yaml"):
+        resp = client.put(
+            "/api/config/fields",
+            json={"dot_path": "ai.model", "value": "gpt-4o", "scope": "personal"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dot_path"] == "ai.model"
+    assert data["scope"] == "personal"
+
+
+def test_set_config_field_enforced_blocked() -> None:
+    config = _make_config()
+    app = _make_app(config=config, enforced_fields=["ai.model"])
+    client = TestClient(app)
+    resp = client.put(
+        "/api/config/fields",
+        json={"dot_path": "ai.model", "value": "gpt-4o", "scope": "personal"},
+    )
+    assert resp.status_code == 403
+
+
+def test_set_config_field_sensitive_blocked() -> None:
+    app = _make_app()
+    client = TestClient(app)
+    resp = client.put(
+        "/api/config/fields",
+        json={"dot_path": "ai.api_key", "value": "sk-new", "scope": "personal"},
+    )
+    assert resp.status_code == 403
+
+
+def test_set_config_field_invalid_scope() -> None:
+    app = _make_app()
+    client = TestClient(app)
+    resp = client.put(
+        "/api/config/fields",
+        json={"dot_path": "ai.model", "value": "gpt-4o", "scope": "galaxy"},
+    )
+    assert resp.status_code == 400
+
+
+def test_set_config_field_validation_error() -> None:
+    app = _make_app()
+    client = TestClient(app)
+    resp = client.put(
+        "/api/config/fields",
+        json={"dot_path": "ai.request_timeout", "value": "abc", "scope": "personal"},
+    )
+    assert resp.status_code == 422
+
+
+def test_reset_config_field_personal() -> None:
+    app = _make_app()
+    client = TestClient(app)
+
+    with patch("anteroom.services.config_editor.reset_personal_field", return_value=True):
+        resp = client.request(
+            "DELETE",
+            "/api/config/fields",
+            json={"dot_path": "ai.model", "scope": "personal"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["deleted"] is True
+
+
+def test_reset_config_field_sensitive_blocked() -> None:
+    app = _make_app()
+    client = TestClient(app)
+    resp = client.request(
+        "DELETE",
+        "/api/config/fields",
+        json={"dot_path": "ai.api_key", "scope": "personal"},
+    )
+    assert resp.status_code == 403
+
+
+def test_get_available_scopes_no_space() -> None:
+    app = _make_app()
+    client = TestClient(app)
+    resp = client.get("/api/config/scopes")
+    assert resp.status_code == 200
+    scopes = resp.json()
+    assert any(s["name"] == "personal" and s["available"] for s in scopes)
+    assert any(s["name"] == "space" and not s["available"] for s in scopes)
+    assert any(s["name"] == "project" and s["available"] for s in scopes)
+
+
+def test_get_available_scopes_with_space() -> None:
+    app = _make_app()
+    app.state.active_space = {"id": "s1", "name": "myspace", "source_file": "/tmp/space.yaml"}
+    client = TestClient(app)
+    resp = client.get("/api/config/scopes")
+    assert resp.status_code == 200
+    scopes = resp.json()
+    space_scope = next(s for s in scopes if s["name"] == "space")
+    assert space_scope["available"] is True
+    assert "myspace" in space_scope["label"]
