@@ -1863,6 +1863,7 @@ class TestThinkingTickerPhases:
         r._thinking_start = time.monotonic() - 3.0
         r._thinking_phase = "waiting"
         r._last_chunk_time = time.monotonic()
+        r._thinking_cancelled = False
 
         mock_spinner = r._spinner = type("FakeSpinner", (), {"update": lambda self, label: None})()
         labels_seen: list[str] = []
@@ -1901,6 +1902,7 @@ class TestThinkingTickerPhases:
         r._thinking_phase = "streaming"
         r._streaming_chars = 1500
         r._last_chunk_time = time.monotonic()
+        r._thinking_cancelled = False
 
         try:
             from anteroom.cli.renderer import _thinking_ticker
@@ -1935,6 +1937,7 @@ class TestThinkingTickerPhases:
         r._thinking_phase = "streaming"
         r._thinking_tokens = 20
         r._last_chunk_time = time.monotonic() - 8.0  # 8s since last chunk
+        r._thinking_cancelled = False
 
         try:
             from anteroom.cli.renderer import _thinking_ticker
@@ -2816,6 +2819,22 @@ class TestStopThinkingEdgeCases:
 
         stop_thinking_sync()
         assert r._thinking_ticker_task is None
+        r._repl_mode = False
+        r._stdout = None
+
+    def test_stop_thinking_sync_sets_cancelled_flag(self) -> None:
+        """stop_thinking_sync() sets _thinking_cancelled to suppress stale output (#937)."""
+        import anteroom.cli.renderer as r
+
+        r._repl_mode = True
+        r._stdout = io.StringIO()
+        r._thinking_start = time.monotonic() - 1.0
+        r._thinking_ticker_task = None
+        r._thinking_cancelled = False
+
+        stop_thinking_sync()
+
+        assert r._thinking_cancelled is True
         r._repl_mode = False
         r._stdout = None
 

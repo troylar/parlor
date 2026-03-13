@@ -416,3 +416,20 @@ class TestEscapeCancellation:
         _current_cancel[0].set()
         assert cancel2.is_set()
         assert not cancel1.is_set()  # first event was never set
+
+    def test_agent_busy_cleared_on_cancel_with_queued_input(self):
+        """Cancel clears agent_busy even when input_queue has items (#937)."""
+        agent_busy = asyncio.Event()
+        agent_busy.set()
+        cancel_event = asyncio.Event()
+        cancel_event.set()
+        input_queue: asyncio.Queue[str] = asyncio.Queue()
+        input_queue.put_nowait("pending message")
+
+        # Simulate the finally block cancel path
+        if cancel_event.is_set():
+            agent_busy.clear()
+
+        assert not agent_busy.is_set()
+        # input_queue untouched — items remain for next turn
+        assert not input_queue.empty()

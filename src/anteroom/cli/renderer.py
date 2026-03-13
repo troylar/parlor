@@ -127,6 +127,7 @@ _thinking_start: float = 0
 _spinner: Status | None = None
 _last_spinner_update: float = 0
 _thinking_ticker_task: asyncio.Task[None] | None = None
+_thinking_cancelled: bool = False  # guard flag to suppress stale ticker output (#937)
 
 # Lifecycle phase tracking
 _thinking_phase: str = ""  # current phase: connecting, waiting, streaming
@@ -490,6 +491,8 @@ async def _thinking_ticker() -> None:
     try:
         while True:
             await asyncio.sleep(0.5)
+            if _thinking_cancelled:
+                return
             if _thinking_start:
                 elapsed = time.monotonic() - _thinking_start
                 suffix = _phase_suffix(elapsed)
@@ -514,8 +517,9 @@ def start_thinking(*, newline: bool = False) -> None:
     """
     global _thinking_start, _spinner, _last_spinner_update, _tool_batch_active, _thinking_ticker_task
     global _thinking_phase, _thinking_tokens, _streaming_chars, _last_chunk_time, _phase_start_time, _retrying_info
-    global _plan_written_lines
+    global _plan_written_lines, _thinking_cancelled
     _flush_dedup()
+    _thinking_cancelled = False
     # Emit spacing after tool call block before AI narration text (#680).
     # Must happen here because start_thinking() is called before
     # render_response_end(), which would otherwise handle this.
@@ -785,8 +789,9 @@ def stop_thinking_sync() -> float:
 
     Does not await the ticker — use only when an event loop is unavailable.
     """
-    global _spinner, _thinking_ticker_task, _plan_written_lines, _thinking_start
+    global _spinner, _thinking_ticker_task, _plan_written_lines, _thinking_start, _thinking_cancelled
     elapsed = 0.0
+    _thinking_cancelled = True  # suppress stale ticker output before cancel propagates (#937)
     if _thinking_ticker_task is not None:
         _thinking_ticker_task.cancel()
         _thinking_ticker_task = None
