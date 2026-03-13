@@ -234,7 +234,7 @@ PyPI: `anteroom`. Deploy via `/deploy` skill (merge PR, CI, version bump, build,
 - **Artifact source** (`ArtifactSource` enum) — the origin layer of an artifact: `built_in`, `global`, `team`, `project`, `local`, `inline`. Determines precedence in the artifact registry
 - **Convention** / **Instruction** — space-level guidance loaded from `ANTEROOM.md`. The `/conventions` and `/instructions` REPL commands are aliases for the same feature
 - **Skill** — a YAML-defined prompt template invoked via `/skill_name` or the `invoke_skill` tool. Loaded from filesystem directories and the artifact registry
-- **Pack** — a named bundle of artifacts installed from a YAML manifest. Managed via `services/packs.py`
+- **Pack** — a named bundle of artifacts installed from a YAML manifest. Managed via `services/packs.py`. Pack attachments use `project_path` internally (DB column) but user-facing terminology is "directory-scoped"
 - **Space** — a workspace binding that auto-detects workspace context from the working directory, bundles repositories, tools, configs, and packs into named workspaces. Unified workspace primitive replacing Projects. Managed via `services/spaces.py` and `services/space_storage.py`
 
 ## Testing Patterns

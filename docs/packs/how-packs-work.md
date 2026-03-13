@@ -11,7 +11,7 @@ A pack goes through five phases before it affects the agent:
 ```
 1. INSTALL      pack.yaml parsed, artifacts stored in SQLite
        |
-2. ATTACH       pack linked to global or project scope (with priority)
+2. ATTACH       pack linked to global or directory scope (with priority)
        |
 3. LOAD         artifact registry reads DB, resolves precedence
        |
@@ -79,14 +79,14 @@ aroom pack attach acme/python-conventions --project
 aroom pack attach acme/security-baseline --priority 10
 ```
 
-### Global vs Project Scope
+### Global vs Directory Scope
 
 | Scope | Stored As | When Active |
 |-------|-----------|-------------|
 | **Global** | `pack_attachments` row with `project_path = NULL` | Always, in every session |
-| **Project** | `pack_attachments` row with `project_path = '/path/to/project'` | Only when working directory is inside that path |
+| **Directory** | `pack_attachments` row with `project_path = '/path/to/dir'` | Only when working directory is inside that path |
 
-Project-scoped attachments let you have different packs for different codebases. A security-focused pack for your banking app, a different coding-standards pack for your open-source project.
+Directory-scoped attachments let you have different packs for different codebases. A security-focused pack for your banking app, a different coding-standards pack for your open-source project.
 
 ### Priority
 
@@ -136,7 +136,7 @@ Detaching removes the attachment but keeps the pack installed:
 
 ```bash
 aroom pack detach acme/python-conventions
-aroom pack detach acme/python-conventions --project  # project scope only
+aroom pack detach acme/python-conventions --project  # directory scope only
 ```
 
 The pack's artifacts become inactive but remain in the DB. Re-attach later without reinstalling.

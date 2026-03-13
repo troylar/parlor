@@ -170,7 +170,7 @@ pack_sources:
     branch: main
 ```
 
-Space-scoped pack attachments are separate from global and project-scoped attachments. When resolving active packs, Anteroom unions all three scopes: global + space + project.
+Space-scoped pack attachments are separate from global and directory-scoped attachments. When resolving active packs, Anteroom unions all three scopes: global + space + directory.
 
 ## Space-Scoped Artifacts
 

@@ -1,8 +1,12 @@
-"""Pack attachment management: attach/detach packs to global or project scope.
+"""Pack attachment management: attach/detach packs at global or directory scope.
 
 Attachments are DB-tracked records that determine which packs are active
 for a given context. Global attachments (``project_path=None``) apply
-everywhere. Project attachments apply only when working in that directory.
+everywhere. Directory-scoped attachments apply only when working in that
+directory.
+
+Note: the internal parameter ``project_path`` is retained for DB/API
+compatibility; user-facing terminology is "directory-scoped".
 """
 
 from __future__ import annotations

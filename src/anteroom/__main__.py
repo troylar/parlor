@@ -1795,7 +1795,7 @@ def _run_pack(data_dir: Path, db: "ThreadSafeConnection", args: argparse.Namespa
             console.print(f"[red]Attach failed:[/red] {e}")
             sys.exit(1)
 
-        scope = "project" if project_path else "global"
+        scope = "directory" if project_path else "global"
         pri_note = f", priority {priority}" if priority != 50 else ""
         console.print(f"[green]Attached[/green] {escape(args.ref)} ({scope}{pri_note})")
 
@@ -1817,7 +1817,7 @@ def _run_pack(data_dir: Path, db: "ThreadSafeConnection", args: argparse.Namespa
         project_path = str(Path.cwd()) if getattr(args, "project", False) else None
         removed = detach_pack(db, match["id"], project_path=project_path)
         if removed:
-            scope = "project" if project_path else "global"
+            scope = "directory" if project_path else "global"
             console.print(f"[green]Detached[/green] {escape(args.ref)} ({scope})")
         else:
             console.print(f"[yellow]Not attached:[/yellow] {escape(args.ref)}")
@@ -2288,7 +2288,7 @@ def main() -> None:
         "--path",
         dest="project_path",
         default=None,
-        help="Project root directory (default: cwd)",
+        help="Root directory for the chat session (default: cwd)",
     )
     chat_parser.add_argument(
         "-m",
@@ -2540,18 +2540,18 @@ def main() -> None:
     )
     pack_subparsers.add_parser("sources", help="List configured pack sources and cache status")
     pack_subparsers.add_parser("refresh", help="Pull all configured pack sources and update packs")
-    pack_attach_parser = pack_subparsers.add_parser("attach", help="Attach a pack to global or project scope")
+    pack_attach_parser = pack_subparsers.add_parser("attach", help="Attach a pack globally or to current directory")
     pack_attach_parser.add_argument("ref", help="Pack reference as namespace/name")
-    pack_attach_parser.add_argument("--project", action="store_true", help="Attach to current project only")
+    pack_attach_parser.add_argument("--project", action="store_true", help="Scope attachment to current directory only")
     pack_attach_parser.add_argument(
         "--priority",
         type=int,
         default=50,
         help="Precedence when packs conflict (1=highest, 100=lowest). Default: 50.",
     )
-    pack_detach_parser = pack_subparsers.add_parser("detach", help="Detach a pack from global or project scope")
+    pack_detach_parser = pack_subparsers.add_parser("detach", help="Detach a pack globally or from current directory")
     pack_detach_parser.add_argument("ref", help="Pack reference as namespace/name")
-    pack_detach_parser.add_argument("--project", action="store_true", help="Detach from current project only")
+    pack_detach_parser.add_argument("--project", action="store_true", help="Remove directory-scoped attachment only")
     pack_add_source_parser = pack_subparsers.add_parser("add-source", help="Add a git pack source to config")
     pack_add_source_parser.add_argument("url", help="Git repository URL (https:// or ssh://)")
 
