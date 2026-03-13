@@ -107,7 +107,6 @@ CLI (cli/)         ──┘         │
 - **`services/team_config.py`** — Team config discovery, loading, merging (deep_merge with named-list support), enforcement
 - **`services/config_validator.py`** — Schema validation for raw YAML config dicts. Collects all errors/warnings
 - **`services/compliance.py`** — Compliance rules engine: declarative config policy validation. `validate_compliance()` evaluates `ComplianceRule` entries (must_be, must_not_be, must_match, must_not_be_empty, must_contain) against the final merged `AppConfig`. Fails closed at startup. `aroom config validate` CLI subcommand. Redacts sensitive fields in violation output
-- **`services/config_editor.py`** — Scoped config editing. `get_config_schema()` generates field metadata (type, default, validation rules). `load_editable_config()` reads merge base (personal/space layer). `update_config()` applies PATCH with validation, layer-aware merging, and YAML serialization
 - **`services/config_watcher.py`** — Mtime-based config file watcher for live reload
 - **`services/discovery.py`** — Walk-up directory discovery. Searches `.anteroom/`, `.claude/`, `.parlor/` with precedence
 - **`services/space_config.py`** — Space-scoped config discovery with SHA-256 trust verification
