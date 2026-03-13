@@ -33,7 +33,7 @@ from anteroom.cli.themes import _BUILTIN_THEMES, CliTheme
 def _capture_console() -> tuple[Console, io.StringIO]:
     """Return a (console, buffer) pair that captures Rich output as plain text."""
     buf = io.StringIO()
-    con = Console(file=buf, force_terminal=True, width=120, highlight=False)
+    con = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
     return con, buf
 
 
@@ -212,7 +212,7 @@ class TestRenderErrorTheme:
         buf = io.StringIO()
         # Patch the module-level console so render_error() writes to our buffer
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_error("something went wrong")
         finally:
@@ -228,7 +228,7 @@ class TestRenderErrorTheme:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_error("disk full")
         finally:
@@ -244,7 +244,7 @@ class TestRenderErrorTheme:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_error("connection refused")
         finally:
@@ -258,7 +258,7 @@ class TestRenderErrorTheme:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_error("boom")
         finally:
@@ -283,7 +283,7 @@ class TestRenderWarningTheme:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_warning("low memory")
         finally:
@@ -298,7 +298,7 @@ class TestRenderWarningTheme:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_warning("approaching token limit")
         finally:
@@ -313,7 +313,7 @@ class TestRenderWarningTheme:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_warning("something")
         finally:
@@ -329,7 +329,7 @@ class TestRenderWarningTheme:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_warning("cvd safe warning")
         finally:
@@ -411,7 +411,7 @@ class TestAllBuiltInThemes:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_error("test error")
         finally:
@@ -426,7 +426,7 @@ class TestAllBuiltInThemes:
 
         buf = io.StringIO()
         original_console = renderer.console
-        renderer.console = Console(file=buf, force_terminal=True, width=120, highlight=False)
+        renderer.console = Console(file=buf, force_terminal=True, color_system="truecolor", width=120, highlight=False)
         try:
             render_warning("test warning")
         finally:
