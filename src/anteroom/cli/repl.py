@@ -2870,7 +2870,7 @@ async def _run_repl(
                 return False
             except Exception:
                 config = previous
-                renderer.console.print("[{_ERROR}]Config rebuild failed — keeping previous config.[/{_ERROR}]")
+                renderer.console.print(f"[{_ERROR}]Config rebuild failed — keeping previous config.[/{_ERROR}]")
                 logger.warning("Config rebuild failed after pack change", exc_info=True)
                 return False
 
@@ -2898,7 +2898,7 @@ async def _run_repl(
                     renderer.console.print("[yellow]Rolled back: pack re-attached to restore valid config.[/yellow]")
             except Exception:
                 logger.error("Rollback failed", exc_info=True)
-                renderer.console.print("[{_ERROR}]Rollback also failed. Manual intervention required.[/{_ERROR}]")
+                renderer.console.print(f"[{_ERROR}]Rollback also failed. Manual intervention required.[/{_ERROR}]")
 
         # Inject initial space instructions if space is active
         if _active_space[0] and space_instructions:
@@ -3390,7 +3390,7 @@ async def _run_repl(
                         for sp in spaces:
                             cnt = count_space_conversations(db, sp["id"])
                             active = (
-                                " [{_SUCCESS}](active)[/{_SUCCESS}]"
+                                f" [{_SUCCESS}](active)[/{_SUCCESS}]"
                                 if (_active_space[0] and _active_space[0]["id"] == sp["id"])
                                 else ""
                             )
@@ -4177,7 +4177,7 @@ async def _run_repl(
                         except ValueError as exc:
                             renderer.console.print(f"[{_ERROR}]{rich_escape(str(exc))}[/{_ERROR}]\n")
                             continue
-                        scope = "project" if project_path else "global"
+                        scope = "directory" if project_path else "global"
                         renderer.console.print(
                             f"[{_SUCCESS}]Attached[/{_SUCCESS}] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                         )
@@ -4223,7 +4223,7 @@ async def _run_repl(
                         project_path = str(Path(working_dir)) if _detach_project else None
                         removed = detach_pack(db, _pm["id"], project_path=project_path)
                         if removed:
-                            scope = "project" if project_path else "global"
+                            scope = "directory" if project_path else "global"
                             renderer.console.print(
                                 f"[{_SUCCESS}]Detached[/{_SUCCESS}] @{rich_escape(ns)}/{rich_escape(name)} ({scope})\n"
                             )
@@ -4388,7 +4388,7 @@ async def _run_repl(
                     )
                     renderer.console.print()
                     if not _ahc_report.issues:
-                        renderer.console.print("[{_SUCCESS}]  ✅ No issues found[/{_SUCCESS}]\n")
+                        renderer.console.print(f"[{_SUCCESS}]  ✅ No issues found[/{_SUCCESS}]\n")
                     else:
                         for _ahc_issue in _ahc_report.issues:
                             _icon = {"error": "❌", "warn": "⚠️", "info": "💡"}.get(_ahc_issue.severity.value, "•")
@@ -4505,7 +4505,7 @@ async def _run_repl(
                                 if steps:
                                     renderer.start_plan(steps)
                                 renderer.console.print(
-                                    "[{_SUCCESS}]Plan approved.[/{_SUCCESS}] Full tools restored.\n"
+                                    f"[{_SUCCESS}]Plan approved.[/{_SUCCESS}] Full tools restored.\n"
                                     f"  [{MUTED}]Plan injected into context. "
                                     f"Send a message to start.[/{MUTED}]\n"
                                 )
