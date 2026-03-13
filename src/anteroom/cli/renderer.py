@@ -59,6 +59,7 @@ def _refresh_aliases() -> None:
     CHROME = _theme.chrome
     ERROR_RED = _theme.error
 
+
 _ESC_HINT_DELAY: float = 3.0  # seconds before showing "esc to cancel" hint
 _STALL_THRESHOLD: float = 15.0  # seconds before showing API stall warning
 
