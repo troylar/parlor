@@ -82,6 +82,10 @@ class ConfigTuiState:
     active_scope: str = "personal"
     available_scopes: list[str] = field(default_factory=lambda: ["personal"])
 
+    # Inline edit/search mode
+    input_mode: str = ""  # "", "edit", "search", "confirm_quit"
+    input_field: str = ""  # dot_path being edited (when input_mode == "edit")
+
     # Flash message
     message: str = ""
     message_time: float = 0.0
@@ -173,29 +177,29 @@ def render_list_fragments(
 
         if item.kind == "section":
             if is_sel:
-                fragments.append(("class:list.selected", f"  {item.label}"))
-                fragments.append(("class:list.selected", "\n"))
+                fragments.append(("class:list.selected", f"  {item.label}  "))
+                fragments.append(("", "\n"))
             else:
-                fragments.append(("class:section", f"  {item.label}"))
-                fragments.append(("class:section", "\n"))
+                fragments.append(("class:section", f"  {item.label}  "))
+                fragments.append(("", "\n"))
         else:
             # Field row
-            modified = "*" if item.is_modified else " "
+            modified = "\u2022" if item.is_modified else " "  # bullet dot
             lock = " \U0001f512" if item.is_enforced else ""  # 🔒
             # Truncate dot_path for display
             path_display = item.dot_path
-            if len(path_display) > 28:
-                path_display = path_display[:25] + "..."
+            if len(path_display) > 26:
+                path_display = path_display[:23] + "\u2026"  # ellipsis
 
             source_display = f"[{item.source}]"
-            line = f"  {modified} {path_display:<28s} {source_display}{lock}"
 
             if is_sel:
+                line = f"  {modified} {path_display:<26s}  {source_display}{lock}"
                 fragments.append(("class:list.selected", line))
-                fragments.append(("class:list.selected", "\n"))
+                fragments.append(("", "\n"))
             else:
+                fragments.append(("", f"  {modified} {path_display:<26s}  "))
                 style = LAYER_STYLE_MAP.get(item.source, "")
-                fragments.append(("", f"  {modified} {path_display:<28s} "))
                 fragments.append((style, source_display))
                 if lock:
                     fragments.append(("class:enforced-icon", lock))
@@ -213,14 +217,18 @@ def render_detail_fragments(
     fragments: list[tuple[str, str]] = []
 
     if not visible or state.selected_idx >= len(visible):
-        return [("class:detail.empty", "  No field selected")]
+        fragments.append(("", "\n"))
+        fragments.append(("class:detail.empty", "  No field selected"))
+        return fragments
 
     item = visible[state.selected_idx]
 
     if item.kind == "section":
         section_name = item.label.split()[-1] if item.label else ""
+        fragments.append(("", "\n"))
         fragments.append(("class:detail.title", f"  {section_name} Section\n"))
-        fragments.append(("class:detail.hint", "\n  Press Enter to expand/collapse\n"))
+        fragments.append(("", "\n"))
+        fragments.append(("class:detail.hint", "  Press Enter to expand/collapse\n"))
         return fragments
 
     # Field detail
@@ -235,6 +243,7 @@ def render_detail_fragments(
             layer_raws=state.layer_raws,
         )
     except (ValueError, KeyError):
+        fragments.append(("", "\n"))
         fragments.append(("class:detail.error", f"  Cannot read {item.dot_path}\n"))
         return fragments
 
@@ -242,41 +251,42 @@ def render_detail_fragments(
     display_value = state.pending_changes.get(item.dot_path, fv.effective_value)
     is_modified = item.dot_path in state.pending_changes
 
+    fragments.append(("", "\n"))
     fragments.append(("class:detail.title", f"  {item.dot_path}\n"))
-    fragments.append(("class:detail.sep", "  " + "\u2500" * 36 + "\n"))  # ─
+    fragments.append(("class:detail.sep", "  " + "\u2500" * 38 + "\n"))  # thin line
 
     # Value
     val_style = "class:detail.modified" if is_modified else "class:detail.value"
     val_text = repr(display_value)
     if is_modified:
         val_text += "  (modified)"
-    fragments.append(("class:detail.label", "  Value:    "))
+    fragments.append(("class:detail.label", "\n  Value:     "))
     fragments.append((val_style, f"{val_text}\n"))
 
     # Source
     src_style = LAYER_STYLE_MAP.get(fv.source_layer, "")
-    fragments.append(("class:detail.label", "  Source:   "))
+    fragments.append(("class:detail.label", "  Source:    "))
     fragments.append((src_style, f"{fv.source_layer}\n"))
 
     # Type
     if fv.field_info:
-        fragments.append(("class:detail.label", "  Type:     "))
+        fragments.append(("class:detail.label", "  Type:      "))
         fragments.append(("class:detail.value", f"{fv.field_info.field_type}\n"))
 
         if fv.field_info.allowed_values:
-            fragments.append(("class:detail.label", "  Allowed:  "))
+            fragments.append(("class:detail.label", "  Allowed:   "))
             fragments.append(("class:detail.value", f"{', '.join(fv.field_info.allowed_values)}\n"))
 
         if fv.field_info.min_val is not None or fv.field_info.max_val is not None:
-            fragments.append(("class:detail.label", "  Range:    "))
+            fragments.append(("class:detail.label", "  Range:     "))
             fragments.append(("class:detail.value", f"{fv.field_info.min_val} .. {fv.field_info.max_val}\n"))
 
     # Enforced
     if fv.is_enforced:
-        fragments.append(("class:detail.label", "  Enforced: "))
+        fragments.append(("class:detail.label", "  Enforced:  "))
         fragments.append(("class:detail.enforced", "yes \u2014 locked by team config\n"))
     else:
-        fragments.append(("class:detail.label", "  Enforced: "))
+        fragments.append(("class:detail.label", "  Enforced:  "))
         fragments.append(("class:detail.value", "no\n"))
 
     # Layer breakdown
@@ -288,11 +298,23 @@ def render_detail_fragments(
                 val = fv.layer_values[layer]
                 is_active = layer == fv.source_layer or (fv.source_layer == "team (enforced)" and layer == "team")
                 l_style = LAYER_STYLE_MAP.get(layer, "")
-                fragments.append((l_style, f"    {layer:<12s}"))
-                fragments.append(("class:detail.value", f" \u2192 {val!r}"))
+                fragments.append(("", "    "))
+                fragments.append((l_style, f"{layer:<14s}"))
+                fragments.append(("class:detail.value", f"\u2192 {val!r}"))
                 if is_active:
                     fragments.append(("class:detail.active", "  \u2190 active"))
                 fragments.append(("", "\n"))
+
+    # Edit hint
+    fragments.append(("", "\n"))
+    if item.is_enforced:
+        fragments.append(("class:detail.enforced", "  \U0001f512 This field is locked by team config\n"))
+    elif item.field_type == "bool":
+        fragments.append(("class:detail.hint", "  Press Enter to toggle\n"))
+    elif item.field_type == "enum":
+        fragments.append(("class:detail.hint", "  Press Enter to cycle values\n"))
+    else:
+        fragments.append(("class:detail.hint", "  Press Enter to edit  |  r to reset\n"))
 
     return fragments
 
@@ -301,19 +323,32 @@ def render_status_fragments(state: ConfigTuiState) -> list[tuple[str, str]]:
     """Render the bottom status bar."""
     fragments: list[tuple[str, str]] = []
 
-    # Keybinding hints
+    if state.input_mode == "edit":
+        fragments.append(("class:input.label", f"  Set {state.input_field}: "))
+        return fragments
+
+    if state.input_mode == "search":
+        fragments.append(("class:input.label", "  Filter: "))
+        return fragments
+
+    if state.input_mode == "confirm_quit":
+        n = len(state.pending_changes)
+        fragments.append(("class:input.label", f"  Discard {n} unsaved change{'s' if n != 1 else ''}? (y/N): "))
+        return fragments
+
+    # Normal mode keybinding hints
     fragments.append(("class:status.key", " \u2191\u2193 "))
-    fragments.append(("class:status.hint", "navigate  "))
+    fragments.append(("class:status.hint", "navigate "))
     fragments.append(("class:status.key", " Enter "))
-    fragments.append(("class:status.hint", "edit  "))
+    fragments.append(("class:status.hint", "edit "))
     fragments.append(("class:status.key", " Tab "))
-    fragments.append(("class:status.hint", "scope  "))
+    fragments.append(("class:status.hint", "scope "))
     fragments.append(("class:status.key", " / "))
-    fragments.append(("class:status.hint", "search  "))
+    fragments.append(("class:status.hint", "filter "))
     fragments.append(("class:status.key", " s "))
-    fragments.append(("class:status.hint", "save  "))
+    fragments.append(("class:status.hint", "save "))
     fragments.append(("class:status.key", " r "))
-    fragments.append(("class:status.hint", "reset  "))
+    fragments.append(("class:status.hint", "reset "))
     fragments.append(("class:status.key", " Esc "))
     fragments.append(("class:status.hint", "quit"))
 
@@ -329,7 +364,7 @@ def render_status_fragments(state: ConfigTuiState) -> list[tuple[str, str]]:
     # Flash message
     flash = state.flash
     if flash:
-        fragments.append(("class:status.flash", f"  {flash}"))
+        fragments.append(("class:status.flash", f"  \u2713 {flash}"))
 
     return fragments
 
@@ -353,10 +388,12 @@ async def run_config_tui(
     Called from the ``/config`` handler in ``repl.py``.
     """
     from prompt_toolkit.application import Application
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.filters import Condition
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout.containers import HSplit, VSplit, Window
-    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, VSplit, Window
+    from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.styles import Style
 
@@ -371,42 +408,124 @@ async def run_config_tui(
         renderer.console.print("[dim]No config fields found.[/dim]\n")
         return
 
+    # ── Input buffer for inline edit/search ──
+
+    input_buffer = Buffer(multiline=False)
+
+    def _get_current_value(dot_path: str) -> str:
+        """Get current effective value for a field."""
+        from dataclasses import asdict
+
+        from ..services.config_overlays import flatten_to_dot_paths
+
+        if dot_path in state.pending_changes:
+            return str(state.pending_changes[dot_path])
+        flat = flatten_to_dot_paths(asdict(config))
+        return str(flat.get(dot_path, ""))
+
+    def _accept_input(buff: Buffer) -> bool:
+        """Called when Enter is pressed in the input buffer."""
+        text = buff.text.strip()
+
+        if state.input_mode == "edit":
+            _finish_edit(text)
+        elif state.input_mode == "search":
+            _finish_search(text)
+        elif state.input_mode == "confirm_quit":
+            _finish_confirm_quit(text)
+
+        return False  # Don't keep text
+
+    input_buffer.accept_handler = _accept_input
+
+    def _finish_edit(text: str) -> None:
+        """Process an edit submission."""
+        from ..services.config_editor import validate_field_value
+
+        dot_path = state.input_field
+        if text:
+            parsed, errors = validate_field_value(dot_path, text)
+            if errors:
+                state.set_message(errors[0])
+            else:
+                state.pending_changes[dot_path] = parsed
+                state.set_message(f"{dot_path} = {parsed!r}")
+
+        state.input_mode = ""
+        state.input_field = ""
+        input_buffer.reset()
+        build_visible_items(state, config)
+        app.invalidate()
+        # Refocus main keybindings by moving focus back
+        app.layout.focus(list_window)
+
+    def _finish_search(text: str) -> None:
+        """Process a search submission."""
+        state.search_filter = text
+        state.selected_idx = 0
+        state.input_mode = ""
+        input_buffer.reset()
+        build_visible_items(state, config)
+        app.invalidate()
+        app.layout.focus(list_window)
+
+    def _finish_confirm_quit(text: str) -> None:
+        """Process quit confirmation."""
+        if text.lower() in ("y", "yes"):
+            app.exit(result=None)
+            return
+        state.input_mode = ""
+        input_buffer.reset()
+        app.invalidate()
+        app.layout.focus(list_window)
+
     # ── Controls ──
 
     list_control = FormattedTextControl(lambda: FormattedText(render_list_fragments(state, state._visible)))
     detail_control = FormattedTextControl(lambda: FormattedText(render_detail_fragments(state, state._visible, config)))
     status_control = FormattedTextControl(lambda: FormattedText(render_status_fragments(state)))
+    input_control = BufferControl(buffer=input_buffer)
 
     def _refresh() -> None:
         build_visible_items(state, config)
         app.invalidate()
 
+    # ── Conditions for layout visibility ──
+
+    @Condition
+    def is_input_mode() -> bool:
+        return state.input_mode != ""
+
+    @Condition
+    def is_normal_mode() -> bool:
+        return state.input_mode == ""
+
     # ── Keybindings ──
 
     kb = KeyBindings()
 
-    @kb.add("up")
-    @kb.add("k")
+    # Normal mode navigation
+    @kb.add("up", filter=is_normal_mode)
+    @kb.add("k", filter=is_normal_mode)
     def _up(event: Any) -> None:
         if state.selected_idx > 0:
             state.selected_idx -= 1
             _refresh()
 
-    @kb.add("down")
-    @kb.add("j")
+    @kb.add("down", filter=is_normal_mode)
+    @kb.add("j", filter=is_normal_mode)
     def _down(event: Any) -> None:
         if state.selected_idx < len(state._visible) - 1:
             state.selected_idx += 1
             _refresh()
 
-    @kb.add("enter")
+    @kb.add("enter", filter=is_normal_mode)
     def _enter(event: Any) -> None:
         if not state._visible or state.selected_idx >= len(state._visible):
             return
         item = state._visible[state.selected_idx]
 
         if item.kind == "section":
-            # Toggle collapse
             section_name = item.label.split()[-1].lower()
             if section_name in state.collapsed_sections:
                 state.collapsed_sections.discard(section_name)
@@ -415,14 +534,12 @@ async def run_config_tui(
             _refresh()
             return
 
-        # Edit field
         if item.is_enforced:
             state.set_message("Locked by team config \u2014 cannot edit")
             _refresh()
             return
 
         if item.field_type == "bool":
-            # Toggle boolean
             from dataclasses import asdict
 
             from ..services.config_overlays import flatten_to_dot_paths
@@ -438,7 +555,6 @@ async def run_config_tui(
             return
 
         if item.field_type == "enum":
-            # Cycle through allowed values
             fi = None
             for f in list_settable_fields():
                 if f.dot_path == item.dot_path:
@@ -465,10 +581,17 @@ async def run_config_tui(
                 _refresh()
                 return
 
-        # String/numeric: exit TUI temporarily for inline edit
-        event.app.exit(result=("edit", item.dot_path))
+        # String/numeric: switch to inline edit mode
+        state.input_mode = "edit"
+        state.input_field = item.dot_path
+        current_val = _get_current_value(item.dot_path)
+        input_buffer.reset()
+        input_buffer.text = current_val
+        input_buffer.cursor_position = len(current_val)
+        app.invalidate()
+        app.layout.focus(input_window)
 
-    @kb.add("tab")
+    @kb.add("tab", filter=is_normal_mode)
     def _cycle_scope(event: Any) -> None:
         scopes = state.available_scopes
         if not scopes:
@@ -481,11 +604,16 @@ async def run_config_tui(
         state.set_message(f"Scope: {state.active_scope}")
         _refresh()
 
-    @kb.add("/")
+    @kb.add("/", filter=is_normal_mode)
     def _search(event: Any) -> None:
-        event.app.exit(result=("search",))
+        state.input_mode = "search"
+        input_buffer.reset()
+        input_buffer.text = state.search_filter
+        input_buffer.cursor_position = len(state.search_filter)
+        app.invalidate()
+        app.layout.focus(input_window)
 
-    @kb.add("s")
+    @kb.add("s", filter=is_normal_mode)
     def _save(event: Any) -> None:
         if not state.pending_changes:
             state.set_message("No changes to save")
@@ -493,7 +621,7 @@ async def run_config_tui(
             return
         event.app.exit(result=("save",))
 
-    @kb.add("r")
+    @kb.add("r", filter=is_normal_mode)
     def _reset(event: Any) -> None:
         if not state._visible or state.selected_idx >= len(state._visible):
             return
@@ -506,37 +634,106 @@ async def run_config_tui(
             return
         event.app.exit(result=("reset", item.dot_path))
 
-    @kb.add("escape")
-    @kb.add("q")
+    @kb.add("escape", filter=is_normal_mode)
+    @kb.add("q", filter=is_normal_mode)
     def _quit(event: Any) -> None:
         if state.pending_changes:
-            event.app.exit(result=("confirm_quit",))
+            state.input_mode = "confirm_quit"
+            input_buffer.reset()
+            app.invalidate()
+            app.layout.focus(input_window)
         else:
             event.app.exit(result=None)
 
+    # Input mode: Escape cancels
+    @kb.add("escape", filter=is_input_mode)
+    def _cancel_input(event: Any) -> None:
+        if state.input_mode == "search":
+            # Keep current filter on cancel
+            pass
+        state.input_mode = ""
+        state.input_field = ""
+        input_buffer.reset()
+        app.invalidate()
+        app.layout.focus(list_window)
+
     # ── Layout ──
 
+    list_window = Window(content=list_control, width=44, wrap_lines=False)
+    detail_window = Window(content=detail_control, wrap_lines=True)
+    input_window = Window(content=input_control, height=1)
+
     separator = Window(width=1, char="\u2502", style="class:separator")  # │
-    body = VSplit(
-        [
-            Window(content=list_control, width=48, wrap_lines=False),
-            separator,
-            Window(content=detail_control, wrap_lines=True),
-        ]
-    )
+
+    body = VSplit([list_window, separator, detail_window])
+
     title_bar = Window(
         content=FormattedTextControl(
             lambda: FormattedText(
                 [
-                    ("class:title", " Config Editor  "),
-                    ("class:title.scope", f" [{state.active_scope}] "),
+                    ("class:title", " \u2699 Config Editor "),  # ⚙
+                    ("class:title.scope", f" {state.active_scope} "),
+                    ("class:title.pad", " "),
                 ]
             )
         ),
         height=1,
     )
-    status_bar = Window(content=status_control, height=1)
-    layout = Layout(HSplit([title_bar, body, status_bar]))
+
+    top_rule = Window(height=1, char="\u2500", style="class:rule")  # ─
+    bottom_rule = Window(height=1, char="\u2500", style="class:rule")
+
+    # Status bar (shown in normal mode)
+    status_bar = ConditionalContainer(
+        Window(content=status_control, height=1, style="class:status-bar"),
+        filter=is_normal_mode,
+    )
+
+    # Input bar (shown in edit/search/confirm mode)
+    input_bar = ConditionalContainer(
+        HSplit(
+            [
+                Window(
+                    content=FormattedTextControl(lambda: FormattedText(render_status_fragments(state))),
+                    height=1,
+                    style="class:input-bar",
+                ),
+                input_window,
+            ]
+        ),
+        filter=is_input_mode,
+    )
+
+    # Search filter indicator
+    filter_bar = ConditionalContainer(
+        Window(
+            content=FormattedTextControl(
+                lambda: FormattedText(
+                    [("class:filter-bar", f"  Filter: {state.search_filter}  (/ to change, Esc to clear)")]
+                    if state.search_filter
+                    else []
+                )
+            ),
+            height=1,
+            style="class:filter-bar",
+        ),
+        filter=Condition(lambda: bool(state.search_filter) and state.input_mode == ""),
+    )
+
+    layout = Layout(
+        HSplit(
+            [
+                title_bar,
+                top_rule,
+                filter_bar,
+                body,
+                bottom_rule,
+                status_bar,
+                input_bar,
+            ]
+        ),
+        focused_element=list_window,
+    )
 
     # ── Style ──
 
@@ -544,8 +741,11 @@ async def run_config_tui(
     style = Style.from_dict(
         {
             "title": f"bg:{theme.accent} {theme.bg_dark} bold",
-            "title.scope": f"bg:{theme.bg_subtle} {theme.secondary}",
-            "separator": theme.bg_subtle,
+            "title.scope": f"bg:{theme.bg_subtle} {theme.secondary} bold",
+            "title.pad": f"bg:{theme.bg_darker}",
+            "rule": f"{theme.bg_subtle}",
+            "separator": f"{theme.bg_subtle}",
+            "filter-bar": f"bg:{theme.bg_subtle} {theme.accent} italic",
             # List panel
             "list.selected": f"bg:{theme.bg_highlight} {theme.accent} bold",
             "section": f"{theme.secondary} bold",
@@ -561,7 +761,7 @@ async def run_config_tui(
             "layer.env": theme.chrome,
             # Detail panel
             "detail.title": f"{theme.accent} bold",
-            "detail.sep": theme.chrome,
+            "detail.sep": theme.bg_subtle,
             "detail.label": f"{theme.secondary}",
             "detail.value": theme.text_light,
             "detail.modified": f"{theme.warning} bold",
@@ -571,17 +771,20 @@ async def run_config_tui(
             "detail.error": theme.error,
             "detail.empty": f"{theme.chrome} italic",
             # Status bar
+            "status-bar": f"bg:{theme.bg_darker}",
             "status.key": f"bg:{theme.bg_subtle} {theme.accent} bold",
-            "status.hint": f"bg:{theme.bg_darker} {theme.chrome}",
-            "status.scope": f"bg:{theme.bg_darker} {theme.secondary} bold",
-            "status.modified": f"bg:{theme.bg_darker} {theme.warning} bold",
-            "status.flash": f"bg:{theme.bg_darker} {theme.success}",
+            "status.hint": f"{theme.chrome}",
+            "status.scope": f"{theme.secondary} bold",
+            "status.modified": f"{theme.warning} bold",
+            "status.flash": f"{theme.success} bold",
+            # Input bar
+            "input-bar": f"bg:{theme.bg_highlight}",
+            "input.label": f"bg:{theme.bg_highlight} {theme.accent} bold",
         }
     )
 
     # ── Run loop ──
-    # The TUI may exit with an action tuple, in which case we handle
-    # the action and re-enter the TUI.
+    # The TUI only exits for save, reset, and quit — never for edit or search.
 
     while True:
         app: Application[Any] = Application(
@@ -594,43 +797,13 @@ async def run_config_tui(
         result = await app.run_async()
 
         if result is None:
-            # Clean exit
             return
 
         if isinstance(result, tuple):
             action = result[0]
 
-            if action == "confirm_quit":
-                n = len(state.pending_changes)
-                renderer.console.print(
-                    f"\n  [bold]Discard {n} unsaved change{'s' if n != 1 else ''}?[/bold] [dim](y/N)[/dim] ",
-                    end="",
-                )
-                try:
-                    from prompt_toolkit import PromptSession as _ConfirmSession
-
-                    confirm_session: _ConfirmSession[str] = _ConfirmSession()
-                    answer = await confirm_session.prompt_async("")
-                    if answer.strip().lower() in ("y", "yes"):
-                        return
-                except (EOFError, KeyboardInterrupt):
-                    return
-                # User said no — re-enter TUI
-                continue
-
-            if action == "edit":
-                dot_path = result[1]
-                await _handle_inline_edit(state, config, dot_path)
-                build_visible_items(state, config)
-                continue
-
-            if action == "search":
-                await _handle_search(state, config)
-                build_visible_items(state, config)
-                continue
-
             if action == "save":
-                await _handle_save(
+                _handle_save(
                     state,
                     config,
                     db,
@@ -639,19 +812,22 @@ async def run_config_tui(
                     ai_service,
                     toolbar_refresh,
                 )
+                # Rebuild state to pick up newly written values
+                retained = dict(state.pending_changes)
+                msg = state.message
+                msg_time = state.message_time
+                scope = state.active_scope
                 state = _build_state(config, db, active_space, working_dir)
+                state.pending_changes = retained
+                state.message = msg
+                state.message_time = msg_time
+                state.active_scope = scope
                 build_visible_items(state, config)
                 continue
 
             if action == "reset":
                 dot_path = result[1]
-                await _handle_reset(
-                    state,
-                    dot_path,
-                    db,
-                    active_space,
-                    working_dir,
-                )
+                _handle_reset(state, dot_path, db, active_space, working_dir)
                 state = _build_state(config, db, active_space, working_dir)
                 build_visible_items(state, config)
                 continue
@@ -741,64 +917,11 @@ def _build_state(
 
 
 # ---------------------------------------------------------------------------
-# Action handlers (called between TUI re-entries)
+# Action handlers (synchronous — called between TUI re-entries)
 # ---------------------------------------------------------------------------
 
 
-async def _handle_inline_edit(
-    state: ConfigTuiState,
-    config: Any,
-    dot_path: str,
-) -> None:
-    """Prompt for a new value for a string/numeric field."""
-    from dataclasses import asdict
-
-    from ..services.config_editor import validate_field_value
-    from ..services.config_overlays import flatten_to_dot_paths
-
-    flat = flatten_to_dot_paths(asdict(config))
-    current = state.pending_changes.get(dot_path, flat.get(dot_path, ""))
-
-    try:
-        from prompt_toolkit import PromptSession as _EditSession
-
-        edit_session: _EditSession[str] = _EditSession()
-        renderer.console.print(f"\n  [bold]{dot_path}[/bold] (current: {current!r})")
-        raw = await edit_session.prompt_async("  New value: ")
-        raw = raw.strip()
-        if not raw:
-            return
-    except (EOFError, KeyboardInterrupt):
-        return
-
-    parsed, errors = validate_field_value(dot_path, raw)
-    if errors:
-        for err in errors:
-            renderer.console.print(f"  [red]{err}[/red]")
-        import asyncio
-
-        await asyncio.sleep(1.5)
-        return
-
-    state.pending_changes[dot_path] = parsed
-    state.set_message(f"{dot_path} = {parsed!r}")
-
-
-async def _handle_search(state: ConfigTuiState, config: Any) -> None:
-    """Prompt for a search filter."""
-    try:
-        from prompt_toolkit import PromptSession as _SearchSession
-
-        search_session: _SearchSession[str] = _SearchSession()
-        renderer.console.print()
-        raw = await search_session.prompt_async("  Filter: ")
-        state.search_filter = raw.strip()
-        state.selected_idx = 0
-    except (EOFError, KeyboardInterrupt):
-        pass
-
-
-async def _handle_save(
+def _handle_save(
     state: ConfigTuiState,
     config: Any,
     db: Any,
@@ -839,7 +962,7 @@ async def _handle_save(
             elif scope == "project":
                 write_project_field(dot_path, value, working_dir=working_dir)
 
-            # Apply to live config (best-effort — file is already saved)
+            # Apply to live config
             try:
                 apply_field_to_config(config, dot_path, value)
                 if dot_path in ("ai.model", "model"):
@@ -853,11 +976,7 @@ async def _handle_save(
         except Exception as exc:
             errors.append(f"{dot_path}: {exc}")
 
-    if errors:
-        for err in errors:
-            renderer.console.print(f"  [red]{err}[/red]")
-
-    # Only clear changes that were successfully saved; retain failed ones for retry
+    # Only clear changes that were successfully saved
     failed_paths = {e.split(":")[0] for e in errors}
     for dot_path in list(state.pending_changes):
         if dot_path not in failed_paths:
@@ -869,7 +988,7 @@ async def _handle_save(
     state.set_message(msg)
 
 
-async def _handle_reset(
+def _handle_reset(
     state: ConfigTuiState,
     dot_path: str,
     db: Any,
@@ -902,4 +1021,4 @@ async def _handle_reset(
         else:
             state.set_message(f"{dot_path} not set in {scope}")
     except Exception as exc:
-        renderer.console.print(f"  [red]Reset failed: {exc}[/red]")
+        state.set_message(f"Reset failed: {exc}")

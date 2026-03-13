@@ -231,7 +231,7 @@ class TestRenderListFragments:
         fragments = render_list_fragments(state, visible)
 
         text = "".join(f[1] for f in fragments)
-        assert "*" in text
+        assert "\u2022" in text  # bullet dot for modified
 
     def test_section_header_rendered(self) -> None:
         visible = [_VisibleItem(kind="section", label="\u25be AI")]
@@ -412,6 +412,36 @@ class TestRenderStatusFragments:
 
         text = "".join(f[1] for f in fragments)
         assert "[space]" in text
+
+    def test_edit_mode_shows_field_prompt(self) -> None:
+        state = ConfigTuiState(input_mode="edit", input_field="ai.model")
+
+        fragments = render_status_fragments(state)
+
+        text = "".join(f[1] for f in fragments)
+        assert "Set ai.model" in text
+        # Normal hints should NOT be shown
+        assert "navigate" not in text
+
+    def test_search_mode_shows_filter_prompt(self) -> None:
+        state = ConfigTuiState(input_mode="search")
+
+        fragments = render_status_fragments(state)
+
+        text = "".join(f[1] for f in fragments)
+        assert "Filter" in text
+        assert "navigate" not in text
+
+    def test_confirm_quit_shows_discard_prompt(self) -> None:
+        state = ConfigTuiState(
+            input_mode="confirm_quit",
+            pending_changes={"ai.model": "gpt-4o", "ai.base_url": "x"},
+        )
+
+        fragments = render_status_fragments(state)
+
+        text = "".join(f[1] for f in fragments)
+        assert "Discard 2 unsaved changes" in text
 
 
 # ---------------------------------------------------------------------------
