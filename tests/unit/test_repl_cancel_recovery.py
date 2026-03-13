@@ -1,5 +1,8 @@
 """Tests for REPL cancel recovery — keybinding routing, agent_busy lifecycle,
 msg_queue backfill, and thinking indicator cleanup (#937).
+
+These tests call the real extracted functions from repl.py, not copies of
+the logic.
 """
 
 from __future__ import annotations
@@ -12,234 +15,163 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from anteroom.cli.repl import _cleanup_after_turn, _route_cancel_signal
+
 # =============================================================================
-# Ctrl-C keybinding: cancel when busy, clear buffer when idle
+# _route_cancel_signal — used by both Ctrl-C and Escape keybindings
 # =============================================================================
 
 
-class TestCtrlCKeybinding:
-    """Verify the @kb.add('c-c') handler routes correctly based on agent_busy."""
+class TestRouteCancelSignal:
+    """Verify _route_cancel_signal() routes correctly based on agent_busy."""
 
-    def test_ctrl_c_sets_cancel_event_when_busy(self) -> None:
-        """When agent_busy is set, Ctrl-C sets the cancel event."""
+    def test_routes_cancel_when_busy(self) -> None:
+        """When agent_busy is set and cancel event exists, sets it and returns True."""
         agent_busy = asyncio.Event()
         agent_busy.set()
         cancel = asyncio.Event()
-        _current_cancel: list[asyncio.Event | None] = [cancel]
+        current: list[asyncio.Event | None] = [cancel]
 
-        # Simulate the handler logic
-        if agent_busy.is_set() and _current_cancel[0] is not None:
-            _current_cancel[0].set()
+        result = _route_cancel_signal(agent_busy, current)
 
+        assert result is True
         assert cancel.is_set()
 
-    def test_ctrl_c_clears_buffer_when_idle(self) -> None:
-        """When agent_busy is NOT set, Ctrl-C should not set cancel event."""
+    def test_does_not_route_when_idle(self) -> None:
+        """When agent_busy is NOT set, returns False and cancel event is untouched."""
         agent_busy = asyncio.Event()  # not set
         cancel = asyncio.Event()
-        _current_cancel: list[asyncio.Event | None] = [cancel]
+        current: list[asyncio.Event | None] = [cancel]
 
-        # Handler should NOT route to cancel when idle
-        if agent_busy.is_set() and _current_cancel[0] is not None:
-            _current_cancel[0].set()
+        result = _route_cancel_signal(agent_busy, current)
 
+        assert result is False
         assert not cancel.is_set()
 
-    def test_ctrl_c_safe_when_no_cancel_event(self) -> None:
-        """When cancel event ref is None, Ctrl-C does not crash."""
+    def test_safe_when_cancel_event_is_none(self) -> None:
+        """When cancel event ref is None, returns False without crashing."""
         agent_busy = asyncio.Event()
         agent_busy.set()
-        _current_cancel: list[asyncio.Event | None] = [None]
+        current: list[asyncio.Event | None] = [None]
 
-        # Should not raise
-        if agent_busy.is_set() and _current_cancel[0] is not None:
-            _current_cancel[0].set()
+        result = _route_cancel_signal(agent_busy, current)
 
-        # No crash, no event to check
+        assert result is False
 
-
-# =============================================================================
-# Escape keybinding: cancel when busy, no-op when idle
-# =============================================================================
-
-
-class TestEscapeKeybinding:
-    """Verify the @kb.add('escape') handler routes correctly."""
-
-    def test_escape_sets_cancel_event_when_busy(self) -> None:
-        """When agent_busy is set, Escape sets the cancel event."""
+    def test_does_not_route_when_idle_and_none(self) -> None:
+        """When both idle and cancel is None, returns False."""
         agent_busy = asyncio.Event()
-        agent_busy.set()
-        cancel = asyncio.Event()
-        _current_cancel: list[asyncio.Event | None] = [cancel]
+        current: list[asyncio.Event | None] = [None]
 
-        if agent_busy.is_set() and _current_cancel[0] is not None:
-            _current_cancel[0].set()
+        result = _route_cancel_signal(agent_busy, current)
 
-        assert cancel.is_set()
-
-    def test_escape_is_noop_when_idle(self) -> None:
-        """When agent_busy is NOT set, Escape does nothing."""
-        agent_busy = asyncio.Event()
-        cancel = asyncio.Event()
-        _current_cancel: list[asyncio.Event | None] = [cancel]
-
-        if agent_busy.is_set() and _current_cancel[0] is not None:
-            _current_cancel[0].set()
-
-        assert not cancel.is_set()
+        assert result is False
 
 
 # =============================================================================
-# agent_busy lifecycle after cancel
+# _cleanup_after_turn — called from the finally block
 # =============================================================================
 
 
-class TestAgentBusyCancel:
-    """Verify agent_busy is always cleared on cancel, preserved on normal completion."""
+class TestCleanupAfterTurn:
+    """Verify _cleanup_after_turn() handles cancel vs normal completion."""
 
-    def test_agent_busy_cleared_on_cancel_with_empty_queue(self) -> None:
-        """Cancel with empty queue clears agent_busy."""
+    def test_cancel_clears_agent_busy_with_empty_queue(self) -> None:
+        """Cancel with empty msg_queue clears agent_busy."""
         agent_busy = asyncio.Event()
         agent_busy.set()
         cancel_event = asyncio.Event()
-        cancel_event.set()  # cancelled
-        input_queue: asyncio.Queue[str] = asyncio.Queue()
+        cancel_event.set()
+        msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
 
-        def _has_pending_work() -> bool:
-            return not input_queue.empty()
-
-        # Simulate finally block logic
-        if cancel_event.is_set():
-            agent_busy.clear()
-        elif not _has_pending_work():
-            agent_busy.clear()
+        _cleanup_after_turn(cancel_event, agent_busy, msg_queue, ai_messages, lambda: False)
 
         assert not agent_busy.is_set()
+        assert len(ai_messages) == 1  # nothing backfilled
 
-    def test_agent_busy_cleared_on_cancel_with_queued_items(self) -> None:
+    def test_cancel_clears_agent_busy_with_queued_items(self) -> None:
         """Cancel with items in input_queue still clears agent_busy (#937)."""
         agent_busy = asyncio.Event()
         agent_busy.set()
         cancel_event = asyncio.Event()
-        cancel_event.set()  # cancelled
-        input_queue: asyncio.Queue[str] = asyncio.Queue()
-        input_queue.put_nowait("queued message")
-
-        def _has_pending_work() -> bool:
-            return not input_queue.empty()
-
-        # Simulate finally block logic
-        if cancel_event.is_set():
-            agent_busy.clear()
-        elif not _has_pending_work():
-            agent_busy.clear()
-
-        assert not agent_busy.is_set()
-
-    def test_agent_busy_stays_set_on_normal_completion_with_pending(self) -> None:
-        """Normal completion with pending work keeps agent_busy set."""
-        agent_busy = asyncio.Event()
-        agent_busy.set()
-        cancel_event = asyncio.Event()  # not set — normal completion
-        input_queue: asyncio.Queue[str] = asyncio.Queue()
-        input_queue.put_nowait("queued message")
-
-        def _has_pending_work() -> bool:
-            return not input_queue.empty()
-
-        # Simulate finally block logic
-        if cancel_event.is_set():
-            agent_busy.clear()
-        elif not _has_pending_work():
-            agent_busy.clear()
-
-        assert agent_busy.is_set()
-
-    def test_agent_busy_cleared_on_normal_completion_empty_queue(self) -> None:
-        """Normal completion with empty queue clears agent_busy."""
-        agent_busy = asyncio.Event()
-        agent_busy.set()
-        cancel_event = asyncio.Event()  # not set
-        input_queue: asyncio.Queue[str] = asyncio.Queue()
-
-        def _has_pending_work() -> bool:
-            return not input_queue.empty()
-
-        if cancel_event.is_set():
-            agent_busy.clear()
-        elif not _has_pending_work():
-            agent_busy.clear()
-
-        assert not agent_busy.is_set()
-
-
-# =============================================================================
-# msg_queue backfill on cancel
-# =============================================================================
-
-
-class TestMsgQueueBackfill:
-    """Verify msg_queue items are backfilled into ai_messages on cancel."""
-
-    def test_backfill_syncs_drained_messages(self) -> None:
-        """On cancel, msg_queue items are appended to ai_messages."""
-        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
+        cancel_event.set()
         msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
+
+        # has_pending_work returns True (items in input_queue)
+        _cleanup_after_turn(cancel_event, agent_busy, msg_queue, ai_messages, lambda: True)
+
+        assert not agent_busy.is_set()  # cancel always clears
+
+    def test_cancel_backfills_msg_queue_into_ai_messages(self) -> None:
+        """On cancel, msg_queue items are appended to ai_messages."""
+        agent_busy = asyncio.Event()
+        agent_busy.set()
         cancel_event = asyncio.Event()
         cancel_event.set()
+        msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
 
         msg_queue.put_nowait({"role": "user", "content": "queued follow-up"})
         msg_queue.put_nowait({"role": "user", "content": "another follow-up"})
 
-        # Simulate backfill from finally block
-        if cancel_event.is_set():
-            while not msg_queue.empty():
-                try:
-                    leftover = msg_queue.get_nowait()
-                    ai_messages.append(leftover)
-                except asyncio.QueueEmpty:
-                    break
+        _cleanup_after_turn(cancel_event, agent_busy, msg_queue, ai_messages, lambda: False)
 
         assert len(ai_messages) == 3
         assert ai_messages[1]["content"] == "queued follow-up"
         assert ai_messages[2]["content"] == "another follow-up"
         assert msg_queue.empty()
 
-    def test_backfill_noop_when_empty(self) -> None:
+    def test_cancel_backfill_noop_when_msg_queue_empty(self) -> None:
         """Backfill is harmless when msg_queue is empty."""
-        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
-        msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        agent_busy = asyncio.Event()
+        agent_busy.set()
         cancel_event = asyncio.Event()
         cancel_event.set()
+        msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
 
-        if cancel_event.is_set():
-            while not msg_queue.empty():
-                try:
-                    leftover = msg_queue.get_nowait()
-                    ai_messages.append(leftover)
-                except asyncio.QueueEmpty:
-                    break
+        _cleanup_after_turn(cancel_event, agent_busy, msg_queue, ai_messages, lambda: False)
 
         assert len(ai_messages) == 1
 
-    def test_no_backfill_on_normal_completion(self) -> None:
-        """On normal completion, msg_queue is not backfilled."""
-        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
+    def test_normal_completion_clears_when_no_pending_work(self) -> None:
+        """Normal completion with no pending work clears agent_busy."""
+        agent_busy = asyncio.Event()
+        agent_busy.set()
+        cancel_event = asyncio.Event()  # not set — normal completion
         msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        ai_messages: list[dict[str, Any]] = []
+
+        _cleanup_after_turn(cancel_event, agent_busy, msg_queue, ai_messages, lambda: False)
+
+        assert not agent_busy.is_set()
+
+    def test_normal_completion_preserves_when_pending_work(self) -> None:
+        """Normal completion with pending work keeps agent_busy set."""
+        agent_busy = asyncio.Event()
+        agent_busy.set()
         cancel_event = asyncio.Event()  # not set
+        msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        ai_messages: list[dict[str, Any]] = []
+
+        _cleanup_after_turn(cancel_event, agent_busy, msg_queue, ai_messages, lambda: True)
+
+        assert agent_busy.is_set()
+
+    def test_no_backfill_on_normal_completion(self) -> None:
+        """On normal completion, msg_queue is not drained into ai_messages."""
+        agent_busy = asyncio.Event()
+        agent_busy.set()
+        cancel_event = asyncio.Event()  # not set
+        msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        ai_messages: list[dict[str, Any]] = [{"role": "user", "content": "initial"}]
 
         msg_queue.put_nowait({"role": "user", "content": "queued"})
 
-        if cancel_event.is_set():
-            while not msg_queue.empty():
-                try:
-                    leftover = msg_queue.get_nowait()
-                    ai_messages.append(leftover)
-                except asyncio.QueueEmpty:
-                    break
+        _cleanup_after_turn(cancel_event, agent_busy, msg_queue, ai_messages, lambda: True)
 
-        # msg_queue untouched, ai_messages unchanged
         assert len(ai_messages) == 1
         assert not msg_queue.empty()
 
@@ -266,12 +198,12 @@ class TestRunnerTaskExceptions:
         logger = logging.getLogger("anteroom.cli.repl")
         logger.addHandler(handler)
         try:
-            # Create a task that raises
+
             async def _fail() -> None:
                 raise RuntimeError("runner exploded")
 
             task = asyncio.create_task(_fail())
-            await asyncio.sleep(0.01)  # let it fail
+            await asyncio.sleep(0.01)
 
             done_tasks = {task}
             for t in done_tasks:
@@ -336,10 +268,12 @@ class TestThinkingTickerSuppression:
         r._repl_mode = True
         r._stdout = MagicMock()
 
-        # Start ticker, let it run one iteration, then set flag
         task = asyncio.create_task(r._thinking_ticker())
         await asyncio.sleep(0.1)
         r._thinking_cancelled = True
-        await asyncio.sleep(0.6)  # let it wake and check
-
-        assert task.done()
+        # Use task.cancel() as a deterministic fallback to avoid CI timing issues
+        try:
+            await asyncio.wait_for(task, timeout=2.0)
+        except asyncio.TimeoutError:
+            task.cancel()
+            pytest.fail("_thinking_ticker did not exit after _thinking_cancelled was set")
