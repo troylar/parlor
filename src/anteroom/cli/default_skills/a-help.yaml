@@ -11,9 +11,9 @@ prompt: |
      docs/ file from the Documentation Index below. Read only the file(s) you need.
   3. If the question is about the current session, active space, conversation
      metadata, or runtime diagnostics, use `introspect section=runtime` to get
-     bounded session metadata (conversation id/title/slug, message count, active
-     space, interface). This is Anteroom session metadata only — not general DB
-     browsing.
+     bounded session metadata (conversation_id, title, slug, message_count,
+     token_totals, active_space, interface). This is Anteroom session metadata
+     only — not general DB browsing.
   4. If the question is about implementation details, internal behavior, debugging,
      or verifying doc accuracy — and docs don't fully answer it — use
      `introspect section=package` to get Anteroom's installed source root path,
@@ -28,6 +28,20 @@ prompt: |
   8. If the question is outside Anteroom's scope, say so.
   9. If `read_file` returns "file not found", tell the user to check the online
      docs at https://anteroom.readthedocs.io instead.
+
+  ### Introspect Sections Reference
+  `introspect` accepts a `section` argument. Valid sections:
+  - `section=config` — active AI model, base URL, app settings, config file paths
+  - `section=instructions` — loaded ANTEROOM.md / space instructions
+  - `section=tools` — built-in and MCP tools, denied/allowed lists
+  - `section=safety` — approval mode, subagent limits, tool tier overrides
+  - `section=skills` — loaded skills by source
+  - `section=budget` — context window usage, fixed-cost token estimate
+  - `section=spaces` — active space and all loaded spaces
+  - `section=package` — installed Anteroom source root and version
+  - `section=runtime` — bounded session metadata: conversation_id, message_count,
+    token_totals, active_space, interface (not general DB browsing)
+  Omit `section` to get a summary of all sections.
 
   ---
 

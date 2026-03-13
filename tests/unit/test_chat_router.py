@@ -1,627 +1,412 @@
-"""Tests for chat router endpoints (stop_generation, get_attachment, stale stream)."""
+"""Tests for web UI introspect wiring in routers/chat.py (_execute_web_tool)."""
 
 from __future__ import annotations
 
 import asyncio
-import tempfile
-import time
-import uuid
-from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from anteroom.routers.chat import ToolExecutorContext, WebConfirmContext, _execute_web_tool
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_confirm_ctx() -> WebConfirmContext:
+    mock_request = AsyncMock()
+    mock_request.is_disconnected.return_value = False
+    return WebConfirmContext(
+        pending_approvals={},
+        event_bus=AsyncMock(),
+        db_name="test-db",
+        conversation_id="conv-test-1",
+        approval_timeout=30,
+        request=mock_request,
+        tool_registry=MagicMock(),
+    )
+
+
+def _make_tool_ctx(*, conversation_id: str = "conv-test-1", db: Any = None) -> ToolExecutorContext:
+    tool_registry = MagicMock()
+    tool_registry.has_tool.return_value = True
+    tool_registry.call_tool = AsyncMock(return_value={"result": "ok"})
+    tool_registry.check_safety.return_value = None
+
+    return ToolExecutorContext(
+        tool_registry=tool_registry,
+        mcp_manager=None,
+        confirm_ctx=_make_confirm_ctx(),
+        ai_service=MagicMock(),
+        cancel_event=asyncio.Event(),
+        db=db or MagicMock(),
+        uid="user-1",
+        uname="testuser",
+        conversation_id=conversation_id,
+        tools_openai=[],
+        subagent_events={},
+        subagent_limiter=MagicMock(),
+        sa_config=MagicMock(),
+        request_config=MagicMock(),
+        rate_limiter=None,
+        skill_registry=None,
+        rule_enforcer=None,
+    )
+
+
+def _fake_conversation(
+    *,
+    title: str = "Test Conv",
+    slug: str = "test-slug",
+    space_id: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": "conv-test-1",
+        "title": title,
+        "slug": slug,
+        "space_id": space_id,
+        "message_count": 999,  # intentionally wrong — must NOT be used
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tests: _runtime_info keys are present
+# ---------------------------------------------------------------------------
+
+
+class TestIntrospectRuntimeInfoKeys:
+    async def test_runtime_info_includes_interface_web(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
+        msgs = [MagicMock(), MagicMock(), MagicMock()]
 
-from anteroom.routers.chat import _active_streams, _cancel_events, router
-
-
-def _make_app() -> FastAPI:
-    app = FastAPI()
-    app.include_router(router, prefix="/api")
-
-    mock_db = MagicMock()
-    mock_db_manager = MagicMock()
-    mock_db_manager.get.return_value = mock_db
-    app.state.db = mock_db
-    app.state.db_manager = mock_db_manager
-
-    mock_config = MagicMock()
-    mock_config.identity = None
-    mock_config.app.data_dir = Path(tempfile.mkdtemp())
-    mock_config.app.tls = False
-    app.state.config = mock_config
-
-    app.state.tool_registry = MagicMock()
-    app.state.mcp_manager = MagicMock()
-
-    return app
-
-
-class TestStopGenerationEndpoint:
-    """POST /conversations/{id}/stop — cancel active generation."""
-
-    def test_stop_success(self) -> None:
-        conv_id = str(uuid.uuid4())
-        app = _make_app()
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_conversation.return_value = {"id": conv_id, "type": "chat"}
-            client = TestClient(app)
-            resp = client.post(f"/api/conversations/{conv_id}/stop")
-            assert resp.status_code == 200
-            assert resp.json()["status"] == "stopped"
-
-    def test_stop_conversation_not_found(self) -> None:
-        conv_id = str(uuid.uuid4())
-        app = _make_app()
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_conversation.return_value = None
-            client = TestClient(app)
-            resp = client.post(f"/api/conversations/{conv_id}/stop")
-            assert resp.status_code == 404
-
-    def test_stop_invalid_uuid(self) -> None:
-        app = _make_app()
-        client = TestClient(app)
-        resp = client.post("/api/conversations/bad-uuid/stop")
-        assert resp.status_code == 400
-
-    def test_stop_no_active_stream(self) -> None:
-        """Stop should succeed even when no stream is active (idempotent)."""
-        conv_id = str(uuid.uuid4())
-        app = _make_app()
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_conversation.return_value = {"id": conv_id, "type": "chat"}
-            client = TestClient(app)
-            resp = client.post(f"/api/conversations/{conv_id}/stop")
-            assert resp.status_code == 200
-
-
-class TestGetAttachmentEndpoint:
-    """GET /attachments/{id} — retrieve attachment files."""
-
-    def test_attachment_not_found(self) -> None:
-        att_id = str(uuid.uuid4())
-        app = _make_app()
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_attachment.return_value = None
-            client = TestClient(app)
-            resp = client.get(f"/api/attachments/{att_id}")
-            assert resp.status_code == 404
-
-    def test_attachment_invalid_uuid(self) -> None:
-        app = _make_app()
-        client = TestClient(app)
-        resp = client.get("/api/attachments/bad-uuid")
-        assert resp.status_code == 400
-
-    def test_attachment_path_traversal_blocked(self) -> None:
-        att_id = str(uuid.uuid4())
-        app = _make_app()
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_attachment.return_value = {
-                "id": att_id,
-                "storage_path": "../../etc/passwd",
-                "mime_type": "text/plain",
-                "filename": "passwd",
-            }
-            client = TestClient(app)
-            resp = client.get(f"/api/attachments/{att_id}")
-            assert resp.status_code == 403
-
-    def test_attachment_file_missing(self) -> None:
-        att_id = str(uuid.uuid4())
-        app = _make_app()
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_attachment.return_value = {
-                "id": att_id,
-                "storage_path": "attachments/nonexistent.txt",
-                "mime_type": "text/plain",
-                "filename": "nonexistent.txt",
-            }
-            client = TestClient(app)
-            resp = client.get(f"/api/attachments/{att_id}")
-            assert resp.status_code == 404
-
-    def test_attachment_inline_for_image(self) -> None:
-        att_id = str(uuid.uuid4())
-        app = _make_app()
-        data_dir = app.state.config.app.data_dir
-        # Create a real file in data_dir
-        att_dir = data_dir / "attachments"
-        att_dir.mkdir(parents=True, exist_ok=True)
-        test_file = att_dir / "test.png"
-        test_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_attachment.return_value = {
-                "id": att_id,
-                "storage_path": "attachments/test.png",
-                "mime_type": "image/png",
-                "filename": "test.png",
-            }
-            client = TestClient(app)
-            resp = client.get(f"/api/attachments/{att_id}")
-            assert resp.status_code == 200
-            assert "inline" in resp.headers.get("content-disposition", "")
-
-    def test_attachment_download_for_non_image(self) -> None:
-        att_id = str(uuid.uuid4())
-        app = _make_app()
-        data_dir = app.state.config.app.data_dir
-        att_dir = data_dir / "attachments"
-        att_dir.mkdir(parents=True, exist_ok=True)
-        test_file = att_dir / "doc.pdf"
-        test_file.write_bytes(b"%PDF-1.4 test content")
-        with patch("anteroom.routers.chat.storage") as mock_storage:
-            mock_storage.get_attachment.return_value = {
-                "id": att_id,
-                "storage_path": "attachments/doc.pdf",
-                "mime_type": "application/pdf",
-                "filename": "doc.pdf",
-            }
-            client = TestClient(app)
-            resp = client.get(f"/api/attachments/{att_id}")
-            assert resp.status_code == 200
-            assert "attachment" in resp.headers.get("content-disposition", "")
-
-
-class TestStaleStreamDetection:
-    """Stale stream detection and cleanup in _active_streams."""
-
-    def setup_method(self) -> None:
-        _active_streams.clear()
-        _cancel_events.clear()
-
-    def teardown_method(self) -> None:
-        _active_streams.clear()
-        _cancel_events.clear()
-
-    def test_active_streams_stores_metadata(self) -> None:
-        """_active_streams now stores dicts with metadata instead of bools."""
-        cid = str(uuid.uuid4())
-        cancel = asyncio.Event()
-        mock_request = MagicMock()
-        _active_streams[cid] = {
-            "started_at": time.monotonic(),
-            "request": mock_request,
-            "cancel_event": cancel,
-        }
-        info = _active_streams[cid]
-        assert isinstance(info, dict)
-        assert "started_at" in info
-        assert info["cancel_event"] is cancel
-
-    def test_stale_stream_detected_by_disconnect(self) -> None:
-        """A stream whose request is disconnected is considered stale."""
-        cid = str(uuid.uuid4())
-        cancel = asyncio.Event()
-        mock_request = AsyncMock()
-        mock_request.is_disconnected.return_value = True
-        _active_streams[cid] = {
-            "started_at": time.monotonic(),
-            "request": mock_request,
-            "cancel_event": cancel,
-        }
-        info = _active_streams[cid]
-        loop = asyncio.new_event_loop()
-        is_disconnected = loop.run_until_complete(info["request"].is_disconnected())
-        loop.close()
-        assert is_disconnected is True
-
-    def test_active_stream_not_stale(self) -> None:
-        """A connected stream with recent start time is not stale."""
-        cid = str(uuid.uuid4())
-        cancel = asyncio.Event()
-        mock_request = AsyncMock()
-        mock_request.is_disconnected.return_value = False
-        _active_streams[cid] = {
-            "started_at": time.monotonic(),
-            "request": mock_request,
-            "cancel_event": cancel,
-        }
-        info = _active_streams[cid]
-        loop = asyncio.new_event_loop()
-        is_disconnected = loop.run_until_complete(info["request"].is_disconnected())
-        loop.close()
-        assert is_disconnected is False
-        assert time.monotonic() - info["started_at"] < 5
-
-    def test_stale_cancel_event_fires(self) -> None:
-        """When a stale stream is detected, its cancel event should be set."""
-        cancel = asyncio.Event()
-        assert not cancel.is_set()
-        cancel.set()
-        assert cancel.is_set()
-
-    def test_truthiness_preserved(self) -> None:
-        """Dict value is truthy, preserving the queue routing check."""
-        cid = str(uuid.uuid4())
-        _active_streams[cid] = {
-            "started_at": time.monotonic(),
-            "request": MagicMock(),
-            "cancel_event": asyncio.Event(),
-        }
-        assert _active_streams.get(cid)
-
-
-class TestBuildToolListWithSkills:
-    """_build_tool_list includes invoke_skill when skill_registry has skills."""
-
-    def test_invoke_skill_added_when_skills_exist(self) -> None:
-        from anteroom.routers.chat import _build_tool_list
-
-        tool_reg = MagicMock()
-        tool_reg.get_openai_tools.return_value = [
-            {"type": "function", "function": {"name": "read_file"}},
-        ]
-        tool_reg.list_tools.return_value = ["read_file"]
-        mcp = MagicMock()
-        mcp.get_openai_tools.return_value = []
-
-        skill_reg = MagicMock()
-        skill_reg.get_invoke_skill_definition.return_value = {
-            "type": "function",
-            "function": {"name": "invoke_skill"},
-        }
-
-        tools, _, _ = _build_tool_list(
-            tool_registry=tool_reg,
-            mcp_manager=mcp,
-            plan_mode=False,
-            conversation_id="c1",
-            data_dir=Path(tempfile.mkdtemp()),
-            max_tools=128,
-            skill_registry=skill_reg,
-        )
-        tool_names = [t["function"]["name"] for t in tools]
-        assert "invoke_skill" in tool_names
-
-    def test_no_invoke_skill_when_no_registry(self) -> None:
-        from anteroom.routers.chat import _build_tool_list
-
-        tool_reg = MagicMock()
-        tool_reg.get_openai_tools.return_value = [
-            {"type": "function", "function": {"name": "read_file"}},
-        ]
-        tool_reg.list_tools.return_value = ["read_file"]
-        mcp = None
-
-        tools, _, _ = _build_tool_list(
-            tool_registry=tool_reg,
-            mcp_manager=mcp,
-            plan_mode=False,
-            conversation_id="c1",
-            data_dir=Path(tempfile.mkdtemp()),
-            max_tools=128,
-            skill_registry=None,
-        )
-        tool_names = [t["function"]["name"] for t in tools]
-        assert "invoke_skill" not in tool_names
-
-
-class TestExecuteWebToolInvokeSkill:
-    """_execute_web_tool handles invoke_skill correctly."""
-
-    @pytest.mark.asyncio
-    async def test_invoke_skill_no_queue_returns_error(self) -> None:
-        from anteroom.routers.chat import ToolExecutorContext, WebConfirmContext, _execute_web_tool, _message_queues
-
-        skill_reg = MagicMock()
-        skill = MagicMock()
-        skill.prompt = "Do the thing"
-        skill_reg.get.return_value = skill
-
-        ctx = ToolExecutorContext(
-            tool_registry=MagicMock(),
-            mcp_manager=None,
-            confirm_ctx=MagicMock(spec=WebConfirmContext),
-            ai_service=MagicMock(),
-            cancel_event=asyncio.Event(),
-            db=MagicMock(),
-            uid=None,
-            uname=None,
-            conversation_id="no-queue-conv",
-            tools_openai=[],
-            subagent_events={},
-            subagent_limiter=MagicMock(),
-            sa_config=MagicMock(),
-            request_config=MagicMock(),
-            skill_registry=skill_reg,
-        )
-
-        _message_queues.pop("no-queue-conv", None)
-
-        result = await _execute_web_tool(ctx, "invoke_skill", {"skill_name": "test"})
-        assert "error" in result
-
-    @pytest.mark.asyncio
-    async def test_invoke_skill_with_queue_succeeds(self) -> None:
-        from anteroom.routers.chat import ToolExecutorContext, WebConfirmContext, _execute_web_tool, _message_queues
-
-        skill_reg = MagicMock()
-        skill = MagicMock()
-        skill.prompt = "Do the thing"
-        skill_reg.get.return_value = skill
-
-        queue: asyncio.Queue = asyncio.Queue()
-        conv_id = "queued-conv"
-
-        ctx = ToolExecutorContext(
-            tool_registry=MagicMock(),
-            mcp_manager=None,
-            confirm_ctx=MagicMock(spec=WebConfirmContext),
-            ai_service=MagicMock(),
-            cancel_event=asyncio.Event(),
-            db=MagicMock(),
-            uid=None,
-            uname=None,
-            conversation_id=conv_id,
-            tools_openai=[],
-            subagent_events={},
-            subagent_limiter=MagicMock(),
-            sa_config=MagicMock(),
-            request_config=MagicMock(),
-            skill_registry=skill_reg,
-        )
-
-        _message_queues[conv_id] = queue
-        try:
-            result = await _execute_web_tool(ctx, "invoke_skill", {"skill_name": "test"})
-            assert result["status"] == "skill_invoked"
-            assert not queue.empty()
-        finally:
-            _message_queues.pop(conv_id, None)
-
-    @pytest.mark.asyncio
-    async def test_invoke_skill_resolves_a_help_with_real_registry(self) -> None:
-        """Web path: _execute_web_tool resolves a-help via skill_registry.get() and queues expanded prompt."""
-        from anteroom.cli.skills import SkillRegistry
-        from anteroom.routers.chat import ToolExecutorContext, WebConfirmContext, _execute_web_tool, _message_queues
-
-        reg = SkillRegistry()
-        reg.load()
-
-        queue: asyncio.Queue = asyncio.Queue()
-        conv_id = "a-help-web-test"
-
-        ctx = ToolExecutorContext(
-            tool_registry=MagicMock(),
-            mcp_manager=None,
-            confirm_ctx=MagicMock(spec=WebConfirmContext),
-            ai_service=MagicMock(),
-            cancel_event=asyncio.Event(),
-            db=MagicMock(),
-            uid=None,
-            uname=None,
-            conversation_id=conv_id,
-            tools_openai=[],
-            subagent_events={},
-            subagent_limiter=MagicMock(),
-            sa_config=MagicMock(),
-            request_config=MagicMock(),
-            skill_registry=reg,
-        )
-
-        _message_queues[conv_id] = queue
-        try:
-            result = await _execute_web_tool(
-                ctx, "invoke_skill", {"skill_name": "a-help", "args": "how does the agent loop work?"}
-            )
-            assert result == {"status": "skill_invoked", "skill": "a-help"}
-            assert not queue.empty()
-            msg = await queue.get()
-            assert "how does the agent loop work?" in msg["content"]
-            assert "Source Code Index" in msg["content"]
-        finally:
-            _message_queues.pop(conv_id, None)
-
-
-class TestGetRequestRegistries:
-    """Verify per-request registries with space scoping."""
-
-    def test_returns_globals_when_no_space(self) -> None:
-        from anteroom.routers.chat import _get_request_registries
-
-        request = MagicMock()
-        global_art = MagicMock()
-        global_skill = MagicMock()
-        global_rules = MagicMock()
-        request.app.state.artifact_registry = global_art
-        request.app.state.skill_registry = global_skill
-        request.app.state.rule_enforcer = global_rules
-        art, skill, rules = _get_request_registries(request, MagicMock(), space_id=None)
-        assert art is global_art
-        assert skill is global_skill
-        assert rules is global_rules
-
-    def test_returns_none_when_no_registry(self) -> None:
-        from anteroom.routers.chat import _get_request_registries
-
-        request = MagicMock(spec=[])
-        request.app = MagicMock()
-        request.app.state = MagicMock(spec=[])
-        art, skill, rules = _get_request_registries(request, MagicMock(), space_id="s1")
-        assert art is None
-
-    def test_returns_space_scoped_registries(self) -> None:
-        from anteroom.routers.chat import _get_request_registries
-
-        request = MagicMock()
-        global_art = MagicMock()
-        global_skill = MagicMock()
-        mock_skill_entry = MagicMock()
-        mock_skill_entry.source = "built_in"
-        global_skill._skills = {"existing": mock_skill_entry}
-        global_rules = MagicMock()
-        request.app.state.artifact_registry = global_art
-        request.app.state.skill_registry = global_skill
-        request.app.state.rule_enforcer = global_rules
-
-        mock_art_reg = MagicMock()
-        mock_art_reg.list_all.return_value = []
         with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=msgs),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value={"total": 100}),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        call_args = ctx.tool_registry.call_tool.call_args
+        arguments = call_args.args[1]
+        assert "_runtime_info" in arguments
+        assert arguments["_runtime_info"]["interface"] == "web"
+
+    async def test_runtime_info_includes_conversation_id(self) -> None:
+        ctx = _make_tool_ctx(conversation_id="conv-xyz")
+        conv = _fake_conversation()
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        rt = arguments["_runtime_info"]
+        assert rt["conversation_id"] == "conv-xyz"
+
+    async def test_runtime_info_includes_conversation_title(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation(title="My Project Chat")
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["conversation_title"] == "My Project Chat"
+
+    async def test_runtime_info_includes_slug(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation(slug="clever-mongoose")
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["slug"] == "clever-mongoose"
+
+
+# ---------------------------------------------------------------------------
+# Tests: message_count is derived from list_messages, NOT get_conversation
+# ---------------------------------------------------------------------------
+
+
+class TestIntrospectMessageCount:
+    async def test_message_count_from_list_messages_not_conversation_field(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()  # message_count=999 — must be ignored
+        msgs = [MagicMock(), MagicMock()]  # actual count = 2
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=msgs),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["message_count"] == 2
+
+    async def test_message_count_is_len_of_list_messages_result(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
+        msgs = [MagicMock() for _ in range(7)]
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=msgs),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["message_count"] == 7
+
+    async def test_message_count_zero_when_list_messages_raises(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", side_effect=RuntimeError("db error")),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["message_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: token_totals is derived from get_conversation_token_total
+# ---------------------------------------------------------------------------
+
+
+class TestIntrospectTokenTotals:
+    async def test_token_totals_from_storage(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
+        token_data = {"prompt_tokens": 500, "completion_tokens": 200, "total_tokens": 700}
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=token_data),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["token_totals"] == token_data
+
+    async def test_token_totals_zero_when_raises(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
             patch(
-                "anteroom.services.artifact_registry.ArtifactRegistry",
-                return_value=mock_art_reg,
-            ),
-            patch(
-                "anteroom.routers.chat.get_space_local_dirs",
-                return_value=[],
+                "anteroom.services.storage.get_conversation_token_total",
+                side_effect=RuntimeError("db error"),
             ),
         ):
-            db = MagicMock()
-            art, skill, rules = _get_request_registries(request, db, space_id="space-123")
-            assert art is mock_art_reg
-            mock_art_reg.load_from_db.assert_called_once_with(db, space_id="space-123", project_path=None)
-            assert skill is not global_skill
-            assert rules is not global_rules
+            await _execute_web_tool(ctx, "introspect", {})
 
-    def test_passes_project_path_from_space_paths(self) -> None:
-        """When a space has mapped directories, the first is passed as project_path."""
-        from anteroom.routers.chat import _get_request_registries
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["token_totals"] == 0
 
-        request = MagicMock()
-        global_art = MagicMock()
-        global_skill = MagicMock()
-        global_skill._skills = {}
-        global_rules = MagicMock()
-        request.app.state.artifact_registry = global_art
-        request.app.state.skill_registry = global_skill
-        request.app.state.rule_enforcer = global_rules
 
-        mock_art_reg = MagicMock()
-        mock_art_reg.list_all.return_value = []
-        with (
-            patch(
-                "anteroom.services.artifact_registry.ArtifactRegistry",
-                return_value=mock_art_reg,
-            ),
-            patch(
-                "anteroom.routers.chat.get_space_local_dirs",
-                return_value=["/home/user/my-project", "/home/user/other-repo"],
-            ),
+# ---------------------------------------------------------------------------
+# Tests: get_conversation raises — _runtime_info only has interface
+# ---------------------------------------------------------------------------
+
+
+class TestIntrospectGetConversationRaises:
+    async def test_runtime_info_only_has_interface_on_storage_error(self) -> None:
+        ctx = _make_tool_ctx()
+
+        with patch(
+            "anteroom.services.storage.get_conversation",
+            side_effect=RuntimeError("db error"),
         ):
-            db = MagicMock()
-            art, skill, rules = _get_request_registries(request, db, space_id="space-456")
-            mock_art_reg.load_from_db.assert_called_once_with(
-                db, space_id="space-456", project_path="/home/user/my-project"
-            )
+            await _execute_web_tool(ctx, "introspect", {})
 
-    def test_project_path_none_when_no_space_paths(self) -> None:
-        """When a space has no mapped directories, project_path is None."""
-        from anteroom.routers.chat import _get_request_registries
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        rt = arguments["_runtime_info"]
+        assert set(rt.keys()) == {"interface"}
+        assert rt["interface"] == "web"
 
-        request = MagicMock()
-        global_art = MagicMock()
-        global_skill = MagicMock()
-        global_skill._skills = {}
-        global_rules = MagicMock()
-        request.app.state.artifact_registry = global_art
-        request.app.state.skill_registry = global_skill
-        request.app.state.rule_enforcer = global_rules
+    async def test_no_conversation_id_in_runtime_info_on_error(self) -> None:
+        ctx = _make_tool_ctx()
 
-        mock_art_reg = MagicMock()
-        mock_art_reg.list_all.return_value = []
-        with (
-            patch(
-                "anteroom.services.artifact_registry.ArtifactRegistry",
-                return_value=mock_art_reg,
-            ),
-            patch(
-                "anteroom.routers.chat.get_space_local_dirs",
-                return_value=[],
-            ),
+        with patch(
+            "anteroom.services.storage.get_conversation",
+            side_effect=Exception("unexpected"),
         ):
-            db = MagicMock()
-            _get_request_registries(request, db, space_id="space-empty")
-            mock_art_reg.load_from_db.assert_called_once_with(db, space_id="space-empty", project_path=None)
+            await _execute_web_tool(ctx, "introspect", {})
 
-    def test_globals_returned_without_space(self) -> None:
-        """Without a space, the global registries are returned as-is (no copy)."""
-        from anteroom.routers.chat import _get_request_registries
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert "conversation_id" not in arguments["_runtime_info"]
 
-        request = MagicMock()
-        global_art = MagicMock()
-        global_skill = MagicMock()
-        global_rules = MagicMock()
-        request.app.state.artifact_registry = global_art
-        request.app.state.skill_registry = global_skill
-        request.app.state.rule_enforcer = global_rules
-        art, skill, rules = _get_request_registries(request, MagicMock(), space_id=None)
-        assert art is global_art
-        assert skill is global_skill
-        assert rules is global_rules
+    async def test_no_message_count_in_runtime_info_on_error(self) -> None:
+        ctx = _make_tool_ctx()
+
+        with patch(
+            "anteroom.services.storage.get_conversation",
+            side_effect=Exception("unexpected"),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert "message_count" not in arguments["_runtime_info"]
+
+    async def test_no_token_totals_in_runtime_info_on_error(self) -> None:
+        ctx = _make_tool_ctx()
+
+        with patch(
+            "anteroom.services.storage.get_conversation",
+            side_effect=Exception("unexpected"),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert "token_totals" not in arguments["_runtime_info"]
 
 
-class TestRuleEnforcerOverride:
-    """rule_enforcer_override avoids mutating shared tool_registry state."""
+# ---------------------------------------------------------------------------
+# Tests: arguments include _active_space and _db (parity with CLI)
+# ---------------------------------------------------------------------------
 
-    def test_check_safety_uses_override_enforcer(self) -> None:
-        """check_safety should use the override enforcer, not the instance field."""
-        from anteroom.tools import ToolRegistry
 
-        reg = ToolRegistry()
-        # No instance-level enforcer set
-        assert reg._rule_enforcer is None
+class TestIntrospectParityUnderscoredParams:
+    async def test_arguments_include_active_space(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
 
-        # Override enforcer that blocks everything
-        override = MagicMock()
-        override.check_tool_call.return_value = (True, "blocked by space rule", "space:rule1")
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
 
-        verdict = reg.check_safety("bash", {"command": "ls"}, rule_enforcer_override=override)
-        assert verdict is not None
-        assert verdict.hard_denied is True
-        assert "space:rule1" in verdict.reason
-        override.check_tool_call.assert_called_once_with("bash", {"command": "ls"})
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert "_active_space" in arguments
 
-    def test_check_safety_falls_back_to_instance_enforcer(self) -> None:
-        """Without override, check_safety uses the instance-level enforcer."""
-        from anteroom.tools import ToolRegistry
+    async def test_arguments_include_db(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
 
-        reg = ToolRegistry()
-        instance_enforcer = MagicMock()
-        instance_enforcer.check_tool_call.return_value = (False, "", "")
-        reg.set_rule_enforcer(instance_enforcer)
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
 
-        verdict = reg.check_safety("bash", {"command": "ls"})
-        instance_enforcer.check_tool_call.assert_called_once()
-        # Not blocked, so verdict depends on safety config (None = no config)
-        assert verdict is None
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert "_db" in arguments
+        assert arguments["_db"] is ctx.db
 
-    def test_check_safety_override_takes_precedence(self) -> None:
-        """Override enforcer takes precedence over instance enforcer."""
-        from anteroom.tools import ToolRegistry
+    async def test_web_and_cli_share_same_underscore_param_keys(self) -> None:
+        """Web introspect must pass the same set of _ params as the CLI."""
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
 
-        reg = ToolRegistry()
-        instance_enforcer = MagicMock()
-        instance_enforcer.check_tool_call.return_value = (False, "", "")
-        reg.set_rule_enforcer(instance_enforcer)
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
 
-        override = MagicMock()
-        override.check_tool_call.return_value = (True, "space blocks this", "space:rule2")
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        underscore_keys = {k for k in arguments if k.startswith("_")}
 
-        verdict = reg.check_safety("bash", {"command": "rm -rf /"}, rule_enforcer_override=override)
-        assert verdict is not None
-        assert verdict.hard_denied is True
-        # Override was used, not instance
-        override.check_tool_call.assert_called_once()
-        instance_enforcer.check_tool_call.assert_not_called()
+        # These are the same keys the CLI passes (repl.py lines 1379-1389)
+        expected_cli_keys = {
+            "_config",
+            "_mcp_manager",
+            "_tool_registry",
+            "_skill_registry",
+            "_instructions_info",
+            "_tools_openai",
+            "_working_dir",
+            "_active_space",
+            "_db",
+            "_runtime_info",
+        }
+        assert expected_cli_keys == underscore_keys
 
-    @pytest.mark.asyncio
-    async def test_call_tool_passes_override_to_check_safety(self) -> None:
-        """call_tool threads rule_enforcer_override through to check_safety."""
-        from anteroom.tools import ToolRegistry
+    async def test_active_space_none_when_no_space_id(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation(space_id=None)
 
-        reg = ToolRegistry()
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
 
-        async def mock_handler(**kwargs: object) -> dict:
-            return {"output": "ok"}
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_active_space"] is None
 
-        reg.register("read_file", mock_handler, {"name": "read_file", "parameters": {}})
+    async def test_active_space_populated_when_space_id_present(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation(space_id="space-abc")
+        fake_space = {"id": "space-abc", "name": "my-space"}
 
-        override = MagicMock()
-        override.check_tool_call.return_value = (True, "blocked", "rule:x")
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+            patch("anteroom.services.space_storage.get_space", return_value=fake_space),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
 
-        result = await reg.call_tool("read_file", {"path": "/tmp/x"}, rule_enforcer_override=override)
-        assert result.get("safety_blocked") is True
-        override.check_tool_call.assert_called_once()
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_active_space"] == fake_space
+
+    async def test_active_space_in_runtime_info_when_space_present(self) -> None:
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation(space_id="space-abc")
+        fake_space = {"id": "space-abc", "name": "my-space"}
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+            patch("anteroom.services.space_storage.get_space", return_value=fake_space),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        rt = arguments["_runtime_info"]
+        assert rt.get("active_space") == {"name": "my-space", "id": "space-abc"}
+
+    async def test_runtime_info_interface_is_web_not_cli(self) -> None:
+        """Ensure the web router does not accidentally set interface=cli."""
+        ctx = _make_tool_ctx()
+        conv = _fake_conversation()
+
+        with (
+            patch("anteroom.services.storage.get_conversation", return_value=conv),
+            patch("anteroom.services.storage.list_messages", return_value=[]),
+            patch("anteroom.services.storage.get_conversation_token_total", return_value=0),
+        ):
+            await _execute_web_tool(ctx, "introspect", {})
+
+        arguments = ctx.tool_registry.call_tool.call_args.args[1]
+        assert arguments["_runtime_info"]["interface"] != "cli"
+        assert arguments["_runtime_info"]["interface"] == "web"

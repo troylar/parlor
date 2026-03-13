@@ -787,3 +787,34 @@ class TestGatherRuntime:
         result = await handle(_runtime_info=info)
         assert "runtime" in result
         assert result["runtime"]["interface"] == "web"
+
+    @pytest.mark.asyncio
+    async def test_handle_runtime_with_full_payload(self) -> None:
+        """Verify runtime passes through all expected fields including token_totals."""
+        info = {
+            "interface": "cli",
+            "conversation_id": "c1",
+            "conversation_title": "Test Chat",
+            "slug": "happy-penguin",
+            "message_count": 5,
+            "token_totals": 12345,
+            "active_space": {"name": "dev", "id": "s1"},
+        }
+        result = await handle(section="runtime", _runtime_info=info)
+        data = result["data"]
+        assert data["interface"] == "cli"
+        assert data["conversation_id"] == "c1"
+        assert data["conversation_title"] == "Test Chat"
+        assert data["slug"] == "happy-penguin"
+        assert data["message_count"] == 5
+        assert data["token_totals"] == 12345
+        assert data["active_space"] == {"name": "dev", "id": "s1"}
+
+    @pytest.mark.asyncio
+    async def test_handle_runtime_zero_values_preserved(self) -> None:
+        """Verify 0-value fields are not stripped (only None is filtered)."""
+        info = {"interface": "web", "message_count": 0, "token_totals": 0}
+        result = await handle(section="runtime", _runtime_info=info)
+        data = result["data"]
+        assert data["message_count"] == 0
+        assert data["token_totals"] == 0

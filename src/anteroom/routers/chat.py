@@ -956,7 +956,15 @@ async def _execute_web_tool(ctx: ToolExecutorContext, tool_name: str, arguments:
             _rt_info["conversation_id"] = ctx.conversation_id
             _rt_info["conversation_title"] = _rt_conv.get("title")
             _rt_info["slug"] = _rt_conv.get("slug")
-            _rt_info["message_count"] = _rt_conv.get("message_count", 0)
+            try:
+                _rt_msgs = storage.list_messages(ctx.db, ctx.conversation_id)
+                _rt_info["message_count"] = len(_rt_msgs)
+            except Exception:
+                _rt_info["message_count"] = 0
+            try:
+                _rt_info["token_totals"] = storage.get_conversation_token_total(ctx.db, ctx.conversation_id)
+            except Exception:
+                _rt_info["token_totals"] = 0
         _rt_space: dict[str, Any] | None = None
         _rt_space_id = _rt_conv.get("space_id") if _rt_conv else None
         if _rt_space_id:

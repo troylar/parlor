@@ -1354,7 +1354,15 @@ async def run_cli(
                     _rt_info["conversation_id"] = conversation_id
                     _rt_info["conversation_title"] = _rt_conv.get("title")
                     _rt_info["slug"] = _rt_conv.get("slug")
-                    _rt_info["message_count"] = _rt_conv.get("message_count", 0)
+                    try:
+                        _rt_msgs = storage.list_messages(db, conversation_id)
+                        _rt_info["message_count"] = len(_rt_msgs)
+                    except Exception:
+                        _rt_info["message_count"] = 0
+                    try:
+                        _rt_info["token_totals"] = storage.get_conversation_token_total(db, conversation_id)
+                    except Exception:
+                        _rt_info["token_totals"] = 0
                     _rt_sid = _rt_conv.get("space_id")
                     if _rt_sid:
                         from ..services.space_storage import get_space as _get_sp

@@ -315,3 +315,243 @@ class TestReconnectCleanup:
         assert page.locator(".ask-user-prompt").count() == 1
         assert page.locator(".approval-prompt.approval-allowed").count() == 1
         assert page.locator(".ask-user-prompt.ask-user-answered").count() == 1
+
+
+class TestTimeoutExpiredUX:
+    """Verify timeout/expiry UX for approval and ask_user cards (#870).
+
+    Tests the visual state changes applied by resolveApprovalCard and
+    resolveAskUserCard when reason='timed_out': expired CSS class, grey
+    border styling, and status text change.
+    """
+
+    def test_approval_expired_css_class_applied(self, authenticated_page) -> None:
+        """resolveApprovalCard with timed_out adds .approval-expired class."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showApprovalPrompt({
+                    approval_id: 'test-expired-appr-1',
+                    tool_name: 'bash',
+                    reason: 'Running a shell command',
+                });
+                Chat.resolveApprovalCard('test-expired-appr-1', false, 'timed_out');
+            }"""
+        )
+
+        card = page.locator('.approval-prompt[data-approval-id="test-expired-appr-1"]')
+        assert card.count() == 1
+        assert "approval-expired" in card.get_attribute("class")
+
+    def test_approval_expired_status_text(self, authenticated_page) -> None:
+        """resolveApprovalCard with timed_out shows 'Expired' status text."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showApprovalPrompt({
+                    approval_id: 'test-expired-appr-2',
+                    tool_name: 'write_file',
+                    reason: 'Writing a file',
+                });
+                Chat.resolveApprovalCard('test-expired-appr-2', false, 'timed_out');
+            }"""
+        )
+
+        card = page.locator('.approval-prompt[data-approval-id="test-expired-appr-2"]')
+        status = card.locator(".approval-status")
+        assert status.count() == 1
+        assert "Expired" in status.text_content()
+
+    def test_approval_expired_does_not_add_allowed_or_denied(self, authenticated_page) -> None:
+        """resolveApprovalCard with timed_out must not add allowed/denied classes."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showApprovalPrompt({
+                    approval_id: 'test-expired-appr-3',
+                    tool_name: 'bash',
+                    reason: 'Some command',
+                });
+                Chat.resolveApprovalCard('test-expired-appr-3', true, 'timed_out');
+            }"""
+        )
+
+        card = page.locator('.approval-prompt[data-approval-id="test-expired-appr-3"]')
+        classes = card.get_attribute("class")
+        assert "approval-expired" in classes
+        assert "approval-allowed" not in classes
+        assert "approval-denied" not in classes
+
+    def test_approval_expired_is_idempotent(self, authenticated_page) -> None:
+        """Calling resolveApprovalCard twice on an expired card is a no-op."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showApprovalPrompt({
+                    approval_id: 'test-expired-appr-4',
+                    tool_name: 'bash',
+                    reason: 'Idempotent check',
+                });
+                Chat.resolveApprovalCard('test-expired-appr-4', false, 'timed_out');
+                Chat.resolveApprovalCard('test-expired-appr-4', false, 'timed_out');
+            }"""
+        )
+
+        status_count = page.evaluate(
+            """() => document.querySelectorAll('[data-approval-id="test-expired-appr-4"] .approval-status').length"""
+        )
+        assert status_count == 1
+
+    def test_approval_expired_removed_by_reconnect_cleanup(self, authenticated_page) -> None:
+        """Expired approval cards are removed by cleanupPendingPrompts.
+
+        The cleanup selector is :not(.approval-allowed):not(.approval-denied),
+        so .approval-expired cards (which lack those classes) are removed on
+        reconnect — they are transient, not pinned like allowed/denied cards.
+        """
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showApprovalPrompt({
+                    approval_id: 'test-expired-appr-5',
+                    tool_name: 'bash',
+                    reason: 'Reconnect check',
+                });
+                Chat.resolveApprovalCard('test-expired-appr-5', false, 'timed_out');
+            }"""
+        )
+
+        page.evaluate("() => Chat.cleanupPendingPrompts()")
+
+        assert page.locator(".approval-prompt.approval-expired").count() == 0
+
+    def test_ask_user_expired_css_class_applied(self, authenticated_page) -> None:
+        """resolveAskUserCard with timed_out adds .ask-user-expired class."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showAskUserPrompt({
+                    ask_id: 'test-expired-ask-1',
+                    question: 'Should I proceed?',
+                });
+                Chat.resolveAskUserCard('test-expired-ask-1', 'timed_out');
+            }"""
+        )
+
+        card = page.locator('.ask-user-prompt[data-ask-id="test-expired-ask-1"]')
+        assert card.count() == 1
+        assert "ask-user-expired" in card.get_attribute("class")
+
+    def test_ask_user_expired_status_text(self, authenticated_page) -> None:
+        """resolveAskUserCard with timed_out shows 'Expired' status text."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showAskUserPrompt({
+                    ask_id: 'test-expired-ask-2',
+                    question: 'What is the target?',
+                });
+                Chat.resolveAskUserCard('test-expired-ask-2', 'timed_out');
+            }"""
+        )
+
+        card = page.locator('.ask-user-prompt[data-ask-id="test-expired-ask-2"]')
+        status = card.locator(".ask-user-status")
+        assert status.count() == 1
+        assert "Expired" in status.text_content()
+
+    def test_ask_user_expired_does_not_add_answered_or_cancelled(self, authenticated_page) -> None:
+        """resolveAskUserCard with timed_out must not add answered/cancelled classes."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showAskUserPrompt({
+                    ask_id: 'test-expired-ask-3',
+                    question: 'Confirm deletion?',
+                });
+                Chat.resolveAskUserCard('test-expired-ask-3', 'timed_out');
+            }"""
+        )
+
+        card = page.locator('.ask-user-prompt[data-ask-id="test-expired-ask-3"]')
+        classes = card.get_attribute("class")
+        assert "ask-user-expired" in classes
+        assert "ask-user-answered" not in classes
+        assert "ask-user-cancelled" not in classes
+
+    def test_ask_user_expired_is_idempotent(self, authenticated_page) -> None:
+        """Calling resolveAskUserCard twice on an expired card is a no-op."""
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showAskUserPrompt({
+                    ask_id: 'test-expired-ask-4',
+                    question: 'Idempotent?',
+                });
+                Chat.resolveAskUserCard('test-expired-ask-4', 'timed_out');
+                Chat.resolveAskUserCard('test-expired-ask-4', 'timed_out');
+            }"""
+        )
+
+        status_count = page.evaluate(
+            """() => document.querySelectorAll('[data-ask-id="test-expired-ask-4"] .ask-user-status').length"""
+        )
+        assert status_count == 1
+
+    def test_ask_user_expired_removed_by_reconnect_cleanup(self, authenticated_page) -> None:
+        """Expired ask_user cards are removed by cleanupPendingPrompts.
+
+        The cleanup selector is :not(.ask-user-answered):not(.ask-user-cancelled),
+        so .ask-user-expired cards (which lack those classes) are removed on
+        reconnect — they are transient, not pinned like answered/cancelled cards.
+        """
+        page = authenticated_page
+        page.evaluate(
+            """() => {
+                Chat.showAskUserPrompt({
+                    ask_id: 'test-expired-ask-5',
+                    question: 'Reconnect check?',
+                });
+                Chat.resolveAskUserCard('test-expired-ask-5', 'timed_out');
+            }"""
+        )
+
+        page.evaluate("() => Chat.cleanupPendingPrompts()")
+
+        assert page.locator(".ask-user-prompt.ask-user-expired").count() == 0
+
+    def test_expired_css_class_has_grey_border(self, authenticated_page) -> None:
+        """Verify .approval-expired and .ask-user-expired use grey border styling."""
+        page = authenticated_page
+
+        page.evaluate(
+            """() => {
+                Chat.showApprovalPrompt({
+                    approval_id: 'test-style-appr',
+                    tool_name: 'bash',
+                    reason: 'Style check',
+                });
+                Chat.resolveApprovalCard('test-style-appr', false, 'timed_out');
+
+                Chat.showAskUserPrompt({
+                    ask_id: 'test-style-ask',
+                    question: 'Style check?',
+                });
+                Chat.resolveAskUserCard('test-style-ask', 'timed_out');
+            }"""
+        )
+
+        appr_border = page.evaluate(
+            """() => {
+                const el = document.querySelector('.approval-expired');
+                return getComputedStyle(el).borderColor;
+            }"""
+        )
+        ask_border = page.evaluate(
+            """() => {
+                const el = document.querySelector('.ask-user-expired');
+                return getComputedStyle(el).borderColor;
+            }"""
+        )
+        assert appr_border is not None
+        assert ask_border is not None
