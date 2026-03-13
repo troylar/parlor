@@ -57,7 +57,7 @@ Common problems and their solutions when working with packs and artifacts.
 
 **Symptom**: A config_overlay artifact is installed but the setting isn't applied.
 
-**Cause**: A higher-precedence config source overrides the overlay. Config precedence: defaults < team < personal < project < env vars < CLI flags. Team-enforced fields always win.
+**Cause**: A higher-precedence config source overrides the overlay. Config precedence: defaults < team < packs < personal < space < project < env vars < CLI flags. Team-enforced fields always win.
 
 **Fix**:
 - Check if the field is team-enforced: look for `enforce:` in the team config
@@ -81,7 +81,7 @@ Common problems and their solutions when working with packs and artifacts.
 
 **Symptom**: Pack sources stop updating. `aroom pack sources` shows the source is cached but stale.
 
-**Cause**: After 10 consecutive failures, the background worker auto-disables the source.
+**Cause**: After 10 consecutive failures, the background refresh worker auto-disables entirely (all sources stop refreshing, not just the failing one).
 
 **Fix**:
 - Run `aroom pack refresh` manually to force a refresh and reset the failure counter
@@ -128,6 +128,27 @@ $ aroom pack install ./my-pack/
 **Cause**: FQN format requires lowercase. The regex is: `^@[a-z0-9_-]+/[a-z_]+/[a-z0-9_][a-z0-9_.-]*$`
 
 **Fix**: Use lowercase for all FQN components. `@my-team/skill/commit` is valid; `@My-Team/skill/commit` is not. See [FQN format rules](concepts.md#fully-qualified-names-fqn).
+
+---
+
+### Pack quarantined after refresh
+
+**Symptom**: A pack that was previously active is suddenly detached/inactive after a background or manual refresh.
+
+**Cause**: The refreshed pack introduced a compliance violation (e.g., a config overlay that conflicts with team-enforced fields). Anteroom detaches offending packs to restore a valid configuration.
+
+**Diagnosis**:
+- Run `aroom pack refresh` — if quarantine occurs, the CLI prints: `Quarantined N pack(s) due to compliance failure: <error>`
+- Via API: `POST /api/packs/refresh` returns `quarantined` (list of pack IDs) and `quarantine_reason` (generic message; full details in server logs)
+- Check server logs for the specific compliance rule that was violated
+
+**Fix**:
+1. Identify the quarantined pack: compare `aroom pack list` with your expected active packs
+2. Fix the pack content in the source repository (e.g., correct the config overlay that violates compliance rules)
+3. Run `aroom pack refresh` to pull the corrected version
+4. Re-attach the pack: `aroom pack attach namespace/name`
+
+See [Pack Sources: Quarantine](pack-sources.md#quarantine) for the full quarantine lifecycle.
 
 ---
 

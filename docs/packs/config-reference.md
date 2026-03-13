@@ -19,9 +19,11 @@ pack_sources:
 
 | Field | Type | Default | Env Override | Description |
 |-------|------|---------|-------------|-------------|
-| `url` | string | (required) | — | Git remote URL. Accepts `https://`, `ssh://`, `git://`, `http://`, and SSH shorthand (`git@host:path`). Rejects `ext::` and `file://` |
+| `url` | string | (required) | — | Git remote URL. Accepts `https://`, `ssh://`, `git://`, and SSH shorthand (`git@host:path`). Rejects `http://`, `ext::`, and `file://` |
 | `branch` | string | `"main"` | — | Git branch to clone and track |
 | `refresh_interval` | int | `30` | — | Minutes between automatic refreshes. Set to `0` to disable auto-refresh (manual only). Minimum: 5 minutes (values below 5 are clamped) |
+| `auto_attach` | bool | `true` | — | Automatically attach new packs from this source on install. Set to `false` for opt-in attachment via `aroom pack attach` |
+| `priority` | int | `50` | — | Conflict resolution priority (1-100). Lower number wins when multiple sources provide conflicting packs |
 
 ## Examples
 

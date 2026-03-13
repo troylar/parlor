@@ -21,7 +21,7 @@ See [Packs](../packs/how-packs-work.md) for details on pack sources and refresh 
 
 Pack attach and detach endpoints now handle config rebuild failures correctly: compliance violations roll back the mutation (409), infrastructure errors preserve the mutation and reload registries from DB (200 with warning). Previously, infrastructure errors returned 500 and left registries stale. (#898)
 
-See [Pack API](../api/packs.md) for the full endpoint reference.
+See [Pack API](../packs/api-reference.md) for the full endpoint reference.
 
 #### Quarantine Reporting in Refresh API
 

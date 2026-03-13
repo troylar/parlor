@@ -653,13 +653,13 @@ pack_sources:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `url` | string | (required) | Git remote URL. Accepts `https://`, `ssh://`, `git://`, `http://`, SSH shorthand. Rejects `ext::` and `file://` |
+| `url` | string | (required) | Git remote URL. Accepts `https://`, `ssh://`, `git://`, and SSH shorthand (`git@host:path`). Rejects `http://`, `ext::`, and `file://` |
 | `branch` | string | `"main"` | Git branch to clone and track |
 | `refresh_interval` | integer | `30` | Minutes between auto-refresh. `0` = manual only. Minimum: 5 (values below 5 are clamped) |
 | `auto_attach` | boolean | `true` | When `true`, new packs from this source are automatically attached at the global scope on install. When `false`, packs must be manually attached via `aroom pack attach` |
 | `priority` | integer | `50` | Conflict resolution priority (1-100). Lower number wins when multiple sources provide conflicting packs. Must be in range 1-100 |
 
-The background worker clones sources on first encounter, then pulls periodically. After 10 consecutive failures, a source is auto-disabled until restart. See [Pack Sources](../packs/pack-sources.md) for the full lifecycle.
+The background worker clones sources on first encounter, then pulls periodically. After 10 consecutive background refresh loop failures, the worker stops all source refreshes until restart. See [Pack Sources](../packs/pack-sources.md) for the full lifecycle.
 
 ## API Key Command
 

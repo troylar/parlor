@@ -34,10 +34,9 @@ Anteroom accepts these URL schemes:
 | `https://` | `https://github.com/org/packs.git` | Recommended |
 | `ssh://` | `ssh://git@github.com/org/packs.git` | For key-based auth |
 | `git://` | `git://github.com/org/packs.git` | Unauthenticated |
-| `http://` | `http://internal.example.com/packs.git` | Warns about MITM risk |
 | SSH shorthand | `git@github.com:org/packs.git` | Also accepted |
 
-**Blocked schemes**: `ext::*` and `file://` are rejected to prevent local code execution and path traversal attacks.
+**Blocked schemes**: `http://`, `ext::*`, and `file://` are rejected. `http://` is rejected to prevent MITM attacks; `ext::` and `file://` are rejected to prevent local code execution and path traversal attacks.
 
 ## Lifecycle
 
@@ -71,7 +70,7 @@ When `refresh_interval > 0`, a background worker (`PackRefreshWorker`) runs:
 - **Poll interval**: checks every 60 seconds which sources are due for refresh
 - **Per-source tracking**: each source has its own last-refresh timestamp
 - **Failure backoff**: consecutive failures double the wait time (backoff multiplier: 2.0)
-- **Auto-disable**: after 10 consecutive failures, the source is disabled until restart
+- **Auto-disable**: after 10 consecutive background refresh loop failures, the worker stops all source refreshes until restart
 - **Graceful shutdown**: `stop()` cancels the background task
 
 ```
@@ -88,7 +87,7 @@ Worker checks every 60s: "Is this source due?"
             ├── Success + no change → reset failure count
             └── Failure → increment failure count, apply backoff
                     │
-                    └── 10 consecutive failures → auto-disable
+                    └── 10 consecutive loop failures → worker auto-disable (all sources)
 ```
 
 ## Cache Layout
@@ -111,6 +110,37 @@ Cloned sources are cached at:
 ```
 
 The cache directory name is deterministic: the first 12 hex characters of the SHA-256 hash of the source URL.
+
+## Content Change Detection
+
+Anteroom detects pack content changes by comparing SHA-256 hashes of pack manifest and artifact files. A version bump in `pack.yaml` is not required — any content change triggers an update. This means pushing a fix to a skill prompt or rule text is picked up on the next refresh without editing the version field.
+
+## Quarantine
+
+When a pack refresh installs or updates packs that cause a **compliance violation** during config rebuild, Anteroom quarantines the offending packs:
+
+1. The refresh worker detects that the effective config cannot be rebuilt with the new pack content
+2. Each changed pack is **detached** (removed from the active attachment set)
+3. Config is rebuilt a second time without the quarantined packs
+4. The quarantine is reported to the caller
+
+**What quarantine means operationally**: the pack remains installed in the database but is inactive — its artifacts are not loaded into the registry and its config overlays are not applied. The pack stays quarantined until the underlying issue is fixed in the source repository and the pack is manually re-attached.
+
+**CLI behavior**: `aroom pack refresh` prints the quarantine count and the compliance error text:
+
+```
+Quarantined 2 pack(s) due to compliance failure: <error message>
+```
+
+The CLI does not list individual quarantined pack names. Check `aroom pack list` to identify which packs lost their attachment.
+
+**API behavior**: `POST /api/packs/refresh` returns a `quarantined` array of pack IDs and a `quarantine_reason` string. The reason is intentionally generic ("Compliance violation detected; see server logs for details") to avoid leaking internal policy details. Full details are logged server-side.
+
+**Recovery**:
+
+1. Fix the offending pack content in the source repository
+2. Run `aroom pack refresh` to pull the corrected version
+3. Re-attach the pack: `aroom pack attach namespace/name`
 
 ## SSH Setup
 

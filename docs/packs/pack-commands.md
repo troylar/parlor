@@ -158,7 +158,7 @@ Added pack source: https://github.com/acme/anteroom-packs.git
 Run aroom pack refresh to clone and install packs.
 ```
 
-URL scheme validation: only `https://`, `ssh://`, and `git@host:path` are allowed. Plaintext `http://`, `file://`, and `ext::` are rejected.
+URL scheme validation: only `https://`, `ssh://`, `git://`, and `git@host:path` are allowed. Plaintext `http://`, `file://`, and `ext::` are rejected.
 
 ### aroom pack sources
 
@@ -185,6 +185,14 @@ $ aroom pack refresh
 Refreshing https://github.com/acme/packs.git... 2 packs updated
 Refreshing https://github.com/org/standards.git... 1 pack installed
 ```
+
+If refreshed packs cause a compliance violation during config rebuild, the offending packs are quarantined (detached). The CLI reports the quarantine count and the compliance error text:
+
+```
+Quarantined 2 pack(s) due to compliance failure: field safety.approval_mode must be "ask"
+```
+
+Individual pack names are not listed in the quarantine message. Use `aroom pack list` to identify which packs lost their attachment, then fix the pack content and re-attach with `aroom pack attach`.
 
 ---
 

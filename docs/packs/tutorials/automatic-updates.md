@@ -54,9 +54,9 @@ If a pull fails (network error, auth problem, etc.):
 | 2 | 4x |
 | 3 | 8x |
 | ... | doubles each time |
-| 10 | **Source auto-disabled** |
+| 10 | **Worker auto-disabled (all sources)** |
 
-After 10 consecutive failures, the source is disabled until Anteroom restarts. This prevents a broken source from consuming resources.
+Backoff is tracked per-source, but after 10 consecutive background refresh loop failures the worker stops entirely — all sources stop refreshing until Anteroom restarts. This prevents a broken source from consuming resources.
 
 ## Manual Override
 
@@ -73,6 +73,19 @@ $ curl -X POST http://localhost:8080/api/packs/refresh
 ```
 
 Manual refresh bypasses the backoff counter and re-enables disabled sources.
+
+## Quarantine on Compliance Failure
+
+If a refreshed pack causes a compliance violation during config rebuild, Anteroom quarantines the offending packs:
+
+- Changed packs are **detached** (removed from the active attachment set)
+- Config is rebuilt without the quarantined packs
+- The CLI reports: `Quarantined N pack(s) due to compliance failure: <error>`
+- The API returns `quarantined` and `quarantine_reason` fields in the refresh response
+
+Quarantined packs remain installed but inactive. To recover: fix the pack content in the source repo, refresh again, and re-attach with `aroom pack attach`.
+
+See [Pack Sources: Quarantine](../pack-sources.md#quarantine) for the full lifecycle.
 
 ## Disabling Auto-Refresh
 

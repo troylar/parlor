@@ -222,17 +222,37 @@ $ curl -X POST http://localhost:8080/api/packs/refresh
 **Response** (200):
 
 ```json
-[
-  {
-    "url": "https://github.com/acme/anteroom-packs.git",
-    "success": true,
-    "packs_installed": 0,
-    "packs_updated": 2,
-    "changed": true,
-    "error": ""
-  }
-]
+{
+  "sources": [
+    {
+      "url": "https://github.com/acme/anteroom-packs.git",
+      "success": true,
+      "packs_installed": 0,
+      "packs_updated": 2,
+      "packs_attached": 0,
+      "changed": true,
+      "error": ""
+    }
+  ],
+  "quarantined": [],
+  "quarantine_reason": null
+}
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sources` | array | Per-source refresh results |
+| `sources[].url` | string | Source URL |
+| `sources[].success` | bool | Whether the pull/clone succeeded |
+| `sources[].packs_installed` | int | Number of newly installed packs |
+| `sources[].packs_updated` | int | Number of updated packs |
+| `sources[].packs_attached` | int | Number of newly attached packs |
+| `sources[].changed` | bool | Whether the git ref changed |
+| `sources[].error` | string | Error message (empty on success) |
+| `quarantined` | array | Pack IDs detached due to compliance failure |
+| `quarantine_reason` | string or null | Human-readable reason (intentionally generic — details are in server logs) |
+
+When a refreshed pack causes a compliance violation during config rebuild, Anteroom detaches the offending packs (quarantine), rebuilds config without them, and returns the quarantine details in this response. The `quarantine_reason` is kept generic to avoid leaking internal policy details to API consumers.
 
 ---
 
