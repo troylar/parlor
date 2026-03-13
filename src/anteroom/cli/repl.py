@@ -1049,6 +1049,7 @@ def _handle_config_command(
     from rich.table import Table
 
     from ..services.config_editor import (
+        _SENSITIVE_FIELDS,
         apply_field_to_config,
         build_full_source_map,
         check_write_allowed,
@@ -1085,6 +1086,29 @@ def _handle_config_command(
 
         personal_raw = _read_yaml(_get_config_path())
 
+        # Pack overlays from DB
+        pack_raw: dict[str, Any] = {}
+        try:
+            from ..services.config_overlays import collect_pack_overlays, merge_pack_overlays
+            from ..services.pack_attachments import (
+                get_active_pack_ids,
+                get_active_pack_ids_for_space,
+                get_attachment_priorities,
+            )
+
+            space_id = active_space["id"] if active_space else None
+            if space_id:
+                active_ids = get_active_pack_ids_for_space(db, space_id, project_path=working_dir)
+            else:
+                active_ids = get_active_pack_ids(db, project_path=working_dir)
+            if active_ids:
+                overlays = collect_pack_overlays(db, active_ids)
+                if overlays:
+                    priorities = get_attachment_priorities(db, active_ids)
+                    pack_raw = merge_pack_overlays(overlays, priorities) or {}
+        except Exception:
+            pass  # graceful degradation if DB schema is minimal
+
         space_raw: dict[str, Any] = {}
         if active_space and active_space.get("source_file"):
             sp_path = Path(active_space["source_file"])
@@ -1104,6 +1128,7 @@ def _handle_config_command(
 
         source_map = build_full_source_map(
             team_raw=team_raw,
+            pack_raw=pack_raw,
             personal_raw=personal_raw,
             space_raw=space_raw,
             project_raw=project_raw,
@@ -1162,6 +1187,9 @@ def _handle_config_command(
             return
 
         dot_path = parts[2]
+        if dot_path in _SENSITIVE_FIELDS:
+            renderer.render_error(f"'{dot_path}' is a sensitive field and cannot be read via /config.")
+            return
         source_map, enforced = _build_context()
 
         try:
@@ -1223,9 +1251,9 @@ def _handle_config_command(
             renderer.render_error("Active space has no YAML file. Cannot write space config.")
             return
 
-        # Check write guards
+        # Check write guards (sensitive fields blocked)
         _, enforced = _build_context()
-        allowed, reason = check_write_allowed(dot_path, enforced, allow_sensitive=True)
+        allowed, reason = check_write_allowed(dot_path, enforced)
         if not allowed:
             renderer.render_error(reason or "Write not allowed")
             return
@@ -1278,6 +1306,10 @@ def _handle_config_command(
             return
 
         dot_path = parts[2]
+        if dot_path in _SENSITIVE_FIELDS:
+            renderer.render_error(f"'{dot_path}' is a sensitive field and cannot be reset via /config.")
+            return
+
         scope = "personal"
         if len(parts) > 3 and parts[3] == "--scope" and len(parts) > 4:
             scope = parts[4].lower()

@@ -864,6 +864,29 @@ def _build_state(
 
     personal_raw = _read_yaml(_get_config_path())
 
+    # Pack overlays from DB
+    pack_raw: dict[str, Any] = {}
+    try:
+        from ..services.config_overlays import collect_pack_overlays, merge_pack_overlays
+        from ..services.pack_attachments import (
+            get_active_pack_ids,
+            get_active_pack_ids_for_space,
+            get_attachment_priorities,
+        )
+
+        space_id = active_space["id"] if active_space else None
+        if space_id:
+            active_ids = get_active_pack_ids_for_space(db, space_id, project_path=working_dir)
+        else:
+            active_ids = get_active_pack_ids(db, project_path=working_dir)
+        if active_ids:
+            overlays = collect_pack_overlays(db, active_ids)
+            if overlays:
+                priorities = get_attachment_priorities(db, active_ids)
+                pack_raw = merge_pack_overlays(overlays, priorities) or {}
+    except Exception:
+        pass  # graceful degradation if DB schema is minimal
+
     space_raw: dict[str, Any] = {}
     if active_space and active_space.get("source_file"):
         sp_path = Path(active_space["source_file"])
@@ -883,6 +906,7 @@ def _build_state(
 
     source_map = build_full_source_map(
         team_raw=team_raw,
+        pack_raw=pack_raw,
         personal_raw=personal_raw,
         space_raw=space_raw,
         project_raw=project_raw,
@@ -899,6 +923,8 @@ def _build_state(
     layer_raws: dict[str, dict[str, Any]] = {}
     if team_raw:
         layer_raws["team"] = team_raw
+    if pack_raw:
+        layer_raws["pack"] = pack_raw
     if personal_raw:
         layer_raws["personal"] = personal_raw
     if space_raw:

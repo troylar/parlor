@@ -382,16 +382,56 @@ def _resolve_project_dir(request: Request) -> Path:
 
 def _build_api_context(request: Request) -> tuple[dict[str, str], list[str]]:
     """Build source map and enforced fields for API requests."""
+    from ..config import _get_config_path
     from ..services.config_editor import _read_yaml, build_full_source_map, collect_env_overrides
     from ..services.project_config import discover_project_config
+    from ..services.team_config import discover_team_config
 
     enforced: list[str] = getattr(request.app.state, "enforced_fields", [])
-    team_raw: dict[str, Any] = getattr(request.app.state, "team_raw", {})
-    personal_raw: dict[str, Any] = getattr(request.app.state, "personal_raw", {})
+    team_raw: dict[str, Any] = {}
+
+    # Read team config from disk (app.state doesn't carry raw layer dicts)
+    try:
+        team_path = discover_team_config()
+        if team_path:
+            from ..services.team_config import load_team_config
+
+            team_raw, enforced = load_team_config(team_path, interactive=False)
+    except Exception:
+        pass
+
+    # Read personal config from disk
+    personal_raw: dict[str, Any] = _read_yaml(_get_config_path())
+
+    # Pack overlays from DB
+    pack_raw: dict[str, Any] = {}
+    db = getattr(request.app.state, "db", None)
+    space = _get_active_space(request)
+    if db is not None:
+        try:
+            from ..services.config_overlays import collect_pack_overlays, merge_pack_overlays
+            from ..services.pack_attachments import (
+                get_active_pack_ids,
+                get_active_pack_ids_for_space,
+                get_attachment_priorities,
+            )
+
+            space_id = space["id"] if space else None
+            if space_id:
+                active_ids = get_active_pack_ids_for_space(db, space_id)
+            else:
+                active_ids = get_active_pack_ids(db)
+            if active_ids:
+                overlays = collect_pack_overlays(db, active_ids)
+                if overlays:
+                    priorities = get_attachment_priorities(db, active_ids)
+                    pack_raw = merge_pack_overlays(overlays, priorities) or {}
+        except Exception:
+            pass  # graceful degradation
+
     space_raw: dict[str, Any] = {}
     project_raw: dict[str, Any] = {}
 
-    space = _get_active_space(request)
     if space and space.get("source_file"):
         sp_path = Path(space["source_file"])
         if sp_path.exists():
@@ -410,6 +450,7 @@ def _build_api_context(request: Request) -> tuple[dict[str, str], list[str]]:
 
     source_map = build_full_source_map(
         team_raw=team_raw,
+        pack_raw=pack_raw,
         personal_raw=personal_raw,
         space_raw=space_raw,
         project_raw=project_raw,
