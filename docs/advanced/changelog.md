@@ -7,6 +7,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 ## March 13, 2026
 
+### v1.114.1
+
+**Fixed:**
+
+- REPL no longer hangs after cancelling an agent run with Ctrl-C or Escape — `agent_busy` is now unconditionally cleared on cancel, even when queued messages exist in the input pipeline (#937)
+- Ctrl-C and Escape reliably route cancel signals through a shared `_route_cancel_signal()` function, preventing stale cancel events between turns (#937)
+- Queued messages typed during streaming are preserved after cancel via msg_queue backfill (#937)
+- Runner task exceptions are now surfaced via logging instead of being silently swallowed by `asyncio.wait()` (#937)
+- Thinking spinner no longer orphaned after cancel — `_thinking_cancelled` guard flag prevents stale ticker artifacts (#937)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.114.1)
+
 ### v1.114.0 — Themes, Timeouts, and Runtime Introspection
 
 This release brings CLI color theming, clearer timeout UX for safety gates, runtime session introspection for the AI, and a terminology cleanup for pack directory scoping.
