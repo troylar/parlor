@@ -5,7 +5,6 @@ msg_queue backfill, and thinking indicator cleanup (#937).
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
 import time
 from typing import Any
@@ -298,7 +297,13 @@ class TestThinkingTickerSuppression:
         import anteroom.cli.renderer as mod
 
         self.mod = mod
-        importlib.reload(mod)
+        # Reset only the globals under test — importlib.reload would clobber
+        # unrelated module state (_verbosity, _theme, etc.) breaking other tests.
+        mod._thinking_cancelled = False
+        mod._thinking_start = 0
+        mod._thinking_ticker_task = None
+        mod._spinner = None
+        mod._repl_mode = False
 
     def test_stop_thinking_sync_sets_cancelled_flag(self) -> None:
         """stop_thinking_sync() sets _thinking_cancelled before cancelling ticker."""
