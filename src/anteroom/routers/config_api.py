@@ -277,7 +277,7 @@ async def set_config_field(body: ConfigFieldSetBody, request: Request) -> dict[s
         raise
     except Exception as e:
         logger.exception("Failed to set config field %s", body.dot_path)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update config field")
 
 
 @router.delete("/config/fields")
@@ -319,7 +319,7 @@ async def reset_config_field(body: ConfigFieldResetBody, request: Request) -> di
         raise
     except Exception as e:
         logger.exception("Failed to reset config field %s", body.dot_path)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to reset config field")
 
 
 @router.get("/config/scopes")
