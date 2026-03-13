@@ -526,7 +526,7 @@ async def run_config_tui(
     )
     title_bar = Window(
         content=FormattedTextControl(
-            FormattedText(
+            lambda: FormattedText(
                 [
                     ("class:title", " Config Editor  "),
                     ("class:title.scope", f" [{state.active_scope}] "),
@@ -839,14 +839,14 @@ async def _handle_save(
             elif scope == "project":
                 write_project_field(dot_path, value, working_dir=working_dir)
 
-            # Apply to live config
+            # Apply to live config (best-effort — file is already saved)
             try:
                 apply_field_to_config(config, dot_path, value)
                 if dot_path in ("ai.model", "model"):
                     if ai_service and hasattr(ai_service, "config"):
                         ai_service.config.model = value
                     toolbar_refresh()
-            except AttributeError:
+            except (AttributeError, TypeError):
                 pass
 
             saved += 1
@@ -857,8 +857,16 @@ async def _handle_save(
         for err in errors:
             renderer.console.print(f"  [red]{err}[/red]")
 
-    state.pending_changes.clear()
-    state.set_message(f"Saved {saved} change{'s' if saved != 1 else ''} to {scope}")
+    # Only clear changes that were successfully saved; retain failed ones for retry
+    failed_paths = {e.split(":")[0] for e in errors}
+    for dot_path in list(state.pending_changes):
+        if dot_path not in failed_paths:
+            del state.pending_changes[dot_path]
+
+    msg = f"Saved {saved} change{'s' if saved != 1 else ''} to {scope}"
+    if errors:
+        msg += f" ({len(errors)} failed)"
+    state.set_message(msg)
 
 
 async def _handle_reset(

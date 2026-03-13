@@ -261,10 +261,10 @@ async def set_config_field(body: ConfigFieldSetBody, request: Request) -> dict[s
         else:
             raise HTTPException(status_code=400, detail="Invalid scope")
 
-        # Apply to live config
+        # Apply to live config (best-effort — file is already saved)
         try:
             apply_field_to_config(config, body.dot_path, parsed)
-        except AttributeError:
+        except (AttributeError, TypeError):
             pass  # field doesn't map 1:1 to AppConfig attrs — restart needed
 
         return {

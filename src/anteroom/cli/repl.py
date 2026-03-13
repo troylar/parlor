@@ -1289,6 +1289,9 @@ def _handle_config_command(
         if scope == "space" and not active_space:
             renderer.render_error("No active space.")
             return
+        if scope == "space" and not active_space.get("source_file"):  # type: ignore[union-attr]
+            renderer.render_error("Active space has no YAML file. Cannot reset space config.")
+            return
 
         try:
             deleted = False
