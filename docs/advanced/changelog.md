@@ -5,6 +5,18 @@ Release highlights for every Anteroom version. For full details including develo
 
 ---
 
+## March 14, 2026
+
+### v1.115.1
+
+**Fixed:**
+
+- `/new-skill` could generate YAML with invalid fields or missing required keys, silently saving a broken skill that failed at invocation time. The skill authoring pipeline now validates against the `Skill` schema at creation time with clear error messages. (#938)
+
+[GitHub Release](https://github.com/troylar/anteroom/releases/tag/v1.115.1)
+
+---
+
 ## March 13, 2026
 
 ### v1.115.0 — Config Gets a Cockpit
