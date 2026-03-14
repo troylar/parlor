@@ -2348,49 +2348,12 @@ async def _run_repl(
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style as PtStyle
 
-    _command_descriptions: dict[str, str] = {
-        "new": "new conversation",
-        "append": "add to last message",
-        "last": "continue last conversation",
-        "list": "list conversations",
-        "search": "search conversations",
-        "resume": "resume a conversation",
-        "delete": "delete a conversation",
-        "rename": "rename a conversation",
-        "slug": "show conversation slug",
-        "rewind": "undo messages",
-        "compact": "compress context",
-        "conventions": "show directory conventions",
-        "instructions": "show directory conventions (alias)",
-        "tools": "list available tools",
-        "skills": "list loaded skills",
-        "reload-skills": "reload skill files",
-        "pack": "manage packs",
-        "packs": "list installed packs",
-        "space": "manage spaces",
-        "spaces": "list spaces",
-        "mcp": "MCP server status",
-        "model": "switch model",
-        "plan": "planning mode",
-        "upload": "upload a file",
-        "usage": "token usage stats",
-        "verbose": "cycle verbosity",
-        "detail": "tool call details",
-        "help": "show help",
-        "artifact": "manage artifacts",
-        "artifacts": "list artifacts",
-        "artifact-check": "artifact health check",
-        "config": "view/edit scoped config",
-        "quit": "exit",
-        "exit": "exit",
-    }
-
-    _subcommand_completions: dict[str, list[str]] = {
-        "artifact": ["list", "show", "delete", "import", "create"],
-        "pack": ["list", "show", "install", "remove", "sources", "attach", "detach", "update", "add-source", "refresh"],
-        "space": ["list", "show", "switch", "create", "load", "refresh", "clear", "init", "clone", "map"],
-        "config": ["list", "get", "set", "reset"],
-    }
+    # Command metadata imported from the shared engine (single source of truth).
+    from anteroom.cli.commands import (
+        ALL_COMMAND_NAMES,
+        COMMAND_DESCRIPTIONS,
+        SUBCOMMAND_COMPLETIONS,
+    )
 
     class AnteroomCompleter(Completer):
         """Tab completer for / commands, @ file paths, and conversation slugs."""
@@ -2434,7 +2397,7 @@ async def _run_repl(
                 prefix = word.lstrip("/")
                 for cmd in self._commands:
                     if cmd.startswith(prefix):
-                        meta = _command_descriptions.get(cmd, "")
+                        meta = COMMAND_DESCRIPTIONS.get(cmd, "")
                         yield Completion(f"/{cmd} ", start_position=-len(word), display_meta=meta)
                 for sname in self._skill_names:
                     if sname.startswith(prefix):
@@ -2447,9 +2410,9 @@ async def _run_repl(
                 if cmd_name in self._slug_commands and len(parts) <= 2:
                     partial = parts[1] if len(parts) == 2 else ""
                     yield from self._get_slug_completions(partial)
-                elif cmd_name in _subcommand_completions and len(parts) <= 2:
+                elif cmd_name in SUBCOMMAND_COMPLETIONS and len(parts) <= 2:
                     partial = parts[1] if len(parts) == 2 else ""
-                    for sc in _subcommand_completions[cmd_name]:
+                    for sc in SUBCOMMAND_COMPLETIONS[cmd_name]:
                         if sc.startswith(partial):
                             yield Completion(sc + " ", start_position=-len(partial))
             elif "@" in word:
@@ -2480,43 +2443,7 @@ async def _run_repl(
                 except OSError:
                     pass
 
-    commands = [
-        "new",
-        "append",
-        "last",
-        "list",
-        "search",
-        "resume",
-        "delete",
-        "rename",
-        "slug",
-        "rewind",
-        "compact",
-        "conventions",
-        "instructions",
-        "tools",
-        "skills",
-        "reload-skills",
-        "artifact",
-        "artifacts",
-        "artifact-check",
-        "pack",
-        "packs",
-        "space",
-        "spaces",
-        "mcp",
-        "config",
-        "model",
-        "plan",
-        "upload",
-        "reprocess",
-        "usage",
-        "verbose",
-        "detail",
-        "help",
-        "quit",
-        "exit",
-    ]
+    commands = list(ALL_COMMAND_NAMES)
     skill_descs_list = skill_registry.get_skill_descriptions() if skill_registry else []
     skill_names = [name for name, _ in skill_descs_list]
     skill_descs = {name: desc for name, desc in skill_descs_list}

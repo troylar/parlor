@@ -17,17 +17,30 @@ All slash commands available in the CLI REPL.
 | `/compact` | Summarize and compact message history to free context |
 | `/model NAME` | Switch to a different model mid-session (omit NAME to see current) |
 | `/upload <path>` | Upload a file to the knowledge base, auto-extracts text from PDFs/DOCX |
+| `/reprocess [all\|<id>]` | Reprocess sources (re-extract and re-chunk) |
+| `/append <text>` | Append text to a note conversation |
+| `/conventions` | Show loaded project conventions (alias: `/instructions`) |
 | `/tools` | List all available tools (built-in + MCP), sorted alphabetically |
 | `/skills` | List available skills with descriptions and source (auto-reloads from disk) |
 | `/reload-skills` | Reload skill files from disk |
 | `/space list` | List all spaces |
 | `/space create <name>` | Create a new space |
-| `/space select <name\|id>` | Set active space for new conversations |
-| `/space edit <name\|id>` | Edit space instructions or model |
-| `/space delete <name\|id>` | Delete a space (with confirmation) |
+| `/space init` | Initialize a space from the current directory |
+| `/space load <path\|url>` | Load a space from a file or URL |
+| `/space switch <name\|id>` | Set active space (aliases: `select`, `use`) |
+| `/space show [name\|id]` | Show space details |
+| `/space edit <field> <value>` | Edit space instructions, model, or name |
+| `/space refresh` | Reload space from disk |
+| `/space clone <name\|id>` | Clone a space |
+| `/space map <directory>` | Map a directory to the active space |
+| `/space export` | Export active space as YAML |
 | `/space clear` | Deactivate the current space |
 | `/space sources` | List sources linked to the active space |
+| `/space link-source <id>` | Link a source to the active space |
+| `/space unlink-source <id>` | Unlink a source from the active space |
 | `/spaces` | Shortcut for `/space list` |
+| `/artifact-check` | Run artifact health checks |
+| `/config` | Open interactive config editor (or `/config get\|set\|reset` for power users) |
 | `/mcp` | Show MCP server status |
 | `/mcp status <name>` | Detailed diagnostics for one server |
 | `/usage` | Show token usage statistics (today, this week, this month, all time) |

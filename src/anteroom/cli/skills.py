@@ -31,44 +31,20 @@ _ARGS_PLACEHOLDER = "{args}"
 MAX_PROMPT_SIZE = 50_000  # 50KB limit on skill prompts
 
 # Built-in slash commands that skill names must not shadow.
-# If a skill has one of these names, direct /invocation would hit the built-in
-# command handler instead, while invoke_skill would hit the skill — causing
-# inconsistent behavior.
-_BUILTIN_COMMANDS = frozenset(
-    {
-        "quit",
-        "exit",
-        "new",
-        "append",
-        "tools",
-        "conventions",
-        "upload",
-        "usage",
-        "help",
-        "compact",
-        "last",
-        "list",
-        "delete",
-        "rename",
-        "slug",
-        "search",
-        "skills",
-        "reload-skills",
-        "projects",
-        "project",
-        "mcp",
-        "model",
-        "pack",
-        "packs",
-        "plan",
-        "space",
-        "spaces",
-        "verbose",
-        "detail",
-        "resume",
-        "rewind",
-    }
-)
+# Derived from the shared command engine — adding a command to commands.py
+# automatically prevents skill name collisions.  Uses a lazy import to
+# avoid circular dependency (commands.py imports SkillRegistry from here).
+_BUILTIN_COMMANDS_CACHE: frozenset[str] | None = None
+
+
+def _get_builtin_commands() -> frozenset[str]:
+    global _BUILTIN_COMMANDS_CACHE  # noqa: PLW0603
+    if _BUILTIN_COMMANDS_CACHE is None:
+        from anteroom.cli.commands import get_builtin_names
+
+        _BUILTIN_COMMANDS_CACHE = get_builtin_names()
+    return _BUILTIN_COMMANDS_CACHE
+
 
 # Regex to match fenced code blocks (``` ... ```)
 _CODE_FENCE_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
@@ -143,7 +119,7 @@ def _validate_skill_name(raw_name: str, stem: str) -> tuple[str, str | None]:
         name = stem
     if not _VALID_SKILL_NAME.match(name):
         return "", f"Skipped {stem}: invalid skill name '{name}' (must match [a-z0-9][a-z0-9_-]*)"
-    if name in _BUILTIN_COMMANDS:
+    if name in _get_builtin_commands():
         return "", f"Skipped {stem}: skill name '{name}' conflicts with built-in /{name} command"
     return name, None
 

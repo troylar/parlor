@@ -341,7 +341,8 @@ class TestPackUpdateRepl:
 
 class TestPackCommandRegistration:
     def test_pack_in_builtin_commands(self) -> None:
-        from anteroom.cli.skills import _BUILTIN_COMMANDS
+        from anteroom.cli.skills import _get_builtin_commands
 
-        assert "pack" in _BUILTIN_COMMANDS
-        assert "packs" in _BUILTIN_COMMANDS
+        builtins = _get_builtin_commands()
+        assert "pack" in builtins
+        assert "packs" in builtins
