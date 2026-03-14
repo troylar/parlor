@@ -5,6 +5,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
+import yaml
+
 from anteroom.cli.skills import (
     _BUILTIN_COMMANDS,
     MAX_PROMPT_SIZE,
@@ -14,6 +17,7 @@ from anteroom.cli.skills import (
     _expand_args,
     _load_skills_from_dir,
     _validate_skill_name,
+    _yaml_error_hint,
     load_skills,
 )
 
@@ -862,3 +866,68 @@ class TestAHelpSizeBudget:
         assert path.exists(), f"a-help.yaml not found at {path}"
         size = path.stat().st_size
         assert size < 15_000, f"a-help.yaml is {size} bytes, budget is 15,000 bytes"
+
+
+class TestContentInsteadOfPrompt:
+    """Regression: skills with 'content:' instead of 'prompt:' get actionable warning."""
+
+    def test_skip_content_instead_of_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "bad.yaml").write_text("name: bad\ndescription: Uses wrong field\ncontent: Do something\n")
+            result = _load_skills_from_dir(skills_dir, "project")
+            assert len(result.skills) == 0
+            assert any("rename 'content' to 'prompt'" in w for w in result.warnings)
+
+    def test_content_empty_still_triggers_specific_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "bad.yaml").write_text("name: bad\ncontent: ''\n")
+            result = _load_skills_from_dir(skills_dir, "project")
+            assert len(result.skills) == 0
+            assert any("rename 'content' to 'prompt'" in w for w in result.warnings)
+
+    def test_no_content_no_prompt_generic_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "bad.yaml").write_text("name: bad\ndescription: No prompt at all\n")
+            result = _load_skills_from_dir(skills_dir, "project")
+            assert len(result.skills) == 0
+            assert any("missing 'prompt' field" in w for w in result.warnings)
+            assert not any("rename 'content'" in w for w in result.warnings)
+
+
+class TestBackslashEscapeHandling:
+    """Regression: backslash sequences in YAML and loader hints."""
+
+    def test_backslash_in_block_scalar_loads(self) -> None:
+        """Block scalar prompt: | handles backslash sequences like \\s+ correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "regex.yaml").write_text(
+                "name: regex\ndescription: Regex skill\nprompt: |\n  Use regex \\s+ to split\n"
+            )
+            result = _load_skills_from_dir(skills_dir, "project")
+            assert len(result.skills) == 1
+            assert "\\s+" in result.skills[0].prompt
+
+    def test_yaml_error_hint_unknown_escape(self) -> None:
+        """_yaml_error_hint returns backslash hint for unknown escape character errors."""
+        try:
+            yaml.safe_load('prompt: "Use \\s+ regex"')
+        except yaml.YAMLError as e:
+            hint = _yaml_error_hint(e)
+            assert "backslash" in hint.lower()
+            assert "block scalar" in hint.lower()
+        else:
+            pytest.skip("YAML parser did not raise for \\s escape")
+
+    def test_backslash_in_double_quoted_fails_with_hint(self) -> None:
+        """YAML with double-quoted backslash produces a warning with the backslash hint."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skills_dir = Path(tmpdir)
+            (skills_dir / "bad.yaml").write_text('name: bad\nprompt: "Use regex \\s+ to split"\n')
+            result = _load_skills_from_dir(skills_dir, "project")
+            assert len(result.skills) == 0
+            assert len(result.warnings) >= 1
+            assert any("backslash" in w.lower() for w in result.warnings)

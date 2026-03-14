@@ -110,6 +110,12 @@ def _yaml_error_hint(error: yaml.YAMLError) -> str:
             "Hint: '{args}' is interpreted as YAML flow mapping. "
             "Use block scalar 'prompt: |' for prompts containing curly braces"
         )
+    if "found unknown escape character" in msg:
+        return (
+            "Hint: YAML double-quoted strings treat backslashes as escape sequences. "
+            "Use block scalar 'prompt: |' instead of double quotes for prompts "
+            "containing regex or backslash characters"
+        )
     return ""
 
 
@@ -172,7 +178,13 @@ def _load_skills_from_dir(skills_dir: Path, source: str) -> _LoadResult:
                 result.warnings.append(f"Skipped {path.name}: 'prompt' must be a string, got {type(prompt).__name__}")
                 continue
             if not prompt.strip():
-                result.warnings.append(f"Skipped {path.name}: missing 'prompt' field")
+                if "content" in data:
+                    result.warnings.append(
+                        f"Skipped {path.name}: uses 'content' field — "
+                        f"local CLI skills require 'prompt' (rename 'content' to 'prompt')"
+                    )
+                else:
+                    result.warnings.append(f"Skipped {path.name}: missing 'prompt' field")
                 continue
             if len(prompt) > MAX_PROMPT_SIZE:
                 result.warnings.append(

@@ -20,6 +20,11 @@ prompt: |
   - **name**: lowercase alphanumeric with hyphens/underscores only (`[a-z0-9][a-z0-9_-]*`)
   - **description**: concise, shown in `/skills` list. Keep under 80 characters
   - **prompt**: use YAML block scalar `|` for multi-line. This is required
+  - **Do NOT use `content:` for the prompt field** — local CLI skills require `prompt:`.
+    The `content:` field is only used by pack artifacts and will cause a "missing 'prompt' field" error.
+  - **Backslash safety**: YAML double-quoted strings treat backslashes as escape characters
+    (`\s` → error, `\d` → error). ALWAYS use the block scalar `prompt: |` for prompts
+    containing regex, backslash sequences, colons, or curly braces.
   - Use `{args}` as a placeholder where user arguments should be inserted inline
   - If `{args}` is absent, arguments are appended as `Additional context: <args>`
 
@@ -72,7 +77,11 @@ prompt: |
      - Project-specific: `.anteroom/skills/` or `.claude/skills/`
      - Global (all projects): `~/.anteroom/skills/`
   6. Write the YAML file to disk. IMPORTANT: use `.yaml` extension (not `.yml`)
-  7. After writing, read the file back and parse it as YAML to confirm it is valid
+  7. After writing, read the file back and parse it as YAML. Confirm:
+     (a) it is valid YAML (no parse errors),
+     (b) the top-level mapping contains a `prompt` key (not `content`), and
+     (c) the `prompt` value is a non-empty string.
+     If any check fails, fix the file and re-validate.
   8. Tell the user to run `/skills` to see it in the list (shows searched directories)
   9. Mention: "Skills are one of 7 artifact types in Anteroom (alongside rules,
      instructions, context, memory, MCP servers, and config overlays). To share
