@@ -277,7 +277,6 @@ SUBCOMMAND_COMPLETIONS: dict[str, list[str]] = {
         "sources",
         "link-source",
         "unlink-source",
-        "delete",
     ],
     "config": ["list", "get", "set", "reset"],
     "mcp": ["status", "connect", "disconnect", "reconnect"],
@@ -762,7 +761,7 @@ def _dispatch_space(parsed: ParsedSlashCommand, context: CommandContext) -> Comm
         command=parsed,
         message=(
             "Usage: `/space [list|show|switch|select|use|create|init|load|refresh|"
-            "clear|clone|map|edit|export|sources|link-source|unlink-source|delete]`"
+            "clear|clone|map|edit|export|sources|link-source|unlink-source]`"
         ),
     )
 

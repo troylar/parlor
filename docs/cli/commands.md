@@ -26,7 +26,7 @@ All slash commands available in the CLI REPL.
 | `/space list` | List all spaces |
 | `/space create <name>` | Create a new space |
 | `/space init` | Initialize a space from the current directory |
-| `/space load <path\|url>` | Load a space from a file or URL |
+| `/space load <path>` | Load a space from a local YAML file |
 | `/space switch <name\|id>` | Set active space (aliases: `select`, `use`) |
 | `/space show [name\|id]` | Show space details |
 | `/space edit <field> <value>` | Edit space instructions, model, or name |

@@ -1053,7 +1053,6 @@ class TestMetadataConsistency:
             "sources",
             "link-source",
             "unlink-source",
-            "delete",
         }
         actual = set(SUBCOMMAND_COMPLETIONS["space"])
         assert actual == expected, f"Missing: {expected - actual}, Extra: {actual - expected}"
