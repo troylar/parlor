@@ -14,6 +14,19 @@ import pytest
 
 _PYTHON = sys.executable
 
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Use an isolated HOME so workflow runs don't pollute the user's DB."""
+    anteroom_dir = tmp_path / ".anteroom"
+    anteroom_dir.mkdir()
+    config_file = anteroom_dir / "config.yaml"
+    config_file.write_text(
+        'ai:\n  base_url: "http://localhost:1/v1"\n  api_key: "test"\n  model: "test"\n'
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    yield
+
 # A generic test workflow (shell-only, no AI needed, no GitHub concepts)
 # Uses no required inputs so it can be run via `aroom workflow run <path>`
 # without needing --issue or other flags.
