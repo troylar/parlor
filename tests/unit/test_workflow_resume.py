@@ -90,8 +90,11 @@ def _register_test_gates():
 class TestStaleRunDetection:
     def test_find_stale_runs_with_old_heartbeat(self, db: Any) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         old_time = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
         update_workflow_run(db, run["id"], status="running", heartbeat_at=old_time)
@@ -102,8 +105,11 @@ class TestStaleRunDetection:
 
     def test_find_stale_runs_ignores_fresh(self, db: Any) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         fresh_time = datetime.now(timezone.utc).isoformat()
         update_workflow_run(db, run["id"], status="running", heartbeat_at=fresh_time)
@@ -114,8 +120,11 @@ class TestStaleRunDetection:
     def test_find_stale_runs_null_heartbeat(self, db: Any) -> None:
         """Null heartbeat_at is treated as stale."""
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         update_workflow_run(db, run["id"], status="running")
 
@@ -124,8 +133,11 @@ class TestStaleRunDetection:
 
     def test_find_stale_runs_ignores_non_running(self, db: Any) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         update_workflow_run(db, run["id"], status="paused")
 
@@ -136,11 +148,17 @@ class TestStaleRunDetection:
 class TestFindRunningSteps:
     def test_finds_running_steps(self, db: Any) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         step = create_workflow_step(
-            db, run_id=run["id"], step_id="s1", step_type="runner",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            step_type="runner",
         )
         update_workflow_step(db, step["id"], status="running")
         running = find_running_steps(db, run["id"])
@@ -149,11 +167,17 @@ class TestFindRunningSteps:
 
     def test_ignores_completed_steps(self, db: Any) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         step = create_workflow_step(
-            db, run_id=run["id"], step_id="s1", step_type="runner",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            step_type="runner",
         )
         update_workflow_step(db, step["id"], status="completed")
         running = find_running_steps(db, run["id"])
@@ -163,8 +187,11 @@ class TestFindRunningSteps:
 class TestListCompletedStepIds:
     def test_returns_completed_ids(self, db: Any) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         s1 = create_workflow_step(db, run_id=run["id"], step_id="s1", step_type="runner")
         s2 = create_workflow_step(db, run_id=run["id"], step_id="s2", step_type="runner")
@@ -184,8 +211,11 @@ class TestRecoverInterruptedRuns:
     @pytest.mark.asyncio
     async def test_marks_stale_runs_paused(self, db: Any, engine: WorkflowEngine) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         old_time = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
         update_workflow_run(db, run["id"], status="running", heartbeat_at=old_time)
@@ -201,8 +231,11 @@ class TestRecoverInterruptedRuns:
     @pytest.mark.asyncio
     async def test_releases_locks(self, db: Any, engine: WorkflowEngine) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         old_time = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
         update_workflow_run(db, run["id"], status="running", heartbeat_at=old_time)
@@ -214,13 +247,19 @@ class TestRecoverInterruptedRuns:
     @pytest.mark.asyncio
     async def test_marks_running_steps_interrupted(self, db: Any, engine: WorkflowEngine) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         old_time = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
         update_workflow_run(db, run["id"], status="running", heartbeat_at=old_time)
         step = create_workflow_step(
-            db, run_id=run["id"], step_id="active_step", step_type="runner",
+            db,
+            run_id=run["id"],
+            step_id="active_step",
+            step_type="runner",
         )
         update_workflow_step(db, step["id"], status="running")
 
@@ -234,13 +273,19 @@ class TestRecoverInterruptedRuns:
     @pytest.mark.asyncio
     async def test_emits_event_with_interrupted_steps(self, db: Any, engine: WorkflowEngine) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         old_time = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
         update_workflow_run(db, run["id"], status="running", heartbeat_at=old_time)
         step = create_workflow_step(
-            db, run_id=run["id"], step_id="active_step", step_type="runner",
+            db,
+            run_id=run["id"],
+            step_id="active_step",
+            step_type="runner",
         )
         update_workflow_step(db, step["id"], status="running")
 
@@ -327,8 +372,11 @@ class TestResumeRun:
 class TestCancel:
     def test_cancel_paused_run(self, db: Any) -> None:
         run = create_workflow_run(
-            db, workflow_id="test", workflow_version="0.1.0",
-            target_kind="task", target_ref="t1",
+            db,
+            workflow_id="test",
+            workflow_version="0.1.0",
+            target_kind="task",
+            target_ref="t1",
         )
         update_workflow_run(db, run["id"], status="paused")
         acquire_lock(db, target_kind="task", target_ref="t1", run_id=run["id"])
@@ -337,7 +385,9 @@ class TestCancel:
         update_workflow_run(db, run["id"], status="cancelled")
         release_lock(db, run_id=run["id"])
         create_workflow_event(
-            db, run_id=run["id"], event_type="run_cancelled",
+            db,
+            run_id=run["id"],
+            event_type="run_cancelled",
             payload={"cancelled_from_status": "paused"},
         )
 

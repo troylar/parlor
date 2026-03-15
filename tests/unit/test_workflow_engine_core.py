@@ -120,6 +120,7 @@ def engine(db: Any) -> WorkflowEngine:
 @pytest.fixture(autouse=True)
 def _register_test_gates():
     """Register generic test gate conditions."""
+
     async def always_pass(run: Any, step: Any, inputs: Any) -> bool:
         return True
 
@@ -152,8 +153,7 @@ class TestLoadDefinition:
 
     def test_missing_kind_raises(self) -> None:
         yaml_str = (
-            "id: test\nversion: 0.1.0\nsteps:\n"
-            "  - id: s1\n    type: runner\n    runner: shell\n    command: echo"
+            "id: test\nversion: 0.1.0\nsteps:\n  - id: s1\n    type: runner\n    runner: shell\n    command: echo"
         )
         with pytest.raises(ValueError, match="kind: workflow"):
             load_definition(yaml_str)
@@ -240,8 +240,7 @@ class TestApprovalModeValidation:
 
     def test_more_permissive_raises(self) -> None:
         extra = (
-            "steps:\n  - id: lax_step\n    type: runner\n"
-            "    runner: shell\n    command: echo\n    approval_mode: auto"
+            "steps:\n  - id: lax_step\n    type: runner\n    runner: shell\n    command: echo\n    approval_mode: auto"
         )
         yaml_str = GENERIC_WORKFLOW.replace("steps:", extra)
         defn = load_definition(yaml_str)
@@ -266,7 +265,10 @@ class TestEngineExecution:
         """Engine executes a generic pipeline workflow with no domain-specific concepts."""
         defn = load_definition(GENERIC_WORKFLOW)
         run = await engine.start_run(
-            defn, target_kind="dataset", target_ref="sales_q4", inputs={"target_name": "sales_q4"},
+            defn,
+            target_kind="dataset",
+            target_ref="sales_q4",
+            inputs={"target_name": "sales_q4"},
         )
         assert run["status"] == "completed"
         steps = list_workflow_steps(db, run["id"])
@@ -299,8 +301,11 @@ class TestEngineExecution:
 
         # Create a real run record so the FK constraint is satisfied
         blocker = create_workflow_run(
-            db, workflow_id="blocker", workflow_version="0.1.0",
-            target_kind="doc", target_ref="d1",
+            db,
+            workflow_id="blocker",
+            workflow_version="0.1.0",
+            target_kind="doc",
+            target_ref="d1",
         )
         acquire_lock(db, target_kind="doc", target_ref="d1", run_id=blocker["id"])
 
@@ -322,7 +327,10 @@ class TestEngineExecution:
         """Engine emits durable events for each state transition."""
         defn = load_definition(GENERIC_WORKFLOW)
         run = await engine.start_run(
-            defn, target_kind="task", target_ref="t1", inputs={"target_name": "test"},
+            defn,
+            target_kind="task",
+            target_ref="t1",
+            inputs={"target_name": "test"},
         )
         events = list_workflow_events(db, run["id"])
         event_types = [e["event_type"] for e in events]
@@ -336,7 +344,10 @@ class TestEngineExecution:
         """Step results are persisted in storage."""
         defn = load_definition(GENERIC_WORKFLOW)
         run = await engine.start_run(
-            defn, target_kind="task", target_ref="t1", inputs={"target_name": "test"},
+            defn,
+            target_kind="task",
+            target_ref="t1",
+            inputs={"target_name": "test"},
         )
         steps = list_workflow_steps(db, run["id"])
         for step in steps:
@@ -351,7 +362,10 @@ class TestEngineExecution:
 
         defn = load_definition(GENERIC_WORKFLOW)
         await engine.start_run(
-            defn, target_kind="task", target_ref="t1", inputs={"target_name": "test"},
+            defn,
+            target_kind="task",
+            target_ref="t1",
+            inputs={"target_name": "test"},
         )
         assert get_lock(db, target_kind="task", target_ref="t1") is None
 
@@ -363,6 +377,60 @@ class TestEngineExecution:
         defn = load_definition(GATE_FAIL_WORKFLOW)
         await engine.start_run(defn, target_kind="task", target_ref="t1")
         assert get_lock(db, target_kind="task", target_ref="t1") is None
+
+
+FAILING_WORKFLOW = """\
+kind: workflow
+id: test_fail
+version: 0.1.0
+inputs: {}
+steps:
+  - id: will_fail
+    type: runner
+    runner: shell
+    command: "exit 7"
+    timeout: 10
+"""
+
+
+class TestRunnerFailurePropagation:
+    """Failed runner results must fail the workflow, not silently continue."""
+
+    @pytest.mark.asyncio
+    async def test_failed_runner_fails_workflow(self, db: Any, engine: WorkflowEngine) -> None:
+        """A shell step that exits non-zero must fail the entire run."""
+        defn = load_definition(FAILING_WORKFLOW)
+        run = await engine.start_run(defn, target_kind="task", target_ref="t1")
+        assert run["status"] == "failed"
+        assert "step_failed:will_fail" in (run.get("stop_reason") or "")
+
+    @pytest.mark.asyncio
+    async def test_failed_step_stops_subsequent_steps(self, db: Any, engine: WorkflowEngine) -> None:
+        """Steps after a failed step should not execute."""
+        yaml_str = """\
+kind: workflow
+id: test_fail_stops
+version: 0.1.0
+inputs: {}
+steps:
+  - id: fail_step
+    type: runner
+    runner: shell
+    command: "exit 1"
+    timeout: 10
+  - id: should_not_run
+    type: runner
+    runner: shell
+    command: "echo should not reach here"
+    timeout: 10
+"""
+        defn = load_definition(yaml_str)
+        run = await engine.start_run(defn, target_kind="task", target_ref="t1")
+        assert run["status"] == "failed"
+        steps = list_workflow_steps(db, run["id"])
+        step_ids = [s["step_id"] for s in steps]
+        assert "fail_step" in step_ids
+        assert "should_not_run" not in step_ids
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +446,9 @@ class TestDomainNeutrality:
         """target_kind can be anything — not just 'issue'."""
         defn = load_definition(GENERIC_WORKFLOW)
         run = await engine.start_run(
-            defn, target_kind="document", target_ref="quarterly_report",
+            defn,
+            target_kind="document",
+            target_ref="quarterly_report",
             inputs={"target_name": "quarterly_report"},
         )
         assert run["status"] == "completed"
@@ -411,7 +481,9 @@ steps:
 """
         defn = load_definition(yaml_str)
         run = await engine.start_run(
-            defn, target_kind="dataset", target_ref="sales_2026",
+            defn,
+            target_kind="dataset",
+            target_ref="sales_2026",
             inputs={"dataset": "sales_2026"},
         )
         assert run["status"] == "completed"
@@ -448,7 +520,10 @@ class TestApprovalModeEnforcement:
         config = WorkflowConfig()
         registry = create_default_registry()
         engine = WorkflowEngine(
-            db, config, registry, effective_approval_mode="ask_for_writes",
+            db,
+            config,
+            registry,
+            effective_approval_mode="ask_for_writes",
         )
         defn = load_definition(PERMISSIVE_WORKFLOW)
         with pytest.raises(ValueError, match="more permissive"):
@@ -472,7 +547,10 @@ steps:
         config = WorkflowConfig()
         registry = create_default_registry()
         engine = WorkflowEngine(
-            db, config, registry, effective_approval_mode="ask_for_writes",
+            db,
+            config,
+            registry,
+            effective_approval_mode="ask_for_writes",
         )
         defn = load_definition(yaml_str)
         with pytest.raises(ValueError, match="more permissive"):
@@ -505,9 +583,7 @@ class TestLoopStepPersistence:
         run = await engine.start_run(defn, target_kind="batch", target_ref="b1")
 
         events = list_workflow_events(db, run["id"])
-        nested_events = [
-            e for e in events if e.get("step_id") and "_r" in e["step_id"]
-        ]
+        nested_events = [e for e in events if e.get("step_id") and "_r" in e["step_id"]]
         # at least 2 starts + 2 finishes for round 1
         assert len(nested_events) >= 4
 

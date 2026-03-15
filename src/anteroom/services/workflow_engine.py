@@ -378,8 +378,11 @@ class WorkflowEngine:
         from . import workflow_storage as ws
 
         ws.create_workflow_event(
-            self._db, run_id=run_id, event_type=event_type,
-            step_id=step_id, payload=payload,
+            self._db,
+            run_id=run_id,
+            event_type=event_type,
+            step_id=step_id,
+            payload=payload,
         )
         await self._publish_event(run_id, event_type, payload, definition=definition)
 
@@ -491,7 +494,8 @@ class WorkflowEngine:
         )
 
         await self._emit_event(
-            run_id=run["id"], event_type="run_started",
+            run_id=run["id"],
+            event_type="run_started",
             payload={"workflow_id": definition.id, "target": f"{target_kind}:{target_ref}"},
             definition=definition,
         )
@@ -506,7 +510,8 @@ class WorkflowEngine:
             logger.exception("Workflow run %s failed with exception", run["id"])
             run = ws.update_workflow_run(self._db, run["id"], status="failed", stop_reason="unhandled_exception")
             await self._emit_event(
-                run_id=run["id"], event_type="run_failed",
+                run_id=run["id"],
+                event_type="run_failed",
                 payload={"reason": "exception"},
             )
         finally:
@@ -544,13 +549,15 @@ class WorkflowEngine:
             running_steps = ws.find_running_steps(self._db, run["id"])
             for step in running_steps:
                 ws.update_workflow_step(
-                    self._db, step["id"],
+                    self._db,
+                    step["id"],
                     status="interrupted",
                     completed_at=datetime.now(timezone.utc).isoformat(),
                 )
 
             ws.update_workflow_run(
-                self._db, run["id"],
+                self._db,
+                run["id"],
                 status="paused",
                 stop_reason="process_interrupted",
             )
@@ -596,9 +603,7 @@ class WorkflowEngine:
             target_ref=run["target_ref"],
             run_id=run_id,
         ):
-            raise RuntimeError(
-                f"Target {run['target_kind']}:{run['target_ref']} is still locked"
-            )
+            raise RuntimeError(f"Target {run['target_kind']}:{run['target_ref']} is still locked")
 
         # Rebuild completed step set
         completed = ws.list_completed_step_ids(self._db, run_id)
@@ -620,20 +625,28 @@ class WorkflowEngine:
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(run_id))
 
         await self._emit_event(
-            run_id=run_id, event_type="run_resumed",
+            run_id=run_id,
+            event_type="run_resumed",
             payload={"skip_completed": list(completed)},
         )
 
         try:
             inputs = run.get("inputs") or {}
             run = await self._execute_steps(
-                run, definition.steps, inputs, definition,
-                skip_completed=completed, step_results=step_results,
+                run,
+                definition.steps,
+                inputs,
+                definition,
+                skip_completed=completed,
+                step_results=step_results,
             )
         except Exception:
             logger.exception("Resumed workflow run %s failed with exception", run_id)
             run = ws.update_workflow_run(
-                self._db, run_id, status="failed", stop_reason="unhandled_exception",
+                self._db,
+                run_id,
+                status="failed",
+                stop_reason="unhandled_exception",
             )
         finally:
             heartbeat_task.cancel()
@@ -692,13 +705,16 @@ class WorkflowEngine:
 
             ws.update_workflow_run(self._db, run["id"], current_step_id=step_def.id)
             await self._emit_event(
-                run_id=run["id"], event_type="step_started",
-                step_id=step_def.id, payload={"step_type": step_def.type},
+                run_id=run["id"],
+                event_type="step_started",
+                step_id=step_def.id,
+                payload={"step_type": step_def.type},
             )
 
             start_time = time.monotonic()
             ws.update_workflow_step(
-                self._db, step_record["id"],
+                self._db,
+                step_record["id"],
                 status="running",
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
@@ -715,7 +731,8 @@ class WorkflowEngine:
             except Exception as exc:
                 duration_ms = int((time.monotonic() - start_time) * 1000)
                 ws.update_workflow_step(
-                    self._db, step_record["id"],
+                    self._db,
+                    step_record["id"],
                     status="failed",
                     result_status="failed",
                     result_summary=str(exc),
@@ -723,11 +740,14 @@ class WorkflowEngine:
                     completed_at=datetime.now(timezone.utc).isoformat(),
                 )
                 await self._emit_event(
-                    run_id=run["id"], event_type="step_failed",
-                    step_id=step_def.id, payload={"error": str(exc)},
+                    run_id=run["id"],
+                    event_type="step_failed",
+                    step_id=step_def.id,
+                    payload={"error": str(exc)},
                 )
                 run = ws.update_workflow_run(
-                    self._db, run["id"],
+                    self._db,
+                    run["id"],
                     status="failed",
                     stop_reason=f"step_failed:{step_def.id}",
                     completed_at=datetime.now(timezone.utc).isoformat(),
@@ -738,7 +758,8 @@ class WorkflowEngine:
 
             if result.status == "blocked":
                 ws.update_workflow_step(
-                    self._db, step_record["id"],
+                    self._db,
+                    step_record["id"],
                     status="completed",
                     result_status="blocked",
                     result_summary=result.summary,
@@ -747,19 +768,50 @@ class WorkflowEngine:
                     completed_at=datetime.now(timezone.utc).isoformat(),
                 )
                 await self._emit_event(
-                    run_id=run["id"], event_type="step_finished",
-                    step_id=step_def.id, payload={"result_status": "blocked"},
+                    run_id=run["id"],
+                    event_type="step_finished",
+                    step_id=step_def.id,
+                    payload={"result_status": "blocked"},
                 )
                 run = ws.update_workflow_run(
-                    self._db, run["id"],
+                    self._db,
+                    run["id"],
                     status="blocked",
                     stop_reason=result.summary or f"blocked_at:{step_def.id}",
                     completed_at=datetime.now(timezone.utc).isoformat(),
                 )
                 return run
 
+            if result.status == "failed":
+                ws.update_workflow_step(
+                    self._db,
+                    step_record["id"],
+                    status="failed",
+                    result_status="failed",
+                    result_summary=result.summary,
+                    result_artifacts=result.artifacts,
+                    result_findings=result.findings,
+                    duration_ms=duration_ms,
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                )
+                await self._emit_event(
+                    run_id=run["id"],
+                    event_type="step_failed",
+                    step_id=step_def.id,
+                    payload={"result_status": "failed", "summary": result.summary},
+                )
+                run = ws.update_workflow_run(
+                    self._db,
+                    run["id"],
+                    status="failed",
+                    stop_reason=f"step_failed:{step_def.id}",
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                )
+                return run
+
             ws.update_workflow_step(
-                self._db, step_record["id"],
+                self._db,
+                step_record["id"],
                 status="completed",
                 result_status=result.status,
                 result_summary=result.summary,
@@ -770,8 +822,10 @@ class WorkflowEngine:
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
             await self._emit_event(
-                run_id=run["id"], event_type="step_finished",
-                step_id=step_def.id, payload={"result_status": result.status, "duration_ms": duration_ms},
+                run_id=run["id"],
+                event_type="step_finished",
+                step_id=step_def.id,
+                payload={"result_status": result.status, "duration_ms": duration_ms},
             )
 
             step_results[step_def.id] = {
@@ -782,18 +836,21 @@ class WorkflowEngine:
             }
 
             run = ws.update_workflow_run(
-                self._db, run["id"],
+                self._db,
+                run["id"],
                 attempt_count=run.get("attempt_count", 0) + 1,
             )
 
         # All steps completed
         run = ws.update_workflow_run(
-            self._db, run["id"],
+            self._db,
+            run["id"],
             status="completed",
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
         await self._emit_event(
-            run_id=run["id"], event_type="run_completed",
+            run_id=run["id"],
+            event_type="run_completed",
             payload={"total_steps": len(steps)},
         )
         return run
@@ -916,12 +973,14 @@ class WorkflowEngine:
                     runner_type=nested_step.runner,
                 )
                 await self._emit_event(
-                    run_id=run["id"], event_type="step_started",
+                    run_id=run["id"],
+                    event_type="step_started",
                     step_id=nested_step_id,
                     payload={"step_type": nested_step.type, "loop": step_def.id, "round": round_num},
                 )
                 ws.update_workflow_step(
-                    self._db, nested_record["id"],
+                    self._db,
+                    nested_record["id"],
                     status="running",
                     started_at=datetime.now(timezone.utc).isoformat(),
                 )
@@ -937,21 +996,27 @@ class WorkflowEngine:
                 except Exception as exc:
                     nested_dur = int((time.monotonic() - nested_start) * 1000)
                     ws.update_workflow_step(
-                        self._db, nested_record["id"],
-                        status="failed", result_status="failed",
-                        result_summary=str(exc), duration_ms=nested_dur,
+                        self._db,
+                        nested_record["id"],
+                        status="failed",
+                        result_status="failed",
+                        result_summary=str(exc),
+                        duration_ms=nested_dur,
                         completed_at=datetime.now(timezone.utc).isoformat(),
                     )
                     await self._emit_event(
-                        run_id=run["id"], event_type="step_failed",
-                        step_id=nested_step_id, payload={"error": str(exc)},
+                        run_id=run["id"],
+                        event_type="step_failed",
+                        step_id=nested_step_id,
+                        payload={"error": str(exc)},
                     )
                     return RunnerResult(status="failed", summary=f"Loop step {nested_step.id} failed: {exc}")
 
                 # Persist nested step result
                 nested_dur = int((time.monotonic() - nested_start) * 1000)
                 ws.update_workflow_step(
-                    self._db, nested_record["id"],
+                    self._db,
+                    nested_record["id"],
                     status="completed",
                     result_status=result.status,
                     result_summary=result.summary,
@@ -961,7 +1026,8 @@ class WorkflowEngine:
                     completed_at=datetime.now(timezone.utc).isoformat(),
                 )
                 await self._emit_event(
-                    run_id=run["id"], event_type="step_finished",
+                    run_id=run["id"],
+                    event_type="step_finished",
                     step_id=nested_step_id,
                     payload={"result_status": result.status, "duration_ms": nested_dur},
                 )

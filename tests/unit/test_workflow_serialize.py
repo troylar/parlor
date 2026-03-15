@@ -14,14 +14,18 @@ from anteroom.services.ai_service import AIService
 
 def _make_ai_service() -> AIService:
     service = AIService.__new__(AIService)
-    service.config = type("C", (), {
-        "base_url": "http://localhost/v1",
-        "api_key": "test",
-        "model": "gpt-4",
-        "request_timeout": 120,
-        "verify_ssl": True,
-        "max_output_tokens": 4096,
-    })()
+    service.config = type(
+        "C",
+        (),
+        {
+            "base_url": "http://localhost/v1",
+            "api_key": "test",
+            "model": "gpt-4",
+            "request_timeout": 120,
+            "verify_ssl": True,
+            "max_output_tokens": 4096,
+        },
+    )()
     service._token_provider = None
     service.client = AsyncMock()
     return service
@@ -86,19 +90,23 @@ class TestSerializedMode:
             execution_order.append(name)
             return {"result": f"{name} done"}
 
-        ai = _mock_ai_with_tool_calls([
-            {"id": "tc1", "name": "tool_a"},
-            {"id": "tc2", "name": "tool_b"},
-            {"id": "tc3", "name": "tool_c"},
-        ])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=ordered_executor,
-            tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
-            serialize_tools=True,
-            max_iterations=2,
-        ))
+        ai = _mock_ai_with_tool_calls(
+            [
+                {"id": "tc1", "name": "tool_a"},
+                {"id": "tc2", "name": "tool_b"},
+                {"id": "tc3", "name": "tool_c"},
+            ]
+        )
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=ordered_executor,
+                tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
+                serialize_tools=True,
+                max_iterations=2,
+            )
+        )
         assert execution_order == ["tool_a", "tool_b", "tool_c"]
         end_events = [e for e in events if e.kind == "tool_call_end"]
         assert [e.data["tool_name"] for e in end_events] == ["tool_a", "tool_b", "tool_c"]
@@ -107,13 +115,15 @@ class TestSerializedMode:
     async def test_default_mode_unchanged(self) -> None:
         """Default (serialize_tools=False) still works — no regression."""
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "tool_a"}])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=_make_tool_executor(),
-            tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
-            max_iterations=2,
-        ))
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=_make_tool_executor(),
+                tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
+                max_iterations=2,
+            )
+        )
         end_events = [e for e in events if e.kind == "tool_call_end"]
         assert len(end_events) == 1
         assert end_events[0].data["tool_name"] == "tool_a"
@@ -123,14 +133,16 @@ class TestSerializedMode:
         """Serialized mode appends tool results to messages like parallel mode."""
         messages: list[dict[str, Any]] = [{"role": "user", "content": "test"}]
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "tool_a"}])
-        await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=messages,
-            tool_executor=_make_tool_executor(),
-            tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
-            serialize_tools=True,
-            max_iterations=2,
-        ))
+        await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=messages,
+                tool_executor=_make_tool_executor(),
+                tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
+                serialize_tools=True,
+                max_iterations=2,
+            )
+        )
         tool_msgs = [m for m in messages if m.get("role") == "tool"]
         assert len(tool_msgs) == 1
         assert tool_msgs[0]["tool_call_id"] == "tc1"
@@ -152,15 +164,17 @@ class TestPauseSignal:
             return {"error": "Operation denied by user", "_approval_decision": "denied"}
 
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "write_file", "args": {"path": "/x"}}])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=pausing_executor,
-            tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
-            serialize_tools=True,
-            pause_signal=pause,
-            max_iterations=2,
-        ))
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=pausing_executor,
+                tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
+                serialize_tools=True,
+                pause_signal=pause,
+                max_iterations=2,
+            )
+        )
         pause_events = [e for e in events if e.kind == "workflow_pause"]
         assert len(pause_events) == 1
         assert pause_events[0].data["tool_name"] == "write_file"
@@ -177,15 +191,17 @@ class TestPauseSignal:
             return {"error": "denied", "_approval_decision": "denied"}
 
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "write_file"}])
-        await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=messages,
-            tool_executor=pausing_executor,
-            tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
-            serialize_tools=True,
-            pause_signal=pause,
-            max_iterations=2,
-        ))
+        await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=messages,
+                tool_executor=pausing_executor,
+                tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
+                serialize_tools=True,
+                pause_signal=pause,
+                max_iterations=2,
+            )
+        )
         tool_msgs = [m for m in messages if m.get("role") == "tool"]
         assert len(tool_msgs) == 0
 
@@ -200,15 +216,17 @@ class TestPauseSignal:
             return {"error": "denied"}
 
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "write_file"}])
-        await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=messages,
-            tool_executor=pausing_executor,
-            tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
-            serialize_tools=True,
-            pause_signal=pause,
-            max_iterations=2,
-        ))
+        await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=messages,
+                tool_executor=pausing_executor,
+                tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
+                serialize_tools=True,
+                pause_signal=pause,
+                max_iterations=2,
+            )
+        )
         assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
         assert len(assistant_msgs) == 1
 
@@ -225,20 +243,24 @@ class TestPauseSignal:
                 return {"error": "denied"}
             return {"result": "ok"}
 
-        ai = _mock_ai_with_tool_calls([
-            {"id": "tc1", "name": "tool_a"},
-            {"id": "tc2", "name": "tool_b"},
-            {"id": "tc3", "name": "tool_c"},
-        ])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=tracking_executor,
-            tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
-            serialize_tools=True,
-            pause_signal=pause,
-            max_iterations=2,
-        ))
+        ai = _mock_ai_with_tool_calls(
+            [
+                {"id": "tc1", "name": "tool_a"},
+                {"id": "tc2", "name": "tool_b"},
+                {"id": "tc3", "name": "tool_c"},
+            ]
+        )
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=tracking_executor,
+                tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
+                serialize_tools=True,
+                pause_signal=pause,
+                max_iterations=2,
+            )
+        )
         assert executed == ["tool_a"]
         assert any(e.kind == "workflow_pause" for e in events)
         assert not any(e.kind == "tool_call_end" and e.data["tool_name"] == "tool_b" for e in events)
@@ -246,18 +268,22 @@ class TestPauseSignal:
     @pytest.mark.asyncio
     async def test_no_pause_signal_full_execution(self) -> None:
         """serialize_tools=True with no pause_signal runs all tools."""
-        ai = _mock_ai_with_tool_calls([
-            {"id": "tc1", "name": "tool_a"},
-            {"id": "tc2", "name": "tool_b"},
-        ])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=_make_tool_executor(),
-            tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
-            serialize_tools=True,
-            max_iterations=2,
-        ))
+        ai = _mock_ai_with_tool_calls(
+            [
+                {"id": "tc1", "name": "tool_a"},
+                {"id": "tc2", "name": "tool_b"},
+            ]
+        )
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=_make_tool_executor(),
+                tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
+                serialize_tools=True,
+                max_iterations=2,
+            )
+        )
         end_events = [e for e in events if e.kind == "tool_call_end"]
         assert len(end_events) == 2
         assert not any(e.kind == "workflow_pause" for e in events)
@@ -269,15 +295,17 @@ class TestPauseSignal:
         pause.set()
 
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "tool_a"}])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=_make_tool_executor(),
-            tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
-            serialize_tools=False,
-            pause_signal=pause,
-            max_iterations=2,
-        ))
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=_make_tool_executor(),
+                tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
+                serialize_tools=False,
+                pause_signal=pause,
+                max_iterations=2,
+            )
+        )
         assert not any(e.kind == "workflow_pause" for e in events)
         assert any(e.kind == "tool_call_end" for e in events)
 
@@ -288,15 +316,17 @@ class TestPauseSignal:
         cancel.set()
 
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "tool_a"}])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=_make_tool_executor(),
-            tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
-            serialize_tools=True,
-            cancel_event=cancel,
-            max_iterations=2,
-        ))
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=_make_tool_executor(),
+                tools_openai=[{"type": "function", "function": {"name": "tool_a"}}],
+                serialize_tools=True,
+                cancel_event=cancel,
+                max_iterations=2,
+            )
+        )
         end_events = [e for e in events if e.kind == "tool_call_end"]
         assert all(e.data.get("status") == "cancelled" for e in end_events)
 
@@ -310,15 +340,17 @@ class TestPauseSignal:
             return {"error": "denied"}
 
         ai = _mock_ai_with_tool_calls([{"id": "tc1", "name": "write_file", "args": {"path": "/src/foo.py"}}])
-        events = await _collect(run_agent_loop(
-            ai_service=ai,
-            messages=[{"role": "user", "content": "test"}],
-            tool_executor=pausing_executor,
-            tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
-            serialize_tools=True,
-            pause_signal=pause,
-            max_iterations=2,
-        ))
+        events = await _collect(
+            run_agent_loop(
+                ai_service=ai,
+                messages=[{"role": "user", "content": "test"}],
+                tool_executor=pausing_executor,
+                tools_openai=[{"type": "function", "function": {"name": "write_file"}}],
+                serialize_tools=True,
+                pause_signal=pause,
+                max_iterations=2,
+            )
+        )
         pause_events = [e for e in events if e.kind == "workflow_pause"]
         assert len(pause_events) == 1
         data = pause_events[0].data

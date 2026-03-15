@@ -147,9 +147,7 @@ class TestWorkflowRuns:
 
     def test_delete_cascades_approvals(self, db: Any) -> None:
         run = _make_run(db)
-        create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="bash", tool_args={}, risk_tier="EXECUTE"
-        )
+        create_approval_request(db, run_id=run["id"], step_id="s1", tool_name="bash", tool_args={}, risk_tier="EXECUTE")
         delete_workflow_run(db, run["id"])
         assert get_pending_approval(db, run["id"]) is None
 
@@ -261,8 +259,12 @@ class TestApprovalRequests:
     def test_create_approval(self, db: Any) -> None:
         run = _make_run(db)
         req = create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="write_file",
-            tool_args={"path": "/src/foo.py"}, risk_tier="WRITE",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            tool_name="write_file",
+            tool_args={"path": "/src/foo.py"},
+            risk_tier="WRITE",
         )
         assert req["status"] == "pending"
         assert req["tool_name"] == "write_file"
@@ -271,8 +273,12 @@ class TestApprovalRequests:
     def test_get_approval(self, db: Any) -> None:
         run = _make_run(db)
         req = create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="bash",
-            tool_args={"command": "rm -rf /"}, risk_tier="DESTRUCTIVE",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            tool_name="bash",
+            tool_args={"command": "rm -rf /"},
+            risk_tier="DESTRUCTIVE",
         )
         fetched = get_approval_request(db, req["id"])
         assert fetched is not None
@@ -281,8 +287,12 @@ class TestApprovalRequests:
     def test_get_pending_approval(self, db: Any) -> None:
         run = _make_run(db)
         create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="bash",
-            tool_args={}, risk_tier="EXECUTE",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            tool_name="bash",
+            tool_args={},
+            risk_tier="EXECUTE",
         )
         pending = get_pending_approval(db, run["id"])
         assert pending is not None
@@ -295,8 +305,12 @@ class TestApprovalRequests:
     def test_resolve_approved(self, db: Any) -> None:
         run = _make_run(db)
         req = create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="bash",
-            tool_args={}, risk_tier="EXECUTE",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            tool_name="bash",
+            tool_args={},
+            risk_tier="EXECUTE",
         )
         resolved = resolve_approval_request(db, req["id"], status="approved", resolved_by="operator")
         assert resolved is not None
@@ -307,8 +321,12 @@ class TestApprovalRequests:
     def test_resolve_denied(self, db: Any) -> None:
         run = _make_run(db)
         req = create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="bash",
-            tool_args={}, risk_tier="EXECUTE",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            tool_name="bash",
+            tool_args={},
+            risk_tier="EXECUTE",
         )
         resolved = resolve_approval_request(db, req["id"], status="denied")
         assert resolved is not None
@@ -317,8 +335,13 @@ class TestApprovalRequests:
     def test_resolve_expired(self, db: Any) -> None:
         run = _make_run(db)
         req = create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="bash",
-            tool_args={}, risk_tier="EXECUTE", timeout_at="2026-01-01T00:05:00Z",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            tool_name="bash",
+            tool_args={},
+            risk_tier="EXECUTE",
+            timeout_at="2026-01-01T00:05:00Z",
         )
         resolved = resolve_approval_request(db, req["id"], status="expired", resolved_by="timeout")
         assert resolved is not None
@@ -327,8 +350,12 @@ class TestApprovalRequests:
     def test_resolve_already_resolved_raises(self, db: Any) -> None:
         run = _make_run(db)
         req = create_approval_request(
-            db, run_id=run["id"], step_id="s1", tool_name="bash",
-            tool_args={}, risk_tier="EXECUTE",
+            db,
+            run_id=run["id"],
+            step_id="s1",
+            tool_name="bash",
+            tool_args={},
+            risk_tier="EXECUTE",
         )
         resolve_approval_request(db, req["id"], status="approved", resolved_by="op1")
         with pytest.raises(ValueError, match="already resolved"):

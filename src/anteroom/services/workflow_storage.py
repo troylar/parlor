@@ -37,9 +37,7 @@ _VALID_RUN_STATUSES = frozenset(
 
 _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "blocked"})
 
-_VALID_STEP_STATUSES = frozenset(
-    {"pending", "running", "completed", "failed", "interrupted", "skipped"}
-)
+_VALID_STEP_STATUSES = frozenset({"pending", "running", "completed", "failed", "interrupted", "skipped"})
 
 _VALID_APPROVAL_STATUSES = frozenset({"pending", "approved", "denied", "expired"})
 
@@ -188,8 +186,7 @@ def find_stale_runs(
 
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=stale_threshold_seconds)).isoformat()
     rows = db.execute_fetchall(
-        "SELECT * FROM workflow_runs WHERE status = 'running'"
-        " AND (heartbeat_at IS NULL OR heartbeat_at < ?)",
+        "SELECT * FROM workflow_runs WHERE status = 'running' AND (heartbeat_at IS NULL OR heartbeat_at < ?)",
         (cutoff,),
     )
     results = []
@@ -358,8 +355,7 @@ def create_workflow_event(
     now = _now()
     payload_json = json.dumps(payload) if payload else None
     cursor = db.execute(
-        "INSERT INTO workflow_events (run_id, step_id, event_type, payload_json, created_at)"
-        " VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO workflow_events (run_id, step_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
         (run_id, step_id, event_type, payload_json, now),
     )
     db.commit()

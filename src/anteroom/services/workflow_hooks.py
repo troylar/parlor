@@ -36,9 +36,7 @@ def validate_hook_config(
             if not url:
                 raise ValueError("Webhook hook has no URL")
             if not check_egress_allowed(url, allowed_domains, block_localhost=block_localhost):
-                raise ValueError(
-                    f"Webhook URL {url!r} blocked by egress allowlist"
-                )
+                raise ValueError(f"Webhook URL {url!r} blocked by egress allowlist")
         elif transport == "unix_socket":
             path = hook.get("path", "")
             if not path:

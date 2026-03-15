@@ -1,0 +1,51 @@
+kind: workflow
+id: demo_pipeline
+version: 0.1.0
+
+inputs: {}
+
+steps:
+  - id: check_environment
+    type: runner
+    runner: shell
+    command: "echo 'Python:' $(python3 --version 2>&1) && echo 'Git:' $(git --version 2>&1) && echo 'OS:' $(uname -s)"
+    timeout: 10
+
+  - id: gate_git_repo
+    type: gate
+    condition: always_pass
+    if_false: not_a_git_repo
+
+  - id: count_files
+    type: runner
+    runner: shell
+    command: "echo 'Python files:' $(find src -name '*.py' 2>/dev/null | wc -l | tr -d ' ') && echo 'Test files:' $(find tests -name '*.py' 2>/dev/null | wc -l | tr -d ' ')"
+    timeout: 10
+
+  - id: run_lint
+    type: runner
+    runner: shell
+    command: "ruff check src/ --select E,F --statistics 2>&1 | tail -5 || echo 'ruff not available or no issues'"
+    timeout: 30
+
+  - id: quality_loop
+    type: loop
+    max_rounds: 2
+    steps:
+      - id: check_types
+        type: runner
+        runner: shell
+        command: "echo 'Type check: $(python3 -c \"import sys; print(sys.version_info[:2])\" 2>&1)' && echo 'mypy available:' $(which mypy >/dev/null 2>&1 && echo yes || echo no)"
+        timeout: 10
+
+      - id: verify_workspace
+        type: runner
+        runner: shell
+        command: "echo 'Working dir:' $(pwd) && echo 'Git branch:' $(git branch --show-current 2>/dev/null || echo 'not a repo')"
+        timeout: 10
+
+  - id: summary
+    type: runner
+    runner: shell
+    command: "echo '--- Demo workflow complete ---' && echo 'Timestamp:' $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    timeout: 10

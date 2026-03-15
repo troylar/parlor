@@ -26,7 +26,14 @@ async def issue_is_current(run: dict[str, Any], step: Any, inputs: dict[str, Any
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gh", "issue", "view", str(issue_number), "--json", "state", "--jq", ".state",
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--json",
+            "state",
+            "--jq",
+            ".state",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -50,8 +57,14 @@ async def plan_is_approved(run: dict[str, Any], step: Any, inputs: dict[str, Any
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gh", "issue", "view", str(issue_number), "--json", "labels", "--jq",
-            "[.labels[].name] | any(. == \"senior-approved\")",
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--json",
+            "labels",
+            "--jq",
+            '[.labels[].name] | any(. == "senior-approved")',
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

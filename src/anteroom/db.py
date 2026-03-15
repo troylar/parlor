@@ -595,12 +595,10 @@ def _create_indexes(conn: sqlite3.Connection) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_steps_run_id ON workflow_steps(run_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_events_run_id ON workflow_events(run_id)")
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_workflow_approval_requests_run_id"
-            " ON workflow_approval_requests(run_id)"
+            "CREATE INDEX IF NOT EXISTS idx_workflow_approval_requests_run_id ON workflow_approval_requests(run_id)"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_workflow_approval_requests_status"
-            " ON workflow_approval_requests(status)"
+            "CREATE INDEX IF NOT EXISTS idx_workflow_approval_requests_status ON workflow_approval_requests(status)"
         )
     except sqlite3.OperationalError:
         pass

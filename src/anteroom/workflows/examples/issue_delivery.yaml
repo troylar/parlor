@@ -1,0 +1,74 @@
+kind: workflow
+id: issue_delivery
+version: 0.1.0
+
+inputs:
+  issue_number:
+    type: integer
+    required: true
+
+policies:
+  max_review_rounds: 2
+
+steps:
+  - id: gate_issue_current
+    type: gate
+    condition: issue_is_current
+    if_false: blocked_issue_not_open
+
+  - id: gate_plan
+    type: gate
+    condition: plan_is_approved
+    if_false: blocked_needs_plan
+
+  - id: start_work
+    type: runner
+    runner: cli_claude
+    prompt: |
+      Implement the changes described in the approved plan for issue #{issue_number}.
+      Create or recover a worktree, make the changes, and run basic validation.
+    timeout: 600
+
+  - id: fast_checks
+    type: runner
+    runner: shell
+    command: "ruff check src/ && ruff format --check src/ && python -m pytest tests/unit/ -x -q --tb=short"
+    timeout: 120
+
+  - id: open_pr
+    type: runner
+    runner: shell
+    command: "gh pr create --title 'feat: implement issue #{issue_number}' --body 'Implements #{issue_number}' --draft"
+    timeout: 60
+
+  - id: review_loop
+    type: loop
+    max_rounds: 2
+    steps:
+      - id: review
+        type: runner
+        runner: cli_codex
+        prompt: |
+          Review the PR diff for issue #{issue_number}. Report only blockers.
+          Focus on correctness, security, and test coverage.
+        context_from:
+          - step: open_pr
+            field: result_summary
+        timeout: 300
+
+      - id: fix_findings
+        type: runner
+        runner: cli_claude
+        prompt: |
+          Fix the blockers found in the review. One pass only.
+          Do not introduce new features or refactor beyond what's needed.
+        context_from:
+          - step: review
+            field: result_findings
+        timeout: 300
+
+  - id: final_checks
+    type: runner
+    runner: shell
+    command: "ruff check src/ && python -m pytest tests/unit/ -x -q --tb=short"
+    timeout: 120

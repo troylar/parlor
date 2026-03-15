@@ -165,10 +165,7 @@ async def execute_agent_runner(
         artifacts={
             "tool_call_count": len(tool_outputs),
         },
-        findings=[
-            {"tool": tc.get("tool_name", ""), "status": tc.get("status", "")}
-            for tc in tool_outputs
-        ],
+        findings=[{"tool": tc.get("tool_name", ""), "status": tc.get("status", "")} for tc in tool_outputs],
         duration_ms=duration_ms,
     )
 

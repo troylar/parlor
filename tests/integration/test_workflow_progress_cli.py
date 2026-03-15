@@ -21,11 +21,10 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     anteroom_dir = tmp_path / ".anteroom"
     anteroom_dir.mkdir()
     config_file = anteroom_dir / "config.yaml"
-    config_file.write_text(
-        'ai:\n  base_url: "http://localhost:1/v1"\n  api_key: "test"\n  model: "test"\n'
-    )
+    config_file.write_text('ai:\n  base_url: "http://localhost:1/v1"\n  api_key: "test"\n  model: "test"\n')
     monkeypatch.setenv("HOME", str(tmp_path))
     yield
+
 
 _TEST_WORKFLOW = """\
 kind: workflow

@@ -44,8 +44,11 @@ class TestRunnerRegistry:
 class TestRunnerResult:
     def test_to_dict(self) -> None:
         r = RunnerResult(
-            status="success", summary="Done", artifacts={"count": 5},
-            findings=[{"type": "info"}], duration_ms=100,
+            status="success",
+            summary="Done",
+            artifacts={"count": 5},
+            findings=[{"type": "info"}],
+            duration_ms=100,
         )
         d = r.to_dict()
         assert d["status"] == "success"
@@ -63,7 +66,9 @@ class TestOpaqueRunner:
     async def test_shell_echo(self) -> None:
         """Shell runner executes a command and returns stdout as summary."""
         result = await execute_opaque_runner(
-            mode="shell", command="echo hello world", timeout=10,
+            mode="shell",
+            command="echo hello world",
+            timeout=10,
         )
         assert result.status == "success"
         assert "hello world" in result.summary
@@ -73,7 +78,9 @@ class TestOpaqueRunner:
     async def test_shell_failure(self) -> None:
         """Shell runner returns failed on non-zero exit code."""
         result = await execute_opaque_runner(
-            mode="shell", command="exit 1", timeout=10,
+            mode="shell",
+            command="exit 1",
+            timeout=10,
         )
         assert result.status == "failed"
         assert result.artifacts.get("exit_code") == 1
@@ -82,7 +89,9 @@ class TestOpaqueRunner:
     async def test_shell_timeout(self) -> None:
         """Shell runner kills process on timeout."""
         result = await execute_opaque_runner(
-            mode="shell", command="sleep 60", timeout=1,
+            mode="shell",
+            command="sleep 60",
+            timeout=1,
         )
         assert result.status == "failed"
         assert "timed out" in result.summary.lower()
@@ -91,7 +100,9 @@ class TestOpaqueRunner:
     async def test_shell_stderr_in_findings(self) -> None:
         """Stderr captured in findings for successful commands."""
         result = await execute_opaque_runner(
-            mode="shell", command="echo output && echo warning >&2", timeout=10,
+            mode="shell",
+            command="echo output && echo warning >&2",
+            timeout=10,
         )
         assert result.status == "success"
         if result.findings:
@@ -101,7 +112,9 @@ class TestOpaqueRunner:
     async def test_shell_empty_output(self) -> None:
         """Empty output returns success with default summary."""
         result = await execute_opaque_runner(
-            mode="shell", command="true", timeout=10,
+            mode="shell",
+            command="true",
+            timeout=10,
         )
         assert result.status == "success"
         assert result.summary  # should have a default, not empty
@@ -112,7 +125,9 @@ class TestOpaqueRunner:
         script = tmp_path / "test_script.py"
         script.write_text("import sys; print('hello from script'); sys.exit(0)")
         result = await execute_opaque_runner(
-            mode="exec", command=str(script), timeout=10,
+            mode="exec",
+            command=str(script),
+            timeout=10,
         )
         assert result.status == "success"
         assert "hello from script" in result.summary
@@ -123,7 +138,10 @@ class TestOpaqueRunner:
         script = tmp_path / "args_script.py"
         script.write_text("import sys; print(' '.join(sys.argv[1:]))")
         result = await execute_opaque_runner(
-            mode="exec", command=str(script), argv=["arg1", "arg2"], timeout=10,
+            mode="exec",
+            command=str(script),
+            argv=["arg1", "arg2"],
+            timeout=10,
         )
         assert result.status == "success"
         assert "arg1 arg2" in result.summary
@@ -134,7 +152,9 @@ class TestOpaqueRunner:
         script = tmp_path / "fail_script.py"
         script.write_text("import sys; print('error msg', file=sys.stderr); sys.exit(1)")
         result = await execute_opaque_runner(
-            mode="exec", command=str(script), timeout=10,
+            mode="exec",
+            command=str(script),
+            timeout=10,
         )
         assert result.status == "failed"
         assert "error msg" in result.summary
@@ -143,7 +163,9 @@ class TestOpaqueRunner:
     async def test_invalid_mode_raises(self) -> None:
         """Unknown mode raises ValueError."""
         result = await execute_opaque_runner(
-            mode="unknown", command="echo", timeout=10,
+            mode="unknown",
+            command="echo",
+            timeout=10,
         )
         assert result.status == "failed"
         assert "Unknown" in result.summary
@@ -152,8 +174,10 @@ class TestOpaqueRunner:
     async def test_env_vars_passed(self) -> None:
         """Additional env vars are available in the subprocess."""
         result = await execute_opaque_runner(
-            mode="shell", command="echo $MY_TEST_VAR",
-            env={"MY_TEST_VAR": "hello_env"}, timeout=10,
+            mode="shell",
+            command="echo $MY_TEST_VAR",
+            env={"MY_TEST_VAR": "hello_env"},
+            timeout=10,
         )
         assert result.status == "success"
         assert "hello_env" in result.summary

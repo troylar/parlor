@@ -102,9 +102,7 @@ class TestApprovalRegressionAfterSerializeTools:
 
     def test_approval_prompt_renders_and_accepts_allow(self) -> None:
         """Approval prompt renders, user types 'y', result is allowed_once."""
-        child = pexpect.spawn(
-            _PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8"
-        )
+        child = pexpect.spawn(_PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8")
         child.expect("PTY_REGRESSION: approval prompt rendering", timeout=10)
         child.expect("PTY_WARNING:.*WRITE operation", timeout=5)
         child.expect(r"PTY_OPTIONS:.*\[y\] Allow once", timeout=5)
@@ -116,9 +114,7 @@ class TestApprovalRegressionAfterSerializeTools:
 
     def test_approval_prompt_renders_and_accepts_deny(self) -> None:
         """Approval prompt renders, user types 'n', result is denied."""
-        child = pexpect.spawn(
-            _PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8"
-        )
+        child = pexpect.spawn(_PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8")
         child.expect("PTY_READY", timeout=10)
 
         child.sendline("n")
@@ -127,9 +123,7 @@ class TestApprovalRegressionAfterSerializeTools:
 
     def test_approval_prompt_handles_eof(self) -> None:
         """Ctrl-D on approval prompt denies (regression for serialize_tools change)."""
-        child = pexpect.spawn(
-            _PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8"
-        )
+        child = pexpect.spawn(_PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8")
         child.expect("PTY_READY", timeout=10)
 
         child.sendeof()
@@ -143,9 +137,7 @@ class TestApprovalRegressionAfterSerializeTools:
         run after the serialize_tools branch was added — proving the default
         path's prompt_toolkit interaction is unchanged.
         """
-        child = pexpect.spawn(
-            _PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8"
-        )
+        child = pexpect.spawn(_PYTHON, ["-c", _approval_regression_script()], timeout=15, encoding="utf-8")
         child.expect("PTY_READY", timeout=10)
         child.sendline("y")
         child.expect("PTY_RESULT: allowed_once", timeout=5)

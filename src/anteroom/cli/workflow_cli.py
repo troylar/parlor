@@ -28,19 +28,26 @@ def _resolve_workflow_path(workflow_id: str) -> Path | None:
 
     Search order:
     1. Exact filesystem path (if it exists and ends in .yaml/.yml)
-    2. examples/workflows/ directory (shipped reference workflows)
-    3. src/anteroom/workflows/ directory (any future built-in generic workflows)
+    2. Package examples: workflows/examples/ inside the installed package
+    3. Source-tree examples: examples/workflows/ (for development)
+    4. Built-in workflows: workflows/ inside the package
     """
     # Direct path
     candidate = Path(workflow_id)
     if candidate.exists() and candidate.suffix in (".yaml", ".yml"):
         return candidate
 
-    # Reference workflows shipped with Anteroom
-    examples_dir = Path(__file__).parent.parent.parent.parent / "examples" / "workflows"
-    ref_path = examples_dir / f"{workflow_id}.yaml"
-    if ref_path.exists():
-        return ref_path
+    # Package-shipped examples (works in installed packages)
+    pkg_examples_dir = Path(__file__).parent.parent / "workflows" / "examples"
+    pkg_example_path = pkg_examples_dir / f"{workflow_id}.yaml"
+    if pkg_example_path.exists():
+        return pkg_example_path
+
+    # Source-tree examples (works in development/editable installs)
+    src_examples_dir = Path(__file__).parent.parent.parent.parent / "examples" / "workflows"
+    src_example_path = src_examples_dir / f"{workflow_id}.yaml"
+    if src_example_path.exists():
+        return src_example_path
 
     # Built-in workflows (generic, shipped in package)
     builtin_dir = Path(__file__).parent.parent / "workflows"
@@ -163,13 +170,9 @@ def _print_run_progress(db: Any, run: dict[str, Any]) -> None:
     if run_status == "completed":
         console.print("\n[green]Workflow completed successfully[/green]")
     elif run_status == "blocked":
-        console.print(
-            f"\n[yellow]Workflow blocked:[/yellow] {run.get('stop_reason', 'unknown')}"
-        )
+        console.print(f"\n[yellow]Workflow blocked:[/yellow] {run.get('stop_reason', 'unknown')}")
     elif run_status == "failed":
-        console.print(
-            f"\n[red]Workflow failed:[/red] {run.get('stop_reason', 'unknown')}"
-        )
+        console.print(f"\n[red]Workflow failed:[/red] {run.get('stop_reason', 'unknown')}")
     else:
         console.print(f"\n[dim]Workflow status:[/dim] {run_status}")
 
@@ -284,12 +287,14 @@ def _handle_run(config: AppConfig, db: Any, args: argparse.Namespace) -> None:
     console.print(f"[bold]Target:[/bold] {target_kind}:{target_ref}\n")
 
     try:
-        run = asyncio.run(engine.start_run(
-            definition,
-            target_kind=target_kind,
-            target_ref=target_ref,
-            inputs=inputs,
-        ))
+        run = asyncio.run(
+            engine.start_run(
+                definition,
+                target_kind=target_kind,
+                target_ref=target_ref,
+                inputs=inputs,
+            )
+        )
     except (ValueError, RuntimeError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
         _cleanup_event_bus(_event_bus)
@@ -515,9 +520,13 @@ def _handle_resume(config: AppConfig, db: Any, args: argparse.Namespace) -> None
         console.print(f"[bold]From step:[/bold] {from_step}")
 
     try:
-        result = asyncio.run(engine.resume_run(
-            run_id, definition, from_step=from_step,
-        ))
+        result = asyncio.run(
+            engine.resume_run(
+                run_id,
+                definition,
+                from_step=from_step,
+            )
+        )
     except (ValueError, RuntimeError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
         _cleanup_event_bus(_event_bus)
@@ -563,7 +572,9 @@ def _handle_cancel(db: Any, args: argparse.Namespace) -> None:
     update_workflow_run(db, run_id, status="cancelled")
     release_lock(db, run_id=run_id)
     create_workflow_event(
-        db, run_id=run_id, event_type="run_cancelled",
+        db,
+        run_id=run_id,
+        event_type="run_cancelled",
         payload={"cancelled_from_status": run["status"]},
     )
     console.print(f"[green]Run {run_id[:12]}... cancelled[/green]")

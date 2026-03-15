@@ -26,11 +26,10 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     anteroom_dir = tmp_path / ".anteroom"
     anteroom_dir.mkdir()
     config_file = anteroom_dir / "config.yaml"
-    config_file.write_text(
-        'ai:\n  base_url: "http://localhost:1/v1"\n  api_key: "test"\n  model: "test"\n'
-    )
+    config_file.write_text('ai:\n  base_url: "http://localhost:1/v1"\n  api_key: "test"\n  model: "test"\n')
     monkeypatch.setenv("HOME", str(tmp_path))
     yield
+
 
 _TEST_WORKFLOW = """\
 kind: workflow
@@ -164,8 +163,11 @@ class TestResumeSuccessPath:
 
         # 3. Resume via real CLI
         resume_result = _run_aroom(
-            "workflow", "resume", run_id,
-            "--definition", str(workflow_file),
+            "workflow",
+            "resume",
+            run_id,
+            "--definition",
+            str(workflow_file),
             timeout=30,
         )
         resume_output = resume_result.stdout + resume_result.stderr
@@ -192,9 +194,7 @@ class TestResumeSuccessPath:
 
         # 4. Verify status shows cancelled
         status_result = _run_aroom("workflow", "status", run_id)
-        assert "cancelled" in status_result.stdout.lower(), (
-            f"Expected cancelled in status. Got: {status_result.stdout}"
-        )
+        assert "cancelled" in status_result.stdout.lower(), f"Expected cancelled in status. Got: {status_result.stdout}"
 
     def test_stale_run_recovered_on_list(self, workflow_file: Path) -> None:
         """Run → mark stale → list triggers recovery → status confirms paused."""
@@ -210,22 +210,16 @@ class TestResumeSuccessPath:
 
         # 3. Verify status before recovery shows "running" (stale)
         pre_status = _run_aroom("workflow", "status", run_id)
-        assert "running" in pre_status.stdout.lower(), (
-            f"Expected 'running' before recovery. Got: {pre_status.stdout}"
-        )
+        assert "running" in pre_status.stdout.lower(), f"Expected 'running' before recovery. Got: {pre_status.stdout}"
 
         # 4. List triggers on-demand recovery
         list_result = _run_aroom("workflow", "list")
         list_output = list_result.stdout
-        assert "Recovered" in list_output, (
-            f"Expected 'Recovered' message in list output. Got: {list_output}"
-        )
+        assert "Recovered" in list_output, f"Expected 'Recovered' message in list output. Got: {list_output}"
 
         # 5. Verify status AFTER recovery shows "paused" (the state transition)
         post_status = _run_aroom("workflow", "status", run_id)
-        assert "paused" in post_status.stdout.lower(), (
-            f"Expected 'paused' after recovery. Got: {post_status.stdout}"
-        )
+        assert "paused" in post_status.stdout.lower(), f"Expected 'paused' after recovery. Got: {post_status.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +249,11 @@ class TestRejectionCases:
         assert run_id
 
         resume_result = _run_aroom(
-            "workflow", "resume", run_id,
-            "--definition", str(workflow_file),
+            "workflow",
+            "resume",
+            run_id,
+            "--definition",
+            str(workflow_file),
         )
         resume_output = resume_result.stdout + resume_result.stderr
         assert "not resumable" in resume_output.lower() or "Error" in resume_output

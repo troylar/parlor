@@ -24,17 +24,27 @@ def _get_db(request: Request) -> Any:
 async def list_workflows(request: Request) -> list[dict[str, Any]]:
     """List available workflow definitions."""
     definitions = []
+    seen_ids: set[str] = set()
     # Built-in workflows
     builtin_dir = Path(__file__).parent.parent / "workflows"
     if builtin_dir.exists():
         for f in sorted(builtin_dir.glob("*.yaml")):
-            definitions.append({"id": f.stem, "source": "built_in", "path": str(f)})
-    # Example workflows
-    examples_dir = Path(__file__).parent.parent.parent.parent / "examples" / "workflows"
-    if examples_dir.exists():
-        for f in sorted(examples_dir.glob("*.yaml")):
-            if not any(d["id"] == f.stem for d in definitions):
-                definitions.append({"id": f.stem, "source": "example", "path": str(f)})
+            definitions.append({"id": f.stem, "source": "built_in"})
+            seen_ids.add(f.stem)
+    # Package-shipped examples
+    pkg_examples = Path(__file__).parent.parent / "workflows" / "examples"
+    if pkg_examples.exists():
+        for f in sorted(pkg_examples.glob("*.yaml")):
+            if f.stem not in seen_ids:
+                definitions.append({"id": f.stem, "source": "example"})
+                seen_ids.add(f.stem)
+    # Source-tree examples (development)
+    src_examples = Path(__file__).parent.parent.parent.parent / "examples" / "workflows"
+    if src_examples.exists():
+        for f in sorted(src_examples.glob("*.yaml")):
+            if f.stem not in seen_ids:
+                definitions.append({"id": f.stem, "source": "example"})
+                seen_ids.add(f.stem)
     return definitions
 
 
