@@ -62,9 +62,15 @@ async def plan_is_approved(run: dict[str, Any], step: Any, inputs: dict[str, Any
         return False
 
 
+async def always_pass(run: dict[str, Any], step: Any, inputs: dict[str, Any]) -> bool:
+    """Gate that always passes. Useful for demos and testing."""
+    return True
+
+
 def register_builtin_gates() -> None:
     """Register all built-in gate conditions."""
     from anteroom.services.workflow_engine import register_gate_condition
 
     register_gate_condition("issue_is_current", issue_is_current)
     register_gate_condition("plan_is_approved", plan_is_approved)
+    register_gate_condition("always_pass", always_pass)

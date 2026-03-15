@@ -943,7 +943,7 @@ class WorkflowEngine:
                         completed_at=datetime.now(timezone.utc).isoformat(),
                     )
                     await self._emit_event(
-                        self._db, run_id=run["id"], event_type="step_failed",
+                        run_id=run["id"], event_type="step_failed",
                         step_id=nested_step_id, payload={"error": str(exc)},
                     )
                     return RunnerResult(status="failed", summary=f"Loop step {nested_step.id} failed: {exc}")

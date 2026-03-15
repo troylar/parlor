@@ -51,8 +51,12 @@ def _resolve_workflow_path(workflow_id: str) -> Path | None:
     return None
 
 
-def _create_engine(config: AppConfig, db: Any) -> Any:
-    """Create a WorkflowEngine with AI service and event bus wired in."""
+def _create_engine(config: AppConfig, db: Any) -> tuple[Any, Any]:
+    """Create a WorkflowEngine with AI service and event bus wired in.
+
+    Returns (engine, event_bus) — caller must call event_bus.stop_polling()
+    when done to avoid asyncio task leak warnings on exit.
+    """
     from ..services.workflow_engine import WorkflowEngine
     from ..services.workflow_runners import create_default_registry
 
@@ -76,8 +80,9 @@ def _create_engine(config: AppConfig, db: Any) -> Any:
         )
 
     # Create event bus backed by DB change_log for cross-process SSE delivery.
-    # The web app's event poller reads change_log from the same DB, so events
-    # published here will be visible to SSE subscribers.
+    # CLI only needs to WRITE events to change_log (for the web app's poller).
+    # We set _db_manager directly without start_polling() to avoid creating a
+    # background asyncio.Task that causes warnings on process exit.
     event_bus = None
     try:
         from ..db import DatabaseManager
@@ -86,12 +91,12 @@ def _create_engine(config: AppConfig, db: Any) -> Any:
         event_bus = EventBus()
         db_manager = DatabaseManager()
         db_manager.add("personal", config.app.data_dir / "chat.db")
-        event_bus.start_polling(db_manager)
+        event_bus._db_manager = db_manager  # Write-only: no poll loop needed
     except Exception as exc:
         logger.warning("Could not initialize event bus: %s", exc)
 
     registry = create_default_registry()
-    return WorkflowEngine(
+    engine = WorkflowEngine(
         db,
         config.workflow,
         registry,
@@ -103,6 +108,16 @@ def _create_engine(config: AppConfig, db: Any) -> Any:
         egress_allowed_domains=list(config.ai.allowed_domains) if config.ai.allowed_domains else [],
         egress_block_localhost=config.ai.block_localhost_api,
     )
+    return engine, event_bus
+
+
+def _cleanup_event_bus(event_bus: Any) -> None:
+    """Stop the event bus polling task to avoid asyncio warnings on exit."""
+    if event_bus is not None:
+        try:
+            event_bus.stop_polling()
+        except Exception:
+            pass
 
 
 def _print_run_progress(db: Any, run: dict[str, Any]) -> None:
@@ -242,7 +257,7 @@ def _handle_run(config: AppConfig, db: Any, args: argparse.Namespace) -> None:
     register_builtin_gates()
 
     # Create engine with AI service dependencies
-    engine = _create_engine(config, db)
+    engine, _event_bus = _create_engine(config, db)
 
     # Set up real-time progress callback for live CLI output
     def _on_progress(event_type: str, step_id: str | None, payload: dict) -> None:
@@ -277,12 +292,14 @@ def _handle_run(config: AppConfig, db: Any, args: argparse.Namespace) -> None:
         ))
     except (ValueError, RuntimeError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
+        _cleanup_event_bus(_event_bus)
         return
 
     # Display step-by-step progress report
     _print_run_progress(db, run)
 
     console.print(f"[dim]Run ID:[/dim] {run['id']}")
+    _cleanup_event_bus(_event_bus)
 
 
 def _handle_status(db: Any, args: argparse.Namespace) -> None:
@@ -335,7 +352,7 @@ def _handle_list(config: AppConfig, db: Any, args: argparse.Namespace) -> None:
     from ..services.workflow_storage import list_workflow_runs
 
     # Recover stale runs before listing (on-demand recovery)
-    engine = _create_engine(config, db)
+    engine, _event_bus = _create_engine(config, db)
     recovered = asyncio.run(engine.recover_interrupted_runs())
     if recovered:
         console.print(f"[yellow]Recovered {len(recovered)} interrupted run(s)[/yellow]")
@@ -353,22 +370,27 @@ def _handle_list(config: AppConfig, db: Any, args: argparse.Namespace) -> None:
     table = Table(title="Workflow Runs", show_header=True)
     table.add_column("ID", style="dim", max_width=12)
     table.add_column("Workflow")
-    table.add_column("Target")
+    table.add_column("Target", max_width=40)
     table.add_column("Status")
     table.add_column("Step")
     table.add_column("Created")
 
     for run in runs:
+        # Shorten long target refs (e.g., temp file paths from tests)
+        target_ref = run["target_ref"]
+        if len(target_ref) > 35:
+            target_ref = "..." + target_ref[-32:]
         table.add_row(
             run["id"][:12],
             run["workflow_id"],
-            f"{run['target_kind']}:{run['target_ref']}",
+            f"{run['target_kind']}:{target_ref}",
             run["status"],
             run.get("current_step_id") or "-",
             run["created_at"][:19],
         )
 
     console.print(table)
+    _cleanup_event_bus(_event_bus)
 
 
 def _handle_history(db: Any, args: argparse.Namespace) -> None:
@@ -441,7 +463,7 @@ def _handle_resume(config: AppConfig, db: Any, args: argparse.Namespace) -> None
         return
 
     # Create engine with full AI/tool wiring (same as _handle_run)
-    engine = _create_engine(config, db)
+    engine, _event_bus = _create_engine(config, db)
 
     # Recover any stale runs first (on-demand recovery)
     asyncio.run(engine.recover_interrupted_runs())
@@ -498,9 +520,11 @@ def _handle_resume(config: AppConfig, db: Any, args: argparse.Namespace) -> None
         ))
     except (ValueError, RuntimeError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
+        _cleanup_event_bus(_event_bus)
         return
 
     _print_run_progress(db, result)
+    _cleanup_event_bus(_event_bus)
 
 
 def _handle_cancel(db: Any, args: argparse.Namespace) -> None:
