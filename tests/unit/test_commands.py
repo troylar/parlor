@@ -1164,6 +1164,31 @@ class TestParsePackPathFlags:
         assert isinstance(result, str)
         assert "integer" in result
 
+    def test_priority_too_low(self) -> None:
+        from anteroom.cli.commands import _parse_pack_path_flags
+
+        result = _parse_pack_path_flags("install", "/path --priority 0")
+        assert isinstance(result, str)
+        assert "between 1 and 100" in result
+
+    def test_priority_too_high(self) -> None:
+        from anteroom.cli.commands import _parse_pack_path_flags
+
+        result = _parse_pack_path_flags("install", "/path --priority 101")
+        assert isinstance(result, str)
+        assert "between 1 and 100" in result
+
+    def test_priority_boundary_values(self) -> None:
+        from anteroom.cli.commands import _parse_pack_path_flags
+
+        result_low = _parse_pack_path_flags("install", "/path --priority 1")
+        assert isinstance(result_low, dict)
+        assert result_low["priority"] == 1
+
+        result_high = _parse_pack_path_flags("install", "/path --priority 100")
+        assert isinstance(result_high, dict)
+        assert result_high["priority"] == 100
+
     def test_multiple_paths(self) -> None:
         from anteroom.cli.commands import _parse_pack_path_flags
 

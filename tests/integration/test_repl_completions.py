@@ -31,18 +31,43 @@ def _read_repl_source() -> str:
     return (_SRC_DIR / "repl.py").read_text()
 
 
-def _extract_space_handler_subcommands(source: str) -> set[str]:
-    """Extract subcommands handled in the /space branch of the REPL dispatcher.
+def _extract_handler_subcommands(source: str, command: str) -> set[str]:
+    """Extract subcommands handled in a specific command branch of the REPL dispatcher.
 
-    Parses the source for patterns like ``sub == "xxx"`` and
-    ``sub in ("xxx", "yyy")`` within the /space handler region.
+    Finds the ``elif cmd in ("/command", "/commands"):`` block and parses
+    ``sub == "xxx"`` and ``sub in ("xxx", "yyy")`` patterns within it.
+    Scoping to the specific handler prevents false positives from other
+    command families that share the same ``sub`` variable name.
     """
+    # Find the start of the command handler block
+    singular = command
+    plural = command + "s"
+    # Try both orderings: ("/spaces", "/space") and ("/space", "/spaces")
+    for pat in [
+        rf'elif cmd in \("/{re.escape(plural)}".*?"/{re.escape(singular)}"\):',
+        rf'elif cmd in \("/{re.escape(singular)}".*?"/{re.escape(plural)}"\):',
+        rf'elif cmd == "/{re.escape(singular)}":',
+    ]:
+        match = re.search(pat, source)
+        if match:
+            break
+    if not match:
+        return set()
+
+    # Extract from the start of this handler to the next top-level elif/else
+    start = match.start()
+    # Find the next elif at the same indentation level (command-family boundary)
+    rest = source[start:]
+    indent_match = re.match(r"(\s*)", rest)
+    indent = indent_match.group(1) if indent_match else ""
+    # Split at the next elif/else at the same indentation
+    block_end = re.search(rf"\n{re.escape(indent)}(?:elif |else:)", rest[1:])
+    block = rest[: block_end.start() + 1] if block_end else rest
+
     subs: set[str] = set()
-    # Match sub == "word"
-    subs.update(re.findall(r'sub\s*==\s*["\'](\w[\w-]*)["\']', source))
-    # Match sub in ("word", "word", ...) — multi-alias branches
-    for match in re.finditer(r"sub\s+in\s+\(([^)]+)\)", source):
-        inner = match.group(1)
+    subs.update(re.findall(r'sub\s*==\s*["\'](\w[\w-]*)["\']', block))
+    for m in re.finditer(r"sub\s+in\s+\(([^)]+)\)", block):
+        inner = m.group(1)
         subs.update(re.findall(r'["\'](\w[\w-]*)["\']', inner))
     return subs
 
@@ -85,7 +110,7 @@ class TestSpaceSubcommandConsistency:
         caught in the senior review).
         """
         source = _read_repl_source()
-        handled = _extract_space_handler_subcommands(source)
+        handled = _extract_handler_subcommands(source, "space")
         # The completions metadata should be a subset of what the REPL handles
         completions = set(SUBCOMMAND_COMPLETIONS.get("space", []))
         unreachable = completions - handled
@@ -129,7 +154,7 @@ class TestPackSubcommandConsistency:
     def test_pack_completions_are_all_handled(self) -> None:
         """Every /pack subcommand in completion metadata must have a REPL handler."""
         source = _read_repl_source()
-        handled = _extract_space_handler_subcommands(source)
+        handled = _extract_handler_subcommands(source, "pack")
         completions = set(SUBCOMMAND_COMPLETIONS.get("pack", []))
         unreachable = completions - handled
         assert unreachable == set(), (

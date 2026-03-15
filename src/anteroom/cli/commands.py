@@ -1029,6 +1029,8 @@ def _parse_pack_path_flags(subcommand: str, rest: str) -> dict[str, Any] | str:
                 priority = int(argv[idx + 1])
             except ValueError:
                 return "Priority must be an integer."
+            if priority < 1 or priority > 100:
+                return "Priority must be between 1 and 100."
             idx += 2
             continue
         path_tokens.append(token)
