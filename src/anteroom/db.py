@@ -292,6 +292,83 @@ CREATE TABLE IF NOT EXISTS space_sources (
     )
 );
 
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    workflow_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN (
+        'pending', 'running', 'paused', 'waiting_for_approval',
+        'blocked', 'completed', 'failed', 'cancelled'
+    )),
+    target_kind TEXT NOT NULL,
+    target_ref TEXT NOT NULL,
+    current_step_id TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    stop_reason TEXT,
+    inputs_json TEXT,
+    space_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    step_type TEXT NOT NULL CHECK(step_type IN ('runner', 'gate', 'loop')),
+    runner_type TEXT,
+    status TEXT NOT NULL CHECK(status IN (
+        'pending', 'running', 'completed', 'failed', 'interrupted', 'skipped'
+    )),
+    attempt INTEGER NOT NULL DEFAULT 1,
+    result_status TEXT,
+    result_summary TEXT,
+    result_artifacts_json TEXT,
+    result_findings_json TEXT,
+    raw_output_path TEXT,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS workflow_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    step_id TEXT,
+    event_type TEXT NOT NULL,
+    payload_json TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS workflow_approval_requests (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    tool_args_json TEXT NOT NULL,
+    risk_tier TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'denied', 'expired')),
+    resolved_by TEXT,
+    resolved_at TEXT,
+    timeout_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS workflow_locks (
+    target_kind TEXT NOT NULL,
+    target_ref TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    PRIMARY KEY (target_kind, target_ref),
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+);
+
 """
 
 _FTS_SCHEMA = """
@@ -511,6 +588,21 @@ def _create_indexes(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_slug ON conversations(slug)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_type ON conversations(type)")
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_runs_target ON workflow_runs(target_kind, target_ref)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_steps_run_id ON workflow_steps(run_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_events_run_id ON workflow_events(run_id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workflow_approval_requests_run_id"
+            " ON workflow_approval_requests(run_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workflow_approval_requests_status"
+            " ON workflow_approval_requests(status)"
+        )
+    except sqlite3.OperationalError:
+        pass
 
 
 def init_db(
@@ -1232,6 +1324,96 @@ def _run_migrations(conn: sqlite3.Connection, vec_dimensions: int = 384) -> None
                 raise
     except sqlite3.OperationalError:
         logger.warning("Failed to restore UNIQUE constraint on packs", exc_info=True)
+
+    # Workflow engine tables (#946)
+    wf_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "workflow_runs" not in wf_tables:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS workflow_runs (
+                id TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                workflow_version TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'running', 'paused', 'waiting_for_approval',
+                    'blocked', 'completed', 'failed', 'cancelled'
+                )),
+                target_kind TEXT NOT NULL,
+                target_ref TEXT NOT NULL,
+                current_step_id TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                stop_reason TEXT,
+                inputs_json TEXT,
+                space_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT
+            )"""
+        )
+    if "workflow_steps" not in wf_tables:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS workflow_steps (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                step_type TEXT NOT NULL CHECK(step_type IN ('runner', 'gate', 'loop')),
+                runner_type TEXT,
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'running', 'completed', 'failed', 'interrupted', 'skipped'
+                )),
+                attempt INTEGER NOT NULL DEFAULT 1,
+                result_status TEXT,
+                result_summary TEXT,
+                result_artifacts_json TEXT,
+                result_findings_json TEXT,
+                raw_output_path TEXT,
+                duration_ms INTEGER,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+            )"""
+        )
+    if "workflow_events" not in wf_tables:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS workflow_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                step_id TEXT,
+                event_type TEXT NOT NULL,
+                payload_json TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+            )"""
+        )
+    if "workflow_approval_requests" not in wf_tables:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS workflow_approval_requests (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                tool_args_json TEXT NOT NULL,
+                risk_tier TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'denied', 'expired')),
+                resolved_by TEXT,
+                resolved_at TEXT,
+                timeout_at TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+            )"""
+        )
+    if "workflow_locks" not in wf_tables:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS workflow_locks (
+                target_kind TEXT NOT NULL,
+                target_ref TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                acquired_at TEXT NOT NULL,
+                PRIMARY KEY (target_kind, target_ref),
+                FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+            )"""
+        )
 
     # Add message-level and source-chunk-level FTS5 tables for hybrid search (#810)
     try:
