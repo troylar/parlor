@@ -96,7 +96,7 @@ anteroom = "anteroom.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-anteroom = ["static/**/*", "cli/default_skills/*.yaml", "packs/**/*"]
+anteroom = ["static/**/*", "cli/default_skills/*.yaml", "packs/**/*", "workflows/**/*.yaml"]
 
 [tool.ruff]
 target-version = "py310"

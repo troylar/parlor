@@ -798,6 +798,44 @@ class ComplianceConfig:
 
 
 @dataclass
+class WorkflowConfig:
+    """Workflow automation and orchestration settings."""
+
+    enabled: bool = True
+    max_review_rounds: int = 2
+    step_timeout: int = 300
+    heartbeat_interval: int = 30
+    stale_threshold: int = 60
+    approval_timeout: int = 300
+    registry_enabled: bool = True
+    registry_heartbeat_interval: int = 30
+
+    _MIN_STEP_TIMEOUT: int = field(default=10, init=False, repr=False)
+    _MAX_STEP_TIMEOUT: int = field(default=3600, init=False, repr=False)
+    _MIN_HEARTBEAT: int = field(default=5, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.step_timeout < self._MIN_STEP_TIMEOUT:
+            logger.warning(
+                "workflow step_timeout=%d below minimum (%d), clamping",
+                self.step_timeout,
+                self._MIN_STEP_TIMEOUT,
+            )
+            object.__setattr__(self, "step_timeout", self._MIN_STEP_TIMEOUT)
+        if self.step_timeout > self._MAX_STEP_TIMEOUT:
+            logger.warning(
+                "workflow step_timeout=%d above maximum (%d), clamping",
+                self.step_timeout,
+                self._MAX_STEP_TIMEOUT,
+            )
+            object.__setattr__(self, "step_timeout", self._MAX_STEP_TIMEOUT)
+        if self.heartbeat_interval < self._MIN_HEARTBEAT:
+            object.__setattr__(self, "heartbeat_interval", self._MIN_HEARTBEAT)
+        if self.max_review_rounds < 1:
+            object.__setattr__(self, "max_review_rounds", 1)
+
+
+@dataclass
 class AppConfig:
     ai: AIConfig
     app: AppSettings = field(default_factory=AppSettings)
@@ -818,6 +856,7 @@ class AppConfig:
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     audit: AuditConfig = field(default_factory=AuditConfig)
     compliance: ComplianceConfig = field(default_factory=ComplianceConfig)
+    workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
     pack_sources: list[PackSourceConfig] = field(default_factory=list)
 
 

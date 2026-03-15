@@ -2579,6 +2579,28 @@ def main() -> None:
     space_move_root_parser.add_argument("name", help="Space name")
     space_move_root_parser.add_argument("new_root", help="New repos root directory")
 
+    # `aroom workflow` subcommand
+    workflow_parser = subparsers.add_parser("workflow", help="Manage workflow runs")
+    workflow_subparsers = workflow_parser.add_subparsers(dest="workflow_action")
+    workflow_run_parser = workflow_subparsers.add_parser("run", help="Start a workflow run")
+    workflow_run_parser.add_argument("workflow_name", help="Workflow ID or YAML path")
+    workflow_run_parser.add_argument("--issue", type=int, help="Issue number (for issue_delivery)")
+    workflow_run_parser.add_argument("--dry-run", action="store_true", help="Show plan without executing")
+    workflow_status_parser = workflow_subparsers.add_parser("status", help="Show run status")
+    workflow_status_parser.add_argument("run_id", help="Run identifier")
+    workflow_list_parser = workflow_subparsers.add_parser("list", help="List workflow runs")
+    workflow_list_parser.add_argument("--status", help="Filter by status")
+    workflow_list_parser.add_argument("--workflow", help="Filter by workflow ID")
+    workflow_list_parser.add_argument("--limit", type=int, default=20, help="Max results")
+    workflow_history_parser = workflow_subparsers.add_parser("history", help="Show run step history")
+    workflow_history_parser.add_argument("run_id", help="Run identifier")
+    workflow_resume_parser = workflow_subparsers.add_parser("resume", help="Resume a paused workflow run")
+    workflow_resume_parser.add_argument("run_id", help="Run identifier")
+    workflow_resume_parser.add_argument("--from-step", help="Override resume point (step ID)")
+    workflow_resume_parser.add_argument("--definition", help="Path to workflow YAML (for custom workflows)")
+    workflow_cancel_parser = workflow_subparsers.add_parser("cancel", help="Cancel a paused workflow run")
+    workflow_cancel_parser.add_argument("run_id", help="Run identifier")
+
     # `aroom start` subcommand
     start_parser = subparsers.add_parser("start", help="Start the web UI server in the background")
     start_parser.add_argument("--no-browser", action="store_true", help="Do not open browser on start")
@@ -2752,6 +2774,12 @@ def main() -> None:
 
     if args.command == "space":
         _run_space(config, args)
+        return
+
+    if args.command == "workflow":
+        from .cli.workflow_cli import _run_workflow
+
+        _run_workflow(config, args)
         return
 
     if args.command == "start":

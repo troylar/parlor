@@ -236,6 +236,8 @@ async def run_agent_loop(
     output_filter: Any | None = None,
     max_consecutive_text_only: int = 3,
     max_line_repeats: int = 5,
+    serialize_tools: bool = False,
+    pause_signal: asyncio.Event | None = None,
 ) -> AsyncGenerator[AgentEvent, None]:
     """Run the agentic tool-call loop, yielding events.
 
@@ -652,7 +654,94 @@ async def run_agent_loop(
                     },
                 )
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(cancelled_result)})
+        elif serialize_tools:
+            # Serialized tool execution for workflow engine.
+            # Tools execute one at a time so the pause signal can be checked
+            # between each tool call. If the signal is set (by a workflow
+            # approval callback), the loop exits BEFORE appending the paused
+            # tool's result to messages — the paused result never enters
+            # LLM-visible history. The assistant message and any earlier
+            # successful tool results ARE in messages (appended before this
+            # block). Full step isolation is handled by the workflow engine
+            # (Phase 3) via session isolation per step.
+            for tc in tool_calls_pending:
+                tc, result, tool_status = await _execute_tool(tc, tool_executor, cancel_event)
+
+                # Check pause signal BEFORE processing this tool's result.
+                if pause_signal and pause_signal.is_set():
+                    yield AgentEvent(
+                        kind="workflow_pause",
+                        data={
+                            "tool_call_id": tc["id"],
+                            "tool_name": tc["function_name"],
+                            "tool_args": tc.get("arguments", {}),
+                            "reason": "approval_required",
+                        },
+                    )
+                    return
+
+                yield AgentEvent(
+                    kind="tool_call_end",
+                    data={"id": tc["id"], "tool_name": tc["function_name"], "output": result, "status": tool_status},
+                )
+                internal_keys = {
+                    "_approval_decision",
+                    "_old_content",
+                    "_new_content",
+                    "_context_trust",
+                    "_context_origin",
+                }
+                if isinstance(result, dict):
+                    if injection_detector is not None and injection_detector.enabled:
+                        _tool_text = "\n".join(
+                            v for k, v in result.items() if isinstance(v, str) and not k.startswith("_")
+                        )
+                        if _tool_text:
+                            _inj_verdict = injection_detector.scan_tool_output(tc["function_name"], _tool_text)
+                            if _inj_verdict.detected:
+                                yield AgentEvent(
+                                    kind="injection_detected",
+                                    data={
+                                        "tool_name": tc["function_name"],
+                                        "technique": _inj_verdict.technique,
+                                        "confidence": _inj_verdict.confidence,
+                                        "detail": _inj_verdict.detail,
+                                        "action": injection_detector.action,
+                                    },
+                                )
+                                if injection_detector.action == "block":
+                                    result = {
+                                        "error": "Tool output blocked: prompt injection detected",
+                                        "safety_blocked": True,
+                                        "_approval_decision": "injection_blocked",
+                                    }
+                    context_trust = result.get("_context_trust")
+                    if context_trust == "untrusted":
+                        origin = result.get("_context_origin", "unknown")
+                        for key in ("content", "result"):
+                            if key in result and isinstance(result[key], str):
+                                result[key] = wrap_untrusted(result[key], origin, "tool-result")
+                                break
+                    llm_result = {k: v for k, v in result.items() if k not in internal_keys}
+                else:
+                    llm_result = result
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": json.dumps(llm_result),
+                    }
+                )
+            total_tool_calls += len(tool_calls_pending)
+            consecutive_text_only = 0
+            logger.debug(
+                "agent_loop tool_exec_done iteration=%d count=%d elapsed=%.2fs (serialized)",
+                iteration,
+                len(tool_calls_pending),
+                time.monotonic() - _tools_start,
+            )
         else:
+            # Parallel tool execution (default — existing behavior, untouched)
             tasks = [asyncio.create_task(_execute_tool(tc, tool_executor, cancel_event)) for tc in tool_calls_pending]
             for coro in asyncio.as_completed(tasks):
                 tc, result, tool_status = await coro

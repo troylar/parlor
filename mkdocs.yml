@@ -104,6 +104,14 @@ nav:
     - cli/context-management.md
     - cli/commands.md
     - cli/project-instructions.md
+  - Workflows:
+    - workflows/index.md
+    - workflows/quickstart.md
+    - workflows/concepts.md
+    - workflows/definitions.md
+    - workflows/commands.md
+    - workflows/monitoring.md
+    - workflows/api-reference.md
   - Configuration:
     - configuration/index.md
     - configuration/config-file.md
@@ -179,4 +187,5 @@ nav:
     - advanced/architecture.md
     - advanced/testing.md
     - advanced/developer-workflow.md
+    - advanced/workflows.md
     - advanced/contributing.md

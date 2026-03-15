@@ -36,19 +36,26 @@ def _validate_uuid(value: str) -> str:
 
 @router.get("/events")
 async def event_stream(
-    request: Request, db: str = "personal", conversation_id: str | None = None, client_id: str = ""
+    request: Request,
+    db: str = "personal",
+    conversation_id: str | None = None,
+    workflow_run_id: str | None = None,
+    client_id: str = "",
 ) -> Any:
     """Long-lived SSE connection for real-time updates.
 
     Subscribes to:
     - ``global:{db}`` always (conversation list changes)
     - ``conversation:{conversation_id}`` when viewing a specific conversation
+    - ``workflow:{workflow_run_id}`` when monitoring a workflow run
     """
     from sse_starlette.sse import EventSourceResponse
 
     _validate_db_name(db)
     if conversation_id:
         _validate_uuid(conversation_id)
+    # workflow_run_id is a UUID but we don't validate format here —
+    # it's just used as a channel subscription key
 
     rl_config: RateLimitConfig = getattr(request.app.state, "rate_limit_config", RateLimitConfig())
     sse_retry_ms: int = rl_config.sse_retry_ms
@@ -70,6 +77,12 @@ async def event_stream(
         conv_channel = f"conversation:{conversation_id}"
         conv_queue = event_bus.subscribe(conv_channel)
 
+    wf_channel: str | None = None
+    wf_queue: asyncio.Queue[dict[str, Any]] | None = None
+    if workflow_run_id:
+        wf_channel = f"workflow:{workflow_run_id}"
+        wf_queue = event_bus.subscribe(wf_channel)
+
     async def generate() -> Any:
         # Send retry: hint and connected event immediately so the browser
         # knows the backoff interval regardless of queue state.
@@ -81,6 +94,8 @@ async def event_stream(
         queues = [global_queue]
         if conv_queue is not None:
             queues.append(conv_queue)
+        if wf_queue is not None:
+            queues.append(wf_queue)
 
         active_tasks: set[asyncio.Task[Any]] = set()
         try:
@@ -126,5 +141,7 @@ async def event_stream(
             event_bus.unsubscribe(global_channel, global_queue)
             if conv_channel and conv_queue:
                 event_bus.unsubscribe(conv_channel, conv_queue)
+            if wf_channel and wf_queue:
+                event_bus.unsubscribe(wf_channel, wf_queue)
 
     return EventSourceResponse(generate())
